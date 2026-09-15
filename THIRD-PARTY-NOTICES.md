@@ -27,8 +27,17 @@
 - 仓库：https://github.com/lucide-icons/lucide
 - 许可证：ISC
 
-### TypeScript / Vitest / ESLint
-- 仓库：https://github.com/microsoft/TypeScript · https://github.com/vitest-dev/vitest · https://github.com/eslint/eslint
+### Markdown 渲染（react-markdown、remark-gfm、rehype-highlight）
+- 仓库：https://github.com/remarkjs/react-markdown · https://github.com/remarkjs/remark-gfm · https://github.com/rehypejs/rehype-highlight
+- 许可证：MIT
+- 说明：助手正文的 Markdown 渲染与代码高亮（底层 highlight.js/lowlight）。`react-markdown` 默认不渲染原始 HTML，正文内容不做 `dangerouslySetInnerHTML` 注入。
+
+### Tauri 前端插件（@tauri-apps/api、plugin-dialog/opener/process/updater）
+- 仓库：https://github.com/tauri-apps/tauri
+- 许可证：Apache-2.0 / MIT（双许可）
+
+### TypeScript / Vitest / ESLint（eslint、typescript-eslint、@eslint/js、eslint-plugin-react-hooks、eslint-plugin-react-refresh、globals）
+- 仓库：https://github.com/microsoft/TypeScript · https://github.com/vitest-dev/vitest · https://github.com/eslint/eslint · https://github.com/typescript-eslint/typescript-eslint
 - 许可证：Apache-2.0 / MIT / MIT
 
 ## Rust 依赖

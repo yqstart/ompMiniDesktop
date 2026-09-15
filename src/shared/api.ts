@@ -44,6 +44,9 @@ export const api = {
     call<void>("set_model", { id, provider, modelId }),
   setThinking: (id: string, level: string) =>
     call<void>("set_thinking", { id, level }),
+  getSessionRuntime: (id: string) =>
+    call<import("./types").SessionRuntime | null>("get_session_runtime", { id }),
+  getGitInfo: (path: string) => call<import("./types").GitInfo>("get_git_info", { path }),
   getGlobalApproval: () => call<string>("get_global_approval"),
   setGlobalApproval: (mode: string) => call<void>("set_global_approval", { mode }),
   setSessionApproval: (id: string, mode: string | null) =>

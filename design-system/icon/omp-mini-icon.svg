@@ -1,0 +1,84 @@
+<!--
+  ompMiniDesktop 应用图标 · 矢量源（唯一真相）
+
+  构思：oh-my-pi 的血脉是 Pi —— 取 π 作字标。π 立于深石墨底上，走一道极光渐变
+  （青绿 → 天蓝 → 紫 → 粉），底部与顶部各透出一层同色辉光，安静但有颜色。
+  T 型交汇处不是硬直角，而是四个内圆角（fillet）圆滑过渡；横杠两端与腿底全圆头。
+
+  该 SVG 由 `pnpm icon` 生成 src-tauri/icons/ 下的 icns / ico / png 全平台产物。
+
+  几何约定（画布 1024，macOS Big Sur 图标网格）：
+    · 内容圆角方  824×824 居中于 100..924，圆角 186
+    · π 笔画宽    96，视觉盒 600×464 居中于 (512, 512)，全圆头
+    · 横杠        y=328，x 260 → 764
+    · 两腿        x=391.04 / 632.96，y 328 → 696（相对横杠两端内缩 26%）
+    · 内圆角      R=46，四个凹角处填「凹角点 · 竖边 · 横边 · 圆弧」围成的曲边三角
+  改字形只需动上面这几个数，辉光层与内圆角会自动跟随。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <!-- π 主体：极光渐变，沿「横杠左上 → 右腿右下」流动 -->
+    <linearGradient id="pi" gradientUnits="userSpaceOnUse" x1="260" y1="328" x2="764" y2="696">
+      <stop offset="0" stop-color="#5EEAD4"/>
+      <stop offset="0.33" stop-color="#38BDF8"/>
+      <stop offset="0.67" stop-color="#A78BFA"/>
+      <stop offset="1" stop-color="#F472B6"/>
+    </linearGradient>
+    <!-- 底色：石墨自左上向右下压深 -->
+    <linearGradient id="bg" gradientUnits="userSpaceOnUse" x1="150" y1="100" x2="640" y2="924">
+      <stop offset="0" stop-color="#232329"/>
+      <stop offset="0.45" stop-color="#121215"/>
+      <stop offset="1" stop-color="#07070A"/>
+    </linearGradient>
+    <!-- 三处彩色辉光：左下极光首色、右上极光末色、中央过渡色 -->
+    <radialGradient id="glowA" gradientUnits="userSpaceOnUse" cx="290" cy="850" r="580">
+      <stop offset="0" stop-color="#5EEAD4" stop-opacity="0.26"/>
+      <stop offset="1" stop-color="#5EEAD4" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" gradientUnits="userSpaceOnUse" cx="800" cy="250" r="580">
+      <stop offset="0" stop-color="#F472B6" stop-opacity="0.26"/>
+      <stop offset="1" stop-color="#F472B6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowC" gradientUnits="userSpaceOnUse" cx="512" cy="560" r="540">
+      <stop offset="0" stop-color="#A78BFA" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#A78BFA" stop-opacity="0"/>
+    </radialGradient>
+    <!-- 顶部柔光：让暗底有材质而非死黑 -->
+    <radialGradient id="sheen" gradientUnits="userSpaceOnUse" cx="380" cy="200" r="620">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.09"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- 底板 -->
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#bg)"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#glowA)"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#glowB)"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#glowC)"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#sheen)"/>
+  <rect x="101.5" y="101.5" width="821" height="821" rx="184.5"
+        fill="none" stroke="#FFFFFF" stroke-opacity="0.10" stroke-width="3"/>
+
+  <!-- π = 横杠 + 左腿 + 右腿；外两层同形低透明描边充当辉光 -->
+  <g stroke="url(#pi)" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="130" opacity="0.14">
+    <path d="M 260 328 H 764"/>
+    <path d="M 391.04 328 V 696"/>
+    <path d="M 632.96 328 V 696"/>
+  </g>
+  <g stroke="url(#pi)" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="112" opacity="0.20">
+    <path d="M 260 328 H 764"/>
+    <path d="M 391.04 328 V 696"/>
+    <path d="M 632.96 328 V 696"/>
+  </g>
+  <g stroke="url(#pi)" fill="none" stroke-width="96" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 260 328 H 764"/>
+    <path d="M 391.04 328 V 696"/>
+    <path d="M 632.96 328 V 696"/>
+  </g>
+
+  <!-- 四个内圆角：把 T 型交汇的硬直角换成 R46 的圆滑过渡 -->
+  <path d="M 343.04 376 L 343.04 422 A 46 46 0 0 0 297.04 376 Z" fill="url(#pi)"/>
+  <path d="M 439.04 376 L 439.04 422 A 46 46 0 0 1 485.04 376 Z" fill="url(#pi)"/>
+  <path d="M 584.96 376 L 584.96 422 A 46 46 0 0 0 538.96 376 Z" fill="url(#pi)"/>
+  <path d="M 680.96 376 L 680.96 422 A 46 46 0 0 1 726.96 376 Z" fill="url(#pi)"/>
+</svg>

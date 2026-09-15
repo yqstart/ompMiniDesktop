@@ -1,8 +1,16 @@
 #!/usr/bin/env node
 /**
- * fake-omp：canned RPC 事件脚本，用于 M1 历史回放 / M2 全链路联调。
- * 用法：OMP_FAKE_SCENARIO=history|approve-once|deny|multi node scripts/fake-omp.mjs
+ * fake-omp：canned RPC 事件脚本，用于历史回放 / 实时全链路联调与自动化验收。
+ *
+ * 用法：OMP_FAKE_SCENARIO=history|approve|deny|multi|abort node scripts/fake-omp.mjs
+ * 场景：
+ *   history  只回历史帧（列表/回放联调）
+ *   approve  审批通过分支（默认场景）
+ *   deny     审批拒绝分支（回 cancelled:true 走"被用户拒绝"）
+ *   multi    同一条 assistant 消息里两个工具并行（一成一败），验证不串卡
+ *   abort    流式中断：只吐前半段，收到 abort 才补 agent_end
  * 行协议与真实 omp --mode rpc 一致（ready/response/事件），便于 Rust pump 照单解析。
+ * 自动化驱动见 scripts/e2e-rpc.mjs（`pnpm e2e:rpc`）。
  */
 import fs from "node:fs";
 
@@ -12,15 +20,51 @@ const out = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
 const sessionId = "01a08f64-617e-7465-acfa-ac5a6c174bf7";
 const sessionFile = `/tmp/fake-agent/sessions/--fake--/2026-09-15T00-00-00-000Z_${sessionId}.jsonl`;
 
-const stateData = {
-  model: { provider: "commandcode", id: "claude-haiku-4-5-20251001" },
-  thinkingLevel: "off",
-  isStreaming: false,
-  sessionFile,
-  sessionId,
-  messageCount: 2,
-  contextUsage: { tokens: 100, contextWindow: 200000, percent: 0.05 },
+// 模型子集（字段照抄真实 omp get_state 的 model 对象；efforts 取自 omp models --json 实测）
+const MODELS = {
+  "commandcode/claude-opus-5": {
+    provider: "commandcode",
+    id: "claude-opus-5",
+    name: "Claude Opus 5",
+    reasoning: true,
+    contextWindow: 1000000,
+    thinking: { mode: "anthropic-adaptive", efforts: ["low", "medium", "high", "xhigh", "max"], supportsDisplay: true },
+  },
+  "commandcode/claude-sonnet-5": {
+    provider: "commandcode",
+    id: "claude-sonnet-5",
+    name: "Claude Sonnet 5",
+    reasoning: true,
+    contextWindow: 1000000,
+    thinking: { mode: "anthropic-adaptive", efforts: ["low", "medium", "high", "xhigh", "max"], supportsDisplay: true },
+  },
+  // 无思考模型：无 thinking 键，档位随之丢失（真实 omp 行为）
+  "commandcode/claude-haiku-4-5-20251001": {
+    provider: "commandcode",
+    id: "claude-haiku-4-5-20251001",
+    name: "Claude Haiku 4.5",
+    reasoning: false,
+    contextWindow: 200000,
+  },
 };
+
+let modelKey = "commandcode/claude-opus-5";
+let thinkingLevel = "xhigh";
+
+function stateData() {
+  const m = MODELS[modelKey];
+  const d = {
+    model: m,
+    isStreaming: false,
+    sessionFile,
+    sessionId,
+    messageCount: 2,
+    contextUsage: { tokens: 100, contextWindow: m.contextWindow ?? 200000, percent: 0.05 },
+  };
+  // 实测：无思考档时 thinkingLevel 键整个缺失
+  if (thinkingLevel) d.thinkingLevel = thinkingLevel;
+  return d;
+}
 
 function historyMessages() {
   return [
@@ -75,7 +119,7 @@ function handle(line) {
       out({ id, type: "response", command: "negotiate_protocol", success: true, data: { protocolVersion: 2 } });
       break;
     case "get_state":
-      out({ id, type: "response", command: "get_state", success: true, data: stateData });
+      out({ id, type: "response", command: "get_state", success: true, data: stateData() });
       break;
     case "get_messages_page":
       out({
@@ -94,14 +138,29 @@ function handle(line) {
       out({ id, type: "response", command: "abort", success: true });
       out({ type: "agent_end", isTerminal: true, messages: [] });
       break;
-    case "set_model":
-      out({ id, type: "response", command: "set_model", success: true, data: {} });
+    case "set_model": {
+      const key = `${cmd.provider}/${cmd.modelId}`;
+      const m = MODELS[key];
+      if (!m) {
+        out({ id, type: "response", command: "set_model", success: false, error: `Model not found: ${key}` });
+        break;
+      }
+      modelKey = key;
+      // 实测：omp 切模型后不修正思考档——切到无思考模型时档位直接丢失
+      if (!m.thinking) thinkingLevel = null;
+      out({ id, type: "response", command: "set_model", success: true, data: m });
       out({ type: "model_changed" });
       break;
-    case "set_thinking_level":
+    }
+    case "set_thinking_level": {
+      const m = MODELS[modelKey];
+      const allowed = new Set(["off", ...(m.thinking?.efforts ?? [])]);
+      // 实测：非法档（不在 efforts 且非 off）同样回 success，服务端静默忽略
+      if (allowed.has(cmd.level)) thinkingLevel = cmd.level;
       out({ id, type: "response", command: "set_thinking_level", success: true });
-      out({ type: "thinking_level_changed", thinkingLevel: cmd.level });
+      out({ type: "thinking_level_changed", thinkingLevel: thinkingLevel ?? cmd.level });
       break;
+    }
     case "switch_session":
       out({ id, type: "response", command: "switch_session", success: true, data: { cancelled: false } });
       break;
@@ -131,6 +190,14 @@ function runScenario(message) {
     type: "message_update",
     assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "简单任务，直接执行。" },
   });
+  // scenario=abort：流式吐一半就停，等 abort 命令（handle 的 abort 分支补 agent_end）。
+  // 验证「流式中只允许停止」与「agent_end 才是完成信号」。
+  if (scenario === "abort") {
+    for (const w of ["这一步", "有点久", "…"]) {
+      out({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: w } });
+    }
+    return;
+  }
   // toolcall 流
   const args = JSON.stringify({ command: "echo hi" });
   out({ type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 1 } });
@@ -162,6 +229,53 @@ function runScenario(message) {
     args: { command: "echo hi" },
     intent: "执行 echo 测试",
   });
+  // scenario=multi：同一条 assistant 消息里再排一个工具（read 一个不存在的文件，必然失败），
+  // 两个工具并行推进：验证前端「各出一张卡、不串卡、失败红边」。多工具不触发审批。
+  if (scenario === "multi") {
+    out({ type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 2 } });
+    out({
+      type: "message_update",
+      assistantMessageEvent: { type: "toolcall_delta", contentIndex: 2, delta: '{"path":"/tmp/omp-missing.ts"}' },
+    });
+    out({
+      type: "message_update",
+      assistantMessageEvent: {
+        type: "toolcall_end",
+        contentIndex: 2,
+        toolCall: {
+          id: "call_00_fake2",
+          name: "read",
+          arguments: { path: "/tmp/omp-missing.ts", startLine: 1, endLine: 20 },
+          streamIndex: 1,
+          intent: "读取缺失文件",
+        },
+      },
+    });
+    out({
+      type: "tool_execution_start",
+      toolCallId: "call_00_fake2",
+      toolName: "read",
+      args: { path: "/tmp/omp-missing.ts" },
+      intent: "读取缺失文件",
+    });
+    out({
+      type: "tool_execution_end",
+      toolCallId: "call_00_fake2",
+      toolName: "read",
+      result: { content: [{ type: "text", text: "ENOENT: no such file or directory" }] },
+      isError: true,
+    });
+    out({
+      type: "message_end",
+      message: {
+        role: "toolResult",
+        toolCallId: "call_00_fake2",
+        toolName: "read",
+        isError: true,
+        content: [{ type: "text", text: "ENOENT: no such file or directory" }],
+      },
+    });
+  }
   if (scenario === "deny") {
     out({
       type: "extension_ui_request",
@@ -270,9 +384,4 @@ process.stdin.on("data", (d) => {
 });
 
 out({ type: "ready", protocolVersion: 1, supportedProtocolVersions: [1, 2], maxFrameBytes: 1048576 });
-
-// scenario=multi：启动后额外吐一个并行双工具事件（供 M2-7）
-if (scenario === "multi" || scenario === "history") {
-  // history 场景不需要额外事件；multi 在 prompt 时由 runScenario 扩展（此处占位）
-  void fs;
-}
+void fs;

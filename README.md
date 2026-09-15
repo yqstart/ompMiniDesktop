@@ -33,6 +33,7 @@ oh-my-pi（`omp`）的极简桌面端 —— 把终端里的 agent 会话装进�
 | Node.js | 22+ |
 | pnpm | 11+ |
 | Rust | stable（已验证 1.97）+ `cargo-tauri` |
+| `git`（可选） | 任意版本；仅用于输入框上方展示当前分支，缺失时那里显示「非 Git 目录」，不影响任何功能 |
 | 系统 | 首发 macOS arm64；Windows / Linux 打包延后 |
 
 > GUI 启动的 PATH 常不含 `/opt/homebrew/bin`：app 会先问登录 shell（`command -v omp`），
@@ -54,7 +55,9 @@ pnpm tauri:dev
 ```bash
 pnpm dev            # 纯前端
 pnpm build          # tsc + vite 构建
-pnpm typecheck && pnpm test && pnpm e2e:ipc
+pnpm check          # 全套：typecheck + lint + test + e2e:ipc + e2e:rpc
+pnpm lint           # eslint（flat config）
+pnpm e2e:rpc        # fake-omp 驱动的行为级端到端（握手/审批双分支/多工具/中断）
 ```
 
 仅 Rust 侧检查：
@@ -84,6 +87,9 @@ pnpm tauri:build    # 产物见 src-tauri/target/release/bundle/
 > `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`，
 > 私钥全文写入仓库 Settings → Secrets → `TAURI_SIGNING_PRIVATE_KEY`
 >（生成时没设密码则 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 置空）。
+>
+> Release 工作流带守卫 job：`pubkey` 里还留着 `TODO` 占位、或 tag 与
+> `package.json` 版本号不一致时，发版会直接失败（见 `.github/workflows/release.yml`）。
 
 ---
 
@@ -93,7 +99,7 @@ pnpm tauri:build    # 产物见 src-tauri/target/release/bundle/
 omp 子进程（per 会话长驻，--mode rpc）
   stdout JSONL → Rust 行解析 / rpc_chunk 重组 → omp-event://<sessionId>
                                        └→ 状态机 → omp-status://<sessionId>
-前端：事件 → lib/viewmsg.ts 归一 ViewMsg → Zustand eventsBySession → 虚拟化渲染
+前端：事件 → lib/viewmsg.ts + lib/mergeEvents.ts 归一合并 ViewMsg → Zustand eventsBySession → 首屏 200 条增量渲染（Markdown + 代码高亮）
 会话真相：~/.omp/agent/sessions/<slug>/*.jsonl（PI_CODING_AGENT_DIR 可覆盖）
 app 覆盖层：$APPDATA/omp-mini/overlay.json（项目列表/归档/备注/会话级权限）
 ```

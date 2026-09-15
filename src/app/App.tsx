@@ -36,6 +36,8 @@ function SidebarShell({
   const dragging = useRef(false);
   // hover 才加宽热区：平时 3px 细线，悬停/拖拽时 7px 好抓
   const [hot, setHot] = useState(false);
+  // 拖拽中的视觉态用 state 表达（render 里不许读 ref），ref 只在事件/effect 里做快速判断
+  const [draggingUi, setDraggingUi] = useState(false);
 
   useEffect(() => {
     const move = (e: PointerEvent) => {
@@ -45,6 +47,7 @@ function SidebarShell({
     };
     const up = () => {
       dragging.current = false;
+      setDraggingUi(false);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     };
@@ -75,6 +78,7 @@ function SidebarShell({
           }}
           onPointerDown={(e) => {
             dragging.current = true;
+            setDraggingUi(true);
             document.body.style.cursor = "col-resize";
             document.body.style.userSelect = "none";
             (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -84,7 +88,7 @@ function SidebarShell({
             if (!dragging.current) setHot(false);
           }}
           className={`absolute top-0 -right-0.5 z-10 h-full cursor-col-resize touch-none transition-colors focus-visible:outline-none ${
-            hot || dragging.current ? "w-[7px] bg-accent/30" : "w-[3px] bg-transparent hover:bg-accent/20"
+            hot || draggingUi ? "w-[7px] bg-accent/30" : "w-[3px] bg-transparent hover:bg-accent/20"
           }`}
         />
       </div>
@@ -138,6 +142,12 @@ export function App() {
       .listProjects()
       .then((projects) => set({ projects }))
       .catch(() => undefined);
+    // 覆盖层里的会话级权限覆盖：启动时水合一次。不水合的话权限徽标只显示全局档，
+    // 与「本会话覆盖」的真实值不一致（重启后尤其明显）。
+    api
+      .getOverlay()
+      .then((ov) => set({ sessionApprovals: ov.sessionApproval ?? {} }))
+      .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -151,7 +161,7 @@ export function App() {
       >
         <Sidebar />
       </SidebarShell>
-      <main className="flex min-w-0 flex-1 flex-col bg-background">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
         <HealthBanner />
         {settingsOpen ? (
           <SettingsPage />

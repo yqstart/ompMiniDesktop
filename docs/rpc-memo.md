@@ -33,6 +33,9 @@ omp --mode rpc --cwd <项目目录> [--resume <sessionId前缀>] [--model <selec
 
 - 模型：`{type:set_model, provider, modelId}`（注意是两个字段，不是 selector 字符串；`provider:"commandcode", modelId:"claude-haiku-4-5-20251001"` 实测通过）→ `response{command:set_model, success, data:{…完整模型}}` + 独立事件 `{"type":"model_changed"}`（无多余字段）。
 - 思考：`{type:set_thinking_level, level:"off"}` → response + `{"type":"thinking_level_changed","thinkingLevel":"off"}`。
+- **档位合法性（2026-09 补测）**：合法档 = `model.thinking.efforts`，但 `off` **恒合法**（不在 efforts 内也生效，无思考模型亦可设）；`auto` 会落到具体档（实测 `auto`→`high`）、`minimal` 抬到最低档（opus 系 →`low`）；**非法档同样回 `{success:true}`**（静默忽略，不报错）——前端必须自己过滤，不能靠报错兜底。
+- **切模型不修正档位（补测）**：`set_model` 成功后思考档不会自动跟随；切到无思考模型（`claude-haiku-4-5`）时 `get_state.thinkingLevel` 键**整个消失**，切回多档模型也不恢复。app 策略：切模型成功后由后端 runtime 自动跟进 `set_thinking_level`（取新模型 `efforts` 最高档；无思考则 `off`），随后 `get_state` 回读真值；切换失败也回读，用于纠正前端乐观态。
+- **档位真值来源（补测）**：`get_state.data.model.thinking.efforts: string[]`（rich 结构，与 `omp models --json` 的 `thinking: string[]|null` 同源）；`set_model` 的 response `data` 即**完整模型对象**（同样带 `thinking`），切完即可知道新模型的档位集。
 - 可用档查询：`omp models --json`（字段 `thinking:string[]|null`，`null`=无思考）+ RPC `get_available_models`（ richer：含 `thinking{mode,efforts}`）。V1 用前者做选择器过滤，后者做运行时校验。
 - CLI 侧 `--thinking off|minimal|low|medium|high|xhigh|max|auto`（`--help` 原文）。
 

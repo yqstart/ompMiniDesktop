@@ -34,7 +34,7 @@ pub fn cmd_err(code: &str, message: String, hint: Option<String>) -> CmdError {
     CmdError { ok: false, code: code.into(), message, hint }
 }
 
-fn save_overlay(state: &State<AppState>) -> Result<(), String> {
+pub(crate) fn save_overlay(state: &State<AppState>) -> Result<(), String> {
     let text = {
         let ov = state.overlay.try_lock().map_err(|_| "overlay 忙，请重试".to_string())?;
         serde_json::to_string_pretty(&*ov).map_err(|e| e.to_string())?
@@ -101,10 +101,13 @@ pub fn discover_omp_path(state: &State<AppState>) -> Option<String> {
     None
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct OmpInfo {
+    #[serde(rename = "ompPath")]
     pub omp_path: Option<String>,
+    #[serde(rename = "ompVersion")]
     pub omp_version: Option<String>,
+    #[serde(rename = "agentDir")]
     pub agent_dir: String,
     pub errors: Vec<String>,
 }
@@ -170,6 +173,7 @@ pub async fn set_omp_path(state: State<'_, AppState>, path: Option<String>) -> R
 #[derive(Debug, Clone, Serialize)]
 pub struct HealthInfo {
     pub omp: OmpInfo,
+    #[serde(rename = "modelsError")]
     pub models_error: Option<String>,
     pub ok: bool,
 }
@@ -329,25 +333,31 @@ pub async fn add_project(state: State<'_, AppState>, path: String) -> Result<Pro
 }
 
 #[tauri::command]
-pub async fn remove_project(state: State<'_, AppState>, id: String) -> Result<(), CmdError> {
-    {
+pub async fn remove_project(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<(), CmdError> {
+    // 语义（对齐“删除工作区”）：仅解绑项目，不删任何会话文件；
+    // 该项目下全部会话标记归档保留（删后进“未归属会话”），备注/权限覆盖一并保留。
+    let proj_path = {
         let ov = state.overlay.lock().await;
         let Some(proj) = ov.projects.iter().find(|p| p.id == id) else {
             return Err(cmd_err("NOT_FOUND", "项目不存在".into(), None));
         };
-        // 级联清该项目会话键：以后端扫描为准
-        let agent = state.agent_dir.lock().await.clone();
-        let sids = session_ids_for(&agent.join("sessions"), &proj.path);
-        drop(ov);
+        proj.path.clone()
+    };
+    // 以后端扫描为准找该项目会话（读 jsonl 头 cwd 前缀匹配，不猜 slug）
+    let agent = state.agent_dir.lock().await.clone();
+    let sids = session_ids_for(&agent.join("sessions"), &proj_path);
+    // 流式中的先停（逐个通知 idle + kill_runtime，不阻塞落盘）
+    for sid in &sids {
+        let _ = app.emit(format!("omp-status://{sid}").as_str(), serde_json::json!({"state":"idle"}));
+        kill_runtime(&state, sid);
+    }
+    {
         let mut ov = state.overlay.lock().await;
         ov.projects.retain(|p| p.id != id);
         for sid in sids {
-            ov.archived.remove(&sid);
-            ov.notes.remove(&sid);
-            ov.session_approval.remove(&sid);
+            ov.archived.insert(sid, true);
         }
     }
-    // 先停该项目运行中的会话（M1 无运行时：标记即可；M2 接 kill）
     save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
     Ok(())
 }
@@ -479,7 +489,7 @@ pub async fn list_sessions(state: State<'_, AppState>, project_id: Option<String
     Ok(out)
 }
 
-fn session_file_for(agent: &std::path::Path, id_prefix: &str) -> Option<PathBuf> {
+pub(crate) fn session_file_for(agent: &std::path::Path, id_prefix: &str) -> Option<PathBuf> {
     let mut best: Option<(i64, PathBuf)> = None;
     let Ok(rd) = std::fs::read_dir(agent.join("sessions")) else { return None };
     for entry in rd.flatten() {
@@ -498,6 +508,58 @@ fn session_file_for(agent: &std::path::Path, id_prefix: &str) -> Option<PathBuf>
         }
     }
     best.map(|b| b.1)
+}
+
+/// 记住会话所属项目的「上次使用」模型与思考档（覆盖层 `lastModel` / `lastThinking`）。
+///
+/// 数据源只认真值：切模型 / 切档后 runtime 会紧跟一次 `get_state` 回读，
+/// 这里把回读结果落到项目上；`create_session` 再把它作为 spawn 参数带上，
+/// 于是「新建会话沿用该项目上次的模型」才真正成立（此前这两个字段只写不读）。
+/// 找不到归属项目（未归属会话）时静默跳过，不报错。
+pub(crate) async fn remember_project_pref(
+    state: &State<'_, AppState>,
+    session_id: &str,
+    model: Option<String>,
+    thinking: Option<String>,
+) {
+    if model.is_none() && thinking.is_none() {
+        return;
+    }
+    let agent = state.agent_dir.lock().await.clone();
+    let prefix: String = session_id.chars().take(8).collect();
+    let Some(path) = session_file_for(&agent, &prefix) else {
+        return;
+    };
+    let head = parse_session_head(&path);
+    if head.cwd.is_empty() {
+        return;
+    }
+    let cwd = normalize_path(&head.cwd);
+    let changed = {
+        let mut ov = state.overlay.lock().await;
+        match ov.projects.iter_mut().find(|p| normalize_path(&p.path) == cwd) {
+            Some(p) => {
+                let mut changed = false;
+                if let Some(m) = model {
+                    if p.last_model.as_deref() != Some(m.as_str()) {
+                        p.last_model = Some(m);
+                        changed = true;
+                    }
+                }
+                if let Some(t) = thinking {
+                    if p.last_thinking.as_deref() != Some(t.as_str()) {
+                        p.last_thinking = Some(t);
+                        changed = true;
+                    }
+                }
+                changed
+            }
+            None => false,
+        }
+    };
+    if changed {
+        let _ = save_overlay(state);
+    }
 }
 
 #[tauri::command]
@@ -522,7 +584,7 @@ pub async fn create_session(
     };
     // 会话级覆盖优先于全局（spawn 时传入）
     let key_hint = format!("new-{}", chrono::Utc::now().timestamp_millis());
-    let (sid, sfile) = crate::runtime::spawn_long_lived(
+    let (sid, sfile, _meta) = crate::runtime::spawn_long_lived(
         &app,
         state.runtime.clone(),
         key_hint.clone(),
@@ -598,7 +660,7 @@ pub async fn open_session(app: AppHandle, state: State<'_, AppState>, id: String
     };
     let cwd = if head.cwd.is_empty() { "/tmp".into() } else { head.cwd.clone() };
     let approval = state.overlay.lock().await.session_approval.get(&id).cloned();
-    let (sid, _) = crate::runtime::spawn_long_lived(
+    let (sid, _, _meta) = crate::runtime::spawn_long_lived(
         &app,
         state.runtime.clone(),
         id.clone(),
@@ -865,6 +927,17 @@ pub async fn set_thinking(app: AppHandle, state: State<'_, AppState>, id: String
     Ok(())
 }
 
+/// 会话运行时真值（模型 / 可用思考档 / 当前档）。会话未运行返回 `None`。
+/// 前端打开会话后拉一次做回填；其后的变化经 `omp-state://<id>` 推送。
+#[tauri::command]
+pub async fn get_session_runtime(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Option<crate::runtime::SessionMeta>, CmdError> {
+    let map = state.runtime.lock().await;
+    Ok(map.get(&id).map(|r| r.meta.clone()))
+}
+
 #[tauri::command]
 pub async fn get_global_approval(state: State<'_, AppState>) -> Result<String, CmdError> {
     let omp = state.omp_path.lock().await.clone();
@@ -911,6 +984,20 @@ pub async fn set_session_approval(state: State<'_, AppState>, id: String, mode: 
     }
     save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
     Ok(())
+}
+
+/// 输入框上方上下文条的 git **只读**查询：当前分支 + 本地分支清单 + 脏工作区标记。
+/// 目录不存在 / 不是仓库 / 找不到 git 都返回降级值（`isRepo:false`），不算命令失败——
+/// 前端据此只隐藏分支展示，绝不把「这里不是 git 仓库」变成一条错误横幅。
+#[tauri::command]
+pub async fn get_git_info(path: String) -> Result<crate::git_info::GitInfo, CmdError> {
+    if !crate::git_info::dir_exists(&path) {
+        return Ok(crate::git_info::GitInfo::not_repo(Some("目录不存在".into())));
+    }
+    let Some(git) = crate::git_info::git_bin().await else {
+        return Ok(crate::git_info::GitInfo::not_repo(Some("未找到 git".into())));
+    };
+    Ok(crate::git_info::read_git_info(&git, &path).await)
 }
 
 pub fn load_state(app: &AppHandle) -> AppState {

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Menu } from "lucide-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
 import { UpdateBell } from "../update/UpdateDialog";
@@ -16,6 +17,15 @@ export function TopBar() {
       data-tauri-drag-region
       className="flex h-11 shrink-0 items-center gap-1 border-b border-border/70 bg-background pr-3 pl-[72px]"
     >
+      {/* 窄窗（<768px）左栏收起为抽屉：这里必须有打开入口，否则项目列表与设置不可达 */}
+      <button
+        onClick={() => set({ sidebarOpen: true })}
+        className="mr-0.5 flex cursor-pointer items-center justify-center rounded p-1.5 text-muted transition-colors duration-150 hover:bg-surface hover:text-foreground md:hidden"
+        aria-label="打开侧栏"
+        title="打开侧栏"
+      >
+        <Menu size={16} aria-hidden />
+      </button>
       {editing && cur ? (
         <input
           autoFocus

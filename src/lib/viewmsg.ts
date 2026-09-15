@@ -43,9 +43,214 @@ export function summarizeArgs(name: string, args: Record<string, unknown>): stri
 }
 
 /**
- * 把 jsonl 文件的一行（message/custom/title_change 等）归一为 ViewMsg。
- * 历史回放与实时流共用此归一语义；未知 type 返回 null（调用方记日志不崩）。
+ * 把 jsonl 文件的多行批量归一为 ViewMsg（历史回放入口）。
+ *
+ * 单行归一（viewMsgFromJsonlLine）无法跨行关联，是截图里
+ * “已完成工具仍转圈”的根因：落盘语义是三行一体——
+ * `message{assistant/toolCall}`（调）+ `custom{tool_execution_start}`（行）+
+ * `message{toolResult}`（果），而落盘里没有 `tool_execution_end`。
+ * 单行归一会把同一个 toolCallId 拆成“running 空卡 + ok 结果卡”两张卡，
+ * 前者永远 running（转圈），后者丢了 intent/参数。
+ *
+ * 本函数按 toolCallId 合并：一个逻辑调用只出一张 Tool 卡，
+ * 有果则终态 ok/error（含输出），无果才 running（真运行中）。
+ * 所有 id 均由 jsonl 行 id / toolCallId 稳定派生（不再随机），
+ * 重复打开同一会话可按 id 去重，不会叠历史。
  */
+export function viewMsgsFromJsonlLines(lines: unknown[]): ViewMsg[] {
+  const arr = Array.isArray(lines) ? lines : [];
+  type CallMeta = { name: string; args: Record<string, unknown>; intent: string; streamIndex: number };
+  type ResultMeta = { text: string; full?: string; isError: boolean };
+  const calls = new Map<string, CallMeta>();
+  const results = new Map<string, ResultMeta>();
+  const lineIdOf = (line: unknown, fallback: string): string => {
+    if (line && typeof line === "object") {
+      const id = (line as Record<string, unknown>).id;
+      if (typeof id === "string" && id) return id;
+      if (typeof id === "number") return String(id);
+    }
+    return fallback;
+  };
+
+  // 第一遍：收集调用元数据与结果（结果行在文件里总在调用行之后，但先全收齐，
+  // 发射时终态一次到位）。
+  arr.forEach((line) => {
+    if (!line || typeof line !== "object") return;
+    const o = line as Record<string, unknown>;
+    if (o.type === "message") {
+      const m = o.message as
+        | { role?: string; content?: unknown[]; toolCallId?: unknown; isError?: unknown }
+        | undefined;
+      if (!m) return;
+      if (m.role === "assistant" && Array.isArray(m.content)) {
+        for (const b of m.content as Record<string, unknown>[]) {
+          if (!b || typeof b !== "object" || b.type !== "toolCall") continue;
+          const id = String(b.id ?? "");
+          if (!id) continue;
+          const args =
+            b.arguments && typeof b.arguments === "object"
+              ? (b.arguments as Record<string, unknown>)
+              : {};
+          const prev = calls.get(id);
+          calls.set(id, {
+            name: String(b.name ?? prev?.name ?? "tool"),
+            args: { ...(prev?.args ?? {}), ...args },
+            intent: String(b.intent ?? prev?.intent ?? ""),
+            streamIndex: typeof b.streamIndex === "number" ? b.streamIndex : (prev?.streamIndex ?? 0),
+          });
+        }
+      } else if (m.role === "toolResult") {
+        const id = String((m as Record<string, unknown>).toolCallId ?? "");
+        if (!id) return;
+        const text = Array.isArray(m.content)
+          ? (m.content as Record<string, unknown>[])
+              .filter((b) => b && typeof b === "object" && b.type === "text")
+              .map((b) => String(b.text ?? ""))
+              .join("\n")
+          : "";
+        const { out, full } = truncate(text);
+        results.set(id, { text: out, full, isError: (m as Record<string, unknown>).isError === true });
+      }
+    } else if (o.type === "custom") {
+      const data = o.data as Record<string, unknown> | undefined;
+      if (!data) return;
+      if (o.customType === "tool_execution_start") {
+        const id = String(data.toolCallId ?? "");
+        if (!id) return;
+        const args =
+          data.args && typeof data.args === "object" ? (data.args as Record<string, unknown>) : {};
+        const prev = calls.get(id);
+        if (!prev) {
+          calls.set(id, {
+            name: String(data.toolName ?? "tool"),
+            args,
+            intent: String(data.intent ?? ""),
+            streamIndex: 0,
+          });
+        } else {
+          // assistant 行参数更全（bash 的 command、read 的 path 都在那边），只补缺口
+          calls.set(id, {
+            name: prev.name !== "tool" ? prev.name : String(data.toolName ?? "tool"),
+            args: { ...args, ...prev.args },
+            intent: prev.intent || String(data.intent ?? ""),
+            streamIndex: prev.streamIndex,
+          });
+        }
+      } else if (o.customType === "tool_execution_end") {
+        // 落盘实测没有这一行（只有 start + message toolResult），此处兼容万一有
+        const id = String(data.toolCallId ?? "");
+        if (!id || results.has(id)) return;
+        const result = data.result as Record<string, unknown> | undefined;
+        const text = result
+          ? (Array.isArray(result.content) ? result.content : [])
+              .filter(
+                (b): b is Record<string, unknown> =>
+                  !!b && typeof b === "object" && (b as Record<string, unknown>).type === "text",
+              )
+              .map((b) => String(b.text ?? ""))
+              .join("\n")
+          : "";
+        const { out, full } = truncate(text);
+        results.set(id, { text: out, full, isError: data.isError === true });
+      }
+    }
+  });
+
+  // 第二遍：按文件顺序发射，一个 toolCallId 只出一卡（位置在首次调用处）
+  const out: ViewMsg[] = [];
+  const emittedTools = new Set<string>();
+  const emitTool = (toolCallId: string) => {
+    if (!toolCallId || emittedTools.has(toolCallId)) return;
+    emittedTools.add(toolCallId);
+    const call = calls.get(toolCallId);
+    const res = results.get(toolCallId);
+    const name = call?.name ?? "tool";
+    out.push({
+      kind: "tool",
+      id: `tool:${toolCallId}`,
+      toolCallId,
+      name,
+      intent: call?.intent ?? "",
+      argsSummary: call ? summarizeArgs(name, call.args) : "",
+      state: res ? (res.isError ? "error" : "ok") : "running",
+      output: res?.text ?? "",
+      outputFull: res?.full,
+      streamIndex: call?.streamIndex ?? 0,
+    });
+  };
+
+  arr.forEach((line, li) => {
+    if (!line || typeof line !== "object") return;
+    const o = line as Record<string, unknown>;
+    const lid = lineIdOf(line, `n${li}`);
+    if (o.type === "message") {
+      const m = o.message as { role?: string; content?: unknown[] } | undefined;
+      if (!m) return;
+      if (m.role === "user") {
+        const text = Array.isArray(m.content)
+          ? (m.content as Record<string, unknown>[])
+              .filter((b) => b && typeof b === "object" && b.type === "text")
+              .map((b) => String(b.text ?? ""))
+              .join("\n")
+          : "";
+        out.push({ kind: "user", id: `u:${lid}`, text, mentions: [] });
+        return;
+      }
+      if (m.role === "toolResult") {
+        // 结果已合并进调用处的卡；孤儿结果（调用行被截断时）才在此处补一卡
+        const id = String((m as Record<string, unknown>).toolCallId ?? "");
+        if (id && !emittedTools.has(id) && !calls.has(id)) emitTool(id);
+        return;
+      }
+      if (!Array.isArray(m.content)) return;
+      (m.content as Record<string, unknown>[]).forEach((b, bi) => {
+        if (!b || typeof b !== "object") return;
+        if (b.type === "text") {
+          const t = String(b.text ?? "");
+          if (!t) return;
+          out.push({ kind: "text", id: `t:${lid}:${bi}`, seq: bi, text: t, complete: true });
+        } else if (b.type === "thinking") {
+          out.push({
+            kind: "thinking",
+            id: `th:${lid}:${bi}`,
+            text: String(b.thinking ?? ""),
+            seconds: 0,
+            complete: true,
+          });
+        } else if (b.type === "toolCall") {
+          const id = String(b.id ?? "");
+          if (id) emitTool(id);
+        }
+      });
+      return;
+    }
+    if (o.type === "custom") {
+      // start/end 行都已合并，孤儿（调用行不在回放窗内）才补卡
+      if (o.customType === "tool_execution_start" || o.customType === "tool_execution_end") {
+        const data = o.data as Record<string, unknown> | undefined;
+        const id = String(data?.toolCallId ?? "");
+        if (id && !emittedTools.has(id) && !calls.has(id)) emitTool(id);
+      }
+      return;
+    }
+    if (o.type === "title_change" || o.type === "model_change" || o.type === "thinking_level_change") {
+      const label =
+        o.type === "model_change"
+          ? `已切换模型`
+          : o.type === "thinking_level_change"
+            ? `思考等级已设为 ${String((o as Record<string, unknown>).thinkingLevel ?? "")}`
+            : `标题：${String((o as Record<string, unknown>).title ?? "")}`;
+      out.push({
+        kind: "divider",
+        id: `d:${lid}`,
+        divider: o.type === "model_change" ? "model" : o.type === "thinking_level_change" ? "thinking" : "title",
+        text: label,
+      });
+      return;
+    }
+  });
+  return out;
+}
 export function viewMsgFromJsonlLine(line: unknown): ViewMsg[] {
   if (!line || typeof line !== "object") return [];
   const o = line as Record<string, unknown>;

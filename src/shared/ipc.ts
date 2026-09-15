@@ -25,6 +25,8 @@ export const IPC = {
   approve: "approve",
   setModel: "set_model",
   setThinking: "set_thinking",
+  getSessionRuntime: "get_session_runtime",
+  getGitInfo: "get_git_info",
   getGlobalApproval: "get_global_approval",
   setGlobalApproval: "set_global_approval",
   setSessionApproval: "set_session_approval",
@@ -32,5 +34,6 @@ export const IPC = {
   // events
   sessionEvent: (id: string) => `omp-event://${id}`,
   sessionStatus: (id: string) => `omp-status://${id}`,
+  sessionRuntime: (id: string) => `omp-state://${id}`,
   health: "omp-status://health",
 } as const;

@@ -22,5 +22,14 @@ export default defineConfig({
   },
   build: {
     target: "es2021",
+    rollupOptions: {
+      output: {
+        // Markdown 渲染链（react-markdown + remark-gfm + rehype-highlight）体积大且只在
+        // 渲染助手正文时用到：单独分包，主包保持轻量（桌面端本地加载，无网络成本）。
+        manualChunks: {
+          markdown: ["react-markdown", "remark-gfm", "rehype-highlight"],
+        },
+      },
+    },
   },
 });

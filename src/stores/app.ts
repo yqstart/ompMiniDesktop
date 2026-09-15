@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { HealthInfo, ModelCatalog, ProjectView, SessionStatus, SessionView, UpdateState, ViewMsg } from "@shared/types";
+import type { HealthInfo, ModelCatalog, ProjectView, SessionRuntime, SessionStatus, SessionView, UpdateState, ViewMsg } from "@shared/types";
 
 type AppState = {
   health: HealthInfo | null;
@@ -13,9 +13,13 @@ type AppState = {
   models: ModelCatalog | null;
   currentModel: string | null;
   currentThinking: string | null;
+  /** 当前模型可用思考档（omp 真值；null = 不支持思考）。驱动思考档下拉只列支持项。 */
+  currentEfforts: string[] | null;
+  /** 当前会话的运行时真值快照（上下文占用 / 本轮用量 / 耗时）：状态条纯透传的数据源。 */
+  currentRuntime: SessionRuntime | null;
   sessionApprovals: Record<string, string>;
-  /** 输入框工具行下拉互斥：model | thinking | permission | null。 */
-  composerMenu: "model" | "thinking" | "permission" | null;
+  /** 输入框工具行与上方上下文条的下拉互斥：同一时刻只开一个（model/thinking/permission/project/branch）。 */
+  composerMenu: "model" | "thinking" | "permission" | "project" | "branch" | null;
   settingsOpen: boolean;
   sidebarOpen: boolean;
   update: UpdateState;
@@ -29,15 +33,19 @@ type AppState = {
   /** 左侧栏宽度（220–480，默认 264，持久化 localStorage）。 */
   sidebarWidth: number;
   setSidebarWidth: (w: number) => void;
-  /** 会话多选（批量归档/删除用，key 为 session id）。 */
-  selectedSessions: Record<string, boolean>;
-  toggleSessionSelected: (id: string) => void;
-  clearSessionSelected: () => void;
+  /** 消息流「首屏增量」窗口：当前会话已渲染的消息条数（见 MASTER §7：首屏 200 条）。 */
+  threadLimitSid: string | null;
+  threadLimit: number;
+  /** 展开更早的消息（按页递增）；打开新会话时由 openSessionWithHistory 重置。 */
+  growThreadLimit: (by: number) => void;
+  resetThreadLimit: (sid: string) => void;
 };
 
 export const SIDEBAR_MIN = 220;
 export const SIDEBAR_MAX = 480;
 export const SIDEBAR_DEFAULT = 264;
+/** 消息流单页条数：首屏只渲染最后 200 条，其余按需向上加载（MASTER §7）。 */
+export const THREAD_PAGE = 200;
 
 function loadSidebarWidth(): number {
   try {
@@ -63,6 +71,8 @@ export const useApp = create<AppState>((set, get) => ({
   models: null,
   currentModel: null,
   currentThinking: null,
+  currentEfforts: null,
+  currentRuntime: null,
   sessionApprovals: {},
   composerMenu: null,
   settingsOpen: false,
@@ -71,6 +81,10 @@ export const useApp = create<AppState>((set, get) => ({
   updateDismissedVersion: null,
   updateDialogOpen: false,
   sidebarWidth: loadSidebarWidth(),
+  threadLimitSid: null,
+  threadLimit: THREAD_PAGE,
+  growThreadLimit: (by) => set((s) => ({ threadLimit: s.threadLimit + by })),
+  resetThreadLimit: (sid) => set({ threadLimitSid: sid, threadLimit: THREAD_PAGE }),
   setSidebarWidth: (w) => {
     const v = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(w)));
     try {
@@ -80,15 +94,6 @@ export const useApp = create<AppState>((set, get) => ({
     }
     set({ sidebarWidth: v });
   },
-  selectedSessions: {},
-  toggleSessionSelected: (id) =>
-    set((s) => {
-      const next = { ...s.selectedSessions };
-      if (next[id]) delete next[id];
-      else next[id] = true;
-      return { selectedSessions: next };
-    }),
-  clearSessionSelected: () => set({ selectedSessions: {} }),
   set: (p) => set(p),
   draftOf: (sid) => (sid ? (get().drafts[sid] ?? "") : ""),
   setDraft: (sid, text) =>

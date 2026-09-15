@@ -48,12 +48,25 @@
 }
 
 body {
+  height: 100%;
   background-color: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* 锁死视口：窗口级永远不滚，滚动只发生在消息列内部 */
+html,
+body {
+  overflow: hidden !important;
+  overscroll-behavior: none;
 }
 
 ::selection {
@@ -79,6 +92,26 @@ body {
   background: transparent;
 }
 
+/* 主消息流：滚动但不显示滚动条（滚轮/触控/键盘/程序化滚动照常工作）。
+   注意：WebKit（含 Tauri 的 WKWebView）里仅 `::-webkit-scrollbar { display:none }` 可靠，
+   `scrollbar-width: none` 是 Firefox 专用，在 WKWebView 下无效——之前只靠后者所以没生效。 */
+.thread-scroll {
+  overflow-y: scroll;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  overscroll-behavior: contain;
+}
+.thread-scroll::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+.thread-scroll::-webkit-scrollbar-thumb,
+.thread-scroll::-webkit-scrollbar-track {
+  display: none !important;
+  background: transparent !important;
+}
+
 /* 可见焦点环（MASTER §5）。输入框类由容器接管焦点样式，此处排除避免生硬外框。 */
 :where(button, a, select, [tabindex]):focus-visible {
   outline: 2px solid var(--accent);
@@ -94,6 +127,157 @@ body {
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ---- Markdown 正文（AssistantText）----
+   渲染走 react-markdown（不注入原始 HTML），这里只补排版。 */
+.md-body {
+  overflow-wrap: anywhere;
+}
+.md-body > :first-child {
+  margin-top: 0;
+}
+.md-body > :last-child {
+  margin-bottom: 0;
+}
+.md-body p {
+  margin: 0.5rem 0;
+}
+.md-body h1,
+.md-body h2,
+.md-body h3,
+.md-body h4 {
+  margin: 1rem 0 0.5rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.md-body h1 {
+  font-size: 1.25rem;
+}
+.md-body h2 {
+  font-size: 1.125rem;
+}
+.md-body h3 {
+  font-size: 1rem;
+}
+.md-body h4 {
+  font-size: 0.9375rem;
+}
+.md-body ul,
+.md-body ol {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+.md-body ul {
+  list-style: disc;
+}
+.md-body ol {
+  list-style: decimal;
+}
+.md-body li {
+  margin: 0.15rem 0;
+}
+.md-body li > ul,
+.md-body li > ol {
+  margin: 0.15rem 0;
+}
+.md-body blockquote {
+  margin: 0.5rem 0;
+  border-left: 3px solid var(--border);
+  padding-left: 0.75rem;
+  color: var(--muted);
+}
+.md-body a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.md-body hr {
+  margin: 1rem 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+/* 行内代码与代码块同底色，避免出现"两种灰" */
+.md-body code {
+  background: var(--code);
+  border-radius: 4px;
+  padding: 0.1rem 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+.md-body pre code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+}
+/* 表格：宽度按内容撑开，横滚交给外层容器（375px 不撑破） */
+.md-body table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+.md-body th,
+.md-body td {
+  border: 1px solid var(--border);
+  padding: 0.25rem 0.5rem;
+  text-align: left;
+}
+.md-body th {
+  background: var(--code);
+  font-weight: 600;
+}
+
+/* 代码高亮（highlight.js 类名）：用项目 token 派生，深浅色自动跟随，不引第三方主题 CSS */
+.hljs-comment,
+.hljs-quote {
+  color: var(--muted);
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-section,
+.hljs-doctag,
+.hljs-type,
+.hljs-name,
+.hljs-strong {
+  color: var(--accent);
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-attribute {
+  color: var(--ok);
+}
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-link,
+.hljs-selector-attr,
+.hljs-selector-pseudo {
+  color: var(--warn);
+}
+.hljs-title,
+.hljs-title.class_,
+.hljs-title.function_,
+.hljs-built_in {
+  color: var(--foreground);
+  font-weight: 600;
+}
+.hljs-attr,
+.hljs-property,
+.hljs-params {
+  color: var(--foreground);
+}
+.hljs-deletion {
+  color: var(--danger);
+}
+.hljs-emphasis {
+  font-style: italic;
 }

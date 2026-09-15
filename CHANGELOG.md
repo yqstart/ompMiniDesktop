@@ -2,6 +2,46 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 风格，版本号遵循语义化版本。
 
+## [Unreleased]
+
+### 新增
+
+- 项目分组头新增「删除工作区」入口（`FolderMinus`，hover 操作区第三个按钮）：二次确认后只解绑目录、不删任何 jsonl 文件；名下对话（含进行中）由后端 `remove_project` 按 cwd 扫描后全部标记归档保留，可在「未归属会话」的已归档里找回。
+- 思考档新增真值回读通道：后端 `get_session_runtime` 命令 + `omp-state://<sessionId>` 事件推送模型 / 可用思考档（omp `thinking.efforts`）/ 当前档，打开会话即回填，不再靠前端猜。
+- 输入框上方新增**上下文条**（`ContextBar`）：左「项目」右「git 分支」。项目认会话归属（会话未归属就显示「未归属」，不回退左栏 `activeProjectId`），点开列全部项目、选中即切上下文并打开该项目最近会话；分支为**只读**展示——收起态显示分支名（detached 显示短 sha + 「游离」角标，有未提交改动带 warn 圆点），展开态列本地分支（当前分支置顶打勾）+ 手动刷新 + 「切分支请在终端操作」，非 git 目录显示「非 Git 目录」。两者与工具行下拉共用互斥槽 `composerMenu`，同一时刻只开一个。
+- 后端新增 `get_git_info` 只读命令：git CLI 查询当前分支 / 本地分支清单 / 脏工作区标记；`git` 路径按 PATH → 登录 shell `command -v git` → 常见绝对路径探测并缓存（GUI 应用的 PATH 只有 launchd 默认值），单条查询 4s 超时。目录缺失 / 非仓库 / 未装 git 一律返回 `isRepo:false` 降级值，不弹错。
+- 助手正文新增 **Markdown 渲染 + 代码高亮**（`AssistantText`）：走 `react-markdown`（不注入原始 HTML）+ `rehype-highlight`，配色在 `src/index.css` 用项目 token 定义（深浅色自动跟随，不引第三方主题）；代码块带复制按钮，表格/列表/引用排版齐全，流式中未闭合的围栏代码块给 skeleton 占位。Markdown 渲染链单独分包（`markdown-*.js`），主包体积不变。
+- 状态条补齐**真值透传**：上下文占用（`get_state.contextUsage`）、本轮 token 用量、耗时与 TTFT（`message_end.message.usage/duration/ttft`）由后端提取后随 `omp-state://<id>` 推送，输入框工具行新增只读 `RuntimeStats`（前端只做格式化，不自算 token）。单位经真实会话 jsonl 确认：omp 的 `duration` / `ttft` 就是毫秒。
+- 消息流新增**首屏增量**（MASTER §7）：默认只渲染最后 200 条，向上滚动或点「加载更早的 N 条」按页展开，加载后保持视口位置不跳；窗口按会话重置。
+- 新增 `pnpm e2e:rpc`（`scripts/e2e-rpc.mjs`）：用 fake-omp 驱真实行协议跑**行为级**端到端——握手 → get_state → prompt → 审批通过/拒绝 → 多工具并行 → 流式中断，并断言事件序列与 toolCallId 一致性；`fake-omp` 补齐 `multi`（双工具一成一败）与 `abort`（流式中断）场景。CI 增加 lint 与 e2e:rpc 两步，另加 `pnpm check` 一键跑全部检查。
+- 新增 `eslint.config.js`（flat config：typescript-eslint + react-hooks + react-refresh）：此前 `package.json` 声明了 `lint` 脚本却没有配置文件，`pnpm lint` 一直以 exit 2 失败。规则按仓库实际取舍（类型重活交给 `tsc`），`pnpm lint` 现已 0 报错。
+- 设置页新增 **omp 诊断区**：omp 路径 / 版本 / agentDir（带复制）+ 重新检测 + 手动指定 omp 可执行文件；顶部「未找到可用的 omp」横幅同样补这两个动作（GUI 启动的 PATH 常不含 homebrew 目录，此前横幅只能看不能修）。指定路径只写应用覆盖层，不改 omp 配置。
+- 项目目录缺失时，左栏分组内新增「重定位」入口（后端 `relocate_project` 此前没有 UI 入口）。
+- 窄窗（<768px）顶栏新增「打开侧栏」按钮：桌面侧栏是 `hidden md:block`，而抽屉状态此前无人置 true，窄窗下项目列表与设置完全不可达。
+- 中央空态补「会话会在哪个项目下新建」说明与 3 个示例问题（点示例即新建会话并填入草稿）；「新建会话」按钮此前只关抽屉、不建会话。
+
+### 变更
+
+- 实时流的工具卡改为**一次调用只出一张卡**：统一用 `tool:<toolCallId>` 作卡 id，新增纯函数 `mergeViewMsgs`（`src/lib/mergeEvents.ts`）按 id 原位合并、保留早期事件里的参数摘要与意图。此前 `toolcall_delta` / `toolcall_end` / `tool_execution_start` / `tool_execution_end` / `toolResult` 各自追加，一次调用渲染 2–3 张卡且「输入中」那张永远转圈（历史回放路径早已合并，直播路径漏了），并伴随 React 重复 key 警告。
+- 新建会话统一走 `createSessionIn`（`src/lib/sessionOpen.ts`）：左栏项目分组与中央空态共用一份实现，都会刷新列表、选中新会话、起 RPC 并拉历史。
+- 会话级权限覆盖改为**直接订阅 store**（启动时经 `get_overlay` 水合），不再用本地 state 拷贝——此前重启后徽标只显示全局档，与真实会话覆盖不一致。
+- 切模型 / 切档后的 `get_state` 真值回读会**顺带回写项目 `lastModel` / `lastThinking`**（新增 `remember_project_pref`）：`create_session` 一直会读这两个字段，但此前没有任何地方写，导致「新建会话沿用项目上次模型」实际永远落回全局默认。
+- 左栏主入口改为「添加项目」：左上角原「新建会话」accent 按钮改为调目录选择器添加项目（与中央空态「选择目录」共用 `src/lib/projects.ts` 的 `pickAndAddProject`，失败走左栏内联错误条）；底部「设置」上方的重复「添加项目」入口移除。新建会话保留在各项目分组内与中央空态，不再占用主入口。
+- 左侧栏移除会话行首复选框与「已选 N」批量工具条：会话行只保留单个会话的归档、取消归档与删除（二次确认浮层）；批量入口统一收归分组头——项目分组头 = 归档全部对话 / 删除全部对话 / 删除工作区（后两者各自浮层二次确认），「未归属会话」分组头 = 归档全部 / 删除全部对话。批量按后端 200 上限分批调用；删除成功后清掉被删会话的前端缓存，正在看的会话退回空态。
+- 项目删除改为工作区语义：分组头 hover 出删除按钮，二次确认后只解绑目录、不删会话文件；名下会话全部归档保留，进「未归属会话」可找回；备注/权限覆盖保留。`remove_project` 流式中的会话先停再删。
+- 输入框工具行模型/思考档下拉改为右对齐（`right-0` + `max-w-[calc(100vw-2rem)]`）：靠近输入框右侧的触发按钮不再被输入框右缘横向裁剪。
+- 应用图标重做为 **π 字标**（呼应 oh-my-pi 的 Pi 血脉）：T 型交汇走 R46 内圆角、笔画全圆头，配色为**极光渐变**（青绿→天蓝→紫→粉）+ 石墨底三处同色辉光。替换 Tauri 默认图标；矢量源落在 `design-system/icon/omp-mini-icon.svg`，`pnpm icon` 一条命令重生成 icns / ico / 各尺寸 png。
+- 模型选择器去掉「思N」角标（档位数不是决策信息），行内只留上下文（`1M`/`200K`）与图片（`图`）标记。
+- 工具行模型名不再截断（原 `max-w-32` + `truncate` 会把 `Muse Spark 1.3 Contributor` 显示成 `Muse Spark 1....`）：改为按内容自适应宽度完整显示；窗口过窄时由工具行换行兜底，不省略模型名。
+- 选择模型后思考档自动适配：可用档随模型自动识别，下拉**只列该模型真正支持的档位**（`off` 恒在首位，不再列全集置灰）；切模型后自动落到新模型最高档（无思考模型自动 `off`）——实测 omp 切模型不会自行修正档位，切到无思考模型甚至会直接丢掉档位。
+
+### 修复
+
+- 审批拒绝分支在 `message_end{toolResult}` 路径不再显示 omp 原文（英文 `Tool call denied by user: bash`），统一渲染为「被用户拒绝」并置失败态（`isError` 也计入——此前只看文本关键字）。
+- 修掉新 lint 配置查出的一批 React 反模式：拖拽态在 render 期读 ref（改 state）、`ContextBar` / `PermissionBadge` 在 effect 里同步 setState（改为派生值 / 直接订阅 store）、`useSessionEvents` 在 render 期写 ref（移到 effect）。
+- 换图标后 cargo 不重建：`tauri-build` 的 `rerun-if-changed` 不覆盖 `icons/`，改由 `src-tauri/build.rs` 显式声明 `cargo:rerun-if-changed=icons`。
+- 修掉模型/思考档两处「看着生效、实际没生效」的老问题：点选模型只改了前端 store、从未下发 `set_model`（omp 侧模型其实没切）；打开会话从不回填 omp 真值（界面显示的模型与档位可能与 omp 实际不一致）。同时把两个选择器改为响应式取值（此前选完按钮文字不更新）。
+
 ## [0.1.0] - 2026-09-15
 
 首个可用版本：oh-my-pi 的极简桌面壳（Tauri v2 + React）。

@@ -19,14 +19,13 @@ export function PermissionBadge({ compact = false, align = "right" }: { compact?
   );
   const ref = useDropdown(open, () => setOpen(false));
   const [global, setGlobal] = useState("write");
-  const [session, setSession] = useState<string | null>(null);
+  // 会话覆盖直接订阅 store（启动时已由 App 经 get_overlay 水合），不再用本地 state 拷贝：
+  // 拷贝会与真实覆盖漂移（重启后徽标显示全局档）
+  const session = useApp((s) => (activeSessionId ? (s.sessionApprovals[activeSessionId] ?? null) : null));
 
   useEffect(() => {
     api.getGlobalApproval().then(setGlobal).catch(() => undefined);
   }, []);
-  useEffect(() => {
-    setSession((useApp.getState().sessionApprovals as Record<string, string> | undefined)?.[activeSessionId ?? ""] ?? null);
-  }, [activeSessionId]);
 
   const shown = session ?? global;
   const danger = shown === "yolo";
@@ -38,12 +37,11 @@ export function PermissionBadge({ compact = false, align = "right" }: { compact?
         setGlobal(mode);
       } else if (activeSessionId) {
         await api.setSessionApproval(activeSessionId, mode);
-        const prev = (useApp.getState().sessionApprovals as Record<string, string> | undefined) ?? {};
-        useApp.setState({ sessionApprovals: { ...prev, [activeSessionId]: mode } } as never);
-        setSession(mode);
+        const prev = useApp.getState().sessionApprovals ?? {};
+        useApp.setState({ sessionApprovals: { ...prev, [activeSessionId]: mode } });
       }
     } catch {
-      // M3-6 补内联错误
+      // 失败保持原档位（内联错误条由设置页诊断区承担）
     } finally {
       setOpen(false);
     }

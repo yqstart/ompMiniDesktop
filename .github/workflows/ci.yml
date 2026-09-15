@@ -32,11 +32,17 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Lint
+        run: pnpm lint
+
       - name: Unit tests
         run: pnpm test
 
       - name: IPC contract selfcheck
         run: pnpm e2e:ipc
+
+      - name: RPC end-to-end (fake-omp)
+        run: pnpm e2e:rpc
 
       - name: Vite build
         run: pnpm build

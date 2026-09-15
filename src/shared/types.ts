@@ -57,6 +57,66 @@ export type ModelCatalog = {
   error?: string;
 };
 
+/** 模型精简引用（真值回读用，selector = provider/id）。 */
+export type ModelRef = {
+  provider: string;
+  id: string;
+  name?: string | null;
+};
+
+/** 上下文占用（omp `get_state.contextUsage`），纯透传，前端只做格式化。 */
+export type ContextUsage = {
+  tokens: number | null;
+  contextWindow: number | null;
+  /** omp 给的是 0–1 比例；展示时换算成百分比。 */
+  percent: number | null;
+};
+
+/** 最近一轮用量（omp `message_end.message.usage`）。 */
+export type TurnUsage = {
+  input: number | null;
+  output: number | null;
+  totalTokens: number | null;
+  cacheRead: number | null;
+  reasoningTokens: number | null;
+  costTotal: number | null;
+};
+
+/**
+ * 会话运行时真值：omp `get_state` / `set_model` / `message_end` 回读的
+ * 模型、可用思考档、当前档、上下文占用与本轮用量。
+ * 打开会话时经 `get_session_runtime` 回填，其后变化经 `omp-state://<id>` 推送。
+ */
+export type SessionRuntime = {
+  model: ModelRef | null;
+  /** 当前模型可用思考档（omp `thinking.efforts`）；null = 不支持思考。 */
+  efforts: string[] | null;
+  thinkingLevel: string | null;
+  contextUsage?: ContextUsage | null;
+  usage?: TurnUsage | null;
+  /** 本轮耗时（毫秒，omp 原值）。 */
+  durationMs?: number | null;
+  /** 本轮首字延迟（毫秒）。 */
+  ttftMs?: number | null;
+};
+
+/**
+ * 输入框上方上下文条的 git **只读**信息（后端 `get_git_info`）。
+ * 非仓库 / 未装 git / 目录缺失时为 `isRepo:false`，前端整段隐藏分支展示，不当错误弹。
+ */
+export type GitInfo = {
+  isRepo: boolean;
+  /** 当前分支名；detached HEAD 时为短 sha；未知 null。 */
+  branch: string | null;
+  detached: boolean;
+  /** 本地分支清单（当前分支置顶，其余按最近提交倒序）。 */
+  branches: string[];
+  /** 有未提交的已跟踪文件改动；null = 未检测 / 超时。 */
+  dirty: boolean | null;
+  /** 降级原因（tooltip 与日志用）。 */
+  error: string | null;
+};
+
 export type OmpInfo = {
   ompPath: string | null;
   ompVersion: string | null;

@@ -1,4 +1,5 @@
 mod commands;
+mod git_info;
 mod overlay;
 mod runtime;
 mod session_scan;
@@ -44,9 +45,11 @@ fn main() {
             approve,
             set_model,
             set_thinking,
+            get_session_runtime,
             get_global_approval,
             set_global_approval,
-            set_session_approval
+            set_session_approval,
+            get_git_info
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

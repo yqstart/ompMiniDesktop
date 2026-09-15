@@ -3,11 +3,12 @@ import { api } from "@shared/api";
 import { ModelPicker } from "../pickers/ModelPicker";
 import { ThinkingPicker } from "../pickers/ThinkingPicker";
 import { PermissionBadge } from "../pickers/PermissionBadge";
-import { OmpStatusPill } from "../thread/StatusBar";
+import { OmpStatusPill, RuntimeStats } from "../thread/StatusBar";
+import { ContextBar } from "./ContextBar";
 
 /**
  * 会话输入框：随心输入 + 底部工具行（截图布局）。
- * 上：多行输入；下左：+ / 权限；下右：模型 / 思考档 / 语音占位 / 发送-停止。
+ * 上：上下文条（项目 / git 分支）+ 多行输入；下左：+ / 权限；下右：模型 / 思考档 / 语音占位 / 发送-停止。
  * 模型·思考档·权限只放这里，顶栏不再重复（UpdateBell 除外）。
  */
 export function Composer() {
@@ -31,7 +32,7 @@ export function Composer() {
 
   if (archived) {
     return (
-      <div className="px-4 pb-4">
+      <div className="shrink-0 px-4 pb-4">
         <div className="mx-auto max-w-3xl rounded-2xl border border-border/70 bg-surface px-4 py-3 text-center text-sm text-muted">
           已归档，只读——取消归档后可继续对话
         </div>
@@ -40,7 +41,9 @@ export function Composer() {
   }
 
   return (
-    <div className="px-4 pb-4">
+    <div className="shrink-0 px-4 pb-4">
+      {/* 上下文条在卡片外、上方：项目 + git 分支（无项目时自身不渲染） */}
+      <ContextBar />
       <div
         className={`mx-auto max-w-3xl rounded-2xl border bg-surface shadow-[0_8px_28px_-12px_rgba(0,0,0,0.35)] transition-colors duration-150 ${
           awaiting ? "border-warn/50" : "border-border/80 focus-within:border-accent/60"
@@ -71,7 +74,7 @@ export function Composer() {
           placeholder={awaiting ? "先处理上面的审批" : "随心输入"}
           className="max-h-44 w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-sm leading-6 outline-none placeholder:text-muted/70 disabled:opacity-60"
         />
-        <div className="flex items-center gap-0.5 px-2.5 pb-2.5">
+        <div className="flex flex-wrap items-center gap-0.5 gap-y-1 px-2.5 pb-2.5">
           <button
             className="cursor-pointer rounded-full p-2 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground disabled:cursor-default disabled:opacity-40"
             aria-label="添加附件（V1 未开放）"
@@ -82,7 +85,8 @@ export function Composer() {
           </button>
           <PermissionBadge compact align="left" />
           <OmpStatusPill />
-          <div className="ml-auto flex items-center gap-1">
+          <RuntimeStats />
+          <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
             <ModelPicker compact />
             <ThinkingPicker compact />
             {running ? (

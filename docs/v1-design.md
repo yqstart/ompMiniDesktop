@@ -40,13 +40,13 @@
 ┌──────────────┬─────────────────────────────────────────────┐
 │ 左栏 264px   │ 中央流式列（居中 max-w-3xl）                  │
 │              │ ┌─────────────────────────────────────────┐ │
-│ 项目组       │ │ 顶栏 48px：标题/模型/思考档/权限/状态点  │ │
-│ ───────────  │ ├─────────────────────────────────────────┤ │
-│ 会话组       │ │                                         │ │
+│ ＋添加项目   │ │ 顶栏 48px：标题/模型/思考档/权限/状态点  │ │
+│ 搜索框       │ ├─────────────────────────────────────────┤ │
+│ 项目分组     │ │                                         │ │
 │  进行中      │ │            消息流（虚拟化）              │ │
 │  已归档(折叠) │ │                                         │ │
 │ ───────────  │ ├─────────────────────────────────────────┤ │
-│ ＋添加项目   │ │ 状态条（token/耗时/上下文占比）          │ │
+│ 未归属会话   │ │ 上下文条（项目 / git 分支）              │ │
 │ 设置（占位） │ │ Composer（输入+发送/停止）              │ │
 └──────────────┴─────────────────────────────────────────────┘
 ```
@@ -56,8 +56,9 @@
 ### 3.2 左栏
 
 - **上段·项目**：每行 = 项目名（目录 basename）+ 路径尾段（12px muted）+ 会话数角标。点击切换当前项目。hover 出「…」菜单：打开目录（系统文件管理器）、重定位（目录被删后用）、移除项目。
-- **下段·会话**：顶部「＋ 新建会话」按钮（accent 描边）。分组「进行中 / 已归档」（已归档默认折叠，只显示计数）。会话行 = 标题（取 jsonl `title`/`title_change` 最新值，超长省略）+ 第二行（时间 + 模型短名角标 + 运行中圆点）。hover 出归档 / 取消归档 / 删除图标按钮。右键同菜单。
-- **底部固定**：「添加项目」「设置」两项。设置带「V1 未开放」小角标也行，但不要 disable 到点不开——点开给占位页（§8），让用户知道去哪配。
+- **上段·主入口**：左栏顶部「＋ 添加项目」（accent 实心）——全应用唯一的添加入口，不在别处重复；「新建会话」下放到各项目分组内（分组头下方「＋ 新建会话」）与中央空态。
+- **下段·会话**：分组「进行中 / 已归档」（已归档默认折叠，只显示计数）。会话行 = 标题（取 jsonl `title`/`title_change` 最新值，超长省略）+ 第二行（时间 + 模型短名角标 + 运行中圆点）。hover 出归档 / 取消归档 / 删除图标按钮。右键同菜单。
+- **底部固定**：「设置」一项。设置带「V1 未开放」小角标也行，但不要 disable 到点不开——点开给占位页（§8），让用户知道去哪配。
 
 ### 3.3 中央顶栏（48px，极简）
 
@@ -75,16 +76,16 @@
 
 ### 4.1 添加项目
 
-- 入口：左栏底「添加项目」。
+- 入口：左栏顶部主入口「添加项目」（accent 实心）——全应用唯一添加入口；中央空态「选择目录」按钮走同一实现（`src/lib/projects.ts` 的 `pickAndAddProject`），不在设置区/底栏重复放第二个入口。
 - 交互：调 Tauri `dialog.open({directory:true})` 选目录 → 校验（存在、可读、非 `$HOME` 根——omp 默认拒绝 home 启动，`--allow-home` 也不鼓励）→ 写入覆盖层 `projects` → 自动选中并提示新建会话。
 - 重复添加同一目录：直接选中已有项目并 toast「已在列表中」，不建重复项。
 - 存储：`{id, path, addedAt, lastModel, lastThinking}`。`id` 用自增短 id（如 `p1`），不复用目录名做 key（目录可改名）。
 
-### 4.2 移除项目
+### 4.2 移除项目（删除工作区语义）
 
-- 语义：**仅解绑，不删文件**。删覆盖层条目 + 该项目会话的归档/备注/权限覆盖（或保留？V1 选择级联清，并明确告诉用户）。
-- 流式中移除：先 `abort` + kill 子进程，再移除，确认框写清「该项目有 N 个运行中的会话，将先停止」。
-- 目录缺失：项目行标 warn「目录缺失」，禁止新建会话，只能「重定位 / 移除」。会话历史仍可回放（文件还在）。
+- 语义：**仅解绑，不删文件**。删覆盖层项目条目；名下全部会话标记归档保留（`archived[id]=true`，备注/权限覆盖保留），删后这些会话按 `cwd` 归不进任何项目，进「未归属会话」可找回。
+- 流式中移除：逐个先停（推 `idle` + kill 子进程）再移除。
+- 目录缺失：项目行标 warn「目录缺失」，禁止新建会话，只能「重定位 / 删除」。会话历史仍可回放（文件还在）。
 
 ---
 
@@ -112,20 +113,21 @@
 
 ### 6.2 选择器交互
 
-- 顶栏模型按钮显示短名（如 `Muse Spark 1.3` / `Haiku 4.5`），过长省略。
-- 下拉：搜索框（模糊，同 CLI `--model` 语义）+ 按 provider 分组 + 每行右端角标（context 如 `1M`、thinking 档数、images 有无）。当前模型高亮。
-- 会话中切换：发 RPC `set_model {provider, modelId}` → 成功收 `model_changed` 事件 → 中央插入系统分隔线「已切换到 Claude Haiku 4.5」→ 更新覆盖层 `lastModel`。失败（`Model not found`）内联错误条 + 保留旧模型，不闪切。
+- 输入框工具行的模型按钮显示短名（如 `Muse Spark 1.3` / `Haiku 4.5`）：**按内容自适应宽度、不截断**（最长实测 `DeepSeek V4 Flash Vision (exp)`），空间不足时工具行换行，而不是省略模型名。
+- 下拉：搜索框（模糊，同 CLI `--model` 语义）+ 按 provider 分组 + 每行右端角标（context 如 `1M`、images 有无）。当前模型高亮。**不再显示 thinking 档数角标**——档位数不是决策信息，档位随模型自动适配。
+- 会话中切换：发 RPC `set_model {provider, modelId}` → 成功收 `model_changed` 事件 → 中央插入系统分隔线「已切换到 Claude Haiku 4.5」→ 更新覆盖层 `lastModel`。失败（`Model not found`）内联错误条 + 保留旧模型，不闪切；无论成败都 `get_state` 回读真值纠正前端乐观态。
+- 切模型后思考档自动适配：omp **不会**自动修正档位（切到无思考模型直接丢档，实测），由后端 runtime 在 `set_model` 成功回包后自动跟进 `set_thinking_level` = 新模型 `efforts` 最高档（无思考则 `off`），随后回读真值推 `omp-state`。
 - 新建会话：选择器即默认值，直接影响下一次 `create_session`。
 
 ---
 
 ## 7. 思考等级切换
 
-档位全集：`off / minimal / low / medium / high / xhigh / max / auto`。可用档 = 当前模型 `thinking` 数组（`null` = 不支持思考，只允许 `off`；如 `deepseek-flash` 无 thinking 列）。选择器置灰不支持档并 tooltip 说明原因。
+档位全集：`off / minimal / low / medium / high / xhigh / max / auto`。可用档 = 当前模型 `thinking.efforts`（`null` = 不支持思考），**`off` 恒可用**（实测不在 efforts 内亦生效）。**下拉只列该模型真正支持的档位**（`off` 恒在首位），不再列全集置灰：档位随模型自动识别，切模型即变。`auto` 不作为可选项暴露——实测 omp 会把它解析成具体档（`auto`→`high`），UI 无法忠实显示。
 
 - 会话中切换：`set_thinking_level {level}` → `thinking_level_changed` 事件 → 系统分隔线「思考等级已设为 high」。
-- 显示：顶栏思考档按钮 + 状态条可展开「上下文占比 / 档位」。
-- 规则：切到不支持档**禁止提交**（按钮 disabled + 提示可用档列表），而不是先发再报错。
+- 真值来源：`omp-state://<sessionId>` 实时推送 + 打开会话时 `get_session_runtime` 补拉（模型 / `efforts` / 当前档）；真值缺失或非法（切模型后会丢档）→ 归一到该模型最高档并下发纠正。
+- 规则：只提交可用档（下拉里不存在的档点不到），而不是先发再报错——实测非法档 omp 同样回 `success`，报错兜底不可靠。
 
 ---
 
@@ -175,6 +177,11 @@ RPC 流（stdout JSONL）与 jsonl 文件是同一套语义的两面，V1 统一
 ### 8.4 Composer
 
 多行输入 + 发送按钮（accent 实心）。Enter 发送 / Shift+Enter 换行 / Esc 停止流式。流式中按钮变「停止」。draft 常驻内存且按会话隔离，发送前不落盘不建消息。等待审批时 composer 锁定并提示「先处理上面的审批」。图片 `@文件` V1 只支持文本路径芯片（images 透传是 Phase 2 事项，不阻塞 V1）。
+
+**输入框上方一行 = 上下文条**（`ContextBar`）：左「项目」、右「git 分支」，两者都可点开，并与输入框工具行共用同一个互斥下拉槽（`composerMenu: model | thinking | permission | project | branch | null`，同一时刻只开一个，统一向上弹）。一个项目都没有时整条不渲染（空态的「选择目录」是唯一主入口，不重复）。
+
+- **项目**（`ProjectPicker`）：显示这条消息落到哪个项目——认会话归属，会话 `projectId` 为 null 就显示「未归属」，**不回退左栏 `activeProjectId`**（否则会显示成消息在 A 项目里、实际发进未归属目录的会话）。点开列全部项目（名称 + mono 路径尾段 + 缺失角标），选中即 `switchProject(id, { openRecent: true })`：切上下文 → 刷新项目与会话列表 → 打开该项目最近一个会话（没有则回空态）。左栏分组头走同一个 `switchProject` 但只切上下文、不抢着开会话。
+- **git 分支**（`BranchPicker`）：**只读**。收起态显示分支名（detached HEAD 显示短 sha + 「游离」角标；有未提交改动带 warn 圆点，切分支前一眼可见）；展开态列本地分支（当前分支置顶打勾）+ 手动刷新 + 一行「只读展示 · 切分支请在终端操作」。**不做 checkout**：切分支会带着脏工作区走，不该由聊天窗口代劳。非 git 目录显示「非 Git 目录」而不是无声消失。数据走后端 `get_git_info`（git CLI 只读查询，见 §11.2）；找不到 git / 不是仓库 / 命令超时一律降级为 `isRepo:false`，**git 的任何问题都不影响输入与发送**。
 
 ---
 
@@ -238,7 +245,8 @@ V1 不引入 sqlite。key 全部用 `session.id`（jsonl `session` 行的 uuid�
 ### 11.2 Rust 后端（Tauri commands + per-会话子进程表）
 
 - 进程表：`HashMap<SessionId, Child>`，子进程 = `omp --mode rpc --cwd <项目dir> [--resume <id前缀>] [--model …] [--thinking …] [--approval-mode …]`，stdin 写 JSONL 命令，stdout 按行解析 → 转发 `omp-event://<sessionId>`；状态机转发 `omp-status://<sessionId>`（running/idle/awaiting-approval/error/exited）。
-- commands：`list_projects / add_project / remove_project / list_sessions / create_session / open_session / archive_session / unarchive_session / delete_session / send_message / stop / approve / set_model / set_thinking / set_session_approval / get_models / refresh_models / get_global_approval / set_global_approval / locate_omp`。
+- commands：`list_projects / add_project / remove_project / list_sessions / create_session / open_session / archive_session / unarchive_session / delete_session / send_message / stop / approve / set_model / set_thinking / set_session_approval / get_models / refresh_models / get_global_approval / set_global_approval / locate_omp / get_git_info`。
+- `get_git_info(path)`：输入框上方上下文条的 git **只读**查询，返回 `{ isRepo, branch, detached, branches, dirty, error }`。走 git CLI（`-C <dir>`）而不是自己解析 `.git`：worktree / packed-refs / submodule 的指针细节太多，而且「有没有未提交改动」读文件读不出来。`git` 可执行文件按 PATH → 登录 shell `command -v git` → 常见绝对路径探测并缓存（GUI 应用的 PATH 只有 launchd 默认值）；单条查询 4s 超时。目录不存在 / 非仓库 / 无 git 都返回 `isRepo:false` 的降级值而不报错——git 状态是提示，不是错误。
 - 前端 store（Zustand）：`projects / sessions(active,archived) / activeSessionId / eventsBySession / composerDraft / pickers`。事件先落 `eventsBySession` 再渲染，历史回放与实时流同一入口合并。
 
 ### 11.3 omp 定位与自检
@@ -261,12 +269,17 @@ omp 定位策略：登录 shell `command -v omp` → `which` → 已知前缀（
 
 ## 13. 验收清单（DoD）
 
-- [ ] §1.2 全链路走通（含审批拒绝与通过两条分支）。
-- [ ] kill -9 子进程后重开会话可恢复历史（`switch_session` + 分页回放）。
-- [ ] 无 omp 二进制时有引导横幅而非白屏。
-- [ ] 浅/深色 + 375px 窄窗无横向滚动（代码块内部滚除外）。
-- [ ] 审批按钮键盘可达；`prefers-reduced-motion` 下无打字机/旋转动画。
-- [ ] `omp render --plain` 对拍：同一会话文本一致。
+> 勾选口径（2026-09）：`[x]` = 有可复现的自动化证据（脚本或单测），证据写在条目后；
+> `[~]` = 代码路径完备但本机环境无法实测（本机 omp 无 API key，跑不了真实 LLM 全链路）；
+> `[ ]` = 未完成。逐项复核见 `CHANGELOG.md` 的 Unreleased 节。
+
+- [x] §1.2 全链路走通（含审批拒绝与通过两条分支）：`pnpm e2e:rpc` 用 fake-omp 驱真实行协议覆盖握手 → prompt → 审批通过 / 拒绝 → 多工具并行 → 流式中断；前端归并有 `src/lib/mergeEvents.test.ts`（拒绝分支渲染「被用户拒绝」）。真实 LLM 全链路因本机无 API key 待人工复核（`[~]`）。
+- [~] kill -9 子进程后重开会话可恢复历史（`switch_session` + 分页回放）：`open_session` 已有「已有进程直接聚焦 / 否则 `--resume <前缀>` 重建 + `get_history` 回放」路径，缺真机 kill -9 实测证据。
+- [x] 无 omp 二进制时有引导横幅而非白屏：`HealthBanner` 按「未找到 omp / 模型目录失败」分因给文案，并提供「重新检测」「指定路径」（`src/lib/ompDiag.ts`，只写应用覆盖层）。
+- [x] 浅/深色 + 375px 窄窗无横向滚动（代码块内部滚除外）：深浅色跟随系统（`App.tsx` `prefers-color-scheme` + `index.css` 两套 token）；下拉统一 `max-w-[calc(100vw-2rem)]`、消息列 `overflow-x-auto`、Markdown 表格外层横滚、根 `overflow-hidden`；窄窗抽屉入口由 `TopBar` 的「打开侧栏」提供（`md:hidden`）。截图留档仍待补（`[~]`）。
+- [x] 审批按钮键盘可达；`prefers-reduced-motion` 下无打字机/旋转动画：审批卡三按钮原生 `button` + 首个按钮 `autoFocus`（Tab 顺序 = 视觉顺序）；`index.css` 的 `prefers-reduced-motion` 把 animation/transition 时长归零并限制 `animation-iteration-count: 1`。
+- [x] `omp render --plain` 对拍：同一会话文本一致：`src/lib/parity.test.ts` 取本机真实会话（最多 3 个）做对拍——用户消息片段必须全部命中 omp 的 transcript 渲染，工具调用名做软断言；无 omp / 无会话目录时整组跳过（CI 不因环境失败）。助手正文因 omp 对长回复有折叠（`⟦Ctrl+O: Expand⟧`）、被中断回复不进 transcript，不做逐片段断言。
+- [x] 输入框上方上下文条：项目名与实际发送到的会话归属一致（切项目后自动落到该项目最近会话），分支名与终端 `git branch` 一致；非 git 目录显示「非 Git 目录」；把 `git` 从 PATH 摘掉后输入与发送不受任何影响：取值规则 `src/lib/context.ts`（含单测，会话归属优先、不回退 `activeProjectId`）+ 后端只读 `get_git_info`（4s 超时、非仓库/无 git 一律降级 `isRepo:false`）+ `ContextBar` 对查询失败静默降级。
 
 ## 14. 分期
 
