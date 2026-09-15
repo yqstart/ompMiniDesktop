@@ -23,6 +23,9 @@ export const api = {
   /** 会话列表（分页）：`limit` 为扫描窗口大小（后端默认 500，夹在 1..=5000）。 */
   listSessions: (projectId?: string, limit?: number) =>
     call<import("./types").SessionPage>("list_sessions", { projectId, limit }),
+  /** 会话内容搜索（只搜 user/assistant 正文；后端有文件数/字节/时间预算）。 */
+  searchSessions: (query: string) =>
+    call<import("./types").SessionSearchResult>("search_sessions", { query }),
   createSession: (projectId: string) =>
     call<import("./types").SessionView>("create_session", { projectId }),
   openSession: (id: string) => call<import("./types").SessionView>("open_session", { id }),

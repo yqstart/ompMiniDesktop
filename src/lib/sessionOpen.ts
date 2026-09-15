@@ -63,8 +63,12 @@ export async function openSessionWithHistory(id: string): Promise<void> {
   try {
     const opened = await api.openSession(id);
     const cur = useApp.getState();
+    // 搜索命中的会话可能落在扫描窗口之外（列表里没有这一行）：把它补进列表，
+    // 否则顶栏标题与上下文条会显示成「未命名会话 / 未归属」。
+    const known = cur.sessions.some((s) => s.id === opened.id);
     cur.set({
       activeSessionId: opened.id,
+      ...(known ? {} : { sessions: [opened, ...cur.sessions] }),
       statusBySession: { ...cur.statusBySession, [opened.id]: { state: "idle" } },
     });
   } catch {

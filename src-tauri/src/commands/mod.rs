@@ -546,6 +546,109 @@ pub async fn list_sessions(
     Ok(SessionPage { sessions: out, total_files, scanned_files })
 }
 
+/// 会话内容搜索的一条命中（V2 M7b）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionHit {
+    pub id: String,
+    pub title: String,
+    pub timestamp: i64,
+    pub snippet: String,
+    pub hits: usize,
+    pub archived: bool,
+}
+
+/// 搜索结果：`truncated` = 因预算（文件数 / 字节 / 时间 / 命中上限）提前收手，
+/// 前端据此提示「结果可能不全」，而不是假装搜完了。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSearchResult {
+    pub hits: Vec<SessionHit>,
+    pub scanned_files: usize,
+    pub truncated: bool,
+}
+
+/// 搜索预算（纯函数，可测）：命中条数 / 扫描文件数 / 总读取字节 / 墙钟时间。
+pub fn search_budget(limit: Option<usize>) -> (usize, usize, u64, u64) {
+    let hits = limit.unwrap_or(30).clamp(1, 200);
+    (hits, 1000, 96 * 1024 * 1024, 1500)
+}
+
+/// 会话内容搜索：只扫 user / assistant 的正文（工具输出与 thinking 不进搜索面）。
+///
+/// 保护：按 mtime 取最近 `MAX_FILES` 个文件；单文件读取上限 8MB；全局字节 / 时间预算到点即停；
+/// 命中数达上限即停。任何预算触发都把 `truncated` 置 true —— **宁可说"可能不全"，也不假装搜完了**。
+#[tauri::command]
+pub async fn search_sessions(state: State<'_, AppState>, query: String) -> Result<SessionSearchResult, CmdError> {
+    let agent = state.agent_dir.lock().await.clone();
+    let archived_map = state.overlay.lock().await.archived.clone();
+    Ok(search_sessions_in(&agent.join("sessions"), &archived_map, &query, None))
+}
+
+/// 搜索核心（不碰 tauri，可在临时目录上做真实行为测试）。
+pub fn search_sessions_in(
+    root: &std::path::Path,
+    archived_map: &HashMap<String, bool>,
+    query: &str,
+    limit: Option<usize>,
+) -> SessionSearchResult {
+    let q = query.trim().to_lowercase();
+    let (max_hits, max_files, max_bytes, max_ms) = search_budget(limit);
+    if q.chars().count() < 2 {
+        return SessionSearchResult { hits: vec![], scanned_files: 0, truncated: false };
+    }
+    let mut candidates: Vec<(std::time::SystemTime, PathBuf)> = vec![];
+    let Ok(rd) = std::fs::read_dir(root) else {
+        return SessionSearchResult { hits: vec![], scanned_files: 0, truncated: false };
+    };
+    for entry in rd.flatten() {
+        let Ok(files) = std::fs::read_dir(entry.path()) else { continue };
+        for f in files.flatten() {
+            let p = f.path();
+            if p.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let mtime = f.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+            candidates.push((mtime, p));
+        }
+    }
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    let started = std::time::Instant::now();
+    let mut hits: Vec<SessionHit> = vec![];
+    let mut scanned_files = 0usize;
+    let mut bytes_read = 0u64;
+    let mut truncated = candidates.len() > max_files;
+    for (_mtime, path) in candidates.into_iter().take(max_files) {
+        if hits.len() >= max_hits || bytes_read >= max_bytes || started.elapsed().as_millis() as u64 >= max_ms {
+            truncated = true;
+            break;
+        }
+        scanned_files += 1;
+        let remaining = max_bytes.saturating_sub(bytes_read);
+        let (snippet, count, read) = search_one_file(&path, &q, remaining);
+        bytes_read += read;
+        if !truncated && bytes_read >= max_bytes {
+            truncated = true;
+        }
+        if let Some(snippet) = snippet {
+            let head = parse_session_head(&path);
+            let archived = archived_map.get(&head.id).copied().unwrap_or(false);
+            hits.push(SessionHit {
+                title: display_title(None, &head.title, head.timestamp),
+                timestamp: head.timestamp,
+                snippet,
+                hits: count,
+                archived,
+                id: head.id,
+            });
+        }
+    }
+    if started.elapsed().as_millis() as u64 >= max_ms {
+        truncated = true;
+    }
+    SessionSearchResult { hits, scanned_files, truncated }
+}
+
 pub(crate) fn session_file_for(agent: &std::path::Path, id_prefix: &str) -> Option<PathBuf> {
     let mut best: Option<(i64, PathBuf)> = None;
     let Ok(rd) = std::fs::read_dir(agent.join("sessions")) else { return None };
@@ -1207,7 +1310,89 @@ pub fn load_state(app: &AppHandle) -> AppState {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_path, scan_window};
+    use super::{resolve_path, scan_window, search_budget, search_sessions_in};
+    use std::collections::HashMap;
+
+    /// 在临时目录里造一个 sessions/<slug>/*.jsonl 结构，跑真实搜索路径。
+    fn tmp_sessions_root(tag: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("omp-search-test-{}-{}", std::process::id(), tag));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("--tmp-demo--")).unwrap();
+        root
+    }
+
+    fn write_session(root: &std::path::Path, file: &str, id: &str, title: &str, lines: &[&str]) {
+        let mut body = format!(
+            "{}\n",
+            serde_json::json!({"type":"session","id":id,"timestamp":"2026-09-15T10:00:00.000Z","cwd":"/tmp/demo","title":title})
+        );
+        for l in lines {
+            body.push_str(l);
+            body.push('\n');
+        }
+        std::fs::write(root.join("--tmp-demo--").join(file), body).unwrap();
+    }
+
+    #[test]
+    fn search_sessions_finds_body_hits_and_reports_archived() {
+        let root = tmp_sessions_root("hit");
+        write_session(
+            &root,
+            "a.jsonl",
+            "s-a",
+            "缓存优化",
+            &[
+                r#"{"type":"message","message":{"role":"user","content":[{"type":"text","text":"缓存怎么调"}]}}"#,
+                r#"{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"先看缓存命中率"}]}}"#,
+            ],
+        );
+        write_session(
+            &root,
+            "b.jsonl",
+            "s-b",
+            "无关会话",
+            &[r#"{"type":"message","message":{"role":"user","content":[{"type":"text","text":"讲讲别的事"}]}}"#],
+        );
+        let archived = HashMap::from([("s-a".to_string(), true)]);
+        let res = search_sessions_in(&root, &archived, "缓存", None);
+        assert_eq!(res.hits.len(), 1, "只有正文命中的会话进结果");
+        let hit = &res.hits[0];
+        assert_eq!(hit.id, "s-a");
+        assert_eq!(hit.title, "缓存优化");
+        assert_eq!(hit.hits, 2, "两个正文块各命中一次");
+        assert!(hit.archived, "归档标记跟着命中一起回来（结果行要标「已归档」）");
+        assert!(!res.truncated && res.scanned_files == 2);
+    }
+
+    #[test]
+    fn search_sessions_ignores_short_query_and_missing_dir() {
+        let root = tmp_sessions_root("short");
+        write_session(&root, "a.jsonl", "s-a", "缓存", &[]);
+        // 单字不搜：命中面太大且没信息量
+        let one = search_sessions_in(&root, &HashMap::new(), "缓", None);
+        assert!(one.hits.is_empty() && one.scanned_files == 0);
+        // 目录不存在时安全返回空结果，不 panic
+        let missing = search_sessions_in(&root.join("nope"), &HashMap::new(), "缓存", None);
+        assert!(missing.hits.is_empty());
+    }
+
+    #[test]
+    fn search_sessions_respects_hit_limit() {
+        let root = tmp_sessions_root("limit");
+        for i in 0..5 {
+            write_session(
+                &root,
+                &format!("s{i}.jsonl"),
+                &format!("s-{i}"),
+                "缓存",
+                &[r#"{"type":"message","message":{"role":"user","content":[{"type":"text","text":"缓存问题"}]}}"#],
+            );
+        }
+        let res = search_sessions_in(&root, &HashMap::new(), "缓存", Some(2));
+        assert_eq!(res.hits.len(), 2, "命中上限生效");
+        assert!(res.truncated, "被上限截断必须如实标记，前端才能提示「结果可能不全」");
+        assert_eq!(search_budget(Some(2)).0, 2);
+    }
 
     #[test]
     fn scan_window_defaults_and_clamps() {

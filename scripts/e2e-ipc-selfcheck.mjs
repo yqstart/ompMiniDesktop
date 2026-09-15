@@ -22,7 +22,7 @@ const modRs = fs.readFileSync(path.join(root, "src-tauri/src/commands/mod.rs"), 
 const COMMANDS = [
   "locate_omp", "get_health", "get_models", "refresh_models", "get_overlay",
   "list_projects", "add_project", "remove_project", "relocate_project",
-  "list_sessions", "create_session", "open_session", "archive_session",
+  "list_sessions", "search_sessions", "create_session", "open_session", "archive_session",
   "unarchive_session", "delete_session", "archive_sessions", "delete_sessions",
   "rename_session_note", "get_history",
   "send_message", "read_image_file", "check_paths", "stop_session", "approve", "respond_ui", "set_model", "set_thinking",

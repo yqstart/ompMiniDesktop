@@ -11,6 +11,7 @@ export const IPC = {
   removeProject: "remove_project",
   relocateProject: "relocate_project",
   listSessions: "list_sessions",
+  searchSessions: "search_sessions",
   createSession: "create_session",
   openSession: "open_session",
   archiveSession: "archive_session",

@@ -74,6 +74,27 @@ export type SessionPage = {
   scannedFiles: number;
 };
 
+/**
+ * 会话内容搜索的一条命中（V2 M7b）：`hits` 是该会话正文里的命中次数，
+ * `snippet` 是首个命中前后的单行片段。搜索面只有 user / assistant 的正文
+ * （工具输出与 thinking 不进搜索面）。
+ */
+export type SessionHit = {
+  id: string;
+  title: string;
+  timestamp: number;
+  snippet: string;
+  hits: number;
+  archived: boolean;
+};
+
+/** 搜索结果：`truncated` = 因预算（文件数 / 字节 / 时间 / 命中上限）提前收手，结果可能不全。 */
+export type SessionSearchResult = {
+  hits: SessionHit[];
+  scannedFiles: number;
+  truncated: boolean;
+};
+
 export type ModelInfo = {
   provider: string;
   id: string;

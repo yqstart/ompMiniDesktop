@@ -19,8 +19,9 @@ import { pickAndAddProject, switchProject } from "../../lib/projects";
 import { groupSessionsByProject } from "../../lib/sessions";
 import { createSessionIn, openSessionWithHistory } from "../../lib/sessionOpen";
 import { SCAN_MAX, SCAN_STEP, loadSessions, scanMoreSessions } from "../../lib/sessionList";
+import { highlightParts } from "../../lib/search";
 import { ConfirmDialog } from "../ConfirmDialog";
-import type { SessionView } from "@shared/types";
+import type { SessionHit, SessionView } from "@shared/types";
 
 /** 后端 archive_sessions / delete_sessions 单次上限，前端按此分批调用。 */
 const BATCH_LIMIT = 200;
@@ -253,6 +254,33 @@ export function Sidebar() {
 
   const { groups, orphanActive, orphanArchived } = groupSessionsByProject(projects, sessions);
   const q = query.trim().toLowerCase();
+  // 内容搜索（V2 M7b）：标题/备注过滤之外，按正文再搜一遍（后端有预算保护）。
+  // 少于 2 个字不搜——单字会把几乎每个会话都命中，既慢又没信息量。
+  const [content, setContent] = useState<{
+    key: string;
+    hits: SessionHit[];
+    scannedFiles: number;
+    truncated: boolean;
+  }>({ key: "", hits: [], scannedFiles: 0, truncated: false });
+  const contentReady = content.key === q;
+  useEffect(() => {
+    if (q.length < 2) return;
+    let alive = true;
+    // 打字期间不发请求：停 300ms 再搜
+    const timer = setTimeout(() => {
+      void api
+        .searchSessions(q)
+        .then((res) => {
+          if (alive) setContent({ key: q, hits: res.hits, scannedFiles: res.scannedFiles, truncated: res.truncated });
+        })
+        .catch(() => undefined);
+    }, 300);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [q]);
+  const contentHits = q.length >= 2 && contentReady ? content.hits : [];
   const matchSession = (s: (typeof sessions)[number]) =>
     q ? s.title.toLowerCase().includes(q) : true;
   const visibleGroups = groups.map((g) => ({
@@ -318,9 +346,43 @@ export function Sidebar() {
               {visibleGroups.reduce((n, g) => n + g.active.length + g.archived.length, 0) +
                 visibleOrphanActive.length +
                 visibleOrphanArchived.length}{" "}
-              个匹配
+              个标题匹配
             </div>
           )
+        )}
+        {/* 内容命中（V2 M7b）：标题匹配之外按正文搜；命中行显示片段与命中次数，点开即打开会话 */}
+        {q.length >= 2 && (
+          <div className="mb-2">
+            <div className="px-2 pb-1 text-[11px] font-medium tracking-wide text-muted">
+              {contentReady ? `内容命中 ${contentHits.length} 个会话` : "正在搜索正文…"}
+              {contentReady && content.truncated && <span className="ml-1 opacity-80">· 已到预算上限，结果可能不全</span>}
+            </div>
+            {contentHits.map((h) => (
+              <button
+                key={h.id}
+                onClick={() => void openSessionWithHistory(h.id)}
+                title={`${h.title}（命中 ${h.hits} 处）`}
+                className="mb-0.5 block w-full cursor-pointer rounded-lg px-2 py-1.5 text-left transition-colors duration-150 hover:bg-background/70"
+              >
+                <div className="flex items-center gap-1.5">
+                  <span className="min-w-0 flex-1 truncate text-[13px]">{h.title}</span>
+                  {h.archived && <span className="shrink-0 text-[10px] text-muted">已归档</span>}
+                  <span className="shrink-0 font-mono text-[10px] text-muted">{h.hits} 处</span>
+                </div>
+                <div className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-muted">
+                  {highlightParts(h.snippet, q).map((part, i) =>
+                    part.hit ? (
+                      <mark key={i} className="rounded-sm bg-accent/25 px-0.5 text-foreground">
+                        {part.text}
+                      </mark>
+                    ) : (
+                      <span key={i}>{part.text}</span>
+                    ),
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
         )}
         <div className="mt-2 px-1">
           {error && (

@@ -197,6 +197,101 @@ pub fn project_of(cwd: &str, projects: &[String]) -> Option<String> {
     best.map(|b| b.1)
 }
 
+// ---------------------------------------------------------------------------
+// 会话内容搜索（V2 M7b）
+// ---------------------------------------------------------------------------
+
+/// 命中片段：`("…上下文…含命中词…", 命中次数)`；`needle_lower` 必须已小写。
+/// 片段按**字符**（不是字节）切，保证中文/emoji 不被截断；换行折成空格，便于单行展示。
+pub fn snippet_around(text: &str, needle_lower: &str, radius: usize) -> Option<(String, usize)> {
+    if needle_lower.is_empty() {
+        return None;
+    }
+    let lower = text.to_lowercase();
+    let first = lower.find(needle_lower)?;
+    let hits = lower.matches(needle_lower).count();
+    // 以字符为单位取命中点前后的上下文
+    let prefix_chars = lower[..first].chars().count();
+    let needle_chars = needle_lower.chars().count();
+    let chars: Vec<char> = text.chars().collect();
+    let start = prefix_chars.saturating_sub(radius);
+    let end = (prefix_chars + needle_chars + radius).min(chars.len());
+    let mut snip: String = chars[start..end].iter().collect();
+    snip = snip.replace(['\n', '\r', '\t'], " ");
+    if start > 0 {
+        snip.insert(0, '…');
+    }
+    if end < chars.len() {
+        snip.push('…');
+    }
+    Some((snip, hits))
+}
+
+/// 扫单个 jsonl 文件：返回（首个命中片段, 命中次数, 实际读取字节数）。
+/// `max_bytes` 是本文件允许读取的上限（全局预算已由调用方按剩余量传入）；
+/// 逐行读取，超预算即停——最多超出一行的长度（读完一行才判断）。
+pub fn search_one_file(
+    path: &std::path::Path,
+    needle_lower: &str,
+    max_bytes: u64,
+) -> (Option<String>, usize, u64) {
+    let Ok(file) = std::fs::File::open(path) else { return (None, 0, 0) };
+    let mut reader = std::io::BufReader::new(file);
+    let mut line = String::new();
+    let mut read = 0u64;
+    let mut count = 0usize;
+    let mut first: Option<String> = None;
+    loop {
+        line.clear();
+        let Ok(n) = std::io::BufRead::read_line(&mut reader, &mut line) else { break };
+        if n == 0 {
+            break;
+        }
+        read += n as u64;
+        if read > max_bytes {
+            break;
+        }
+        let Some(text) = searchable_text(&line) else { continue };
+        if let Some((snip, c)) = snippet_around(&text, needle_lower, 60) {
+            count += c;
+            if first.is_none() {
+                first = Some(snip);
+            }
+        }
+    }
+    (first, count, read)
+}
+
+/// 一行 jsonl 里**可搜索的正文**：只管 user / assistant 的 text 块。
+/// 工具输出、thinking、JSON 字段名都不进搜索面——否则搜 "user" 会命中每一行。
+pub fn searchable_text(line: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    if v.get("type").and_then(|t| t.as_str()) != Some("message") {
+        return None;
+    }
+    let m = v.get("message")?;
+    let role = m.get("role").and_then(|r| r.as_str())?;
+    if role != "user" && role != "assistant" {
+        return None;
+    }
+    let mut out = String::new();
+    for b in m.get("content")?.as_array()? {
+        if b.get("type").and_then(|t| t.as_str()) == Some("text") {
+            if let Some(t) = b.get("text").and_then(|t| t.as_str()) {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(t);
+            }
+        }
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,5 +385,62 @@ mod tests {
         assert_eq!(h.id, "big-1");
         assert_eq!(h.cwd, "/tmp/big");
         assert_eq!(h.title, "尾部标题", "标题必须来自尾段窗口，而不是只看头 64KB");
+    }
+
+    // --- V2 M7b：会话内容搜索 ---------------------------------------------
+
+    #[test]
+    fn snippet_counts_hits_and_keeps_char_boundaries() {
+        let text = "先讲一段背景，然后提到缓存策略，最后再补充缓存失效的处理。";
+        let (snip, hits) = snippet_around(text, "缓存", 4).unwrap();
+        assert_eq!(hits, 2, "同一段文本里的多次命中都要计数");
+        assert!(snip.contains("缓存"), "片段必须包含命中词：{snip}");
+        assert!(snip.starts_with('…') && snip.ends_with('…'), "两端被截断要加省略号：{snip}");
+        // 中文按字符切，不能切出半个字符（此处命中词在中间，两侧都有省略号即为字符边界正确）
+        assert_eq!(snippet_around(text, "不存在的词", 4), None);
+        assert_eq!(snippet_around(text, "", 4), None);
+    }
+
+    #[test]
+    fn snippet_flattens_newlines() {
+        let (snip, hits) = snippet_around("第一行\n第二行 关键词\n第三行", "关键词", 6).unwrap();
+        assert_eq!(hits, 1);
+        assert!(!snip.contains('\n'), "片段必须单行展示：{snip}");
+    }
+
+    #[test]
+    fn searchable_text_only_takes_user_and_assistant_text() {
+        let user = r#"{"type":"message","message":{"role":"user","content":[{"type":"text","text":"帮我看看缓存"}]}}"#;
+        assert_eq!(searchable_text(user).unwrap(), "帮我看看缓存");
+        // 工具结果、thinking、非 message 行都不进搜索面
+        let tool = r#"{"type":"message","message":{"role":"toolResult","content":[{"type":"text","text":"缓存命中"}]}}"#;
+        assert!(searchable_text(tool).is_none());
+        let custom = r#"{"type":"custom","customType":"tool_execution_start","data":{"command":"echo 缓存"}}"#;
+        assert!(searchable_text(custom).is_none());
+        let think = r#"{"type":"message","message":{"role":"assistant","content":[{"type":"thinking","thinking":"缓存"}]}}"#;
+        assert!(searchable_text(think).is_none());
+        assert!(searchable_text("not json").is_none());
+    }
+
+    #[test]
+    fn search_one_file_finds_hits_and_respects_byte_budget() {
+        let body = [
+            r#"{"type":"session","id":"s-1","timestamp":"2026-09-15T10:00:00.000Z","cwd":"/tmp/x","title":"缓存优化"}"#,
+            r#"{"type":"message","message":{"role":"user","content":[{"type":"text","text":"帮我看看缓存策略"}]}}"#,
+            r#"{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"建议先量命中率，再决定缓存层数。"}]}}"#,
+            r#"{"type":"message","message":{"role":"toolResult","toolCallId":"c1","toolName":"bash","content":[{"type":"text","text":"缓存缓存缓存"}]}}"#,
+        ]
+        .join("\n");
+        let p = tmp_file("search.jsonl", &body);
+        let (snip, hits, read) = search_one_file(&p, "缓存", 8 * 1024 * 1024);
+        assert_eq!(hits, 2, "只数 user/assistant 正文里的命中（各 1 次），工具输出里的 3 次不算");
+        assert!(snip.unwrap().contains("缓存"));
+        assert!(read > 0);
+
+        // 预算极小 → 必须提前收手（读满一行才判断，所以允许最多超出一行的长度）
+        let full = std::fs::metadata(&p).unwrap().len();
+        let (_, hits_small, read_small) = search_one_file(&p, "缓存", 10);
+        assert!(read_small < full, "预算到点要提前收手：读到 {read_small} / 共 {full} 字节");
+        assert!(hits_small <= 2);
     }
 }

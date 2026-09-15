@@ -31,6 +31,7 @@ fn main() {
             remove_project,
             relocate_project,
             list_sessions,
+            search_sessions,
             create_session,
             open_session,
             archive_session,
