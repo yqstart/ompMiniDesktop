@@ -26,7 +26,26 @@ type AppState = {
   draftOf: (sid: string | null) => string;
   setDraft: (sid: string | null, text: string) => void;
   appendEvents: (sid: string, msgs: ViewMsg[]) => void;
+  /** 左侧栏宽度（220–480，默认 264，持久化 localStorage）。 */
+  sidebarWidth: number;
+  setSidebarWidth: (w: number) => void;
 };
+
+export const SIDEBAR_MIN = 220;
+export const SIDEBAR_MAX = 480;
+export const SIDEBAR_DEFAULT = 264;
+
+function loadSidebarWidth(): number {
+  try {
+    if (typeof localStorage === "undefined") return SIDEBAR_DEFAULT;
+    const v = Number(localStorage.getItem("omp.sidebarWidth"));
+    if (!Number.isFinite(v)) return SIDEBAR_DEFAULT;
+    return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, v));
+  } catch {
+    // 无痕模式等取不到持久化时回默认宽度
+    return SIDEBAR_DEFAULT;
+  }
+}
 
 export const useApp = create<AppState>((set, get) => ({
   health: null,
@@ -47,6 +66,16 @@ export const useApp = create<AppState>((set, get) => ({
   update: { status: "idle" },
   updateDismissedVersion: null,
   updateDialogOpen: false,
+  sidebarWidth: loadSidebarWidth(),
+  setSidebarWidth: (w) => {
+    const v = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(w)));
+    try {
+      localStorage.setItem("omp.sidebarWidth", String(v));
+    } catch {
+      // 持久化失败不阻断本次拖拽
+    }
+    set({ sidebarWidth: v });
+  },
   set: (p) => set(p),
   draftOf: (sid) => (sid ? (get().drafts[sid] ?? "") : ""),
   setDraft: (sid, text) =>

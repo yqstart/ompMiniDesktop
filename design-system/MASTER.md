@@ -42,8 +42,10 @@
 
 ## 4. 布局
 
-- V1 两栏：左栏 264px（`sidebar` 底 + 项目上段 + 按项目分组的会话下段 + 底设置入口），中央流式列居中 `max-w-3xl`。右侧栏 V1 不做。
+- V1 两栏：左栏可拖拽（220–480px，默认 264，`sidebarWidth` 存 Zustand + localStorage 持久化；窄窗 <768px 收抽屉）→ 中央流式列居中 `max-w-3xl`。右侧栏 V1 不做。
 - 左栏：顶部主入口「新建会话」（accent 实心）→ 会话搜索框 → 项目卡片 → 按项目分组的手风琴会话组（旋转 chevron + 左侧 hairline 引导线）+ 未归属组 → 底固定「添加项目 / 设置」。
+- 会话行：单行 `● 标题 … 时间 操作`（标题省略 + 右侧 mono 时间 + hover 浮现归档/删除icon，选中行描边高亮）；归档、删除都在行内展示，不另起第二行。
+- 状态收敛：标题框外的独立状态条已下线（`StatusBar` 仅保留读屏播报位）；状态统一进输入框工具行的 `OmpStatusPill`，且仅非就绪（运行中/等待审批/出错/已退出/omp 不可用）才出现，就绪态不占位。
 - 输入框工具行下拉互斥：`composerMenu: model | thinking | permission | null` 存 Zustand，同时只开一个；点击外部 / Esc 关闭（`useDropdown`）。
 - 中央三段：顶栏 44px（标题 + 更新入口，无边框感）→ 消息流（用户气泡右对齐圆角 `rounded-2xl rounded-br-md` + inset ring）→ 会话输入框（整块 `rounded-2xl` 卡：`focus-within` accent 边 + 悬浮阴影，发送为圆形箭头按钮）。
 - 圆角：卡片 `rounded-xl`（12px）、输入框/气泡 `rounded-2xl`（16px）、小按钮 `rounded-lg`、发送按钮圆形。边框一律 `border-border/70` 起步，选中/焦点才加深。

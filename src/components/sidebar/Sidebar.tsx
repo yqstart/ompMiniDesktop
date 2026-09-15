@@ -16,13 +16,21 @@ import { groupSessionsByProject } from "../../lib/sessions";
 import { viewMsgFromJsonlLine } from "../../lib/viewmsg";
 import type { SessionView } from "@shared/types";
 
+/**
+ * 会话行：单行结构 `● 标题 … 时间 操作`，对齐截图。
+ * - 标题单行省略；右侧时间 mono 小字；hover / 选中时右侧浮现归档、删除。
+ * - 归档、删除都在行内展示（hover 出现，触屏常显），不再另起第二行。
+ */
 function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void }) {
   const { activeSessionId, set, appendEvents } = useApp();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const active = s.id === activeSessionId;
+  const time = s.corrupt
+    ? "已损坏"
+    : new Date(s.timestamp).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
   return (
     <div
-      className={`group rounded-lg px-2.5 py-2 transition-colors duration-150 ${
+      className={`group flex min-w-0 items-center gap-1 rounded-lg py-[7px] pr-1.5 pl-2 transition-colors duration-150 ${
         active ? "bg-background shadow-[inset_0_0_0_1px_var(--color-border)]" : "hover:bg-background/60"
       }`}
     >
@@ -39,33 +47,34 @@ function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void })
             // 历史加载失败不阻塞选中（横幅在 M1-6 补）
           }
         }}
-        className="block w-full cursor-pointer text-left"
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
         aria-label={`会话 ${s.title}`}
       >
-        <div className="flex items-center gap-1.5">
-          {s.running && (
-            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ok" aria-label="运行中" />
-          )}
-          <div className={`truncate text-[13px] ${active ? "font-medium" : ""}`}>{s.title}</div>
-        </div>
-        <div className="mt-0.5 truncate pl-3 font-mono text-[11px] text-muted">
-          {s.corrupt ? "已损坏，可删除" : new Date(s.timestamp).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-        </div>
+        {/* 运行中圆点（占位保持对齐，无状态时隐藏不断行） */}
+        <span
+          className={`h-1.5 w-1.5 shrink-0 rounded-full ${s.running ? "bg-ok" : "bg-transparent"}`}
+          aria-label={s.running ? "运行中" : undefined}
+          aria-hidden={!s.running}
+        />
+        <span className={`min-w-0 flex-1 truncate text-[13px] ${active ? "font-medium" : ""}`}>{s.title}</span>
+        <span className="shrink-0 font-mono text-[11px] text-muted/80">{time}</span>
       </button>
-      <div className="mt-0.5 hidden gap-0.5 pl-3 group-hover:flex">
+      <span className="flex shrink-0 items-center">
         {!s.archived ? (
           <button
             onClick={() => api.archiveSession(s.id).then(onChanged)}
-            className="cursor-pointer rounded-md p-1.5 text-muted opacity-0 transition-all duration-150 group-hover:opacity-100 hover:bg-background hover:text-foreground"
+            className="hidden cursor-pointer rounded-md p-1.5 text-muted transition-all duration-150 group-hover:block hover:bg-background hover:text-foreground"
             aria-label={s.running ? "先停止再归档" : "归档会话"}
+            title={s.running ? "先停止再归档" : "归档会话"}
           >
             <Archive size={13} />
           </button>
         ) : (
           <button
             onClick={() => api.unarchiveSession(s.id).then(onChanged)}
-            className="cursor-pointer rounded-md p-1.5 text-muted opacity-0 transition-all duration-150 group-hover:opacity-100 hover:bg-background hover:text-foreground"
+            className="hidden cursor-pointer rounded-md p-1.5 text-muted transition-all duration-150 group-hover:block hover:bg-background hover:text-foreground"
             aria-label="取消归档"
+            title="取消归档"
           >
             <ArchiveRestore size={13} />
           </button>
@@ -73,14 +82,15 @@ function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void })
         {!confirmDelete ? (
           <button
             onClick={() => setConfirmDelete(true)}
-            className="cursor-pointer rounded-md p-1.5 text-muted opacity-0 transition-all duration-150 group-hover:opacity-100 hover:bg-background hover:text-danger"
+            className="hidden cursor-pointer rounded-md p-1.5 text-muted transition-all duration-150 group-hover:block hover:bg-background hover:text-danger"
             aria-label="删除会话"
+            title="删除会话"
           >
             <Trash2 size={13} />
           </button>
         ) : (
-          <span className="flex items-center gap-1 text-xs">
-            <span className="text-danger">不可恢复，确认？</span>
+          <span className="flex items-center gap-1 pl-1 text-xs whitespace-nowrap">
+            <span className="text-danger">确认删？</span>
             <button
               onClick={() =>
                 api.deleteSession(s.id).then(() => {
@@ -88,21 +98,21 @@ function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void })
                   setConfirmDelete(false);
                 })
               }
-              className="cursor-pointer rounded-md bg-danger px-2 py-0.5 text-white"
+              className="cursor-pointer rounded-md bg-danger px-1.5 py-0.5 text-white"
               aria-label="确认删除"
             >
               删除
             </button>
             <button
               onClick={() => setConfirmDelete(false)}
-              className="cursor-pointer rounded-md border border-border px-2 py-0.5"
+              className="cursor-pointer rounded-md border border-border px-1.5 py-0.5"
               aria-label="取消删除"
             >
               取消
             </button>
           </span>
         )}
-      </div>
+      </span>
     </div>
   );
 }
@@ -140,7 +150,7 @@ export function Sidebar() {
   const visibleOrphanArchived = orphanArchived.filter(matchSession);
 
   return (
-    <aside className="flex h-full w-full flex-col border-r border-border bg-sidebar md:w-66">
+    <aside className="flex h-full w-full flex-col overflow-hidden border-r border-border bg-sidebar">
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
         {/* 顶部：新建会话（DSH 式主入口） */}
         <button
@@ -211,7 +221,7 @@ export function Sidebar() {
                 </span>
                 {project.missing && <span className="shrink-0 text-warn">缺失</span>}
               </summary>
-              <div className="mt-0.5 space-y-0.5 border-l border-border pl-1.5">
+              <div className="mt-0.5 space-y-px border-l border-border pl-1.5">
                 <button
                   onClick={async () => {
                     try {
@@ -257,7 +267,7 @@ export function Sidebar() {
                 未归属会话
                 <span className="ml-auto font-mono">{visibleOrphanActive.length + visibleOrphanArchived.length}</span>
               </summary>
-              <div className="mt-0.5 space-y-0.5 border-l border-border pl-1.5">
+              <div className="mt-0.5 space-y-px border-l border-border pl-1.5">
                 {visibleOrphanActive.map((s) => (
                   <SessionRow key={s.id} s={s} onChanged={refreshSessions} />
                 ))}
