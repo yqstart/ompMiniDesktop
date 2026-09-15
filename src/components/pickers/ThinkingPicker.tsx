@@ -16,17 +16,17 @@ export function ThinkingPicker({ compact = false }: { compact?: boolean }) {
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className={`flex cursor-pointer items-center gap-1 rounded px-2 py-1 transition-colors duration-200 hover:bg-background ${
-          compact ? "text-xs" : "text-[13px]"
+        className={`flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 transition-colors duration-150 hover:bg-background ${
+          compact ? "text-xs text-muted hover:text-foreground" : "text-[13px]"
         }`}
         aria-label="选择思考等级"
         aria-expanded={open}
       >
         <span>{value}</span>
-        <ChevronDown size={14} aria-hidden />
+        <ChevronDown size={13} aria-hidden className="opacity-60" />
       </button>
       {open && (
-        <div className="absolute top-8 left-0 z-10 w-48 rounded border border-border bg-surface p-1 shadow-lg">
+        <div className="absolute bottom-9 left-0 z-10 w-48 rounded-xl border border-border bg-surface p-1 shadow-xl">
           {THINKING_LEVELS.map((lv) => {
             const ok = allowed.has(lv);
             return (

@@ -53,17 +53,17 @@ export function ModelPicker({ compact = false }: { compact?: boolean }) {
           setOpen((v) => !v);
           if (!models) void load(false);
         }}
-        className={`flex cursor-pointer items-center gap-1 truncate rounded px-2 py-1 text-[13px] transition-colors duration-200 hover:bg-background ${
-          compact ? "max-w-32 text-xs" : "max-w-44"
+        className={`flex cursor-pointer items-center gap-1 truncate rounded-full px-2.5 py-1 transition-colors duration-150 hover:bg-background ${
+          compact ? "max-w-32 text-xs text-muted hover:text-foreground" : "max-w-44 text-[13px]"
         }`}
         aria-label="选择模型"
         aria-expanded={open}
       >
         <span className="truncate">{current ? shortName(current) : "模型"}</span>
-        <ChevronDown size={14} aria-hidden />
+        <ChevronDown size={13} aria-hidden className="shrink-0 opacity-60" />
       </button>
       {open && (
-        <div className="absolute top-8 left-0 z-10 max-h-80 w-80 overflow-y-auto rounded border border-border bg-surface p-2 shadow-lg">
+        <div className="absolute bottom-9 left-0 z-10 max-h-80 w-80 overflow-y-auto rounded-xl border border-border bg-surface p-2 shadow-xl">
           <div className="flex items-center gap-2">
             <label htmlFor="model-search" className="sr-only">搜索模型</label>
             <input

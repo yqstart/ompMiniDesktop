@@ -18,8 +18,8 @@ export function StatusBar() {
               ? `工具 ${tools}`
               : "就绪";
   return (
-    <div className="flex shrink-0 items-center gap-2 border-t border-border bg-surface px-4 py-1 text-xs text-muted" aria-live="polite">
-      <span className={`h-1.5 w-1.5 rounded-full ${status === "running" ? "bg-accent animate-pulse" : status === "awaiting-approval" ? "bg-warn" : "bg-border"}`} aria-hidden />
+    <div className="flex shrink-0 items-center gap-2 px-5 py-1.5 text-[11px] text-muted" aria-live="polite">
+      <span className={`h-1.5 w-1.5 rounded-full ${status === "running" ? "bg-accent animate-pulse" : status === "awaiting-approval" ? "bg-warn" : "bg-muted/40"}`} aria-hidden />
       <span>{text}</span>
     </div>
   );

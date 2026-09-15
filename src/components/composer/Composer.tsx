@@ -31,7 +31,7 @@ export function Composer() {
   if (archived) {
     return (
       <div className="px-4 pb-4">
-        <div className="mx-auto max-w-3xl rounded-2xl border border-border bg-surface px-4 py-3 text-center text-sm text-muted">
+        <div className="mx-auto max-w-3xl rounded-2xl border border-border/70 bg-surface px-4 py-3 text-center text-sm text-muted">
           已归档，只读——取消归档后可继续对话
         </div>
       </div>
@@ -40,16 +40,20 @@ export function Composer() {
 
   return (
     <div className="px-4 pb-4">
-      <div className="mx-auto max-w-3xl rounded-2xl border border-border bg-surface shadow-sm">
+      <div
+        className={`mx-auto max-w-3xl rounded-2xl border bg-surface shadow-[0_8px_28px_-12px_rgba(0,0,0,0.35)] transition-colors duration-150 ${
+          awaiting ? "border-warn/50" : "border-border/80 focus-within:border-accent/60"
+        }`}
+      >
         {awaiting && (
-          <div className="px-4 pt-2 text-xs text-warn">先处理上面的审批</div>
+          <div className="px-4 pt-2.5 text-xs text-warn">先处理上面的审批</div>
         )}
         <label htmlFor="composer" className="sr-only">
           输入消息
         </label>
         <textarea
           id="composer"
-          rows={2}
+          rows={3}
           value={draft}
           onChange={(e) => setDraft(activeSessionId, e.target.value)}
           onKeyDown={(e) => {
@@ -64,11 +68,11 @@ export function Composer() {
           }}
           disabled={awaiting}
           placeholder={awaiting ? "先处理上面的审批" : "随心输入"}
-          className="max-h-40 w-full resize-y bg-transparent px-4 pt-3 text-sm outline-none placeholder:text-muted disabled:opacity-60"
+          className="max-h-44 w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-sm leading-6 outline-none placeholder:text-muted/70 disabled:opacity-60"
         />
-        <div className="flex items-center gap-1 px-2 pb-2">
+        <div className="flex items-center gap-0.5 px-2.5 pb-2.5">
           <button
-            className="cursor-pointer rounded-full p-2 text-muted transition-colors duration-200 hover:bg-background hover:text-foreground"
+            className="cursor-pointer rounded-full p-2 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground disabled:cursor-default disabled:opacity-40"
             aria-label="添加附件（V1 未开放）"
             title="添加附件（V1 未开放）"
             disabled
@@ -82,19 +86,22 @@ export function Composer() {
             {running ? (
               <button
                 onClick={() => activeSessionId && api.stop(activeSessionId).catch(() => undefined)}
-                className="cursor-pointer rounded-full bg-accent px-4 py-1.5 text-sm text-white transition-opacity duration-200 hover:opacity-90"
+                className="ml-1 flex cursor-pointer items-center gap-1.5 rounded-full bg-accent px-3.5 py-1.5 text-[13px] text-white transition-opacity duration-150 hover:opacity-90"
                 aria-label="停止"
               >
+                <span className="h-2 w-2 rounded-sm bg-white" aria-hidden />
                 停止
               </button>
             ) : (
               <button
                 onClick={() => void send()}
                 disabled={!draft.trim()}
-                className="cursor-pointer rounded-full bg-accent px-4 py-1.5 text-sm text-white transition-opacity duration-200 hover:opacity-90 disabled:opacity-40"
+                className="ml-1 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-accent text-white transition-all duration-150 hover:opacity-90 disabled:cursor-default disabled:opacity-30"
                 aria-label="发送"
               >
-                发送
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path d="M12 19V5m0 0-6 6m6-6 6 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
               </button>
             )}
           </div>

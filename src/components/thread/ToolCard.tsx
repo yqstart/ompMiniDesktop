@@ -10,13 +10,13 @@ export function ToolCard({ m }: { m: Extract<ViewMsg, { kind: "tool" }> }) {
     m.state === "ok" ? "bg-ok" : m.state === "error" ? "bg-danger" : "bg-accent animate-pulse";
   return (
     <div
-      className={`rounded border bg-surface ${m.state === "error" ? "border-danger" : "border-border"}`}
+      className={`rounded-xl border bg-surface/70 transition-colors duration-150 ${m.state === "error" ? "border-danger/60" : "border-border/70"}`}
       role="group"
       aria-label={`工具 ${m.name} ${stateText}`}
     >
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left"
+        className="flex w-full cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors duration-150 hover:bg-background/50"
         aria-expanded={open}
       >
         {m.state === "ok" ? (
@@ -37,21 +37,21 @@ export function ToolCard({ m }: { m: Extract<ViewMsg, { kind: "tool" }> }) {
         <span className="sr-only">{stateText}</span>
       </button>
       {open && (
-        <div className="border-t border-border px-3 py-2">
+        <div className="border-t border-border/70 px-3 py-2">
           {m.argsSummary && (
             <div className="truncate font-mono text-xs text-muted" title={m.argsSummary}>
               {m.argsSummary}
             </div>
           )}
           {m.output && (
-            <div className="mt-1">
-              <pre className="max-h-60 overflow-auto rounded bg-code p-2 font-mono text-xs whitespace-pre-wrap">
+            <div className="mt-1.5">
+              <pre className="max-h-60 overflow-auto rounded-lg bg-code p-2.5 font-mono text-xs leading-5 whitespace-pre-wrap">
                 {showFull && m.outputFull ? m.outputFull : m.output}
               </pre>
               {m.outputFull && (
                 <button
                   onClick={() => setShowFull((v) => !v)}
-                  className="mt-1 cursor-pointer text-xs text-accent"
+                  className="mt-1 cursor-pointer text-xs text-accent transition-opacity duration-150 hover:opacity-80"
                 >
                   {showFull ? "收起" : "展开全文"}
                 </button>

@@ -7,9 +7,9 @@ export function HealthBanner() {
   return (
     <div
       role="alert"
-      className="flex shrink-0 items-start gap-2 border-b border-warn bg-surface px-4 py-2 text-sm"
+      className="mx-3 mt-2 flex shrink-0 items-start gap-2 rounded-xl border border-warn/40 bg-surface px-3.5 py-2.5 text-[13px]"
     >
-      <TriangleAlert size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden />
+      <TriangleAlert size={15} className="mt-0.5 shrink-0 text-warn" aria-hidden />
       <div>
         <div className="font-medium">未找到可用的 omp</div>
         <div className="text-muted">

@@ -10,7 +10,7 @@ export function TopBar() {
   const [note, setNote] = useState(cur?.note ?? "");
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-1 border-b border-border bg-surface px-3">
+    <header className="flex h-11 shrink-0 items-center gap-1 border-b border-border/70 bg-background px-3">
       {editing && cur ? (
         <input
           autoFocus

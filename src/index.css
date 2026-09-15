@@ -1,8 +1,11 @@
 @import "tailwindcss";
 
-/* ---- ompMiniDesktop tokens（design-system/MASTER.md §2 冻结） ---- */
+/* ---- ompMiniDesktop tokens（design-system/MASTER.md §2 冻结） ----
+   深色走 opencode / deepseek-harness 式的分层锌灰：
+   应用底最深 → 侧栏略浅 → 卡片再浅一层，边框只用 1px 低对比线。 */
 :root {
   --background: hsl(60 9% 98%);
+  --sidebar: hsl(60 6% 95.5%);
   --foreground: hsl(20 8% 11%);
   --muted: hsl(30 5% 32%);
   --surface: hsl(0 0% 100%);
@@ -15,20 +18,22 @@
 }
 
 .dark {
-  --background: hsl(0 0% 5%);
-  --foreground: hsl(30 8% 90%);
-  --muted: hsl(30 5% 66%);
-  --surface: hsl(0 0% 9%);
-  --border: hsl(20 6% 16%);
+  --background: hsl(0 0% 4%);
+  --sidebar: hsl(0 0% 6.5%);
+  --foreground: hsl(0 0% 93%);
+  --muted: hsl(0 0% 62%);
+  --surface: hsl(0 0% 8.5%);
+  --border: hsl(0 0% 13.5%);
   --accent: hsl(234 97% 74%);
   --danger: hsl(0 91% 71%);
   --warn: hsl(43 96% 62%);
   --ok: hsl(160 71% 52%);
-  --code: hsl(20 6% 11%);
+  --code: hsl(0 0% 11%);
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-sidebar: var(--sidebar);
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
   --color-surface: var(--surface);
@@ -46,12 +51,41 @@ body {
   background-color: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* 可见焦点环（MASTER §5） */
-:where(button, a, input, textarea, select, [tabindex]):focus-visible {
+::selection {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* 细滚动条：平时几乎看不见，hover 才显形 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--foreground) 16%, transparent) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--foreground) 14%, transparent);
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 可见焦点环（MASTER §5）。输入框类由容器接管焦点样式，此处排除避免生硬外框。 */
+:where(button, a, select, [tabindex]):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+:where(input):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  outline-offset: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {

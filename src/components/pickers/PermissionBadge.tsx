@@ -47,15 +47,15 @@ export function PermissionBadge({ compact = false, align = "right" }: { compact?
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className={`flex cursor-pointer items-center gap-1 rounded px-2 py-1 transition-colors duration-200 hover:bg-background ${compact ? "text-xs" : "text-[13px]"} ${danger ? "text-danger" : ""}`}
+        className={`flex cursor-pointer items-center gap-1.5 rounded-full px-2.5 py-1 transition-colors duration-150 hover:bg-background ${compact ? "text-xs" : "text-[13px]"} ${danger ? "text-danger" : "text-muted hover:text-foreground"}`}
         aria-label={`权限：${LABEL[shown] ?? shown}`}
         aria-expanded={open}
       >
-        <Shield size={14} aria-hidden />
+        <Shield size={13} aria-hidden />
         <span>{LABEL[shown] ?? shown}</span>
       </button>
       {open && (
-        <div className={`absolute top-8 z-10 w-56 rounded border border-border bg-surface p-1 shadow-lg ${align === "left" ? "left-0" : "right-0"}`}>
+        <div className={`absolute bottom-9 z-10 w-56 rounded-xl border border-border bg-surface p-1 shadow-xl ${align === "left" ? "left-0" : "right-0"}`}>
           <div className="px-2 py-1 text-xs text-muted">全局</div>
           {Object.keys(LABEL).map((m) => (
             <button

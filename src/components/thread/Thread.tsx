@@ -11,19 +11,19 @@ export function Thread() {
   const events = eventsBySession[activeSessionId] ?? [];
   if (events.length === 0) return <EmptyState kind="no-session" />;
   return (
-    <div className="mx-auto w-full max-w-3xl flex-1 overflow-y-auto px-4 py-4" role="log" aria-label="会话消息">
+    <div className="mx-auto w-full max-w-3xl flex-1 overflow-y-auto px-5 py-5" role="log" aria-label="会话消息">
       {events.map((m) => (
-        <div key={m.id} className="mb-4 text-sm leading-7">
+        <div key={m.id} className="mb-5 text-sm leading-7">
           {m.kind === "user" && (
-            <div className="ml-auto w-fit max-w-full rounded bg-surface px-3 py-2">{m.text}</div>
+            <div className="ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-md bg-surface px-3.5 py-2 shadow-[inset_0_0_0_1px_var(--color-border)]">{m.text}</div>
           )}
-          {m.kind === "text" && <div className="whitespace-pre-wrap">{m.text}</div>}
+          {m.kind === "text" && <div className="max-w-full overflow-x-auto whitespace-pre-wrap">{m.text}</div>}
           {m.kind === "thinking" && (
-            <details className="rounded border border-border px-3 py-2 text-muted">
-              <summary className="cursor-pointer">
-                {m.complete ? `已思考 ${m.seconds} 秒…` : "思考中…"}
+            <details className="rounded-xl border border-border/70 bg-surface/60 px-3 py-2 text-[13px] text-muted">
+              <summary className="cursor-pointer transition-colors duration-150 hover:text-foreground [&::-webkit-details-marker]:hidden">
+                {m.complete ? `已思考 ${m.seconds} 秒` : "思考中…"}
               </summary>
-              <div className="whitespace-pre-wrap">{m.text}</div>
+              <div className="mt-1 whitespace-pre-wrap">{m.text}</div>
             </details>
           )}
           {m.kind === "tool" && <ToolCard m={m} />}
@@ -31,7 +31,11 @@ export function Thread() {
             <ApprovalCard m={m} sessionId={activeSessionId} />
           )}
           {m.kind === "divider" && (
-            <div className="text-center text-xs text-muted">{m.text}</div>
+            <div className="flex items-center gap-3 py-1">
+              <span className="h-px flex-1 bg-border/60" aria-hidden />
+              <span className="text-xs text-muted">{m.text}</span>
+              <span className="h-px flex-1 bg-border/60" aria-hidden />
+            </div>
           )}
         </div>
       ))}

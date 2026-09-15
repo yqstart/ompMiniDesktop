@@ -54,11 +54,11 @@ export function App() {
   }, []);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background text-foreground">
+    <div className="flex h-screen overflow-hidden bg-background text-[13px] text-foreground">
       <div className="hidden w-66 shrink-0 md:block">
         <Sidebar />
       </div>
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main className="flex min-w-0 flex-1 flex-col bg-background">
         <HealthBanner />
         {settingsOpen ? (
           <SettingsPage />
