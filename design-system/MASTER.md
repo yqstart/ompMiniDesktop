@@ -43,7 +43,8 @@
 ## 4. 布局
 
 - V1 两栏：左栏 264px（`sidebar` 底 + 项目上段 + 按项目分组的会话下段 + 底设置入口），中央流式列居中 `max-w-3xl`。右侧栏 V1 不做。
-- 左栏：分组用 `details/summary` 手风琴（旋转 chevron + 左侧 hairline 引导线），选中行 `inset ring` 而非整块变色；hover 操作只在 `group-hover` 出现。
+- 左栏：顶部主入口「新建会话」（accent 实心）→ 会话搜索框 → 项目卡片 → 按项目分组的手风琴会话组（旋转 chevron + 左侧 hairline 引导线）+ 未归属组 → 底固定「添加项目 / 设置」。
+- 输入框工具行下拉互斥：`composerMenu: model | thinking | permission | null` 存 Zustand，同时只开一个；点击外部 / Esc 关闭（`useDropdown`）。
 - 中央三段：顶栏 44px（标题 + 更新入口，无边框感）→ 消息流（用户气泡右对齐圆角 `rounded-2xl rounded-br-md` + inset ring）→ 会话输入框（整块 `rounded-2xl` 卡：`focus-within` accent 边 + 悬浮阴影，发送为圆形箭头按钮）。
 - 圆角：卡片 `rounded-xl`（12px）、输入框/气泡 `rounded-2xl`（16px）、小按钮 `rounded-lg`、发送按钮圆形。边框一律 `border-border/70` 起步，选中/焦点才加深。
 - 间距：4 / 8 / 12 / 16 / 24 五档，卡内 padding 12，卡间距 8，流内消息间距 20。

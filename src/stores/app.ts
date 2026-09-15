@@ -14,6 +14,8 @@ type AppState = {
   currentModel: string | null;
   currentThinking: string | null;
   sessionApprovals: Record<string, string>;
+  /** 输入框工具行下拉互斥：model | thinking | permission | null。 */
+  composerMenu: "model" | "thinking" | "permission" | null;
   settingsOpen: boolean;
   sidebarOpen: boolean;
   update: UpdateState;
@@ -39,6 +41,7 @@ export const useApp = create<AppState>((set, get) => ({
   currentModel: null,
   currentThinking: null,
   sessionApprovals: {},
+  composerMenu: null,
   settingsOpen: false,
   sidebarOpen: false,
   update: { status: "idle" },

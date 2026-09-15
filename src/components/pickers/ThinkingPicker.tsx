@@ -1,21 +1,27 @@
-import { useState } from "react";
+import { useCallback } from "react";
 import { ChevronDown } from "lucide-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
+import { useDropdown } from "../../lib/useDropdown";
 import { THINKING_LEVELS } from "@shared/types";
 
 export function ThinkingPicker({ compact = false }: { compact?: boolean }) {
-  const { models, activeSessionId } = useApp();
-  const [open, setOpen] = useState(false);
+  const { models, activeSessionId, composerMenu } = useApp();
+  const open = composerMenu === "thinking";
+  const setOpen = useCallback(
+    (v: boolean) => useApp.setState({ composerMenu: v ? "thinking" : null }),
+    [],
+  );
+  const ref = useDropdown(open, () => setOpen(false));
   const selector = useApp.getState().currentModel as string | undefined;
   const current = models?.models.find((m) => m.selector === selector);
   const allowed = new Set(current?.thinking ?? ["off"]);
   const value = (useApp.getState().currentThinking as string | undefined) ?? "off";
 
   return (
-    <div className="relative">
+    <div className="relative" ref={ref}>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(!open)}
         className={`flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 transition-colors duration-150 hover:bg-background ${
           compact ? "text-xs text-muted hover:text-foreground" : "text-[13px]"
         }`}

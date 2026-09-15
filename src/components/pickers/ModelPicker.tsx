@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { ChevronDown, RefreshCw } from "lucide-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
+import { useDropdown } from "../../lib/useDropdown";
 import type { ModelInfo } from "@shared/types";
 
 function shortName(m: ModelInfo): string {
@@ -15,8 +16,13 @@ function fmtCtx(n: number | null): string {
 }
 
 export function ModelPicker({ compact = false }: { compact?: boolean }) {
-  const { models, set } = useApp();
-  const [open, setOpen] = useState(false);
+  const { models, set, composerMenu } = useApp();
+  const open = composerMenu === "model";
+  const setOpen = useCallback(
+    (v: boolean) => useApp.setState({ composerMenu: v ? "model" : null }),
+    [],
+  );
+  const ref = useDropdown(open, () => setOpen(false));
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
   const current: ModelInfo | null =
@@ -47,11 +53,11 @@ export function ModelPicker({ compact = false }: { compact?: boolean }) {
   }
 
   return (
-    <div className="relative">
+    <div className="relative" ref={ref}>
       <button
         onClick={() => {
-          setOpen((v) => !v);
-          if (!models) void load(false);
+          setOpen(!open);
+          if (!models && !open) void load(false);
         }}
         className={`flex cursor-pointer items-center gap-1 truncate rounded-full px-2.5 py-1 transition-colors duration-150 hover:bg-background ${
           compact ? "max-w-32 text-xs text-muted hover:text-foreground" : "max-w-44 text-[13px]"

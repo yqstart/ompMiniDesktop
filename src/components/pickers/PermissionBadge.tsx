@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Shield } from "lucide-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
+import { useDropdown } from "../../lib/useDropdown";
 
 const LABEL: Record<string, string> = {
   "always-ask": "每次询问",
@@ -10,8 +11,13 @@ const LABEL: Record<string, string> = {
 };
 
 export function PermissionBadge({ compact = false, align = "right" }: { compact?: boolean; align?: "left" | "right" }) {
-  const { activeSessionId } = useApp();
-  const [open, setOpen] = useState(false);
+  const { activeSessionId, composerMenu } = useApp();
+  const open = composerMenu === "permission";
+  const setOpen = useCallback(
+    (v: boolean) => useApp.setState({ composerMenu: v ? "permission" : null }),
+    [],
+  );
+  const ref = useDropdown(open, () => setOpen(false));
   const [global, setGlobal] = useState("write");
   const [session, setSession] = useState<string | null>(null);
 
@@ -44,9 +50,9 @@ export function PermissionBadge({ compact = false, align = "right" }: { compact?
   };
 
   return (
-    <div className="relative">
+    <div className="relative" ref={ref}>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(!open)}
         className={`flex cursor-pointer items-center gap-1.5 rounded-full px-2.5 py-1 transition-colors duration-150 hover:bg-background ${compact ? "text-xs" : "text-[13px]"} ${danger ? "text-danger" : "text-muted hover:text-foreground"}`}
         aria-label={`权限：${LABEL[shown] ?? shown}`}
         aria-expanded={open}

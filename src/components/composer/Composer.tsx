@@ -3,6 +3,7 @@ import { api } from "@shared/api";
 import { ModelPicker } from "../pickers/ModelPicker";
 import { ThinkingPicker } from "../pickers/ThinkingPicker";
 import { PermissionBadge } from "../pickers/PermissionBadge";
+import { OmpStatusPill } from "../thread/StatusBar";
 
 /**
  * 会话输入框：随心输入 + 底部工具行（截图布局）。
@@ -80,6 +81,7 @@ export function Composer() {
             <span aria-hidden className="text-lg leading-none">＋</span>
           </button>
           <PermissionBadge compact align="left" />
+          <OmpStatusPill />
           <div className="ml-auto flex items-center gap-1">
             <ModelPicker compact />
             <ThinkingPicker compact />

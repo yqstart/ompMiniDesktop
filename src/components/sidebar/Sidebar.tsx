@@ -6,6 +6,7 @@ import {
   ChevronRight,
   FolderPlus,
   Plus,
+  Search,
   Settings,
   Trash2,
 } from "lucide-react";
@@ -108,6 +109,7 @@ function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void })
 
 export function Sidebar() {
   const { projects, sessions, activeProjectId, set } = useApp();
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     // 会话一次全量拉取，前端按项目分组（修复：之前按 activeProjectId 传参，
@@ -126,10 +128,51 @@ export function Sidebar() {
       .catch(() => undefined);
 
   const { groups, orphanActive, orphanArchived } = groupSessionsByProject(projects, sessions);
+  const q = query.trim().toLowerCase();
+  const matchSession = (s: (typeof sessions)[number]) =>
+    q ? s.title.toLowerCase().includes(q) : true;
+  const visibleGroups = groups.map((g) => ({
+    ...g,
+    active: g.active.filter(matchSession),
+    archived: g.archived.filter(matchSession),
+  }));
+  const visibleOrphanActive = orphanActive.filter(matchSession);
+  const visibleOrphanArchived = orphanArchived.filter(matchSession);
 
   return (
     <aside className="flex h-full w-full flex-col border-r border-border bg-sidebar md:w-66">
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+        {/* 顶部：新建会话（DSH 式主入口） */}
+        <button
+          onClick={async () => {
+            const targetId =
+              activeProjectId ?? projects.find((p) => !p.missing)?.id ?? projects[0]?.id;
+            if (!targetId) return;
+            try {
+              const created = await api.createSession(targetId);
+              await refreshSessions();
+              set({ activeProjectId: targetId, activeSessionId: created.id });
+            } catch {
+              // M1-6 补内联错误条
+            }
+          }}
+          disabled={projects.length === 0 || projects.every((p) => p.missing)}
+          className="mb-2 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-white transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          aria-label="新建会话"
+        >
+          <Plus size={14} aria-hidden /> 新建会话
+        </button>
+        {/* 搜索入口（V1 仅占位过滤本地列表，后续接全局搜索） */}
+        <div className="mb-2 flex items-center gap-2 rounded-lg bg-background/70 px-2.5 py-2 text-[13px] text-muted">
+          <Search size={14} aria-hidden className="shrink-0" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="搜索会话…"
+            aria-label="搜索会话"
+            className="w-full bg-transparent outline-none placeholder:text-muted/70"
+          />
+        </div>
         <div className="px-2 pt-1 pb-1.5 text-[11px] font-medium tracking-wide text-muted">项目</div>
         {projects.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border px-3 py-3 text-[13px] text-muted">
@@ -155,7 +198,7 @@ export function Sidebar() {
           ))
         )}
         <div className="mt-2 px-1">
-          {groups.map(({ project, active, archived }) => (
+          {visibleGroups.map(({ project, active, archived }) => (
             <details key={project.id} className="group/proj mt-1" open>
               <summary
                 className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] text-muted transition-colors duration-150 hover:bg-background/70 [&::-webkit-details-marker]:hidden"
@@ -207,25 +250,25 @@ export function Sidebar() {
               </div>
             </details>
           ))}
-          {(orphanActive.length > 0 || orphanArchived.length > 0) && (
+          {(visibleOrphanActive.length > 0 || visibleOrphanArchived.length > 0) && (
             <details className="group/orphan mt-1">
               <summary className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] text-muted transition-colors duration-150 hover:bg-background/70 [&::-webkit-details-marker]:hidden">
                 <ChevronRight size={12} aria-hidden className="transition-transform duration-150 group-open/orphan:rotate-90" />
                 未归属会话
-                <span className="ml-auto font-mono">{orphanActive.length + orphanArchived.length}</span>
+                <span className="ml-auto font-mono">{visibleOrphanActive.length + visibleOrphanArchived.length}</span>
               </summary>
               <div className="mt-0.5 space-y-0.5 border-l border-border pl-1.5">
-                {orphanActive.map((s) => (
+                {visibleOrphanActive.map((s) => (
                   <SessionRow key={s.id} s={s} onChanged={refreshSessions} />
                 ))}
-                {orphanArchived.length > 0 && (
+                {visibleOrphanArchived.length > 0 && (
                   <details className="group/oarch">
                     <summary className="flex cursor-pointer items-center gap-1 rounded-md px-2.5 py-1 text-[11px] text-muted transition-colors duration-150 hover:bg-background/70 [&::-webkit-details-marker]:hidden">
                       <ChevronRight size={11} aria-hidden className="transition-transform duration-150 group-open/oarch:rotate-90" />
-                      已归档（{orphanArchived.length}）
+                      已归档（{visibleOrphanArchived.length}）
                     </summary>
                     <div className="space-y-0.5">
-                      {orphanArchived.map((s) => (
+                      {visibleOrphanArchived.map((s) => (
                         <SessionRow key={s.id} s={s} onChanged={refreshSessions} />
                       ))}
                     </div>
