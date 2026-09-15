@@ -16,6 +16,8 @@ export const IPC = {
   archiveSession: "archive_session",
   unarchiveSession: "unarchive_session",
   deleteSession: "delete_session",
+  archiveSessions: "archive_sessions",
+  deleteSessions: "delete_sessions",
   renameSessionNote: "rename_session_note",
   getHistory: "get_history",
   sendMessage: "send_message",

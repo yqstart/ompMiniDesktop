@@ -28,6 +28,10 @@ export const api = {
   archiveSession: (id: string) => call<void>("archive_session", { id }),
   unarchiveSession: (id: string) => call<void>("unarchive_session", { id }),
   deleteSession: (id: string) => call<void>("delete_session", { id }),
+  archiveSessions: (ids: string[]) =>
+    call<{ ok: number; failed: { id: string; message: string }[] }>("archive_sessions", { ids }),
+  deleteSessions: (ids: string[]) =>
+    call<{ ok: number; failed: { id: string; message: string }[] }>("delete_sessions", { ids }),
   renameSessionNote: (id: string, note: string) =>
     call<void>("rename_session_note", { id, note }),
   getHistory: (id: string) => call<import("./types").ViewMsg[]>("get_history", { id }),

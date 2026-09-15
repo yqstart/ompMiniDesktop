@@ -9,6 +9,7 @@ import {
   Search,
   Settings,
   Trash2,
+  X,
 } from "lucide-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
@@ -24,9 +25,10 @@ import type { SessionView } from "@shared/types";
  * - 归档、删除都在行内展示，不另起第二行；删除二次确认以浮层覆盖，不撑布局。
  */
 function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void }) {
-  const { activeSessionId, set, appendEvents } = useApp();
+  const { activeSessionId, set, appendEvents, selectedSessions, toggleSessionSelected } = useApp();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const active = s.id === activeSessionId;
+  const selected = !!selectedSessions[s.id];
   const time = s.corrupt
     ? "已损坏"
     : new Date(s.timestamp).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -37,21 +39,52 @@ function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void })
       }`}
     >
       <button
-        onClick={async () => {
-          set({ activeSessionId: s.id });
-          try {
-            const history = await api.getHistory(s.id);
-            appendEvents(
-              s.id,
-              history.flatMap((l) => viewMsgFromJsonlLine(l)),
-            );
-          } catch {
-            // 历史加载失败不阻塞选中（横幅在 M1-6 补）
+        onClick={(e) => {
+          // 修饰键点击 = 多选切换，不打开会话
+          if (e.metaKey || e.ctrlKey || e.shiftKey) {
+            toggleSessionSelected(s.id);
+            return;
           }
+          void (async () => {
+            set({ activeSessionId: s.id });
+            try {
+              const history = await api.getHistory(s.id);
+              appendEvents(
+                s.id,
+                history.flatMap((l) => viewMsgFromJsonlLine(l)),
+              );
+            } catch {
+              // 历史加载失败不阻塞选中（横幅在 M1-6 补）
+            }
+          })();
         }}
         className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
         aria-label={`会话 ${s.title}`}
       >
+        <span
+          role="checkbox"
+          aria-checked={selected}
+          aria-label={selected ? `取消选择会话 ${s.title}` : `选择会话 ${s.title}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleSessionSelected(s.id);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === " " || e.key === "Enter") {
+              e.preventDefault();
+              e.stopPropagation();
+              toggleSessionSelected(s.id);
+            }
+          }}
+          tabIndex={0}
+          className={`flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded border transition-colors duration-150 ${
+            selected ? "border-accent bg-accent text-white" : "border-border text-transparent hover:border-muted"
+          }`}
+        >
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
         <span
           className={`h-1.5 w-1.5 shrink-0 rounded-full ${s.running ? "bg-ok" : "bg-transparent"}`}
           aria-label={s.running ? "运行中" : undefined}
@@ -121,8 +154,10 @@ function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void })
 }
 
 export function Sidebar() {
-  const { projects, sessions, activeProjectId, set } = useApp();
+  const { projects, sessions, activeProjectId, selectedSessions, clearSessionSelected, set } = useApp();
   const [query, setQuery] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     // 会话一次全量拉取，前端按项目分组（修复：之前按 activeProjectId 传参，
@@ -139,6 +174,31 @@ export function Sidebar() {
       .listSessions()
       .then((all) => set({ sessions: all }))
       .catch(() => undefined);
+
+  /** 批量操作：ids 为空时 toast 提示；成功后清选择 + 刷新；失败逐条展示。 */
+  const runBatch = async (kind: "archive" | "delete", ids: string[]) => {
+    if (ids.length === 0) {
+      setError("未选中任何会话");
+      return;
+    }
+    if (kind === "delete" && !window.confirm(`确定删除选中的 ${ids.length} 个会话？不可恢复。`)) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = kind === "archive" ? await api.archiveSessions(ids) : await api.deleteSessions(ids);
+      clearSessionSelected();
+      await refreshSessions();
+      if (res.failed.length > 0) {
+        setError(`${kind === "archive" ? "归档" : "删除"}部分失败：${res.failed.map((f) => f.message || f.id).join("；")}`);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : `${kind === "archive" ? "归档" : "删除"}失败`);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const { groups, orphanActive, orphanArchived } = groupSessionsByProject(projects, sessions);
   const q = query.trim().toLowerCase();
@@ -211,6 +271,48 @@ export function Sidebar() {
           ))
         )}
         <div className="mt-2 px-1">
+          {error && (
+            <div role="alert" className="mb-1 rounded-md border border-danger/50 px-2 py-1.5 text-xs text-danger">
+              {error}
+              <button onClick={() => setError(null)} className="ml-2 cursor-pointer underline" aria-label="关闭错误提示">
+                关闭
+              </button>
+            </div>
+          )}
+          {Object.keys(selectedSessions).length > 0 && (
+            <div className="mb-1 flex items-center gap-1 rounded-md border border-border bg-background/60 px-1.5 py-1 text-xs text-muted">
+              <span>已选 {Object.keys(selectedSessions).length}</span>
+              <button
+                onClick={() => {
+                  const ids = Object.keys(selectedSessions);
+                  void runBatch("archive", ids);
+                }}
+                disabled={busy}
+                className="ml-auto cursor-pointer rounded px-1.5 py-0.5 transition-colors duration-150 hover:bg-background hover:text-foreground disabled:opacity-40"
+                aria-label="批量归档选中会话"
+              >
+                归档
+              </button>
+              <button
+                onClick={() => {
+                  const ids = Object.keys(selectedSessions);
+                  void runBatch("delete", ids);
+                }}
+                disabled={busy}
+                className="cursor-pointer rounded px-1.5 py-0.5 transition-colors duration-150 hover:bg-background hover:text-danger disabled:opacity-40"
+                aria-label="批量删除选中会话"
+              >
+                删除
+              </button>
+              <button
+                onClick={clearSessionSelected}
+                className="cursor-pointer rounded px-1 py-0.5 transition-colors duration-150 hover:bg-background"
+                aria-label="清空选择"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          )}
           {visibleGroups.map(({ project, active, archived }) => (
             <details key={project.id} className="group/proj mt-1" open>
               <summary
@@ -219,10 +321,31 @@ export function Sidebar() {
               >
                 <ChevronRight size={12} aria-hidden className="shrink-0 transition-transform duration-150 group-open/proj:rotate-90" />
                 <span className="truncate font-medium text-foreground">{project.name}</span>
-                <span className="ml-auto shrink-0 font-mono">
+                <span className="ml-auto flex shrink-0 items-center gap-0.5 font-mono">
                   {active.length}{archived.length > 0 ? ` · ${archived.length}` : ""}
                 </span>
                 {project.missing && <span className="shrink-0 text-warn">缺失</span>}
+                {/* 项目级批量操作：归档/删除该项目全部进行中会话 */}
+                <span className="hidden shrink-0 items-center gap-0.5 group-hover/proj:flex" onClick={(e) => e.preventDefault()}>
+                  <button
+                    onClick={() => void runBatch("archive", active.map((s) => s.id))}
+                    disabled={busy || active.length === 0}
+                    className="cursor-pointer rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground disabled:opacity-40"
+                    aria-label={`归档 ${project.name} 全部进行中会话`}
+                    title="归档本项目全部进行中会话"
+                  >
+                    <Archive size={12} />
+                  </button>
+                  <button
+                    onClick={() => void runBatch("delete", active.map((s) => s.id))}
+                    disabled={busy || active.length === 0}
+                    className="cursor-pointer rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-danger disabled:opacity-40"
+                    aria-label={`删除 ${project.name} 全部进行中会话`}
+                    title="删除本项目全部进行中会话"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </span>
               </summary>
               <div className="mt-0.5 space-y-px border-l border-border pl-1.5">
                 <button
@@ -269,6 +392,26 @@ export function Sidebar() {
                 <ChevronRight size={12} aria-hidden className="transition-transform duration-150 group-open/orphan:rotate-90" />
                 未归属会话
                 <span className="ml-auto font-mono">{visibleOrphanActive.length + visibleOrphanArchived.length}</span>
+                <span className="hidden shrink-0 items-center gap-0.5 group-hover/orphan:flex" onClick={(e) => e.preventDefault()}>
+                  <button
+                    onClick={() => void runBatch("archive", visibleOrphanActive.map((s) => s.id))}
+                    disabled={busy || visibleOrphanActive.length === 0}
+                    className="cursor-pointer rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground disabled:opacity-40"
+                    aria-label="归档全部未归属会话"
+                    title="归档全部未归属会话"
+                  >
+                    <Archive size={12} />
+                  </button>
+                  <button
+                    onClick={() => void runBatch("delete", visibleOrphanActive.map((s) => s.id))}
+                    disabled={busy || visibleOrphanActive.length === 0}
+                    className="cursor-pointer rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-danger disabled:opacity-40"
+                    aria-label="删除全部未归属会话"
+                    title="删除全部未归属会话"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </span>
               </summary>
               <div className="mt-0.5 space-y-px border-l border-border pl-1.5">
                 {visibleOrphanActive.map((s) => (

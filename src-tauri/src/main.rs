@@ -35,6 +35,8 @@ fn main() {
             archive_session,
             unarchive_session,
             delete_session,
+            archive_sessions,
+            delete_sessions,
             rename_session_note,
             get_history,
             send_message,

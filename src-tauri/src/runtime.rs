@@ -190,7 +190,7 @@ pub async fn spawn_long_lived(
     let stdin = stdin_opt.take().unwrap();
     start_pump(app.clone(), key.clone(), reader, stdin, rx, sid.clone());
 
-    let mut m = map.blocking_lock();
+    let mut m = map.lock().await;
     // 旧进程先杀
     if let Some(old) = m.remove(&key) {
         let _ = old.tx.send(String::new());

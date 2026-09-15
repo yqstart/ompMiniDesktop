@@ -29,6 +29,10 @@ type AppState = {
   /** 左侧栏宽度（220–480，默认 264，持久化 localStorage）。 */
   sidebarWidth: number;
   setSidebarWidth: (w: number) => void;
+  /** 会话多选（批量归档/删除用，key 为 session id）。 */
+  selectedSessions: Record<string, boolean>;
+  toggleSessionSelected: (id: string) => void;
+  clearSessionSelected: () => void;
 };
 
 export const SIDEBAR_MIN = 220;
@@ -76,6 +80,15 @@ export const useApp = create<AppState>((set, get) => ({
     }
     set({ sidebarWidth: v });
   },
+  selectedSessions: {},
+  toggleSessionSelected: (id) =>
+    set((s) => {
+      const next = { ...s.selectedSessions };
+      if (next[id]) delete next[id];
+      else next[id] = true;
+      return { selectedSessions: next };
+    }),
+  clearSessionSelected: () => set({ selectedSessions: {} }),
   set: (p) => set(p),
   draftOf: (sid) => (sid ? (get().drafts[sid] ?? "") : ""),
   setDraft: (sid, text) =>

@@ -13,12 +13,14 @@
     "windows": [
       {
         "label": "main",
-        "title": "ompMiniDesktop",
+        "title": "",
         "width": 1200,
         "height": 800,
         "minWidth": 375,
         "minHeight": 600,
-        "center": true
+        "center": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       }
     ],
     "security": {

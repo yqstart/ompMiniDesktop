@@ -35,8 +35,10 @@ pub fn cmd_err(code: &str, message: String, hint: Option<String>) -> CmdError {
 }
 
 fn save_overlay(state: &State<AppState>) -> Result<(), String> {
-    let ov = state.overlay.blocking_lock();
-    let text = serde_json::to_string_pretty(&*ov).map_err(|e| e.to_string())?;
+    let text = {
+        let ov = state.overlay.try_lock().map_err(|_| "overlay 忙，请重试".to_string())?;
+        serde_json::to_string_pretty(&*ov).map_err(|e| e.to_string())?
+    };
     if let Some(parent) = state.overlay_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -107,26 +109,40 @@ pub struct OmpInfo {
     pub errors: Vec<String>,
 }
 
+/// 后端工具函数：解析一次 omp 定位与版本（不触碰 State，供 Tauri commands 与内部调用共用）。
+/// 必须 anyhow 化：任何失败都返回 Err(String)，调用方自行决定降级。
+fn probe_omp(bin: &str) -> Result<(Option<String>, std::path::PathBuf, Vec<String>), String> {
+    let mut errors = vec![];
+    let mut version = None;
+    match run_cmd(bin, &["--version"]) {
+        Ok(out) => {
+            let text = out.trim().to_string();
+            version = text.split_whitespace().next().map(|s| s.trim_start_matches("omp/").to_string()).or(Some(text));
+        }
+        Err(e) => errors.push(format!("omp --version 失败：{e}")),
+    }
+    let mut agent_dir = resolve_agent_dir(None);
+    match run_cmd(bin, &["config", "path"]) {
+        Ok(out) => {
+            agent_dir = resolve_agent_dir(Some(out));
+        }
+        Err(e) => errors.push(format!("omp config path 失败：{e}")),
+    }
+    Ok((version, agent_dir, errors))
+}
+
 #[tauri::command]
 pub async fn locate_omp(state: State<'_, AppState>) -> Result<OmpInfo, CmdError> {
-    let mut errors = vec![];
     let resolved = discover_omp_path(&state);
-    let mut version = None;
-    let mut agent_dir = resolve_agent_dir(None);
+    let (mut version, mut agent_dir, mut errors) = (None, resolve_agent_dir(None), vec![]);
     if let Some(ref p) = resolved {
-        match run_cmd(p, &["--version"]) {
-            Ok(out) => {
-                let text = out.trim().to_string();
-                // 形如 "omp/18.1.22"
-                version = text.split_whitespace().next().map(|s| s.trim_start_matches("omp/").to_string()).or(Some(text));
+        match probe_omp(p) {
+            Ok((v, dir, errs)) => {
+                version = v;
+                agent_dir = dir;
+                errors = errs;
             }
-            Err(e) => errors.push(format!("omp --version 失败：{e}")),
-        }
-        match run_cmd(p, &["config", "path"]) {
-            Ok(out) => {
-                agent_dir = resolve_agent_dir(Some(out));
-            }
-            Err(e) => errors.push(format!("omp config path 失败：{e}")),
+            Err(e) => errors.push(e),
         }
     } else {
         errors.push("未找到 omp 可执行文件，请安装 oh-my-pi 或手动指定路径".into());
@@ -223,10 +239,11 @@ pub struct ProjectView {
 }
 
 fn project_views(state: &State<AppState>) -> Vec<ProjectView> {
-    let ov = state.overlay.blocking_lock();
-    let agent = state.agent_dir.blocking_lock().clone();
-    let sessions_root = agent.join("sessions");
-    ov.projects
+    let (projects, sessions_root) = match (state.overlay.try_lock(), state.agent_dir.try_lock()) {
+        (Ok(ov), Ok(agent)) => (ov.projects.clone(), agent.join("sessions")),
+        _ => return vec![],
+    };
+    projects
         .iter()
         .map(|p| {
             let name = std::path::Path::new(&p.path)
@@ -634,7 +651,60 @@ pub async fn unarchive_session(state: State<'_, AppState>, id: String) -> Result
 
 #[tauri::command]
 pub async fn delete_session(state: State<'_, AppState>, id: String) -> Result<(), CmdError> {
-    kill_runtime(&state, &id);
+    delete_session_inner(&state, &id).await?;
+    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+    Ok(())
+}
+
+/// 批量归档：逐个标记 archived=true，一次落盘；返回成功数与失败明细。
+#[tauri::command]
+pub async fn archive_sessions(state: State<'_, AppState>, ids: Vec<String>) -> Result<serde_json::Value, CmdError> {
+    if ids.is_empty() {
+        return Err(cmd_err("BAD_ARG", "未选中任何会话".into(), None));
+    }
+    if ids.len() > 200 {
+        return Err(cmd_err("BAD_ARG", "一次最多归档 200 个会话".into(), None));
+    }
+    let mut ok = 0usize;
+    let mut failed: Vec<serde_json::Value> = vec![];
+    {
+        let mut ov = state.overlay.lock().await;
+        for id in &ids {
+            ov.archived.insert(id.clone(), true);
+            ok += 1;
+        }
+    }
+    // 流式中的先停（逐个 kill_runtime，不阻塞落盘）
+    for id in &ids {
+        kill_runtime(&state, id);
+    }
+    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+    Ok(serde_json::json!({ "ok": ok, "failed": failed }))
+}
+
+/// 批量删除：逐个删文件 + 清覆盖层键，一次落盘；返回成功数与失败明细。
+#[tauri::command]
+pub async fn delete_sessions(state: State<'_, AppState>, ids: Vec<String>) -> Result<serde_json::Value, CmdError> {
+    if ids.is_empty() {
+        return Err(cmd_err("BAD_ARG", "未选中任何会话".into(), None));
+    }
+    if ids.len() > 200 {
+        return Err(cmd_err("BAD_ARG", "一次最多删除 200 个会话".into(), None));
+    }
+    let mut ok = 0usize;
+    let mut failed: Vec<serde_json::Value> = vec![];
+    for id in &ids {
+        match delete_session_inner(&state, id).await {
+            Ok(()) => ok += 1,
+            Err(e) => failed.push(serde_json::json!({ "id": id, "message": e.message })),
+        }
+    }
+    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+    Ok(serde_json::json!({ "ok": ok, "failed": failed }))
+}
+
+async fn delete_session_inner(state: &State<'_, AppState>, id: &str) -> Result<(), CmdError> {
+    kill_runtime(state, id);
     let agent = state.agent_dir.lock().await.clone();
     let prefix = id.chars().take(8).collect::<String>();
     if let Some(path) = session_file_for(&agent, &prefix) {
@@ -651,11 +721,10 @@ pub async fn delete_session(state: State<'_, AppState>, id: String) -> Result<()
     }
     {
         let mut ov = state.overlay.lock().await;
-        ov.archived.remove(&id);
-        ov.notes.remove(&id);
-        ov.session_approval.remove(&id);
+        ov.archived.remove(id);
+        ov.notes.remove(id);
+        ov.session_approval.remove(id);
     }
-    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
     Ok(())
 }
 
@@ -729,10 +798,11 @@ pub async fn stop_session(app: AppHandle, state: State<'_, AppState>, id: String
 
 pub fn kill_runtime(state: &State<AppState>, id: &str) {
     let map = state.runtime.clone();
-    let mut m = map.blocking_lock();
-    if let Some(r) = m.remove(id) {
-        let _ = r.tx.send(String::new());
-        // child kill 需要 async；此处发哨兵让 pump 退出，进程随 stdin 关闭退出（code 0）
+    if let Ok(mut m) = map.try_lock() {
+        if let Some(r) = m.remove(id) {
+            let _ = r.tx.send(String::new());
+            // child kill 需要 async；此处发哨兵让 pump 退出，进程随 stdin 关闭退出（code 0）
+        }
     }
     if let Ok(mut run) = state.running.try_lock() {
         run.remove(id);
