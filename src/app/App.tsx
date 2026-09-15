@@ -21,11 +21,17 @@ function useTheme() {
 }
 
 import { useSessionEvents } from "../lib/useSessionEvents";
+import { autoCheckOnBoot } from "../lib/appUpdate";
 
 export function App() {
   const { settingsOpen, set } = useApp();
   useTheme();
   useSessionEvents();
+
+  useEffect(() => {
+    // 启动静默检查更新（有更新只点亮入口，不打断）
+    void autoCheckOnBoot();
+  }, []);
 
   useEffect(() => {
     api

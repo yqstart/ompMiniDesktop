@@ -16,8 +16,8 @@
 
 - 本仓现状：空仓，仅 `LICENSE` + `docs/v1-design.md` + `docs/rpc-memo.md` + `design-system/MASTER.md`。无 `package.json`、无 `src/`、无 `src-tauri/`。第一个里程碑必须搭脚手架。
 - 协议现状（Phase 0 已实测）：`omp --mode rpc` 握手/prompt/审批（select 双分支）/切模型/切思考档/resume 回放全部走通。V1 后端只用最小命令集：`negotiate_protocol、get_state、prompt、abort、set_model、set_thinking_level、get_available_models、switch_session、get_messages_page、extension_ui_response、bash（诊断用）`。
-- 工具链实测：node v22.23.1、npm 10.9.8、pnpm 11.22.0、rustc/cargo 1.97.1、`cargo-tauri` 可用。包管理选 **pnpm**（两边参照项目 OmpConfig、PrismCode 均用 pnpm）。
-- 复用锚点（不另起炉灶）：PrismCode 的 `src-tauri/tauri.conf.json + Cargo.toml` 结构（含 `tauri-plugin-dialog/opener/store`、release profile）照抄裁剪；OmpConfig 的 `src/main/omp/locate.ts` 定位策略（登录 shell → which → 已知前缀 → 手动指定）与 `settings.ts` 的 `config set` 链路翻译为 Rust 实现；设计 token 以 `design-system/MASTER.md` 为准，组件名以其 §8 速查表为准，禁止同义重复组件。
+- 工具链实测：node v22.23.1、npm 10.9.8、pnpm 11.22.0、rustc/cargo 1.97.1、`cargo-tauri` 可用。包管理选 **pnpm**。
+- 复用锚点（不另起炉灶）：PrismCode 的 `src-tauri/tauri.conf.json + Cargo.toml` 结构（含 `tauri-plugin-dialog/opener/store`、release profile）照抄裁剪；omp 定位策略（登录 shell → which → 已知前缀 → 手动指定）与 `config set` 链路已在 Rust 侧实现；设计 token 以 `design-system/MASTER.md` 为准，组件名以其 §8 速查表为准，禁止同义重复组件。
 
 ## 2. 里程碑总览
 
@@ -42,7 +42,7 @@
 
 ### 3.2 Rust 后端：定位、自检与覆盖层（M0–M1）
 
-- omp 定位：翻译 OmpConfig `locate.ts`——登录 shell `command -v omp` → `which` → `/opt/homebrew/bin/omp、/usr/local/bin/omp、~/.local/bin/omp` → 手动指定（overlay 持久化）。启动自检 `omp --version` + `omp models --json` 探针，失败经 `omp-status://health` 推横幅。
+- omp 定位：登录 shell `command -v omp` → `which` → `/opt/homebrew/bin/omp、/usr/local/bin/omp、~/.local/bin/omp` → 手动指定（overlay 持久化）。启动自检 `omp --version` + `omp models --json` 探针，失败经 `omp-status://health` 推横幅。
 - agentDir 解析：`omp config path` 成功取末行绝对路径，否则 `~/.omp/agent`，再被 `PI_CODING_AGENT_DIR` 覆盖。三者优先级在 `session_scan.rs` 写死并单测。
 - 覆盖层 `overlay.json`（tauri-plugin-store，`$APPDATA/omp-mini/overlay.json`，schema 见 §4）：读写经 `overlay.rs` 串行化，原子写 + 版本字段校验；未知字段保留透传，`version != 1` 时备份后重置并 toast 提示。
 

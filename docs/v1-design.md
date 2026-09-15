@@ -188,7 +188,7 @@ RPC 流（stdout JSONL）与 jsonl 文件是同一套语义的两面，V1 统一
 | 写入时询问 | `write` | 读类直行，写类审批 | 盾牌蓝（默认建议） |
 | 全部自动通过 | `yolo` | 跳过所有确认 | 盾牌红 + 「跳过所有确认」警告文案 |
 
-- 全局档：读 `config.yml` / `config list --json` 初值，修改走 `omp config set tools.approvalMode <值>`（OmpConfig 已验证该链路，见 `src/main/omp/settings.ts` 的 `setValue`）。
+- 全局档：读 `config.yml` / `config list --json` 初值，修改走 `omp config set tools.approvalMode <值>`。
 - 会话覆盖：会话菜单「本会话权限」→ spawn 时以 `--approval-mode` 传入 → 存覆盖层 `sessionApproval[sessionId]`。会话关闭后覆盖即失效（不污染全局）。
 
 ### 9.2 审批卡（内联，最高优先级）
@@ -213,7 +213,7 @@ RPC 流（stdout JSONL）与 jsonl 文件是同一套语义的两面，V1 统一
 ## 10. 设置（V1 占位，不做功能）
 
 - 入口保留：左栏底「设置」可点。
-- 页面内容：一句说明「V1 暂不在此提供设置。Provider Key、模型目录、 surgeon 级选项请用 `omp` CLI 或 OmpConfig 管理」+ 只读展示 `config path`（调 `omp config path`）+ 复制按钮。**不做任何写入**，避免与 CLI/OmpConfig 打架。
+- 页面内容：一句说明「V1 暂不在此提供设置。Provider Key、模型目录等请用 `omp` CLI 管理」+ 只读展示 `config path`（调 `omp config path`）+ 复制按钮。**不做任何写入**，避免与 CLI 配置打架。
 
 ---
 
@@ -243,13 +243,13 @@ V1 不引入 sqlite。key 全部用 `session.id`（jsonl `session` 行的 uuid�
 
 ### 11.3 omp 定位与自检
 
-复用 OmpConfig 已验证策略（`src/main/omp/locate.ts`）：登录 shell `command -v omp` → `which` → 已知前缀（`/opt/homebrew/bin/omp` 等）→ 手动指定。启动自检 `omp --version` + `models --json` 探针，失败给横幅 + 安装提示，不白屏。
+omp 定位策略：登录 shell `command -v omp` → `which` → 已知前缀（`/opt/homebrew/bin/omp` 等）→ 手动指定。启动自检 `omp --version` + `models --json` 探针，失败给横幅 + 安装提示，不白屏。
 
 ---
 
 ## 12. 边界与失败模式
 
-- omp 不存在 / 版本过旧 → 启动横幅 + 诊断（沿用 OmpConfig `ompInfo.errors` 文案风格）。
+- omp 不存在 / 版本过旧 → 启动横幅 + 诊断，不白屏。
 - 项目目录被删 → 项目标「目录缺失」，禁新建，可重定位/移除/回放历史。
 - jsonl 损坏 → 该会话标「损坏，可删除」，不阻塞列表；超大会话虚拟化 + 结果截断。
 - 同一会话被 omp TUI 与本 app 双开 → V1 以文档警告 + 「后开只读提示」处理（文件锁检测放 Phase 3）。

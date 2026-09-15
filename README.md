@@ -19,7 +19,7 @@ oh-my-pi（`omp`）的极简桌面端 —— 把终端里的 agent 会话装进�
 - 输出渲染：用户气泡 / 流式 Markdown / 思考折叠 / 工具调用卡（四态：输入中·运行中·成功·失败）/ 系统分隔线
 - 权限：全局三档（每次询问 `always-ask` / 写入询问 `write` / 自动通过 `yolo`）+ 会话级覆盖；工具执行前内联审批卡（允许一次 / 总是允许本会话 / 拒绝）
 - 切换：模型选择器（搜索 + provider 分组 + context/thinking/images 角标）/ 思考档选择器（按模型可用档过滤）
-- 设置页为占位：只读展示 `config path`，零写入（Provider Key 与模型目录请用 `omp` CLI 或 OmpConfig 管理）
+- 设置页为占位：只读展示 `config path`，零写入（Provider Key 与模型目录请用 `omp` CLI 管理）
 
 **明确不做（V1）**：自动化/定时任务、插件/Skill/MCP/Hook 管理、主题市场、云同步、多窗口协作、终端 PTY 仿真、diff 合并编辑器、用量统计。
 
@@ -71,6 +71,19 @@ pnpm tauri:build    # 产物见 src-tauri/target/release/bundle/
 
 未签名（`signingIdentity: "-"`）：首次打开若被 Gatekeeper 拦截，右键 → 打开，
 或 `xattr -dr com.apple.quarantine <App>.app`。
+
+## 应用内更新
+
+- 更新源：GitHub Release 的 `latest.json`（Tauri updater 标准链路，需签名校验）。
+- 触发：启动后静默检查一次（有更新只点亮顶栏入口，不打断）；设置页「应用更新」可手动检查。
+- 行为：有更新弹「立即更新 / 稍后更新」；下载完成后可「立即重启 / 稍后重启」（稍后则下次启动生效）；稍后过的版本本轮不再弹窗，顶栏入口常驻。
+- 发版流程：打 `v*` tag 推送 → GitHub Actions Release 工作流多平台打包并生成 `latest.json`。
+
+> 首次正式发版前必须先配签名，否则 updater 会拒绝安装：
+> `pnpm tauri signer generate -w ~/.tauri/omp-mini.key`，把公钥填入
+> `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`，
+> 私钥全文写入仓库 Settings → Secrets → `TAURI_SIGNING_PRIVATE_KEY`
+>（生成时没设密码则 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 置空）。
 
 ---
 
@@ -126,5 +139,4 @@ and report vulnerabilities privately per [SECURITY.md](SECURITY.md).
 ## 相关项目
 
 - [oh-my-pi](https://github.com/ldx/oh-my-pi) —— 本 app 驱动的上游 agent CLI
-- [OmpConfig](../OmpConfig) —— omp 可视化全局配置界面（同作者，Electron）
-- [PrismCode](../PrismCode) —— 轻量桌面代码编辑器（同作者，Tauri；明确不做 AI 面板，与本项目互补）
+- [PrismCode](https://github.com/yqstart/PrismCode) —— 轻量桌面代码编辑器（同作者，Tauri；明确不做 AI 面板，与本项目互补）

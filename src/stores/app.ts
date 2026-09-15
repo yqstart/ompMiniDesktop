@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { HealthInfo, ModelCatalog, ProjectView, SessionStatus, SessionView, ViewMsg } from "@shared/types";
+import type { HealthInfo, ModelCatalog, ProjectView, SessionStatus, SessionView, UpdateState, ViewMsg } from "@shared/types";
 
 type AppState = {
   health: HealthInfo | null;
@@ -16,6 +16,10 @@ type AppState = {
   sessionApprovals: Record<string, string>;
   settingsOpen: boolean;
   sidebarOpen: boolean;
+  update: UpdateState;
+  updateDismissedVersion: string | null;
+  /** 更新弹窗显隐（available 常驻入口，弹窗可单独关闭=稍后）。 */
+  updateDialogOpen: boolean;
   set: (p: Partial<AppState>) => void;
   draftOf: (sid: string | null) => string;
   setDraft: (sid: string | null, text: string) => void;
@@ -37,6 +41,9 @@ export const useApp = create<AppState>((set, get) => ({
   sessionApprovals: {},
   settingsOpen: false,
   sidebarOpen: false,
+  update: { status: "idle" },
+  updateDismissedVersion: null,
+  updateDialogOpen: false,
   set: (p) => set(p),
   draftOf: (sid) => (sid ? (get().drafts[sid] ?? "") : ""),
   setDraft: (sid, text) =>

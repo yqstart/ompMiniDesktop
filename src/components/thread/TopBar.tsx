@@ -4,6 +4,7 @@ import { useApp } from "../../stores/app";
 import { ModelPicker } from "../pickers/ModelPicker";
 import { ThinkingPicker } from "../pickers/ThinkingPicker";
 import { PermissionBadge } from "../pickers/PermissionBadge";
+import { UpdateBell } from "../update/UpdateDialog";
 
 export function TopBar() {
   const { activeSessionId, sessions, set } = useApp();
@@ -46,6 +47,7 @@ export function TopBar() {
         </button>
       )}
       <div className="ml-auto flex items-center">
+        <UpdateBell />
         <ModelPicker />
         <ThinkingPicker />
         <PermissionBadge />

@@ -122,3 +122,13 @@ export type SessionStatus =
   | { state: "awaiting-approval" }
   | { state: "error"; detail: string }
   | { state: "exited"; detail: string };
+
+/** 应用更新状态（Tauri updater，直接面向 GitHub Release latest.json）。 */
+export type UpdateState =
+  | { status: "idle" }
+  | { status: "checking" }
+  | { status: "latest"; current: string }
+  | { status: "available"; version: string; current: string; body: string | null }
+  | { status: "downloading"; version: string; downloaded: number; total: number | null }
+  | { status: "ready"; version: string }
+  | { status: "error"; message: string };

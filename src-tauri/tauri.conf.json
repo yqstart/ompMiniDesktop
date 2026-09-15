@@ -29,6 +29,7 @@
     "active": true,
     "targets": "all",
     "publisher": "ompMiniDesktop",
+    "createUpdaterArtifacts": true,
     "macOS": {
       "signingIdentity": "-"
     },
@@ -40,5 +41,16 @@
       "icons/128x128.png",
       "icons/128x128@2x.png"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "TODO: 首次发布前填入 `pnpm tauri signer generate` 的公钥",
+      "endpoints": [
+        "https://github.com/yqstart/ompMiniDesktop/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

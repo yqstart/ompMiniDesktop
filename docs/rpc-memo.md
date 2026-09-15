@@ -42,7 +42,7 @@ omp --mode rpc --cwd <项目目录> [--resume <sessionId前缀>] [--model <selec
 - 通过：回 `{type:extension_ui_response, id, value:"Approve"}` → `tool_execution_end{isError:false, result:{content:[{type:text}], details}}` → agent 继续总结。
 - 拒绝：回 `{type:extension_ui_response, id, cancelled:true}`（`value:"Deny"` 等价，未深测，统一用 cancelled）→ `tool_execution_end{isError:true, result:{content:[{text:"Tool call denied by user: bash"}]}}` → `message role=toolResult isError:true` → agent 输出「执行被拒绝」类总结，turn 正常结束（**不是 error，不是中断**）。
 - `confirm` 类对话框（未在本 spike 触发，协议有）：回 `{confirmed:true/false}`。`input` 类回 `{value}`。未知 id 的回包被忽略（安全）。
-- `--approval-mode always-ask|write|yolo` CLI 透传有效；`get_state` 不回显 approvalMode——全局档读 `omp config list --json`（OmpConfig `settings.ts` 的 `setValue(key,value)` → `omp config set tools.approvalMode <值>` 链路已验证，可直接复用思路）。
+- `--approval-mode always-ask|write|yolo` CLI 透传有效；`get_state` 不回显 approvalMode——全局档读 `omp config list --json`，写经 `omp config set tools.approvalMode <值>`。
 
 ## 5. 历史回放与辅助命令（已实测）
 
