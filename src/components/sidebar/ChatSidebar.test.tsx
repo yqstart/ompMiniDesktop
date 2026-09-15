@@ -1,0 +1,360 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ProjectView, SessionView } from "@shared/types";
+import { useApp } from "../../stores/app";
+import { fmt, TEXT } from "../../lib/locale";
+import { ChatSidebar } from "./ChatSidebar";
+
+/** `vi.mock` 的工厂会被提升：用 `vi.hoisted` 拿能在用例里改行为的 mock。 */
+const mock = vi.hoisted(() => ({
+ listSessions: vi.fn(),
+ listProjects: vi.fn(async () => [] as unknown[]),
+ listWorkspaces: vi.fn(async () => [] as unknown[]),
+ listCheckouts: vi.fn(async () => [] as unknown[]),
+ createWorkspace: vi.fn(),
+ updateWorkspace: vi.fn(async () => undefined),
+ deleteWorkspace: vi.fn(async () => undefined),
+ deleteSessions: vi.fn(),
+ archiveSessions: vi.fn(),
+}));
+vi.mock("@shared/api", () => ({
+ api: {
+  listSessions: mock.listSessions,
+  listProjects: mock.listProjects,
+  listWorkspaces: mock.listWorkspaces,
+  listCheckouts: mock.listCheckouts,
+  createWorkspace: mock.createWorkspace,
+  updateWorkspace: mock.updateWorkspace,
+  deleteWorkspace: mock.deleteWorkspace,
+  deleteSessions: mock.deleteSessions,
+  archiveSessions: mock.archiveSessions,
+ },
+}));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(async () => null) }));
+vi.mock("@tauri-apps/api/app", () => ({ getVersion: vi.fn(async () => "0.10.0") }));
+
+const actEnv = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+actEnv.IS_REACT_ACT_ENVIRONMENT = true;
+
+const P1: ProjectView = { id: "p1", path: "/w/alpha", name: "alpha", missing: false, sessionCount: 2, workspaceId: "w1" };
+const P2: ProjectView = { id: "p2", path: "/w/beta", name: "beta", missing: false, sessionCount: 1, workspaceId: "w1" };
+const P3: ProjectView = { id: "p3", path: "/w/solo", name: "solo", missing: false, sessionCount: 0, workspaceId: null };
+
+/** 会话行相对时间的锚点：用「相对当前」的时间戳，断言「5分 / 3小时 / 2天」（测试间不跨档）。 */
+const NOW = Date.now();
+const MIN = 60_000;
+
+const session = (id: string, projectId: string | null, title: string, archived = false, timestamp = NOW - 5 * MIN): SessionView => ({
+ id,
+ projectId,
+ title,
+ cwd: projectId === "p1" ? "/w/alpha" : projectId === "p2" ? "/w/beta" : "/tmp/scratch",
+ timestamp,
+ archived,
+ corrupt: false,
+ note: null,
+ running: false,
+});
+
+const SESSIONS: SessionView[] = [
+ session("s1", "p1", "登录页重构"),
+ session("s2", "p2", "后端接口联调", false, NOW - 3 * 60 * MIN),
+ session("s3", null, "游离会话", false, NOW - 2 * 24 * 60 * MIN),
+ session("s4", "p1", "已归档的旧会话", true),
+];
+
+let container: HTMLDivElement;
+let root: Root;
+
+beforeEach(() => {
+ mock.listSessions.mockReset();
+ mock.listSessions.mockResolvedValue({ sessions: SESSIONS, totalFiles: 4, scannedFiles: 4 });
+ mock.listProjects.mockReset();
+ mock.listProjects.mockResolvedValue([]);
+ mock.listWorkspaces.mockReset();
+ mock.listWorkspaces.mockResolvedValue([]);
+ mock.listCheckouts.mockReset();
+ mock.listCheckouts.mockResolvedValue([]);
+ mock.createWorkspace.mockReset();
+ mock.updateWorkspace.mockReset();
+ mock.deleteWorkspace.mockReset();
+ mock.deleteSessions.mockReset();
+ mock.deleteSessions.mockImplementation(async (ids: string[]) => ({ ok: ids.length, failed: [] }));
+ mock.archiveSessions.mockReset();
+ mock.archiveSessions.mockImplementation(async (ids: string[]) => ({ ok: ids.length, failed: [] }));
+ useApp.setState({
+  projects: [P1, P2],
+  workspaceGroups: [{ id: "w1", name: "全栈", createdAt: 0, projectIds: ["p1", "p2"] }],
+  sessions: [],
+  activeSessionId: null,
+  locale: "zh-CN",
+ });
+ container = document.createElement("div");
+ document.body.append(container);
+ root = createRoot(container);
+});
+
+afterEach(() => {
+ act(() => root.unmount());
+ container.remove();
+});
+
+/** 渲染并等 `list_sessions` 那一趟落地。 */
+async function open(): Promise<void> {
+ await act(async () => {
+  root.render(<ChatSidebar visible />);
+ });
+ await act(async () => { });
+}
+
+function summaryFor(text: string): HTMLElement {
+ const el = [...container.querySelectorAll<HTMLElement>("summary")].find((s) => (s.textContent ?? "").includes(text));
+ if (!el) throw new Error(`summary 不存在：${text}`);
+ return el;
+}
+
+describe("聊天侧栏的工作区分段（V21 容器在聊天形态的投影）", () => {
+ it("有自定义工作区：按组分段，工作区头带成员数，会话挂在自己的项目下", async () => {
+  await open();
+  const text = container.textContent ?? "";
+  expect(text).toContain("全栈");
+  // 工作区头的成员计数（`wsGroupCount` = 「N 个项目」）
+  expect(container.querySelector('[aria-label="2 个项目"]')).not.toBeNull();
+  // 会话按项目落在工作区段内：段里同时有项目名与它会话的标题
+  const section = container.querySelector("details.group\\/ws");
+  expect(section?.textContent).toContain("alpha");
+  expect(section?.textContent).toContain("登录页重构");
+  expect(section?.textContent).toContain("后端接口联调");
+  // 未归属会话仍在（它不属于任何项目）
+  expect(text).toContain("游离会话");
+  // 已归档的会话不列
+  expect(text).not.toContain("已归档的旧会话");
+ });
+
+ it("未进组的项目：进「未分组」段（同一个分段排布）", async () => {
+  act(() => {
+   useApp.setState({ projects: [P1, P3] });
+  });
+  await open();
+  const text = container.textContent ?? "";
+  expect(text).toContain("全栈");
+  expect(text).toContain("未分组");
+  expect(text).toContain("solo");
+ });
+
+ it("没有自定义工作区：平铺（不出现工作区头 / 未分组段）", async () => {
+  act(() => {
+   useApp.setState({ workspaceGroups: [], projects: [{ ...P1, workspaceId: null }, { ...P2, workspaceId: null }] });
+  });
+  await open();
+  const text = container.textContent ?? "";
+  expect(text).not.toContain("未分组");
+  expect(container.querySelector("details.group\\/ws")).toBeNull();
+  expect(text).toContain("alpha");
+  expect(text).toContain("登录页重构");
+ });
+});
+
+describe("项目分组头的行内悬浮图标（V43）", () => {
+ it("行内三键 = 新建会话 / 归档全部 / 删除全部；「提交」入口已移除", async () => {
+  const t = TEXT["zh-CN"];
+  await open();
+  expect(container.querySelector(`button[aria-label="${t.gitCommitTitle}"]`), "提交入口应移除").toBeNull();
+  expect(container.querySelector(`button[aria-label="${fmt(t.newSessionIn, "alpha")}"]`), "新建会话").not.toBeNull();
+  expect(container.querySelector(`button[aria-label="${fmt(t.archiveAllIn, "alpha")}"]`), "归档全部").not.toBeNull();
+  expect(container.querySelector(`button[aria-label="${fmt(t.deleteAllIn, "alpha")}"]`), "删除全部").not.toBeNull();
+ });
+
+ it("点「归档全部」→ 归档该项目进行中的对话（已归档的除外）", async () => {
+  const t = TEXT["zh-CN"];
+  await open();
+  await click(container.querySelector<HTMLButtonElement>(`button[aria-label="${fmt(t.archiveAllIn, "alpha")}"]`));
+  expect(mock.archiveSessions).toHaveBeenCalledWith(["s1"]);
+ });
+
+ it("点「删除全部对话」→ 二次确认 → 只删该项目进行中的对话（已归档的除外）", async () => {
+  const t = TEXT["zh-CN"];
+  await open();
+  await click(container.querySelector<HTMLButtonElement>(`button[aria-label="${fmt(t.deleteAllIn, "alpha")}"]`));
+  const dialog = document.querySelector('[role="dialog"]');
+  expect(dialog?.getAttribute("aria-label")).toBe(t.sessDeleteAllConfirm.replace("{0}", "1"));
+  expect(dialog?.textContent).toContain(t.sessDeleteAllDetail);
+  const confirm = [...(dialog?.querySelectorAll("button") ?? [])].at(-1)!;
+  await act(async () => {
+   confirm.click();
+  });
+  // alpha 列的进行中会话只有 s1；已归档的 s4 不在列表里，也不许被删
+  expect(mock.deleteSessions).toHaveBeenCalledWith(["s1"]);
+ });
+
+ it("有未推送提交时分组头显示待推送徽章（点击走推送）", async () => {
+  act(() => {
+   useApp.setState({
+    workspaceGitStates: { "/w/alpha": { path: "/w/alpha", isRepo: true, dirty: false, ahead: 3, behind: 0, upstream: "origin/main", upstreamGone: false } },
+    commitTasks: {},
+   });
+  });
+  await open();
+  const badge = container.querySelector(`button[aria-label="${TEXT["zh-CN"].gitPushTitle.replace("{0}", "3")}"]`);
+  expect(badge, "待推送徽章应渲染").not.toBeNull();
+  expect(badge?.textContent).toContain("3");
+ });
+
+ it("改名后的实时标题覆盖扫描行的旧标题", async () => {
+  await open();
+  expect(container.textContent).toContain("登录页重构");
+  act(() => {
+   useApp.setState({
+    sessions: [{ id: "s1", projectId: "p1", title: "改名后的标题", cwd: "/w/alpha", timestamp: 1, archived: false, corrupt: false, note: "改名后的标题", running: true }],
+   });
+  });
+  expect(container.textContent).toContain("改名后的标题");
+ });
+});
+
+describe("会话行的时间展示（2026-10-13 对齐 ZCode 的紧凑相对时间）", () => {
+ it("行内 = 刚刚/N分/N小时/N天，完整绝对时间在悬停 title，不再用固定宽度截断", async () => {
+  await open();
+  const text = container.textContent ?? "";
+  expect(text).toContain("5分");
+  expect(text).toContain("3小时");
+  expect(text).toContain("2天");
+  const row = [...container.querySelectorAll<HTMLElement>("div.h-8")].find((el) => (el.textContent ?? "").includes("登录页重构"));
+  const timeSpan = [...(row?.querySelectorAll("span") ?? [])].find((el) => el.textContent === "5分" && el.hasAttribute("title"));
+  expect(timeSpan, "行内时间应渲染成相对时间").not.toBeUndefined();
+  const title = timeSpan?.getAttribute("title") ?? "";
+  expect(title, "悬停给完整绝对时间").toContain(String(new Date(NOW - 5 * MIN).getFullYear()));
+  expect(title).toContain(":");
+  expect(timeSpan?.className, "时间不再受「固定宽度 + truncate」约束").not.toContain("truncate");
+ });
+});
+
+/** 输入框赋值：绕过 React 的 value 影子状态（与 `WorkspaceGroupDialog.test.tsx` 同一套）。 */
+async function fill(input: HTMLInputElement | null, value: string): Promise<void> {
+ const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+ await act(async () => {
+  setter?.call(input, value);
+  input?.dispatchEvent(new Event("input", { bubbles: true }));
+ });
+}
+
+async function click(el: HTMLElement | null | undefined): Promise<void> {
+ await act(async () => {
+  el?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+ });
+}
+
+describe("聊天侧栏的工作区标题行（与终端形态同一排入口）", () => {
+ it("标题行给出「新建工作区」与「添加项目」两枚键", async () => {
+  const t = TEXT["zh-CN"];
+  await open();
+  expect(container.textContent).toContain(t.workspaceTitle);
+  expect(container.querySelector(`button[aria-label="${t.wsGroupNew}"]`), "新建工作区").not.toBeNull();
+  expect(container.querySelector(`button[aria-label="${t.sidebarAddProjectAria}"]`), "添加项目").not.toBeNull();
+ });
+
+ it("点「新建工作区」打开同一个对话框；建完左栏立刻出现新段与其成员", async () => {
+  const t = TEXT["zh-CN"];
+  await open();
+  expect(container.textContent).not.toContain("数据组");
+
+  // 建完工作区后端的两个变化：项目归属改了、工作区清单多一组
+  mock.createWorkspace.mockResolvedValue({ id: "w2", name: "数据组", createdAt: 0, projectIds: ["p2"] });
+  mock.listProjects.mockResolvedValue([P1, { ...P2, workspaceId: "w2" }]);
+  mock.listWorkspaces.mockResolvedValue([
+   { id: "w1", name: "全栈", createdAt: 0, projectIds: ["p1"] },
+   { id: "w2", name: "数据组", createdAt: 0, projectIds: ["p2"] },
+  ]);
+
+  await click(container.querySelector<HTMLButtonElement>(`button[aria-label="${t.wsGroupNew}"]`));
+  const nameInput = container.querySelector<HTMLInputElement>(`input[placeholder="${t.wsGroupNamePlaceholder}"]`);
+  expect(nameInput, "点标题行的 Layers 应打开工作区对话框").not.toBeNull();
+  await fill(nameInput, "数据组");
+  const beta = [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find((b) =>
+   (b.closest("label")?.textContent ?? "").includes("beta"),
+  );
+  await click(beta);
+  expect(beta?.checked, "勾选成员项目").toBe(true);
+  await click([...container.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === t.wsGroupCreate));
+
+  expect(mock.createWorkspace).toHaveBeenCalledWith("数据组", ["p2"]);
+  // 项目行必须重拉：归属没刷新的话新组在聊天左栏是「没有成员的空组」，按口径不占段
+  expect(mock.listProjects, "建完要重拉项目行").toHaveBeenCalled();
+  const created = [...container.querySelectorAll("details.group\\/ws")].find((s) => (s.textContent ?? "").includes("数据组"));
+  expect(created, "新工作区应作为分段出现在左栏").not.toBeUndefined();
+  expect(created?.textContent).toContain("beta");
+  // 对话框建完即关
+  expect(container.querySelector(`input[placeholder="${t.wsGroupNamePlaceholder}"]`)).toBeNull();
+ });
+});
+
+describe("左栏行级悬浮图标（V43）", () => {
+ const t = TEXT["zh-CN"];
+
+ it("会话行：归档键 → 归档该会话；删除键 → 二次确认 → delete_sessions", async () => {
+  await open();
+  const row = [...container.querySelectorAll<HTMLElement>("div.h-8")].find((el) => (el.textContent ?? "").includes("登录页重构"));
+  expect(row, "会话行应渲染").not.toBeUndefined();
+  await click(row?.querySelector<HTMLButtonElement>(`button[aria-label="${t.archiveChat}"]`));
+  expect(mock.archiveSessions).toHaveBeenCalledWith(["s1"]);
+
+  await click(row?.querySelector<HTMLButtonElement>(`button[aria-label="${t.deleteChat}"]`));
+  const dialog = document.querySelector('[role="dialog"]');
+  expect(dialog?.getAttribute("aria-label")).toBe("登录页重构");
+  expect(dialog?.textContent).toContain(t.sessDeleteConfirm);
+  const confirm = [...(dialog?.querySelectorAll("button") ?? [])].at(-1)!;
+  await act(async () => {
+   confirm.click();
+  });
+  expect(mock.deleteSessions).toHaveBeenCalledWith(["s1"]);
+ });
+
+ it("「未归属会话」组头：归档全部 / 删除全部两键；删除走二次确认", async () => {
+  await open();
+  const head = summaryFor(t.orphanChats);
+  await click(head.querySelector<HTMLButtonElement>(`button[aria-label="${t.archiveOrphanAll}"]`));
+  expect(mock.archiveSessions).toHaveBeenCalledWith(["s3"]);
+
+  await click(head.querySelector<HTMLButtonElement>(`button[aria-label="${t.deleteOrphanAll}"]`));
+  const dialog = document.querySelector('[role="dialog"]');
+  expect(dialog?.getAttribute("aria-label")).toBe(t.sessDeleteAllConfirm.replace("{0}", "1"));
+  const confirm = [...(dialog?.querySelectorAll("button") ?? [])].at(-1)!;
+  await act(async () => {
+   confirm.click();
+  });
+  expect(mock.deleteSessions).toHaveBeenCalledWith(["s3"]);
+ });
+
+ it("工作区段头：删除键走二次确认并调 delete_workspace", async () => {
+  await open();
+  const head = summaryFor("全栈");
+  await click(head.querySelector<HTMLButtonElement>(`button[aria-label="${t.wsGroupDelete}"]`));
+  const dialog = document.querySelector('[role="dialog"]');
+  expect(dialog?.getAttribute("aria-label")).toBe(t.wsGroupDeleteTitle.replace("{0}", "全栈"));
+  const confirm = [...(dialog?.querySelectorAll("button") ?? [])].at(-1)!;
+  await act(async () => {
+   confirm.click();
+  });
+  expect(mock.deleteWorkspace).toHaveBeenCalledWith("w1");
+ });
+
+ it("段头编辑键打开对话框并回填名字", async () => {
+  await open();
+  const head = summaryFor("全栈");
+  await click(head.querySelector<HTMLButtonElement>(`button[aria-label="${fmt(t.wsGroupEditTitle, "全栈")}"]`));
+  const input = container.querySelector<HTMLInputElement>(`input[placeholder="${t.wsGroupNamePlaceholder}"]`);
+  expect(input?.value).toBe("全栈");
+ });
+
+ it("「未分组」段头不渲染编辑 / 删除键", async () => {
+  act(() => {
+   useApp.setState({ projects: [P1, P3] });
+  });
+  await open();
+  const head = summaryFor(t.wsGroupUngrouped);
+  expect(head.querySelector(`button[aria-label="${t.wsGroupDelete}"]`)).toBeNull();
+  expect(head.querySelector(`button[aria-label="${fmt(t.wsGroupEditTitle, "未分组")}"]`)).toBeNull();
+ });
+});

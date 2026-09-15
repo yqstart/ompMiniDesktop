@@ -1,0 +1,68 @@
+# 贡献指南
+
+感谢关注 ompMiniDesktop。欢迎 Issue、讨论与 Pull Request。
+
+## 开发环境
+
+| 工具 | 建议版本 |
+|---|---|
+| Node.js | 22 及以上 |
+| pnpm | 11 及以上 |
+| Rust | stable（已验证 1.97）+ `cargo-tauri` |
+| `omp` | 18.x |
+| 系统 | macOS arm64（首发；Windows / Linux 打包延后） |
+
+额外依赖见 [Tauri 前置条件](https://v2.tauri.app/start/prerequisites/)。
+
+## 本地运行
+
+```bash
+git clone https://github.com/yqstart/ompMiniDesktop.git
+cd ompMiniDesktop
+pnpm install
+pnpm tauri:dev
+```
+
+仅检查前端类型与打包（无需完整桌面壳）：
+
+```bash
+pnpm build
+```
+
+常用检查（提交前请全过）：
+
+```bash
+pnpm typecheck && pnpm test && pnpm e2e:ipc
+```
+
+仅检查 Rust 侧（含单测）：
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+联调无需真实 LLM 时，以 Rust 慢测试为准（`cargo test --manifest-path src-tauri/Cargo.toml -- --ignored`，
+`runtime.rs` 的 `real_rpc_*` 用真实 `omp` 做回环）。
+
+## 贡献方向
+
+- 按版本规划推进（见 [`docs/roadmap.md`](docs/roadmap.md)）：0.1.0 形态收敛 → 0.2.0 聊天对标 → 0.3.0 设置重构
+- 当前主战场：对照 [`docs/v1-schedule.md`](docs/v1-schedule.md) 的删除 / 迁移清单做形态收敛
+- Windows / Linux 打包验证
+- 文档与翻译
+
+明确不做（请勿提交）：编辑器 / 文件树 / 内置浏览器 / SSH / 移动端 / PR 集成、
+分屏与多窗口、worktree 生命周期管理、云同步 / 定时任务、终端形态的新功能
+（终端形态按 0.1.0 规划退场）。
+
+## 提交约定
+
+- 中文描述，一事一 PR；UI 变更请附截图；架构变更请同步 `AGENTS.md` 与 `docs/`。
+- 禁止事项：不新增伪实时轮询（实时性走事件通道或既有轮询口径）；前端不自算 token 用量；
+  会话改名走 omp 原生能力（`set_session_name` / `/rename`），壳侧不留本地覆盖。
+- 组件命名与视觉以 [`design-system/MASTER.md`](design-system/MASTER.md) §4 为准，禁止同义重复组件。
+- 不得提交密钥、Token、私钥、签名证书与个人路径（见 [SECURITY.md](SECURITY.md)）。
+
+## 行为准则
+
+请遵守 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)（Contributor Covenant 2.1 中文简述版）。

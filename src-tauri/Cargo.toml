@@ -1,0 +1,40 @@
+[package]
+name = "omp-mini-desktop"
+version = "0.1.0"
+description = "oh-my-pi 极简桌面端"
+authors = ["ompMiniDesktop"]
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "omp_mini_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "json"] }
+portable-pty = "0.9"
+libc = "0.2"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "io-util", "sync", "time"] }
+walkdir = "2"
+chrono = { version = "0.4", features = ["serde"] }
+tauri-plugin-notification = "2.5.1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
+[dev-dependencies]
+# 真机 RPC 冒烟测试（runtime.rs 的 `real_rpc_*`，默认 `--ignored`）：mock app 提供
+# AppHandle，不需要真实窗口；见 modules 测试模块的说明。
+tauri = { version = "2", features = ["test"] }

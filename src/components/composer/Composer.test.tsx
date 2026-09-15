@@ -1,0 +1,387 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SessionView } from "@shared/types";
+import { useApp } from "../../stores/app";
+
+/**
+ * Composer 三件事：
+ * 1. 工具行的「上下文容量环」位置（2026-10-12 与顶栏右端的供应商用量键互换）；
+ * 2. 发送语义（V39，对齐 omp 终端与 codex）：流式中 Enter = 插话（steer）、Tab / ⌘Ctrl+Enter = 排队
+ *    （follow_up；运行中工具行的「排队」按钮 2026-10-13 按用户口径退场）；
+ * 3. V40 增量：Shift+Tab 执行模式循环、Esc 中断还原队列、待发区 = 队列真值（撤回 / 编辑 / 提升）、
+ *    壳本地命令拦截（/goal /status …不进 omp）。
+ */
+
+/** 发送语义要断言 IPC 参数：spy 替身；其余命令给最小可用返回值。 */
+const { apiMock } = vi.hoisted(() => ({
+ apiMock: {
+  sendMessage: vi.fn(async (_sid: string, _text: string, _images?: unknown) => undefined),
+  steerMessage: vi.fn(async (_sid: string, _text: string, _images?: unknown) => undefined),
+  followUpMessage: vi.fn(async (_sid: string, _text: string, _images?: unknown) => undefined),
+  runSlash: vi.fn(async (_sid: string, _cmd: string) => undefined),
+  stop: vi.fn(async (_sid: string) => undefined),
+  checkPaths: vi.fn(async (_base: string, _paths: string[]) => []),
+  completePath: vi.fn(async (_base: string, _prefix: string) => []),
+  removeQueuedMessage: vi.fn(async () => ({ removed: true })),
+  promoteQueuedMessage: vi.fn(async () => ({ promoted: true })),
+  abortAndRestoreQueue: vi.fn(async () => ({ steering: [] as { text: string }[], followUp: [] as { text: string }[] })),
+  setSessionApproval: vi.fn(async (_id: string, _mode: string) => undefined),
+  getGlobalApproval: vi.fn(async () => "write"),
+  restartSessionRuntime: vi.fn(async () => null),
+  goalCommand: vi.fn(async (_id: string, _op: string, _obj?: string) => ({ goal: null, state: null })),
+  forkSession: vi.fn(async () => null),
+  savePaste: vi.fn(async (_text: string) => ({ path: "/tmp/paste/paste-1.txt" })),
+  setFastMode: vi.fn(async (_id: string, _on: boolean) => ({ enabled: true, active: true })),
+  setSlowMode: vi.fn(async (_id: string, _on: boolean) => ({ enabled: true })),
+  exportSessionHtml: vi.fn(async (_id: string) => ({ path: "/tmp/demo/omp-session-x.html" })),
+  runBash: vi.fn(async (_id: string, _cmd: string) => ({
+   exitCode: 0,
+   cancelled: false,
+   workingDir: "/tmp/demo",
+   output: "hello-shell\n",
+   truncated: false,
+   outputLines: 1,
+   totalLines: 1,
+  })),
+ },
+}));
+vi.mock("@shared/api", () => ({
+ api: new Proxy(apiMock, { get: (t, k) => (k in t ? (t as Record<string, unknown>)[k as string] : async () => null) }),
+}));
+
+const { openerMock } = vi.hoisted(() => ({ openerMock: { openPath: vi.fn(async () => undefined) } }));
+vi.mock("@tauri-apps/plugin-opener", () => openerMock);
+
+import { Composer } from "./Composer";
+import { pushHistory } from "../../lib/promptHistory";
+
+const actEnv = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+actEnv.IS_REACT_ACT_ENVIRONMENT = true;
+
+let container: HTMLDivElement;
+let root: Root;
+
+const session = (over: Partial<SessionView> = {}): SessionView => ({
+ id: "s1",
+ projectId: null,
+ title: "聊一聊",
+ cwd: "/w/alpha",
+ timestamp: 0,
+ archived: false,
+ corrupt: false,
+ note: null,
+ running: false,
+ ...over,
+});
+
+beforeEach(() => {
+ vi.clearAllMocks();
+ useApp.setState({
+  sessions: [],
+  projects: [],
+  activeSessionId: null,
+  eventsBySession: {},
+  statusBySession: {},
+  drafts: {},
+  attachmentsBySession: {},
+  queuedBySession: {},
+  goalBySession: {},
+  sessionApprovals: {},
+  approvalRestartBySession: {},
+  globalApproval: "write",
+  statsOpen: false,
+  findOpen: false,
+  currentRuntime: null,
+  composerMenu: null,
+  locale: "zh-CN",
+ });
+ container = document.createElement("div");
+ document.body.append(container);
+ root = createRoot(container);
+});
+
+afterEach(() => {
+ act(() => root.unmount());
+ container.remove();
+});
+
+/** 挂载一个带草稿「你好」的会话（running 决定流式 / 就绪）。 */
+const mount = async (running: boolean) => {
+ useApp.setState({
+  sessions: [session()],
+  activeSessionId: "s1",
+  statusBySession: running ? { s1: { state: "running" } } : {},
+  drafts: { s1: "你好" },
+ });
+ act(() => root.render(<Composer />));
+ await act(async () => { });
+ return container.querySelector<HTMLTextAreaElement>("textarea");
+};
+
+const press = async (el: HTMLElement | null, init: KeyboardEventInit) => {
+ expect(el).not.toBeNull();
+ await act(async () => {
+  el!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
+ });
+};
+
+describe("Composer 工具行", () => {
+ it("渲染上下文容量环并可点开分项面板；供应商用量键已换到顶栏", async () => {
+  useApp.setState({
+   sessions: [session()],
+   activeSessionId: "s1",
+   currentRuntime: {
+    model: null,
+    efforts: null,
+    thinkingLevel: null,
+    contextUsage: { tokens: 1300, contextWindow: 10000, percent: 13 },
+   },
+  });
+  act(() => root.render(<Composer />));
+  await act(async () => { });
+  const meter = container.querySelector<HTMLButtonElement>('button[aria-label^="上下文容量"]');
+  expect(meter?.textContent).toBe("13%");
+  expect(container.querySelector('button[aria-label="供应商用量"]')).toBeNull();
+  act(() => meter?.click());
+  expect(useApp.getState().composerMenu).toBe("context");
+  await act(async () => { });
+ });
+});
+
+describe("Composer 发送语义（V39/V40：对齐 omp 终端与 codex）", () => {
+ it("流式中 Enter = 插话：steer_message + 草稿清空（队列展示由 queue_update 驱动）", async () => {
+  const ta = await mount(true);
+  await press(ta, { key: "Enter" });
+  expect(apiMock.steerMessage).toHaveBeenCalledTimes(1);
+  expect(apiMock.steerMessage.mock.calls[0][0]).toBe("s1");
+  expect(apiMock.steerMessage.mock.calls[0][1]).toBe("你好");
+  expect(apiMock.followUpMessage).not.toHaveBeenCalled();
+  expect(useApp.getState().drafts["s1"]).toBe("");
+ });
+
+ it("流式中 Tab = 排队（codex 的 Tab to queue）；Shift+Tab = 执行模式循环", async () => {
+  const ta = await mount(true);
+  await press(ta, { key: "Tab" });
+  expect(apiMock.followUpMessage).toHaveBeenCalledTimes(1);
+  expect(apiMock.followUpMessage.mock.calls[0][1]).toBe("你好");
+  // 新一轮：Shift+Tab 走执行模式循环（V40），不排队；running 时挂起重启、不立即重启
+  vi.clearAllMocks();
+  useApp.setState({ drafts: { s1: "再来" } });
+  await press(ta, { key: "Tab", shiftKey: true });
+  expect(apiMock.followUpMessage).not.toHaveBeenCalled();
+  expect(apiMock.setSessionApproval).toHaveBeenCalledWith("s1", "yolo");
+  expect(useApp.getState().approvalRestartBySession["s1"]).toBe(true);
+  expect(apiMock.restartSessionRuntime).not.toHaveBeenCalled();
+ });
+
+ it("Shift+Tab 在就绪时立即重启 runtime 生效（执行模式是启动参数）", async () => {
+  const ta = await mount(false);
+  await press(ta, { key: "Tab", shiftKey: true });
+  expect(apiMock.setSessionApproval).toHaveBeenCalledWith("s1", "yolo");
+  expect(apiMock.restartSessionRuntime).toHaveBeenCalledWith("s1");
+ });
+
+ it("运行中工具行不再渲染「排队」按钮（2026-10-13 用户口径）：排队只走 Tab / ⌘Ctrl+Enter，停止键照旧", async () => {
+  await mount(true);
+  expect(container.querySelector('button[aria-label="排队追问（本轮后执行）"]')).toBeNull();
+  expect(container.querySelector('button[aria-label="停止"]')).not.toBeNull();
+  expect(apiMock.followUpMessage).not.toHaveBeenCalled();
+ });
+
+ it("发送失败：草稿还回来", async () => {
+  apiMock.followUpMessage.mockRejectedValueOnce(new Error("boom"));
+  const ta = await mount(true);
+  await press(ta, { key: "Tab" });
+  expect(useApp.getState().drafts["s1"]).toBe("你好");
+ });
+
+ it("就绪时：Tab 不发送（照常移焦），Enter 走普通 send_message", async () => {
+  const ta = await mount(false);
+  await press(ta, { key: "Tab" });
+  expect(apiMock.followUpMessage).not.toHaveBeenCalled();
+  expect(apiMock.steerMessage).not.toHaveBeenCalled();
+  await press(ta, { key: "Enter" });
+  expect(apiMock.sendMessage).toHaveBeenCalledTimes(1);
+  expect(apiMock.sendMessage.mock.calls[0][0]).toBe("s1");
+  // 乐观回显：消息流里立刻有一条用户消息
+  expect((useApp.getState().eventsBySession["s1"] ?? []).some((m) => m.kind === "user")).toBe(true);
+ });
+
+ it("Esc = 中断并交还队列：返回的插话 / 排队文本回输入框", async () => {
+  apiMock.abortAndRestoreQueue.mockResolvedValueOnce({
+   steering: [{ text: "插话一" }],
+   followUp: [{ text: "排队二" }],
+  });
+  const ta = await mount(true);
+  act(() => useApp.setState({ drafts: { s1: "" } }));
+  await act(async () => { });
+  await press(ta, { key: "Escape" });
+  expect(apiMock.abortAndRestoreQueue).toHaveBeenCalledWith("s1");
+  expect(useApp.getState().drafts["s1"]).toBe("插话一\n\n排队二");
+ });
+
+ it("待发区 = 队列真值：渲染 + 撤回 / 编辑 / 提升三个操作", async () => {
+  useApp.setState({
+   sessions: [session()],
+   activeSessionId: "s1",
+   drafts: { s1: "" },
+   queuedBySession: { s1: { steering: ["先看一眼日志"], followUp: ["再跑测试"] } },
+  });
+  act(() => root.render(<Composer />));
+  await act(async () => { });
+  const lis = container.querySelectorAll('[role="status"] li');
+  expect(lis).toHaveLength(2);
+  expect(lis[0].textContent).toContain("插话");
+  expect(lis[0].textContent).toContain("先看一眼日志");
+  expect(lis[1].textContent).toContain("排队");
+  expect(lis[1].textContent).toContain("再跑测试");
+  // 排队行有「提升」（followUp → steering），插话行没有
+  expect(lis[0].querySelector('button[aria-label="提升为插话（下一个边界生效）"]')).toBeNull();
+  const promote = lis[1].querySelector<HTMLButtonElement>('button[aria-label="提升为插话（下一个边界生效）"]');
+  expect(promote).not.toBeNull();
+  await act(async () => {
+   promote!.click();
+  });
+  expect(apiMock.promoteQueuedMessage).toHaveBeenCalledWith("s1", "再跑测试");
+  // 编辑 = 撤回 + 退回输入框
+  const edit = lis[0].querySelector<HTMLButtonElement>('button[aria-label="编辑这条（退回输入框）"]');
+  await act(async () => {
+   edit!.click();
+  });
+  expect(apiMock.removeQueuedMessage).toHaveBeenCalledWith("s1", "先看一眼日志", "steering");
+  expect(useApp.getState().drafts["s1"]).toBe("先看一眼日志");
+  // 撤回
+  const remove = lis[1].querySelector<HTMLButtonElement>('button[aria-label="撤回这条"]');
+  await act(async () => {
+   remove!.click();
+  });
+  expect(apiMock.removeQueuedMessage).toHaveBeenCalledWith("s1", "再跑测试", "followUp");
+ });
+
+ it("壳本地命令：/goal 走 goalCommand（不进 omp），/status 开统计弹窗", async () => {
+  const ta = await mount(false);
+  act(() => useApp.setState({ drafts: { s1: "/goal 修好所有类型错误" } }));
+  await act(async () => { });
+  await press(ta, { key: "Enter" });
+  expect(apiMock.goalCommand).toHaveBeenCalledWith("s1", "create", "修好所有类型错误");
+  expect(apiMock.runSlash).not.toHaveBeenCalled();
+  act(() => useApp.setState({ drafts: { s1: "/status" } }));
+  await act(async () => { });
+  await press(ta, { key: "Enter" });
+  expect(useApp.getState().statsOpen).toBe(true);
+  expect(apiMock.runSlash).not.toHaveBeenCalled();
+ });
+
+ it("非本地命令仍走 run_slash（omp 命令面）", async () => {
+  const ta = await mount(false);
+  act(() => useApp.setState({ drafts: { s1: "/compact" } }));
+  await act(async () => { });
+  await press(ta, { key: "Enter" });
+  expect(apiMock.runSlash).toHaveBeenCalledWith("s1", "/compact");
+ });
+});
+
+describe("Composer 历史浏览（V41，codex 的 ↑↓ 调回）", () => {
+ it("↑ 调出最近一条，再 ↑/↓ 浏览，↓ 到底还原浏览前草稿", async () => {
+  localStorage.removeItem("omp.promptHistory.v1");
+  pushHistory("s1", "第一条");
+  pushHistory("s1", "第二条");
+  const ta = await mount(false);
+  act(() => useApp.setState({ drafts: { s1: "" } }));
+  await act(async () => { });
+  ta!.setSelectionRange(0, 0);
+  await press(ta, { key: "ArrowUp" });
+  expect(useApp.getState().drafts["s1"]).toBe("第二条");
+  await press(ta, { key: "ArrowUp" });
+  expect(useApp.getState().drafts["s1"]).toBe("第一条");
+  // 到顶再 ↑ 不动
+  await press(ta, { key: "ArrowUp" });
+  expect(useApp.getState().drafts["s1"]).toBe("第一条");
+  await press(ta, { key: "ArrowDown" });
+  expect(useApp.getState().drafts["s1"]).toBe("第二条");
+  await press(ta, { key: "ArrowDown" });
+  expect(useApp.getState().drafts["s1"]).toBe(""); // 还原浏览前的空草稿
+ });
+
+ it("光标在中间时 ↑ 不接管（多行编辑照常）", async () => {
+  localStorage.removeItem("omp.promptHistory.v1");
+  pushHistory("s1", "旧文本");
+  const ta = await mount(false);
+  act(() => useApp.setState({ drafts: { s1: "第一行\n第二行" } }));
+  await act(async () => { });
+  ta!.setSelectionRange(3, 3);
+  await press(ta, { key: "ArrowUp" });
+  expect(useApp.getState().drafts["s1"]).toBe("第一行\n第二行");
+ });
+
+ it("发送成功后进历史（localStorage 落盘）", async () => {
+  localStorage.removeItem("omp.promptHistory.v1");
+  const ta = await mount(false);
+  await press(ta, { key: "Enter" });
+  const raw = localStorage.getItem("omp.promptHistory.v1");
+  expect(raw).not.toBeNull();
+  expect((JSON.parse(raw!) as Record<string, string[]>).s1).toContain("你好");
+ });
+});
+
+describe("Composer V41：大段粘贴 / fast·slow / 导出", () => {
+ const pasteText = async (el: HTMLElement, text: string) => {
+  const ev = new Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(ev, "clipboardData", { value: { files: [], getData: () => text } });
+  await act(async () => {
+   el.dispatchEvent(ev);
+  });
+ };
+
+ it("大段粘贴转文件引用：save_paste + 草稿插入 @路径", async () => {
+  const ta = await mount(false);
+  act(() => useApp.setState({ drafts: { s1: "" } }));
+  await act(async () => { });
+  await pasteText(ta!, "长".repeat(3000));
+  expect(apiMock.savePaste).toHaveBeenCalledTimes(1);
+  expect(apiMock.savePaste.mock.calls[0][0]).toHaveLength(3000);
+  expect(useApp.getState().drafts["s1"]).toBe("@/tmp/paste/paste-1.txt ");
+ });
+
+ it("短文本粘贴不拦截（不调 save_paste）", async () => {
+  const ta = await mount(false);
+  await pasteText(ta!, "短文本");
+  expect(apiMock.savePaste).not.toHaveBeenCalled();
+ });
+
+ it("/fast 与 /slow：toggle 走 IPC；返回命令行走流尾", async () => {
+  const ta = await mount(false);
+  act(() => useApp.setState({ drafts: { s1: "/fast" } }));
+  await act(async () => { });
+  await press(ta, { key: "Enter" });
+  expect(apiMock.setFastMode).toHaveBeenCalledWith("s1", true);
+  act(() => useApp.setState({ drafts: { s1: "/slow on" } }));
+  await act(async () => { });
+  await press(ta, { key: "Enter" });
+  expect(apiMock.setSlowMode).toHaveBeenCalledWith("s1", true);
+ });
+
+ it("/export：导出会话并交给系统打开", async () => {
+  const ta = await mount(false);
+  act(() => useApp.setState({ drafts: { s1: "/export" } }));
+  await act(async () => { });
+  await press(ta, { key: "Enter" });
+  expect(apiMock.exportSessionHtml).toHaveBeenCalledWith("s1");
+  expect(openerMock.openPath).toHaveBeenCalledWith("/tmp/demo/omp-session-x.html");
+  const body = (useApp.getState().eventsBySession["s1"] ?? []).map((m) => (m.kind === "command" ? m.output : "")).join("\n");
+  expect(body).toContain("/tmp/demo/omp-session-x.html");
+ });
+
+ it("! 前缀 = 本地 shell：命令行 + 输出各落一条流尾 command 行", async () => {
+  const ta = await mount(false);
+  act(() => useApp.setState({ drafts: { s1: "! echo hello-shell" } }));
+  await act(async () => { });
+  await press(ta, { key: "Enter" });
+  expect(apiMock.runBash).toHaveBeenCalledWith("s1", "echo hello-shell");
+  const body = (useApp.getState().eventsBySession["s1"] ?? []).map((m) => (m.kind === "command" ? m.output : "")).join("\n");
+  expect(body).toContain("$ echo hello-shell");
+  expect(body).toContain("hello-shell");
+ });
+});

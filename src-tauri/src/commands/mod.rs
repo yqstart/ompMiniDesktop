@@ -1,0 +1,3228 @@
+use serde::Serialize;
+use std::{collections::HashMap, future::Future, path::PathBuf};
+use tokio::sync::Mutex;
+use tauri::{AppHandle, Emitter, Manager, State};
+
+use crate::{overlay::*, session_scan::*};
+
+pub struct AppState {
+    pub overlay_path: PathBuf,
+    pub overlay: Mutex<Overlay>,
+    pub agent_dir: Mutex<PathBuf>,
+    pub omp_path: Mutex<Option<String>>,
+    pub omp_version: Mutex<Option<String>>,
+    pub models_cache: Mutex<Option<(i64, serde_json::Value)>>,
+    /// 模型目录拉取的**单飞锁**：`omp models --json` 实测 2–10s（上游要拉各供应商的
+    /// 模型列表，抖动大），而读取方有四个（启动预取 / 健康检查 / 供应商页 / 模型页）
+    /// ——必须共用同一次拉取（见 [`load_catalog`]）。
+    pub models_fetch: Mutex<()>,
+    /// 进行中的供应商登录（同一时刻只允许一个）。
+    pub login: std::sync::Arc<Mutex<Option<crate::providers::LoginSession>>>,
+    /// 最近一次登录的进度快照（切走设置页再回来时用它补齐，见 `providers.rs`）。
+    pub login_status: std::sync::Arc<Mutex<crate::providers::LoginStatus>>,
+    /// 模型角色「读 → 改 → 写」的串行锁：`modelRoles` 是 record，只能整表写回，
+    /// 两次并发编辑不加锁会互相覆盖（丢键）。
+    pub roles_edit: Mutex<()>,
+    /// 失败转移链（`retry.fallbackChains`）的同类锁：record 也只能整表写回。
+    pub retry_edit: Mutex<()>,
+    /// 自定义模型配置（`models.yml`）的读写锁：写入含「预校验 + 备份 + 替换」多步，
+    /// 并发保存会互相覆盖（见 `models_config.rs`）。
+    pub models_edit: Mutex<()>,
+    /// 扩展（设置 ›「插件」/「技能」）写操作的串行锁：插件 install / uninstall 会动
+    /// 同一个插件目录与 lock 文件；技能的 `disabledExtensions` 是读-改-写同一份 config.yml
+    /// （见 `plugins.rs` / `skills.rs`）。能力少、争用低，共用一个锁就够。
+    pub extensions_edit: Mutex<()>,
+    /// 聊天形态（V32 恢复自 V1–V10）：per-会话长驻 `omp --mode rpc-ui` 进程表（见 `runtime.rs`）。
+    pub runtime: crate::runtime::RuntimeMap,
+    /// 会话 id → 是否有长驻进程（列表行「运行中」标记；进程退出 / kill 时移除）。
+    pub running: Mutex<HashMap<String, bool>>,
+    /// V11 终端工作区：per-终端 `omp` TUI 进程表（PTY，见 `pty.rs`）。
+    pub pty: crate::pty::PtyMap,
+    /// V14 工作区「提交并推送」：cwd → 任务句柄（同一工作区拒绝重入，不同工作区可并行，
+    /// 见 `git_commit.rs`）。
+    pub commit_tasks: crate::git_commit::CommitMap,
+    /// V24 omp 运行时更新：**全局单槽**任务句柄（一台机器只有一份 omp 安装，两次更新互斥；
+    /// 见 `omp_update.rs`）。
+    pub omp_update_task: crate::omp_update::UpdateSlot,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CmdError {
+    pub ok: bool,
+    pub code: String,
+    pub message: String,
+    pub hint: Option<String>,
+}
+
+pub fn cmd_err(code: &str, message: String, hint: Option<String>) -> CmdError {
+    CmdError { ok: false, code: code.into(), message, hint }
+}
+
+pub(crate) fn save_overlay(state: &State<AppState>) -> Result<(), String> {
+    let text = {
+        let ov = state.overlay.try_lock().map_err(|_| "overlay 忙，请重试".to_string())?;
+        serde_json::to_string_pretty(&*ov).map_err(|e| e.to_string())?
+    };
+    if let Some(parent) = state.overlay_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let tmp = state.overlay_path.with_extension("tmp");
+    std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &state.overlay_path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn load_overlay(path: &std::path::Path) -> (Overlay, bool) {
+    let Ok(text) = std::fs::read_to_string(path) else { return (Overlay::default(), false) };
+    let Ok(v) = serde_json::from_str::<Overlay>(&text) else {
+        let bak = path.with_extension("bak");
+        let _ = std::fs::copy(path, &bak);
+        return (Overlay::default(), true);
+    };
+    v.normalize()
+}
+
+// ---------- omp 定位 ----------
+
+fn run_cmd(file: &str, args: &[&str]) -> Result<String, String> {
+    let out = std::process::Command::new(file)
+        .args(args)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+pub fn discover_omp_path(state: &State<AppState>) -> Option<String> {
+    if let Ok(ov) = state.overlay.try_lock() {
+        if let Some(p) = ov.omp_path.as_ref() {
+            if std::path::Path::new(p).is_file() {
+                return Some(p.clone());
+            }
+        }
+    }
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    if let Ok(out) = run_cmd(&shell, &["-ilc", "command -v omp"]) {
+        if let Some(found) = out.lines().map(str::trim).filter(|l| l.starts_with('/')).last() {
+            if std::path::Path::new(found).is_file() {
+                return Some(found.to_string());
+            }
+        }
+    }
+    for c in ["/opt/homebrew/bin/omp", "/usr/local/bin/omp"] {
+        if std::path::Path::new(c).is_file() {
+            return Some(c.to_string());
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let p = format!("{home}/.local/bin/omp");
+        if std::path::Path::new(&p).is_file() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OmpInfo {
+    #[serde(rename = "ompPath")]
+    pub omp_path: Option<String>,
+    #[serde(rename = "ompVersion")]
+    pub omp_version: Option<String>,
+    #[serde(rename = "agentDir")]
+    pub agent_dir: String,
+    pub errors: Vec<String>,
+}
+
+/// 后端工具函数：解析一次 omp 定位与版本（不触碰 State，供 Tauri commands 与内部调用共用）。
+/// 必须 anyhow 化：任何失败都返回 Err(String)，调用方自行决定降级。
+fn probe_omp(bin: &str) -> Result<(Option<String>, std::path::PathBuf, Vec<String>), String> {
+    let mut errors = vec![];
+    let mut version = None;
+    match run_cmd(bin, &["--version"]) {
+        Ok(out) => {
+            let text = out.trim().to_string();
+            version = text.split_whitespace().next().map(|s| s.trim_start_matches("omp/").to_string()).or(Some(text));
+        }
+        Err(e) => errors.push(format!("omp --version 失败：{e}")),
+    }
+    let mut agent_dir = resolve_agent_dir(None);
+    match run_cmd(bin, &["config", "path"]) {
+        Ok(out) => {
+            agent_dir = resolve_agent_dir(Some(out));
+        }
+        Err(e) => errors.push(format!("omp config path 失败：{e}")),
+    }
+    Ok((version, agent_dir, errors))
+}
+
+#[tauri::command]
+pub async fn locate_omp(state: State<'_, AppState>) -> Result<OmpInfo, CmdError> {
+    let resolved = discover_omp_path(&state);
+    let (mut version, mut agent_dir, mut errors) = (None, resolve_agent_dir(None), vec![]);
+    if let Some(ref p) = resolved {
+        match probe_omp(p) {
+            Ok((v, dir, errs)) => {
+                version = v;
+                agent_dir = dir;
+                errors = errs;
+            }
+            Err(e) => errors.push(e),
+        }
+    } else {
+        errors.push("未找到 omp 可执行文件，请安装 oh-my-pi 或手动指定路径".into());
+    }
+    *state.omp_path.lock().await = resolved.clone();
+    *state.omp_version.lock().await = version.clone();
+    *state.agent_dir.lock().await = agent_dir.clone();
+    Ok(OmpInfo {
+        omp_path: resolved,
+        omp_version: version,
+        agent_dir: agent_dir.to_string_lossy().to_string(),
+        errors,
+    })
+}
+
+#[tauri::command]
+pub async fn set_omp_path(state: State<'_, AppState>, path: Option<String>) -> Result<OmpInfo, CmdError> {
+    if let Ok(mut ov) = state.overlay.try_lock() {
+        ov.omp_path = path;
+    }
+    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+    locate_omp(state).await
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HealthInfo {
+    pub omp: OmpInfo,
+    #[serde(rename = "modelsError")]
+    pub models_error: Option<String>,
+    pub ok: bool,
+}
+
+#[tauri::command]
+pub async fn get_health(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<HealthInfo, CmdError> {
+    let omp = locate_omp(state.clone()).await?;
+    let mut models_error = None;
+    if omp.omp_path.is_some() {
+        // 目录走缓存（SWR）：健康检查的职责是「omp 能不能用」，不该每次重拉目录——
+        // `omp models --json` 实测 2–10s，这是启动慢与「重新检测」慢的主要来源。
+        if let Err(e) = catalog_swr(&state, &app).await {
+            models_error = Some(format!("模型目录加载失败：{}", e.message));
+        }
+    } else {
+        models_error = Some("未找到 omp，无法加载模型目录".into());
+    }
+    let ok = omp.omp_path.is_some() && models_error.is_none();
+    Ok(HealthInfo { omp, models_error, ok })
+}
+
+// ---------- overlay ----------
+
+#[tauri::command]
+pub async fn get_overlay(state: State<'_, AppState>) -> Result<Overlay, CmdError> {
+    Ok(state.overlay.lock().await.clone())
+}
+
+// ---------- 模型目录（唯一读取入口） ----------
+
+/// 模型目录（`omp models --json`）的缓存有效期：过期后由读取方顺带**后台**刷新
+/// （stale-while-revalidate），只有从未拉过时才阻塞等待。
+pub const MODELS_TTL_MS: i64 = 5 * 60_000;
+/// 目录快照刷新完成的事件通道（payload = `{models, fetchedAt}` 目录快照）。
+/// 冷启动 / 后台刷新完成后广播——已挂载的设置页据此在原地换成新目录，不必自己轮询重拉。
+pub const MODELS_EVENT: &str = "omp-models://catalog";
+
+/// 快照是否仍在有效期内（纯函数，单测锁着）。
+pub fn catalog_fresh(at: i64, now: i64) -> bool {
+    now - at < MODELS_TTL_MS
+}
+
+/// 单飞 + SWR 的缓存读取核心（与 Tauri 解耦，单测锁着；[`load_catalog`] 是它的一个实例）。
+///
+/// - `force = false`：缓存新鲜（< `ttl_ms`）直接命中；过期才考虑真拉。
+/// - 需要真拉的路径都先抢 `lock`（**单飞**）：等锁后二次检查——若缓存时间戳晚于本次请求
+///   起点（别人刚拉完），直接复用，**不重复拉**。
+pub(crate) async fn load_cached<T, E, F, Fut>(
+    cache: &Mutex<Option<(i64, T)>>,
+    lock: &Mutex<()>,
+    force: bool,
+    ttl_ms: i64,
+    fetch: F,
+) -> Result<T, E>
+where
+    T: Clone,
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+{
+    let started = chrono::Utc::now().timestamp_millis();
+    if !force {
+        if let Some((at, v)) = cache.lock().await.clone() {
+            if started - at < ttl_ms {
+                return Ok(v);
+            }
+        }
+    }
+    let _guard = lock.lock().await;
+    if let Some((at, v)) = cache.lock().await.clone() {
+        // 等锁期间别人拉过：更新的（或仍然新鲜的）快照直接用，不再重复拉
+        if at >= started || (!force && chrono::Utc::now().timestamp_millis() - at < ttl_ms) {
+            return Ok(v);
+        }
+    }
+    let v = fetch().await?;
+    *cache.lock().await = Some((chrono::Utc::now().timestamp_millis(), v.clone()));
+    Ok(v)
+}
+
+/// 模型目录的**唯一读取入口**（`get_models` / `refresh_models` / 健康检查 / 供应商页都走它）。
+///
+/// **为什么要单飞**：`omp models --json` 实测 2–10s（上游要拉各供应商的模型列表，抖动大），
+/// 没有单飞时四个读取方会各起一个进程（实测设置页里最多并发三个）——总延迟按最慢的算，
+/// CPU / 网络翻倍。
+///
+/// - `force = false`：快照新鲜（< [`MODELS_TTL_MS`]）直接命中；过期则真拉一次。
+/// - `force = true`（用户点「刷新」）：必拉；但等锁期间若别人刚拉完（快照时间戳晚于本次
+///   请求起点），直接用它——同一份数据不重复拉。
+pub async fn load_catalog(
+    state: &State<'_, AppState>,
+    app: &AppHandle,
+    force: bool,
+) -> Result<serde_json::Value, CmdError> {
+    load_cached(
+        &state.models_cache,
+        &state.models_fetch,
+        force,
+        MODELS_TTL_MS,
+        || async {
+            // omp 定位走 `discover_omp_path`（唯一入口：覆盖层 → 登录 shell → 常见路径），
+            // 而不是诊断状态里的 `state.omp_path`——那个只在 `locate_omp` 成功后才非空，
+            // 用它会让「诊断还没跑完 / 探测失败」连模型目录一起拖垮（供应商页与 ModelPicker 都会中招）。
+            let Some(p) = discover_omp_path(state) else {
+                return Err(cmd_err("OMP_MISSING", "未找到 omp，无法加载模型目录".into(), Some("请先安装 oh-my-pi".into())));
+            };
+            *state.omp_path.lock().await = Some(p.clone());
+            // 拉取最长可到 10s：`run_cmd` 是同步子进程，放 `spawn_blocking` 别占 tokio 工作线程
+            let out = tokio::task::spawn_blocking(move || run_cmd(&p, &["models", "--json"]))
+                .await
+                .map_err(|e| cmd_err("MODELS_FAILED", format!("模型目录加载失败：{e}"), Some("重试或检查网络".into())))?
+                .map_err(|e| cmd_err("MODELS_FAILED", format!("模型目录加载失败：{e}"), Some("重试或检查网络".into())))?;
+            let v: serde_json::Value =
+                serde_json::from_str(&out).map_err(|e| cmd_err("MODELS_PARSE", format!("模型目录解析失败：{e}"), None))?;
+            let catalog = serde_json::json!({
+                "models": v.get("models").cloned().unwrap_or(serde_json::Value::Array(vec![])),
+                "fetchedAt": chrono::Utc::now().timestamp_millis(),
+            });
+            // 广播新快照：设置页（模型 / 供应商）据此在原地更新，不必自己重拉
+            let _ = app.emit(MODELS_EVENT, &catalog);
+            Ok(catalog)
+        },
+    )
+    .await
+}
+
+/// SWR 读取：有快照立即返回（哪怕过期——过期时顺带起一次**后台**刷新，完成后广播事件）；
+/// 从未拉过才阻塞等待。
+///
+/// 给「目录是参考信息、不该拖慢页面」的调用方用（健康检查 / 供应商页的已配置标记）：
+/// `omp models --json` 2–10s，等它只会让页面白等。
+pub async fn catalog_swr(
+    state: &State<'_, AppState>,
+    app: &AppHandle,
+) -> Result<serde_json::Value, CmdError> {
+    let cached = state.models_cache.lock().await.clone();
+    match cached {
+        Some((at, v)) => {
+            if !catalog_fresh(at, chrono::Utc::now().timestamp_millis()) {
+                spawn_catalog_refresh(app);
+            }
+            Ok(v)
+        }
+        None => load_catalog(state, app, false).await,
+    }
+}
+
+/// 起一次后台目录刷新（不等待）。已有拉取在飞时，[`load_catalog`] 会等锁后直接复用结果。
+pub fn spawn_catalog_refresh(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let _ = load_catalog(&state, &app, false).await;
+    });
+}
+
+// ---------- 模型 ----------
+
+#[tauri::command]
+pub async fn get_models(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, CmdError> {
+    load_catalog(&state, &app, false).await
+}
+
+#[tauri::command]
+pub async fn refresh_models(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, CmdError> {
+    load_catalog(&state, &app, true).await
+}
+
+// ---------- 项目 ----------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectView {
+    pub id: String,
+    pub path: String,
+    pub name: String,
+    pub missing: bool,
+    #[serde(rename = "sessionCount")]
+    pub session_count: usize,
+    /// 所属工作区（V21）；null = 未分组。
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: Option<String>,
+}
+
+fn project_views(state: &State<AppState>) -> Vec<ProjectView> {
+    let (projects, sessions_root) = match (state.overlay.try_lock(), state.agent_dir.try_lock()) {
+        (Ok(ov), Ok(agent)) => (ov.projects.clone(), agent.join("sessions")),
+        _ => return vec![],
+    };
+    projects
+        .iter()
+        .map(|p| {
+            let name = std::path::Path::new(&p.path)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(&p.path)
+                .to_string();
+            let missing = !std::path::Path::new(&p.path).exists();
+            let count = count_sessions_for(&sessions_root, &p.path);
+            ProjectView { id: p.id.clone(), path: p.path.clone(), name, missing, session_count: count, workspace_id: p.workspace_id.clone() }
+        })
+        .collect()
+}
+
+fn count_sessions_for(root: &std::path::Path, project_path: &str) -> usize {
+    let mut n = 0;
+    let Ok(rd) = std::fs::read_dir(root) else { return 0 };
+    for entry in rd.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let Ok(files) = std::fs::read_dir(&dir) else { continue };
+        for f in files.flatten() {
+            let p = f.path();
+            if p.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                continue;
+            }
+            // 只读前 64KB 找 session.cwd
+            let Ok(text) = read_head_text(&p, 65536) else { continue };
+            for line in text.lines().take(40) {
+                let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+                if v.get("type").and_then(|t| t.as_str()) == Some("session") {
+                    let cwd = v.get("cwd").and_then(|c| c.as_str()).unwrap_or("");
+                    if project_of(cwd, &[project_path.to_string()]).is_some() {
+                        n += 1;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    n
+}
+
+fn read_head_text(p: &std::path::Path, limit: usize) -> std::io::Result<String> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(p)?;
+    let mut buf = vec![0u8; limit];
+    let n = f.read(&mut buf)?;
+    Ok(String::from_utf8_lossy(&buf[..n]).to_string())
+}
+
+#[tauri::command]
+pub async fn list_projects(state: State<'_, AppState>) -> Result<Vec<ProjectView>, CmdError> {
+    Ok(project_views(&state))
+}
+
+#[tauri::command]
+pub async fn add_project(state: State<'_, AppState>, path: String) -> Result<ProjectView, CmdError> {
+    let norm = normalize_path(&path);
+    let md = std::fs::metadata(&norm).map_err(|_| cmd_err("DIR_MISSING", "目录不存在，只能移除或重定位".into(), None))?;
+    if !md.is_dir() {
+        return Err(cmd_err("NOT_DIR", "所选路径不是目录".into(), None));
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        if normalize_path(&home) == norm {
+            return Err(cmd_err("HOME_ROOT", "不能把 $HOME 根目录作为项目".into(), None));
+        }
+    }
+    {
+        let mut ov = state.overlay.lock().await;
+        if let Some(exist) = ov.projects.iter().find(|p| normalize_path(&p.path) == norm) {
+            let id = exist.id.clone();
+            drop(ov);
+            return project_views(&state).into_iter().find(|v| v.id == id).ok_or(cmd_err("INTERNAL", "项目状态不一致".into(), None));
+        }
+        let id = format!("p{}", chrono::Utc::now().timestamp_millis());
+        ov.projects.push(Project { id: id.clone(), path: norm.clone(), added_at: chrono::Utc::now().timestamp_millis(), last_model: None, last_thinking: None, workspace_id: None });
+    }
+    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+    project_views(&state).into_iter().find(|v| v.path == norm).ok_or(cmd_err("INTERNAL", "项目状态不一致".into(), None))
+}
+
+#[tauri::command]
+pub async fn remove_project(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<(), CmdError> {
+    // 语义（对齐“删除工作区”）：仅解绑项目，不删任何会话文件；
+    // 该项目下全部会话标记归档保留（删后进“未归属会话”），备注/权限覆盖一并保留。
+    let proj_path = {
+        let ov = state.overlay.lock().await;
+        let Some(proj) = ov.projects.iter().find(|p| p.id == id) else {
+            return Err(cmd_err("NOT_FOUND", "项目不存在".into(), None));
+        };
+        proj.path.clone()
+    };
+    // 以后端扫描为准找该项目会话（读 jsonl 头 cwd 前缀匹配，不猜 slug）
+    let agent = state.agent_dir.lock().await.clone();
+    let sids = session_ids_for(&agent.join("sessions"), &proj_path);
+    // 聊天形态：该项目下的长驻会话进程先停（逐个通知 idle + kill_runtime，不阻塞落盘）
+    for sid in &sids {
+        let _ = app.emit(format!("omp-status://{sid}").as_str(), serde_json::json!({"state":"idle"}));
+        kill_runtime(&state, sid);
+    }
+    {
+        let mut ov = state.overlay.lock().await;
+        ov.projects.retain(|p| p.id != id);
+        for sid in sids {
+            ov.archived.insert(sid, true);
+        }
+    }
+    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+    Ok(())
+}
+
+fn session_ids_for(root: &std::path::Path, project_path: &str) -> Vec<String> {
+    let mut out = vec![];
+    let Ok(rd) = std::fs::read_dir(root) else { return out };
+    for entry in rd.flatten() {
+        let Ok(files) = std::fs::read_dir(entry.path()) else { continue };
+        for f in files.flatten() {
+            let p = f.path();
+            if p.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let head = parse_session_head(&p);
+            if !head.corrupt && project_of(&head.cwd, &[project_path.to_string()]).is_some() {
+                out.push(head.id);
+            }
+        }
+    }
+    out
+}
+
+#[tauri::command]
+pub async fn relocate_project(state: State<'_, AppState>, id: String, path: String) -> Result<ProjectView, CmdError> {
+    let norm = normalize_path(&path);
+    if !std::path::Path::new(&norm).is_dir() {
+        return Err(cmd_err("DIR_MISSING", "目录不存在，只能移除或重定位".into(), None));
+    }
+    {
+        let mut ov = state.overlay.lock().await;
+        let Some(p) = ov.projects.iter_mut().find(|p| p.id == id) else {
+            return Err(cmd_err("NOT_FOUND", "项目不存在".into(), None));
+        };
+        p.path = norm;
+    }
+    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+    project_views(&state).into_iter().find(|v| v.id == id).ok_or(cmd_err("INTERNAL", "项目状态不一致".into(), None))
+}
+
+// ---------- 目录行（V21：项目主目录 + git worktree；原「工作区行」） ----------
+
+/// 左栏目录行：项目主目录或它的一个 git worktree。
+///
+/// V21 起「工作区」指多项目容器（见下方 workspace 命令），这里改名为目录行；
+/// 字段与语义与旧 `WorkspaceView` 完全一致（只读展示，真相 = `git worktree list`）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckoutView {
+    #[serde(rename = "projectId")]
+    pub project_id: String,
+    #[serde(rename = "projectName")]
+    pub project_name: String,
+    /// 工作目录：主目录 = 项目路径；worktree = worktree 路径。
+    pub path: String,
+    /// 检出的分支；detached / 非 git 仓库为 null。
+    pub branch: Option<String>,
+    /// detached 时的短 sha（用于展示「游离」）。
+    pub head: Option<String>,
+    /// 主目录（项目本体）还是 worktree。
+    #[serde(rename = "isMain")]
+    pub is_main: bool,
+    /// 目录不存在（worktree 被手工删掉 / 项目目录被移走）。
+    pub missing: bool,
+}
+
+fn project_display_name(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path)
+        .to_string()
+}
+
+/// 左栏树数据源：每个项目 = 主目录行 + 该仓库的全部 worktree 行（只读展示）。
+///
+/// worktree 真相 = `git worktree list --porcelain`（手工 `git worktree add` 的也在），
+/// 而不是 `omp worktree list`（只登记 `~/.omp/wt` 下的）。
+#[tauri::command]
+pub async fn list_checkouts(state: State<'_, AppState>) -> Result<Vec<CheckoutView>, CmdError> {
+    let projects: Vec<(String, String, String)> = {
+        let ov = state.overlay.lock().await;
+        ov.projects.iter().map(|p| (p.id.clone(), p.path.clone(), project_display_name(&p.path))).collect()
+    };
+    let git = crate::git_info::git_bin().await;
+    let mut out: Vec<CheckoutView> = vec![];
+    for (id, path, name) in projects {
+        let missing = !std::path::Path::new(&path).is_dir();
+        let wts = match (&git, missing) {
+            (Some(g), false) => crate::git_info::list_worktrees(g, &path).await,
+            _ => vec![],
+        };
+        // 主目录行的分支取 porcelain 第一块（git 约定第一块是主 worktree）；
+        // 路径仍用项目自己的写法（git 回读的可能是 /private 归一后的形式）。
+        let main = wts.first();
+        out.push(CheckoutView {
+            project_id: id.clone(),
+            project_name: name.clone(),
+            path: path.clone(),
+            branch: main.and_then(|w| w.branch.clone()),
+            head: main.and_then(|w| w.head.clone()),
+            is_main: true,
+            missing,
+        });
+        for w in wts.iter().skip(1) {
+            if w.path == path || !std::path::Path::new(&w.path).is_dir() {
+                continue;
+            }
+            out.push(CheckoutView {
+                project_id: id.clone(),
+                project_name: name.clone(),
+                path: w.path.clone(),
+                branch: w.branch.clone(),
+                head: w.head.clone(),
+                is_main: false,
+                missing: false,
+            });
+        }
+    }
+    Ok(out)
+}
+
+// ---------- 工作区（V21：多项目容器） ----------
+
+/// 左栏工作区：多项目容器。成员关系存在 `Project.workspace_id` 上（唯一归属），
+/// 这里返回的 `project_ids` 按左栏顺序（`overlay.projects` 的数组顺序；V26 起可在左栏拖拽调整）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceView {
+    pub id: String,
+    pub name: String,
+    pub created_at: i64,
+    /// 成员项目 id；空组合法（先建组、后加项目）。
+    pub project_ids: Vec<String>,
+}
+
+fn workspace_views(ov: &Overlay) -> Vec<WorkspaceView> {
+    ov.workspaces
+        .iter()
+        .map(|w| WorkspaceView {
+            id: w.id.clone(),
+            name: w.name.clone(),
+            created_at: w.created_at,
+            project_ids: ov
+                .projects
+                .iter()
+                .filter(|p| p.workspace_id.as_deref() == Some(w.id.as_str()))
+                .map(|p| p.id.clone())
+                .collect(),
+        })
+        .collect()
+}
+
+/// 工作区名清洗：去首尾空白；内部换行 / 制表符折成空格（名字会进注入文本与左栏）。
+pub fn clean_workspace_name(raw: &str) -> String {
+    raw.chars()
+        .map(|c| if c == '\n' || c == '\r' || c == '\t' { ' ' } else { c })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+/// 成员重设：`project_ids` 里的项目设为工作区 `wid` 成员，其余原成员移出（回归未分组）。
+/// 不存在的项目 id 静默忽略（前端列表可能过期）；一个项目只会属于一个工作区——
+/// 若它原本在别的组里，归属直接改到本组。
+fn assign_members(ov: &mut Overlay, wid: &str, project_ids: &[String]) {
+    for p in &mut ov.projects {
+        if project_ids.iter().any(|id| id == &p.id) {
+            p.workspace_id = Some(wid.to_string());
+        } else if p.workspace_id.as_deref() == Some(wid) {
+            p.workspace_id = None;
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn list_workspaces(state: State<'_, AppState>) -> Result<Vec<WorkspaceView>, CmdError> {
+    let ov = state.overlay.lock().await;
+    Ok(workspace_views(&ov))
+}
+
+#[tauri::command]
+pub async fn create_workspace(
+    state: State<'_, AppState>,
+    name: String,
+    project_ids: Vec<String>,
+) -> Result<WorkspaceView, CmdError> {
+    let name = clean_workspace_name(&name);
+    if name.is_empty() {
+        return Err(cmd_err("BAD_ARG", "工作区名不能为空".into(), None));
+    }
+    let id = format!("w{}", chrono::Utc::now().timestamp_millis());
+    let view = {
+        let mut ov = state.overlay.lock().await;
+        ov.workspaces.push(Workspace { id: id.clone(), name, created_at: chrono::Utc::now().timestamp_millis() });
+        assign_members(&mut ov, &id, &project_ids);
+        workspace_views(&ov)
+            .into_iter()
+            .find(|w| w.id == id)
+            .ok_or_else(|| cmd_err("INTERNAL", "工作区状态不一致".into(), None))?
+    };
+    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+    Ok(view)
+}
+
+/// 一次写全：改名 + 成员重设（编辑对话框的两个字段同时提交）。
+/// 项目移出本组即回归未分组——不删项目、不动任何文件。
+#[tauri::command]
+pub async fn update_workspace(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+    project_ids: Vec<String>,
+) -> Result<(), CmdError> {
+    let name = clean_workspace_name(&name);
+    if name.is_empty() {
+        return Err(cmd_err("BAD_ARG", "工作区名不能为空".into(), None));
+    }
+    {
+        let mut ov = state.overlay.lock().await;
+        let Some(w) = ov.workspaces.iter_mut().find(|w| w.id == id) else {
+            return Err(cmd_err("NOT_FOUND", "工作区不存在".into(), None));
+        };
+        w.name = name;
+        assign_members(&mut ov, &id, &project_ids);
+    }
+    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+    Ok(())
+}
+
+/// 删组：成员项目回归未分组（不删项目、不删文件、不杀终端）。
+#[tauri::command]
+pub async fn delete_workspace(state: State<'_, AppState>, id: String) -> Result<(), CmdError> {
+    {
+        let mut ov = state.overlay.lock().await;
+        let before = ov.workspaces.len();
+        ov.workspaces.retain(|w| w.id != id);
+        if ov.workspaces.len() == before {
+            return Err(cmd_err("NOT_FOUND", "工作区不存在".into(), None));
+        }
+        for p in &mut ov.projects {
+            if p.workspace_id.as_deref() == Some(id.as_str()) {
+                p.workspace_id = None;
+            }
+        }
+    }
+    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+    Ok(())
+}
+
+/// 左栏拖拽落地（V26）：把一个项目移动到目标工作区（`workspace_id = None` = 未分组）并同步全局顺序。
+///
+/// `order` = 拖拽后的**全部项目 id 顺序**（左栏顺序 = 覆盖层 `projects` 的数组顺序）：
+/// 认不得的 id 忽略、缺席的项目按原相对顺序补到末尾——任何输入都不丢项目（前端传的是全量列表）。
+/// 归属与顺序一次写完：拖进 / 拖出工作区与组内排序是同一次操作的两个面。
+#[tauri::command]
+pub async fn move_project(
+    state: State<'_, AppState>,
+    id: String,
+    workspace_id: Option<String>,
+    order: Vec<String>,
+) -> Result<Vec<ProjectView>, CmdError> {
+    {
+        let mut ov = state.overlay.lock().await;
+        if !ov.projects.iter().any(|p| p.id == id) {
+            return Err(cmd_err("NOT_FOUND", "项目不存在".into(), None));
+        }
+        if let Some(w) = &workspace_id {
+            if !ov.workspaces.iter().any(|g| &g.id == w) {
+                return Err(cmd_err("NOT_FOUND", "工作区不存在".into(), None));
+            }
+        }
+        let projects = std::mem::take(&mut ov.projects);
+        let mut projects = apply_project_order(projects, &order);
+        if let Some(p) = projects.iter_mut().find(|p| p.id == id) {
+            p.workspace_id = workspace_id;
+        }
+        ov.projects = projects;
+    }
+    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+    Ok(project_views(&state))
+}
+
+/// 按 `order` 重排项目：认得的 id 按序在前，缺席的按原相对顺序补末尾（防御脏输入，不丢项目）。
+fn apply_project_order(projects: Vec<Project>, order: &[String]) -> Vec<Project> {
+    let mut rest = projects;
+    let mut out: Vec<Project> = Vec::with_capacity(rest.len());
+    for id in order {
+        if let Some(pos) = rest.iter().position(|p| p.id == *id) {
+            out.push(rest.remove(pos));
+        }
+    }
+    out.extend(rest);
+    out
+}
+
+/// 归属匹配集：项目路径 ∪ 其全部 worktree 路径（同 project id）。
+/// V11：终端工作区在 worktree 里开的会话（jsonl cwd = worktree 目录）必须归到所属项目——
+/// 否则会话弹窗与归档清单都看不见它们（掉进「未归属」）。
+pub async fn ownership_scope(projects: &[(String, String)]) -> Vec<(String, String)> {
+    let mut out = projects.to_vec();
+    let Some(git) = crate::git_info::git_bin().await else { return out };
+    for (id, path) in projects {
+        if !std::path::Path::new(path).is_dir() {
+            continue;
+        }
+        for wt in crate::git_info::list_worktrees(&git, path).await {
+            if !wt.main && !wt.path.is_empty() {
+                out.push((id.clone(), wt.path));
+            }
+        }
+    }
+    out
+}
+
+// ---------- 会话 ----------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionView {
+    pub id: String,
+    #[serde(rename = "projectId")]
+    pub project_id: Option<String>,
+    pub title: String,
+    pub cwd: String,
+    pub timestamp: i64,
+    pub archived: bool,
+    pub corrupt: bool,
+    pub note: Option<String>,
+    /// 是否有长驻聊天进程（V32；终端形态不看这个字段，聊天形态列表行标记「运行中」）。
+    pub running: bool,
+}
+
+/// 显示标题的兜底链：备注 > omp 真标题 > 首条用户消息派生的短标题 > 「未命名会话 MM-DD」。
+///
+/// 派生档（V44）：omp 在 `--mode rpc-ui` 下**关闭自动标题**（二进制实测
+/// `PI_NO_TITLE=1`，TUI 才有），聊天形态会话在壳侧补标题完成前一直是空标题——
+/// 派生标题让列表 / 顶栏立刻有可读名字（与前端 `fallbackTitleFromText` 同口径：
+/// 折叠空白、取前 12 字、超长加省略号）；omp 真标题（`/rename` / 用户改名）一到就顶掉它。
+fn display_title(note: Option<&String>, head_title: &str, first_user_text: Option<&str>, ts: i64) -> String {
+    if let Some(n) = note {
+        if !n.trim().is_empty() {
+            return n.clone();
+        }
+    }
+    if !head_title.trim().is_empty() {
+        return head_title.to_string();
+    }
+    if let Some(t) = first_user_text.and_then(derived_title) {
+        return t;
+    }
+    format!("未命名会话 {}", chrono::DateTime::from_timestamp_millis(ts).map(|d| d.format("%m-%d").to_string()).unwrap_or_default())
+}
+
+/// 首条用户消息 → 短标题（前 12 字 + 省略号；与前端 `fallbackTitleFromText` 同口径）。
+fn derived_title(text: &str) -> Option<String> {
+    let clean = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if clean.is_empty() {
+        return None;
+    }
+    if clean.chars().count() <= 12 {
+        return Some(clean);
+    }
+    Some(format!("{}…", clean.chars().take(12).collect::<String>()))
+}
+
+/// 会话列表分页（V2 M7a）：`totalFiles` = sessions 目录下的 jsonl 总数，
+/// `scannedFiles` = 本次真正解析头部的文件数（默认最近 500 个）。
+/// 前端据此显示「已扫描最近 N 个（共 M 个）」并允许继续加载更老的会话。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionPage {
+    pub sessions: Vec<SessionView>,
+    pub total_files: usize,
+    pub scanned_files: usize,
+}
+
+/// 扫描窗口：`limit` 默认 500、夹在 1..=5000；`offset` 无上限（超出即空窗口）。
+pub fn scan_window(limit: Option<usize>, offset: Option<usize>) -> (usize, usize) {
+    let limit = limit.unwrap_or(500).clamp(1, 5000);
+    (limit, offset.unwrap_or(0))
+}
+
+#[tauri::command]
+pub async fn list_sessions(
+    state: State<'_, AppState>,
+    project_id: Option<String>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> Result<SessionPage, CmdError> {
+    let ov = state.overlay.lock().await;
+    let agent = state.agent_dir.lock().await.clone();
+    let running = state.running.lock().await.clone();
+    let paths: Vec<(String, String)> = ov.projects.iter().map(|p| (p.id.clone(), p.path.clone())).collect();
+    // 只列某个项目的会话：按 id 过滤（归属已算成 id，不必再拿路径比一遍）
+    let only: Option<String> = project_id.filter(|pid| ov.projects.iter().any(|p| p.id == *pid));
+    drop(ov);
+    // 归属匹配集含工作区 worktree：在 worktree 里跑的会话也归到项目（V11）
+    let scope = ownership_scope(&paths).await;
+    let mut out: Vec<SessionView> = vec![];
+    // 损坏文件也列出（M1-1 要求可删）：按文件兜底一行
+    let root = agent.join("sessions");
+    // 规模保护（V2 M7a 起可分页）：sessions 目录按修改时间倒序取「窗口」再解析。
+    // 共享 agentDir / 长期使用后动辄上千个会话文件，逐个读头尾也会拖慢列表；
+    // 列表本来就按时间倒序展示，窗口外都是更老的会话——前端用 `scannedFiles/totalFiles`
+    // 告诉用户还有多少没扫，并按 500 递增重扫。
+    let (limit, offset) = scan_window(limit, offset);
+    let mut candidates: Vec<(std::time::SystemTime, PathBuf)> = vec![];
+    let Ok(rd) = std::fs::read_dir(&root) else {
+        return Ok(SessionPage { sessions: out, total_files: 0, scanned_files: 0 });
+    };
+    for entry in rd.flatten() {
+        let Ok(files) = std::fs::read_dir(entry.path()) else { continue };
+        for f in files.flatten() {
+            let p = f.path();
+            if p.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let mtime = f.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+            candidates.push((mtime, p));
+        }
+    }
+    let total_files = candidates.len();
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    if total_files > limit + offset {
+        eprintln!(
+            "[list_sessions] 共 {} 个会话文件，本次窗口 offset={} limit={}",
+            total_files, offset, limit
+        );
+    }
+    let window: Vec<(std::time::SystemTime, PathBuf)> =
+        candidates.into_iter().skip(offset).take(limit).collect();
+    let scanned_files = window.len();
+    for (_mtime, p) in window {
+        {
+            let head = parse_session_head(&p);
+            let ov = state.overlay.lock().await;
+            if head.corrupt {
+                out.push(SessionView {
+                    id: head.id.clone(),
+                    project_id: None,
+                    title: "已损坏，可删除".into(),
+                    cwd: String::new(),
+                    timestamp: 0,
+                    archived: false,
+                    corrupt: true,
+                    note: None,
+                    running: false,
+                });
+                continue;
+            }
+            let owner = owner_project(&scope, &head.cwd);
+            if let Some(want) = &only {
+                if owner.as_deref() != Some(want.as_str()) {
+                    continue;
+                }
+            }
+            let archived = ov.archived.get(&head.id).copied().unwrap_or(false);
+            let note = ov.notes.get(&head.id).cloned();
+            out.push(SessionView {
+                title: display_title(note.as_ref(), &head.title, head.first_user_text.as_deref(), head.timestamp),
+                project_id: owner,
+                cwd: head.cwd.clone(),
+                timestamp: head.timestamp,
+                archived,
+                corrupt: false,
+                note,
+                running: running.get(&head.id).copied().unwrap_or(false),
+                id: head.id.clone(),
+            });
+        }
+    }
+    // runtime 里可能有「刚建好、尚未落盘」的会话（omp 懒写盘）：扫磁盘当然扫不到，但列表
+    // 不能因此把刚新建的会话抹掉（切换项目等任何一次刷新都会丢行）——按 spawn 事实补一行。
+    {
+        let candidates: Vec<(String, String, i64)> = {
+            let rt = state.runtime.lock().await;
+            rt.iter().map(|(sid, c)| (sid.clone(), c.cwd.clone(), c.created_ms)).collect()
+        };
+        if !candidates.is_empty() {
+            let ov = state.overlay.lock().await;
+            for v in unlanded_views(&agent, &candidates, &scope, &ov.notes) {
+                if out.iter().any(|s| s.id == v.id) {
+                    continue;
+                }
+                if let Some(want) = &only {
+                    if v.project_id.as_deref() != Some(want.as_str()) {
+                        continue;
+                    }
+                }
+                out.push(v);
+            }
+        }
+    }
+    out.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    Ok(SessionPage { sessions: out, total_files, scanned_files })
+}
+
+/// 已归档对话清单（设置页「已归档对话」tab）。
+///
+/// 与 `list_sessions` 的关键差别：**不受扫描窗口限制**。归档是管理面——归档的意义就是
+/// 把老会话收起来，它们大概率落在窗口之外，被窗口截掉等于「归档即失踪」。所以这里不看
+/// mtime 窗口，只按覆盖层 `archived` 标记逐个定位文件。代价可控：**只读那些文件名里带
+/// 归档 id 前缀的文件**（与 `session_file_for` 同一套约定），不做全量头部解析。
+#[tauri::command]
+pub async fn list_archived_sessions(state: State<'_, AppState>) -> Result<Vec<SessionView>, CmdError> {
+    let ov = state.overlay.lock().await;
+    let archived = ov.archived.clone();
+    let notes = ov.notes.clone();
+    let projects: Vec<(String, String)> = ov.projects.iter().map(|p| (p.id.clone(), p.path.clone())).collect();
+    drop(ov);
+    let agent = state.agent_dir.lock().await.clone();
+    // 归属匹配集含 worktree（与 list_sessions 同一口径）
+    let scope = ownership_scope(&projects).await;
+    let running = state.running.lock().await.clone();
+    Ok(list_archived_in(&agent.join("sessions"), &archived, &scope, &running, &notes))
+}
+
+/// 归档清单核心（不碰 tauri，可在临时目录上做真实行为测试）。
+/// `archived` 里 value 为 true 的 id 才算归档；覆盖层里残留的失效 id（文件已被删）自然落空。
+pub fn list_archived_in(
+    root: &std::path::Path,
+    archived: &HashMap<String, bool>,
+    projects: &[(String, String)],
+    running: &HashMap<String, bool>,
+    notes: &HashMap<String, String>,
+) -> Vec<SessionView> {
+    let wanted: Vec<&String> = archived.iter().filter(|(_, v)| **v).map(|(id, _)| id).collect();
+    if wanted.is_empty() {
+        return vec![];
+    }
+    let Ok(rd) = std::fs::read_dir(root) else { return vec![] };
+    let mut out: Vec<SessionView> = vec![];
+    for entry in rd.flatten() {
+        let Ok(files) = std::fs::read_dir(entry.path()) else { continue };
+        for f in files.flatten() {
+            let path = f.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                continue;
+            }
+            // 文件名主干带完整会话 id（真实布局：`sessions/<slug>/<时间戳>_<id>.jsonl`，
+            // 与 `session_file_for` 同一套约定）。**不用 8 字符前缀**：同一分钟建的两个
+            // 会话前缀相同，前缀过滤会把无关文件也读进来（那头里的 id 复核能挡住错行，
+            // 但没必要读）；用整条路径比以免漏掉 id 落在目录名上的情况。
+            let full = path.to_string_lossy();
+            if !wanted.iter().any(|id| !id.is_empty() && full.contains(id.as_str())) {
+                continue;
+            }
+            let head = parse_session_head(&path);
+            // 文件名前缀可能撞车，以头里的 id 为准再核一次归档标记
+            if head.corrupt || !archived.get(&head.id).copied().unwrap_or(false) {
+                continue;
+            }
+            let pid = owner_project(projects, &head.cwd);
+            let note = notes.get(&head.id).cloned();
+            out.push(SessionView {
+                title: display_title(note.as_ref(), &head.title, head.first_user_text.as_deref(), head.timestamp),
+                project_id: pid,
+                cwd: head.cwd.clone(),
+                timestamp: head.timestamp,
+                archived: true,
+                corrupt: false,
+                note,
+                running: running.get(&head.id).copied().unwrap_or(false),
+                id: head.id.clone(),
+            });
+        }
+    }
+    out.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    out
+}
+
+/// 按**完整会话 id** 在 sessions 树里定位 jsonl（真实布局 `sessions/<slug>/<ISO 时间戳>_<id>.jsonl`）。
+///
+/// 只认完整 id（`stem == id` 或 `stem` 以 `_<id>` 结尾），**不许退回 8 字符前缀**——
+/// uuid v7 的前 8 个字符是毫秒时间戳的高 32 位，**同一分钟内建的两个会话前 8 位必然相同**
+/// （真机实测：`01a123c6-9b8c…` 与 `01a123c6-f958…`，同一分钟里建的两个聊天会话）。
+/// 前缀匹配会命中「文件名最大」的那个 = **另一个会话**：读历史读错文件、删除删错文件、
+/// `--resume <前缀>` 拉起另一个会话（omp 侧同口径取最新，实测），正在跑的会话还会被
+/// 同 id 补位顶掉（进行中的轮次被中止，用户侧表现就是「切换会话把会话打断」）。
+///
+/// `id` 也允许是 `parse_session_head` 损坏兜底给的文件名主干（`<时间戳>_<id>`）——
+/// 那一支由 `stem == id` 兼容。同一 id 命中多个 slug 目录时取字典序最大的整条路径（新目录）。
+pub(crate) fn session_file_for(agent: &std::path::Path, id: &str) -> Option<PathBuf> {
+    if id.is_empty() {
+        return None;
+    }
+    let suffix = format!("_{id}");
+    let mut best: Option<PathBuf> = None;
+    let Ok(rd) = std::fs::read_dir(agent.join("sessions")) else { return None };
+    for entry in rd.flatten() {
+        let Ok(files) = std::fs::read_dir(entry.path()) else { continue };
+        for f in files.flatten() {
+            let p = f.path();
+            let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+            let Some(stem) = name.strip_suffix(".jsonl") else { continue };
+            if stem != id && !stem.ends_with(&suffix) {
+                continue;
+            }
+            if best.as_ref().map(|b| p > *b).unwrap_or(true) {
+                best = Some(p);
+            }
+        }
+    }
+    best
+}
+
+/// 会话归属判定的**唯一入口**（新建 / 打开 / 归档清单共用）：
+/// 按 `project_of` 的真实路径前缀匹配（最长优先、符号链接展开），与 `list_sessions`
+/// 同一条规则。此前这三处各写一遍「路径精确相等」，规则一旦分叉，左栏按前缀归组、
+/// 命令回包却给 null，刚建好的会话就会掉进「未归属」。
+///
+/// `projects` = `(项目 id, 项目路径)` 列表；`project_of` 回传的是原始路径串，按串取 id。
+pub fn owner_project(projects: &[(String, String)], cwd: &str) -> Option<String> {
+    let paths: Vec<String> = projects.iter().map(|p| p.1.clone()).collect();
+    let owner = project_of(cwd, &paths)?;
+    projects.iter().find(|p| p.1 == owner).map(|p| p.0.clone())
+}
+
+/// 批量归档：逐个标记 archived=true，一次落盘；返回成功数与失败明细。
+#[tauri::command]
+pub async fn archive_sessions(state: State<'_, AppState>, ids: Vec<String>) -> Result<serde_json::Value, CmdError> {
+    if ids.is_empty() {
+        return Err(cmd_err("BAD_ARG", "未选中任何会话".into(), None));
+    }
+    if ids.len() > 200 {
+        return Err(cmd_err("BAD_ARG", "一次最多归档 200 个会话".into(), None));
+    }
+    let mut ok = 0usize;
+    // 归档只改覆盖层键，逐个都不该失败；失败明细字段保留为空，与 delete_sessions 的返回结构对齐
+    let failed: Vec<serde_json::Value> = vec![];
+    // 聊天形态：先停这批会话的长驻进程（归档 = 收起来；进程继续跑没有意义，还会占内存）
+    for id in &ids {
+        kill_runtime(&state, id);
+    }
+    {
+        let mut ov = state.overlay.lock().await;
+        for id in &ids {
+            ov.archived.insert(id.clone(), true);
+            ok += 1;
+        }
+    }
+    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+    Ok(serde_json::json!({ "ok": ok, "failed": failed }))
+}
+
+/// 批量取消归档（设置页「恢复」用）：逐个摘掉覆盖层标记，一次落盘；
+/// 返回结构与 `archive_sessions` 对齐（`ok` / `failed`）。
+/// 幂等：对没归档过的 id 也返回成功，不因重复点击报错。
+#[tauri::command]
+pub async fn unarchive_sessions(state: State<'_, AppState>, ids: Vec<String>) -> Result<serde_json::Value, CmdError> {
+    if ids.is_empty() {
+        return Err(cmd_err("BAD_ARG", "未选中任何会话".into(), None));
+    }
+    if ids.len() > 200 {
+        return Err(cmd_err("BAD_ARG", "一次最多恢复 200 个会话".into(), None));
+    }
+    let mut ok = 0usize;
+    {
+        let mut ov = state.overlay.lock().await;
+        for id in &ids {
+            ov.archived.remove(id);
+            ok += 1;
+        }
+    }
+    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+    Ok(serde_json::json!({ "ok": ok, "failed": Vec::<serde_json::Value>::new() }))
+}
+
+/// 批量删除：逐个删文件 + 清覆盖层键，一次落盘；返回成功数与失败明细。
+#[tauri::command]
+pub async fn delete_sessions(state: State<'_, AppState>, ids: Vec<String>) -> Result<serde_json::Value, CmdError> {
+    if ids.is_empty() {
+        return Err(cmd_err("BAD_ARG", "未选中任何会话".into(), None));
+    }
+    if ids.len() > 200 {
+        return Err(cmd_err("BAD_ARG", "一次最多删除 200 个会话".into(), None));
+    }
+    let mut ok = 0usize;
+    let mut failed: Vec<serde_json::Value> = vec![];
+    // 聊天形态：先停再删（进程若还在写盘，删掉的文件会被重新创建）
+    for id in &ids {
+        kill_runtime(&state, id);
+    }
+    for id in &ids {
+        match delete_session_inner(&state, id).await {
+            Ok(()) => ok += 1,
+            Err(e) => failed.push(serde_json::json!({ "id": id, "message": e.message })),
+        }
+    }
+    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+    Ok(serde_json::json!({ "ok": ok, "failed": failed }))
+}
+
+async fn delete_session_inner(state: &State<'_, AppState>, id: &str) -> Result<(), CmdError> {
+    let agent = state.agent_dir.lock().await.clone();
+    if let Some(path) = session_file_for(&agent, id) {
+        let _ = std::fs::remove_file(&path);
+        // 同名前缀目录（去 .jsonl 后缀）
+        if let Some(stem) = path.file_name().and_then(|s| s.to_str()) {
+            if let Some(dir_name) = stem.strip_suffix(".jsonl") {
+                let dir = path.parent().unwrap_or(&agent).join(dir_name);
+                if dir.is_dir() {
+                    let _ = std::fs::remove_dir_all(&dir);
+                }
+            }
+        }
+    }
+    {
+        let mut ov = state.overlay.lock().await;
+        ov.archived.remove(id);
+        ov.notes.remove(id);
+        ov.session_approval.remove(id);
+    }
+    Ok(())
+}
+
+// ==================== 聊天形态（V32 恢复自 V1–V10）：RPC 会话命令面 ====================
+
+/// 图片附件（V2 M6）：只用得上 base64 与 mime，`name`/`bytes` 供前端展示。
+/// 前端传 camelCase（`dataBase64` / `mimeType`），omp 侧 image 内容块用 `data` / `mimeType`。
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageAttachment {
+    pub data_base64: String,
+    pub mime_type: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub bytes: Option<usize>,
+}
+
+/// 单张图片上限：与前端 `ATTACH_MAX_BYTES` 对齐，后端再兜一道（RPC 帧别被几十 MB 撑爆）。
+const IMAGE_MAX_BYTES: usize = 10 * 1024 * 1024;
+
+/// 记住会话所属项目的「上次使用」模型与思考档（覆盖层 `lastModel` / `lastThinking`）。
+///
+/// 数据源只认真值：切模型 / 切档后 runtime 会紧跟一次 `get_state` 回读，
+/// 这里把回读结果落到项目上；`create_session` 再把它作为 spawn 参数带上，
+/// 于是「新建会话沿用该项目上次的模型」才真正成立（此前这两个字段只写不读）。
+/// 找不到归属项目（未归属会话）时静默跳过，不报错。
+pub(crate) async fn remember_project_pref(
+    state: &State<'_, AppState>,
+    session_id: &str,
+    model: Option<String>,
+    thinking: Option<String>,
+) {
+    if model.is_none() && thinking.is_none() {
+        return;
+    }
+    let agent = state.agent_dir.lock().await.clone();
+    let Some(path) = session_file_for(&agent, session_id) else {
+        return;
+    };
+    let head = parse_session_head(&path);
+    if head.cwd.is_empty() {
+        return;
+    }
+    let cwd = normalize_path(&head.cwd);
+    let changed = {
+        let mut ov = state.overlay.lock().await;
+        match ov.projects.iter_mut().find(|p| normalize_path(&p.path) == cwd) {
+            Some(p) => {
+                let mut changed = false;
+                if let Some(m) = model {
+                    if p.last_model.as_deref() != Some(m.as_str()) {
+                        p.last_model = Some(m);
+                        changed = true;
+                    }
+                }
+                if let Some(t) = thinking {
+                    if p.last_thinking.as_deref() != Some(t.as_str()) {
+                        p.last_thinking = Some(t);
+                        changed = true;
+                    }
+                }
+                changed
+            }
+            None => false,
+        }
+    };
+    if changed {
+        let _ = save_overlay(state);
+    }
+}
+
+/// 归属用的 cwd：会话文件头读得到就以文件为准（真相），读不到（omp 的 jsonl 懒写盘，
+/// 刚建好的会话要等首个 turn 才落文件）退回 spawn 时的 `--cwd`——
+/// 不许因为「文件还不存在」就把刚新建的会话退回「未归属」。
+pub fn owner_cwd(head_cwd: &str, spawn_cwd: &str) -> String {
+    if head_cwd.is_empty() {
+        spawn_cwd.to_string()
+    } else {
+        head_cwd.to_string()
+    }
+}
+
+/// 「刚建好、尚未落盘」的会话补行（纯函数，可在临时目录上做真实行为测试）。
+///
+/// `candidates` = 当前 runtime 里的会话 `(sid, spawn 时的 --cwd, spawn 时刻毫秒)`。
+/// 磁盘上已有 jsonl 的候选不算（走正常解析），只补真正还没落盘的——omp 懒写盘期间，
+/// 任何一次列表刷新（切换项目 / 新建会话 / 打开搜索命中）都不许把刚新建的会话抹掉。
+/// cwd / 时间 / 归属全是 spawn 的事实，只有标题还没有来源，用「未命名会话」。
+pub fn unlanded_views(
+    agent: &std::path::Path,
+    candidates: &[(String, String, i64)],
+    projects: &[(String, String)],
+    notes: &HashMap<String, String>,
+) -> Vec<SessionView> {
+    candidates
+        .iter()
+        .filter(|(sid, _, _)| session_file_for(agent, sid).is_none())
+        .map(|(sid, cwd, created_ms)| {
+            let note = notes.get(sid).cloned();
+            SessionView {
+                // 文件还没落盘 = 真标题与首条用户消息两个数据源都还没有：交给 `display_title` 的
+                // 「未命名会话 MM-DD」分支；落盘后由正常解析接上（无真标题时是首条用户消息派生，
+                // 与前端本地回退同口径——会话有内容后不会跳回「未命名」）
+                title: display_title(note.as_ref(), "", None, *created_ms),
+                project_id: owner_project(projects, cwd),
+                cwd: cwd.clone(),
+                timestamp: *created_ms,
+                archived: false,
+                corrupt: false,
+                note,
+                running: true,
+                id: sid.clone(),
+            }
+        })
+        .collect()
+}
+
+/// 新建聊天会话（V32：按目录开——左栏目录行 / 会话弹窗的「新建」都传 checkout 路径；
+/// 模型与思考档沿用所属项目上次的选择）。
+#[tauri::command]
+pub async fn create_session(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    cwd: String,
+) -> Result<SessionView, CmdError> {
+    if !std::path::Path::new(&cwd).is_dir() {
+        return Err(cmd_err("DIR_MISSING", "目录不存在".into(), None));
+    }
+    let (model, thinking) = {
+        let ov = state.overlay.lock().await;
+        let projects: Vec<(String, String)> = ov.projects.iter().map(|p| (p.id.clone(), p.path.clone())).collect();
+        let scope = projects.clone();
+        match owner_project(&scope, &cwd) {
+            Some(pid) => match ov.projects.iter().find(|p| p.id == pid) {
+                Some(p) => (p.last_model.clone(), p.last_thinking.clone()),
+                None => (None, None),
+            },
+            None => (None, None),
+        }
+    };
+    let bin = state.omp_path.lock().await.clone();
+    let Some(bin) = bin else {
+        return Err(cmd_err("OMP_MISSING", "未找到 omp，无法新建会话".into(), Some("请先安装 oh-my-pi".into())));
+    };
+    // spawn 内部以会话 id 作 runtime 表的键（不再需要占位键换名——换名窗口会让
+    // pump 的首批帧查不到表条目：命令面缓存丢、偏好回写跳过）
+    let (sid, sfile, _meta) = crate::runtime::spawn_long_lived(
+        &app,
+        state.runtime.clone(),
+        crate::runtime::SpawnOpts { bin, cwd: cwd.clone(), resume: None, model, thinking, approval: None },
+    )
+    .await?;
+    if let Ok(mut run) = state.running.try_lock() {
+        run.insert(sid.clone(), true);
+    }
+    let head = parse_session_head(std::path::Path::new(&sfile));
+    // 刚建好的会话还没有 jsonl（omp 懒写盘）：归属退回 spawn 的 --cwd、时间用建会话这一刻
+    // ——文件头此时全空，直接透传 timestamp=0 会让左栏那一行显示成 1970 的「01-01」。
+    let session_cwd = owner_cwd(&head.cwd, &cwd);
+    let session_ts = if head.timestamp == 0 { chrono::Utc::now().timestamp_millis() } else { head.timestamp };
+    let ov = state.overlay.lock().await;
+    let projects: Vec<(String, String)> = ov.projects.iter().map(|p| (p.id.clone(), p.path.clone())).collect();
+    let pid = owner_project(&projects, &session_cwd);
+    let note = ov.notes.get(&sid).cloned();
+    Ok(SessionView {
+        title: display_title(note.as_ref(), &head.title, head.first_user_text.as_deref(), session_ts),
+        project_id: pid,
+        cwd: session_cwd,
+        timestamp: session_ts,
+        archived: false,
+        corrupt: false,
+        note,
+        running: true,
+        id: sid,
+    })
+}
+
+/// 打开（或聚焦）一个聊天会话：已有长驻进程直接返回视图；否则 `omp --resume` 拉起。
+#[tauri::command]
+pub async fn open_session(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<SessionView, CmdError> {
+    // 已有长驻进程直接聚焦（含刚建好、尚未落盘的新会话）
+    let rt = state.runtime.lock().await.get(&id).map(|r| (r.cwd.clone(), r.created_ms));
+    if let Some((rt_cwd, rt_created)) = rt {
+        let agent = state.agent_dir.lock().await.clone();
+        let head = session_file_for(&agent, &id)
+            .map(|p| parse_session_head(&p))
+            .unwrap_or(SessionHead { id: id.clone(), cwd: String::new(), timestamp: 0, title: String::new(), first_user_text: None, file: String::new(), corrupt: false });
+        let session_cwd = owner_cwd(&head.cwd, &rt_cwd);
+        // 文件还没落盘时头里什么都没有：时间退回 spawn 时刻（见 create_session 同样的道理）
+        let session_ts = if head.timestamp == 0 { rt_created } else { head.timestamp };
+        return Ok(build_session_view(&state, &id, &head.title, head.first_user_text.as_deref(), session_cwd, session_ts, true).await);
+    }
+    // 否则 resume 长驻
+    let head = spawn_session_runtime(&app, &state, &id).await?;
+    // 历史回放由前端 get_history 一次拉全量（实时增量经事件 pump）
+    Ok(build_session_view(&state, &head.id, &head.title, head.first_user_text.as_deref(), head.cwd.clone(), head.timestamp, true).await)
+}
+
+/// resume 拉起一个没有长驻进程的会话并登记进 `runtime` 表（`open_session` 的 spawn 段
+/// 与 `send_prompt` 的自动恢复共用；调用方负责先确认 runtime 里没有这个会话）。
+/// 返回 jsonl 头（组装会话视图用）。
+async fn spawn_session_runtime<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    state: &State<'_, AppState>,
+    id: &str,
+) -> Result<SessionHead, CmdError> {
+    let agent = state.agent_dir.lock().await.clone();
+    let Some(path) = session_file_for(&agent, id) else {
+        return Err(cmd_err("NOT_FOUND", "会话文件不存在，可能已被删除".into(), None));
+    };
+    let head = parse_session_head(&path);
+    if head.corrupt {
+        return Err(cmd_err("CORRUPT", "会话文件已损坏，可删除".into(), None));
+    }
+    let bin = state.omp_path.lock().await.clone();
+    let Some(bin) = bin else {
+        return Err(cmd_err("OMP_MISSING", "未找到 omp".into(), None));
+    };
+    let spawn_cwd = if head.cwd.is_empty() { "/tmp".into() } else { head.cwd.clone() };
+    let approval = state.overlay.lock().await.session_approval.get(id).cloned();
+    // `--resume` 必须给**完整会话 id**（终端侧 resume 一直是全 id 口径）：omp 对前缀的
+    // 解析取「最新匹配的那个」（实测），8 字符前缀在同一分钟建的两个会话间会拉起**另一个
+    // 会话**——新进程以那个会话的身份登记，若它正在跑就被同 id 补位顶掉（进行中的轮次被中止）。
+    let (sid, _, _meta) = crate::runtime::spawn_long_lived(
+        app,
+        state.runtime.clone(),
+        crate::runtime::SpawnOpts { bin, cwd: spawn_cwd, resume: Some(id.to_string()), model: None, thinking: None, approval },
+    )
+    .await?;
+    if let Ok(mut run) = state.running.try_lock() {
+        run.insert(sid, true);
+    }
+    Ok(head)
+}
+
+// ---------- 会话消息与运行控制 ----------
+
+/// 回放上限：最多读 5000 行、最多收 2000 条（message/custom/title 系）。
+const MAX_HISTORY_LINES: usize = 5000;
+const MAX_HISTORY_ENTRIES: usize = 2000;
+
+#[tauri::command]
+pub async fn get_history(state: State<'_, AppState>, id: String) -> Result<serde_json::Value, CmdError> {
+    // 读 jsonl 全量转 ViewMsg 载荷（前端经 viewmsg 归一）。
+    // 超过回放上限时 `truncated: true` 如实上报——绝不静默截断（前端在流尾注明）。
+    let agent = state.agent_dir.lock().await.clone();
+    let Some(path) = session_file_for(&agent, &id) else {
+        return Err(cmd_err("NOT_FOUND", "会话文件不存在，可能已被删除".into(), None));
+    };
+    let text = std::fs::read_to_string(&path).map_err(|_| cmd_err("CORRUPT", "会话文件已损坏，可删除".into(), None))?;
+    let mut out = vec![];
+    let mut truncated = false;
+    for (i, line) in text.lines().enumerate() {
+        if i >= MAX_HISTORY_LINES {
+            truncated = true;
+            break;
+        }
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+            // 只回放 message/custom/title_change 系
+            if matches!(v.get("type").and_then(|t| t.as_str()), Some("message" | "custom" | "title_change" | "model_change" | "thinking_level_change")) {
+                if out.len() >= MAX_HISTORY_ENTRIES {
+                    truncated = true;
+                    break;
+                }
+                out.push(v);
+            }
+        }
+    }
+    Ok(serde_json::json!({ "lines": out, "truncated": truncated }))
+}
+
+#[tauri::command]
+pub async fn send_message(app: AppHandle, state: State<'_, AppState>, id: String, message: String, images: Option<Vec<ImageAttachment>>) -> Result<(), CmdError> {
+    send_prompt(&app, &state, &id, "prompt", message, images).await
+}
+
+/// 流式中转向（`steer`）：在下一个工具调用边界生效，不砍掉进行中的工作。
+#[tauri::command]
+pub async fn steer_message(app: AppHandle, state: State<'_, AppState>, id: String, message: String, images: Option<Vec<ImageAttachment>>) -> Result<(), CmdError> {
+    send_prompt(&app, &state, &id, "steer", message, images).await
+}
+
+/// 流式中排队（`follow_up`）：本轮结束后按序执行。
+#[tauri::command]
+pub async fn follow_up_message(app: AppHandle, state: State<'_, AppState>, id: String, message: String, images: Option<Vec<ImageAttachment>>) -> Result<(), CmdError> {
+    send_prompt(&app, &state, &id, "follow_up", message, images).await
+}
+
+/// `/` 命令：经 prompt 直发（`/` 开头即可，omp 侧按本地命令处理）。
+#[tauri::command]
+pub async fn run_slash(app: AppHandle, state: State<'_, AppState>, id: String, command: String) -> Result<(), CmdError> {
+    send_prompt(&app, &state, &id, "prompt", command, None).await
+}
+
+/// 上下文压缩：历史压缩成摘要后继续本会话（满上下文时的接续手段）。
+#[tauri::command]
+pub async fn compact_session(app: AppHandle, state: State<'_, AppState>, id: String, custom_instructions: Option<String>) -> Result<(), CmdError> {
+    let map = state.runtime.clone();
+    let tx = map.lock().await.get(&id).map(|r| r.tx.clone());
+    let Some(tx) = tx else {
+        return Err(cmd_err("NOT_RUNNING", "会话未启动，请先打开会话".into(), None));
+    };
+    let mut req = serde_json::json!({"id": format!("c-{}", chrono::Utc::now().timestamp_millis()), "type": "compact"});
+    if let Some(ins) = custom_instructions.filter(|s| !s.trim().is_empty()) {
+        req["customInstructions"] = serde_json::Value::String(ins);
+    }
+    tx.send(format!("{}\n", serde_json::to_string(&req).unwrap()))
+        .map_err(|_| cmd_err("RPC_IO", "压缩失败，进程可能已退出".into(), None))?;
+    let _ = app;
+    Ok(())
+}
+
+/// 从某条消息另起分支：下发 `branch{entryId}` 后返回原会话视图，
+/// 新会话身份随后续事件流推出（分支落盘后可 resume）。
+#[tauri::command]
+pub async fn branch_session(app: AppHandle, state: State<'_, AppState>, id: String, entry_id: String) -> Result<SessionView, CmdError> {
+    let tx = {
+        let map = state.runtime.lock().await;
+        let Some(r) = map.get(&id) else {
+            return Err(cmd_err("NOT_RUNNING", "会话未运行，无法分支".into(), None));
+        };
+        r.tx.clone()
+    };
+    let req = serde_json::json!({"id": format!("b-{}", chrono::Utc::now().timestamp_millis()), "type": "branch", "entryId": entry_id});
+    tx.send(format!("{}\n", serde_json::to_string(&req).unwrap()))
+        .map_err(|_| cmd_err("RPC_IO", "分支失败，进程可能已退出".into(), None))?;
+    open_session(app, state, id).await
+}
+
+// ---------- V40：对标 codex / zcode 的命令面（要读返回值的 RPC 请求） ----------
+
+/// 向会话进程发一条请求并等它的 `response` 回包（V40 新面）。
+///
+/// 等法 = 临时挂一个 `omp-event://<id>` 监听、按请求 `id` 匹配回包就撤监听：
+/// pump 把 response 全量透传到该通道（前端对成功回包不渲染——多一个监听者不影响它），
+/// 这是壳侧第一条**要读返回值**的 RPC 通路（fork / goal / 队列撤回 / 旁问 / 统计）。
+/// 超时兜底：会话正忙时命令会在 omp 内部排队，迟迟不回不能把界面卡死。
+pub(crate) async fn rpc_request<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    state: &State<'_, AppState>,
+    id: &str,
+    req: serde_json::Value,
+    timeout_ms: u64,
+) -> Result<serde_json::Value, CmdError> {
+    use tauri::Listener;
+    let req_id = req.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let tx = state.runtime.lock().await.get(id).map(|r| r.tx.clone());
+    let Some(tx) = tx else {
+        return Err(cmd_err("NOT_RUNNING", "会话未启动，请先打开会话".into(), None));
+    };
+    let (otx, mut orx) = tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
+    let handle = app.listen(format!("omp-event://{id}"), move |e| {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(e.payload()) {
+            let _ = otx.send(v);
+        }
+    });
+    if tx.send(format!("{}\n", serde_json::to_string(&req).unwrap())).is_err() {
+        app.unlisten(handle);
+        return Err(cmd_err("RPC_IO", "请求失败，进程可能已退出".into(), None));
+    }
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+    let mut hit: Option<serde_json::Value> = None;
+    loop {
+        let remain = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remain.is_zero() {
+            break;
+        }
+        match tokio::time::timeout(remain, orx.recv()).await {
+            Ok(Some(v)) => {
+                if v.get("type").and_then(|t| t.as_str()) == Some("response")
+                    && v.get("id").and_then(|i| i.as_str()) == Some(req_id.as_str())
+                {
+                    hit = Some(v);
+                    break;
+                }
+            }
+            Ok(None) | Err(_) => break,
+        }
+    }
+    app.unlisten(handle);
+    let Some(resp) = hit else {
+        return Err(cmd_err("RPC_TIMEOUT", "等待 omp 响应超时".into(), None));
+    };
+    if resp.get("success").and_then(|s| s.as_bool()) != Some(true) {
+        let message = resp.get("error").and_then(|e| e.as_str()).unwrap_or("命令执行失败").to_string();
+        let code = resp.get("code").and_then(|c| c.as_str()).unwrap_or("RPC_FAIL").to_string();
+        return Err(cmd_err(&code, message, None));
+    }
+    Ok(resp.get("data").cloned().unwrap_or(serde_json::Value::Null))
+}
+
+/// 撤回一条尚未投递的队列消息（steering / followUp）→ `{removed, images?, imagesDropped?}`。
+#[tauri::command]
+pub async fn remove_queued_message(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    message: String,
+    queue: String,
+) -> Result<serde_json::Value, CmdError> {
+    if queue != "steering" && queue != "followUp" {
+        return Err(cmd_err("BAD_ARG", "队列必须是 steering 或 followUp".into(), None));
+    }
+    let req = serde_json::json!({
+        "id": format!("rq-{}", chrono::Utc::now().timestamp_millis()),
+        "type": "remove_queued_message",
+        "message": message,
+        "queue": queue,
+    });
+    rpc_request(&app, &state, &id, req, 15_000).await
+}
+
+/// 把一条 followUp 排队提升为 steering 插话 → `{promoted}`。
+#[tauri::command]
+pub async fn promote_queued_message(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    message: String,
+) -> Result<serde_json::Value, CmdError> {
+    let req = serde_json::json!({
+        "id": format!("pq-{}", chrono::Utc::now().timestamp_millis()),
+        "type": "promote_queued_message",
+        "message": message,
+    });
+    rpc_request(&app, &state, &id, req, 15_000).await
+}
+
+/// 中断并交还队列（Esc 语义，= omp TUI 里按 Esc）：返回被撤回的插话 / 排队文本，
+/// 调用方放回输入框。响应恒成功（队列为空时等同普通 abort）。
+#[tauri::command]
+pub async fn abort_and_restore_queue(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<serde_json::Value, CmdError> {
+    let req = serde_json::json!({
+        "id": format!("ar-{}", chrono::Utc::now().timestamp_millis()),
+        "type": "abort_and_restore_queue",
+    });
+    rpc_request(&app, &state, &id, req, 30_000).await
+}
+
+/// goal 目标模式（get / create / resume / pause / drop）→ `{goal, state}`。
+#[tauri::command]
+pub async fn goal_command(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    op: String,
+    objective: Option<String>,
+) -> Result<serde_json::Value, CmdError> {
+    if !["get", "create", "resume", "pause", "drop"].contains(&op.as_str()) {
+        return Err(cmd_err("BAD_ARG", "goal op 必须是 get/create/resume/pause/drop".into(), None));
+    }
+    let mut req = serde_json::json!({
+        "id": format!("g-{}", chrono::Utc::now().timestamp_millis()),
+        "type": "goal",
+        "op": op,
+    });
+    if let Some(o) = objective.filter(|s| !s.trim().is_empty()) {
+        req["objective"] = serde_json::Value::String(o);
+    }
+    rpc_request(&app, &state, &id, req, 20_000).await
+}
+
+/// 会话统计（`/status` 弹窗）：消息数 / tokens 分项 / 成本 / 上下文占用。
+#[tauri::command]
+pub async fn get_session_stats(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<serde_json::Value, CmdError> {
+    let req = serde_json::json!({
+        "id": format!("ss-{}", chrono::Utc::now().timestamp_millis()),
+        "type": "get_session_stats",
+    });
+    rpc_request(&app, &state, &id, req, 30_000).await
+}
+
+/// 旁问（`/btw`）：一问一答、不进会话转录；`recordId` 时是对该话题的追问。
+#[tauri::command]
+pub async fn btw_ask(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    question: String,
+    record_id: Option<String>,
+) -> Result<serde_json::Value, CmdError> {
+    if question.trim().is_empty() {
+        return Err(cmd_err("BAD_ARG", "问题不能为空".into(), None));
+    }
+    let mut req = serde_json::json!({
+        "id": format!("btw-{}", chrono::Utc::now().timestamp_millis()),
+        "type": "btw",
+        "question": question,
+    });
+    if let Some(r) = record_id.filter(|s| !s.is_empty()) {
+        req["recordId"] = serde_json::Value::String(r);
+    }
+    rpc_request(&app, &state, &id, req, 30_000).await
+}
+
+/// 取消正在跑的旁问 → `{cancelled}`。
+#[tauri::command]
+pub async fn btw_cancel(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    record_id: Option<String>,
+) -> Result<serde_json::Value, CmdError> {
+    let mut req = serde_json::json!({
+        "id": format!("btwx-{}", chrono::Utc::now().timestamp_millis()),
+        "type": "btw_cancel",
+    });
+    if let Some(r) = record_id.filter(|s| !s.is_empty()) {
+        req["recordId"] = serde_json::Value::String(r);
+    }
+    rpc_request(&app, &state, &id, req, 15_000).await
+}
+
+/// 旁问历史（最新在前；运行中的记录带部分答案）。
+#[tauri::command]
+pub async fn get_btw_history(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<serde_json::Value, CmdError> {
+    let req = serde_json::json!({
+        "id": format!("btwh-{}", chrono::Utc::now().timestamp_millis()),
+        "type": "get_btw_history",
+    });
+    rpc_request(&app, &state, &id, req, 15_000).await
+}
+
+/// 会话改名（V40）：RPC `set_session_name` 写 omp 真名（jsonl `title` 行，source:user），
+/// 成功后清掉覆盖层的旧备注（备注优先只服务存量数据，不再提供写入面），返回收敛后的视图。
+#[tauri::command]
+pub async fn rename_session(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+) -> Result<SessionView, CmdError> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(cmd_err("BAD_ARG", "会话名不能为空".into(), None));
+    }
+    // 改名要活跃进程：不在就先 resume 拉起（与 send_prompt 的自动恢复同口径）
+    if state.runtime.lock().await.get(&id).is_none() {
+        spawn_session_runtime(&app, &state, &id).await?;
+    }
+    let req = serde_json::json!({
+        "id": format!("rn-{}", chrono::Utc::now().timestamp_millis()),
+        "type": "set_session_name",
+        "name": name,
+    });
+    rpc_request(&app, &state, &id, req, 15_000).await?;
+    {
+        let removed = {
+            let mut ov = state.overlay.lock().await;
+            ov.notes.remove(&id).is_some()
+        };
+        if removed {
+            save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+        }
+    }
+    open_session(app, state, id).await
+}
+
+/// 定位一条 message entry（纯函数，单测直接喂 jsonl 文本）。
+///
+/// 匹配口径与前端的显示模型对齐：`role=="user"` 时全部 text 块以 `\n` 拼接后等于 `text`；
+/// `role=="assistant"` 时任一 text 块等于 `text`（一条 assistant 行可能有多个文本块，
+/// 前端每个块渲染一条消息，这里按行匹配）。`nth` = 第几个匹配行（0-based，前端按同规则数）。
+/// 返回 `(该行 id, 它之前最近一条 message 行的 id)`——后者是「编辑重发」的分叉点。
+pub(crate) fn find_message_entry_in(
+    content: &str,
+    role: &str,
+    text: &str,
+    nth: usize,
+) -> Option<(String, Option<String>)> {
+    let mut count = 0usize;
+    let mut prev_msg: Option<String> = None;
+    for line in content.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        if v.get("type").and_then(|t| t.as_str()) != Some("message") {
+            continue;
+        }
+        let Some(m) = v.get("message").filter(|m| m.is_object()) else { continue };
+        let r = m.get("role").and_then(|x| x.as_str()).unwrap_or("");
+        let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        if id.is_empty() {
+            continue;
+        }
+        let matched = if r == role {
+            let blocks: Vec<&str> = m
+                .get("content")
+                .and_then(|c| c.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+                        .map(|b| b.get("text").and_then(|t| t.as_str()).unwrap_or(""))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if role == "user" {
+                blocks.join("\n") == text
+            } else {
+                blocks.iter().any(|b| *b == text)
+            }
+        } else {
+            false
+        };
+        if matched {
+            if count == nth {
+                return Some((id, prev_msg));
+            }
+            count += 1;
+        }
+        prev_msg = Some(id);
+    }
+    None
+}
+
+/// 等锁版 kill（fork 收尾用，V40）：`kill_runtime` 的 `try_lock` 在锁被占时**会静默跳过移除**
+/// （归档等同步路径可接受：下次打开会 resume），fork 场景不行——旧 key 留在表里，
+/// 「同 id 接管」与状态收敛都会错位。语义与 `kill_runtime` 一致（哨兵 → stdin 关闭 → 进程退出）。
+async fn kill_runtime_awaited(state: &State<'_, AppState>, id: &str) {
+    {
+        let mut m = state.runtime.lock().await;
+        if let Some(r) = m.remove(id) {
+            let _ = r.tx.send(String::new());
+        }
+    }
+    {
+        let mut run = state.running.lock().await;
+        run.remove(id);
+    }
+}
+
+/// fork 收尾（`fork_from_message` / `fork_session` 共用）：发起 fork → 拿新身份 →
+/// kill 旧进程 → resume 新会话 → 返回新会话视图。
+///
+/// 为什么 kill 旧进程：pump 的三通道名（`omp-event://<sid>` 等）在 `start_pump` 时与 sid
+/// 绑定，fork 后进程已换身份而通道名留在旧 sid 上；kill + resume（与「闲置回收后自动恢复」
+/// 同一条已验证路径）是唯一不重构 pump 的通路。新会话由本次调用直接拉起，调用方拿到视图
+/// 时进程已在（running: true），随后 `openSessionWithHistory` 走「已有进程直接聚焦」分支。
+async fn fork_at<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    state: &State<'_, AppState>,
+    id: &str,
+    entry_id: Option<String>,
+) -> Result<SessionView, CmdError> {
+    if state.runtime.lock().await.get(id).is_none() {
+        spawn_session_runtime(app, state, id).await?;
+    }
+    let ts = chrono::Utc::now().timestamp_millis();
+    let mut req = serde_json::json!({"id": format!("fk-{ts}"), "type": "fork"});
+    if let Some(e) = entry_id {
+        req["entryId"] = serde_json::Value::String(e);
+    }
+    rpc_request(app, state, id, req, 60_000).await?;
+    // fork 响应不含新身份：回读一次 get_state（进程已绑定新会话）
+    let st = rpc_request(
+        app,
+        state,
+        id,
+        serde_json::json!({"id": format!("fk-get-{ts}"), "type": "get_state"}),
+        15_000,
+    )
+    .await?;
+    let new_sid = st
+        .get("sessionId")
+        .and_then(|s| s.as_str())
+        .map(str::to_string)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| cmd_err("RPC_STATE", "fork 后未拿到新会话身份".into(), None))?;
+    kill_runtime_awaited(state, id).await;
+    let head = spawn_session_runtime(app, state, &new_sid).await?;
+    Ok(build_session_view(state, &head.id, &head.title, head.first_user_text.as_deref(), head.cwd.clone(), head.timestamp, true).await)
+}
+
+/// 从某条消息分叉（V40）：`mode="branch"` 从该消息处（保留到它）、`mode="edit"` 从它**之前**
+/// （编辑重发：原消息不进新会话，文本由前端载回输入框）。定位走 jsonl 行（entryId 即行 id）。
+#[tauri::command]
+pub async fn fork_from_message(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    role: String,
+    text: String,
+    nth: usize,
+    mode: String,
+) -> Result<SessionView, CmdError> {
+    if role != "user" && role != "assistant" {
+        return Err(cmd_err("BAD_ARG", "role 必须是 user 或 assistant".into(), None));
+    }
+    if mode != "branch" && mode != "edit" {
+        return Err(cmd_err("BAD_ARG", "mode 必须是 branch 或 edit".into(), None));
+    }
+    if text.trim().is_empty() {
+        return Err(cmd_err("BAD_ARG", "消息文本为空，无法定位".into(), None));
+    }
+    let agent = state.agent_dir.lock().await.clone();
+    let Some(path) = session_file_for(&agent, &id) else {
+        return Err(cmd_err("NOT_FOUND", "会话文件不存在，可能已被删除".into(), None));
+    };
+    let content = std::fs::read_to_string(&path).map_err(|_| cmd_err("CORRUPT", "会话文件已损坏，可删除".into(), None))?;
+    let Some((entry_id, prev_id)) = find_message_entry_in(&content, &role, &text, nth) else {
+        return Err(cmd_err("NOT_FOUND", "没有定位到这条消息（可能尚未落盘）".into(), None));
+    };
+    let fork_entry = if mode == "edit" {
+        match prev_id {
+            Some(p) => p,
+            None => return Err(cmd_err("NO_PREV", "这是第一条消息，没有可回退的分叉点".into(), None)),
+        }
+    } else {
+        entry_id
+    };
+    fork_at(&app, &state, &id, Some(fork_entry)).await
+}
+
+/// 全量复制当前会话另起一份（`/fork`）。
+#[tauri::command]
+pub async fn fork_session(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<SessionView, CmdError> {
+    fork_at(&app, &state, &id, None).await
+}
+
+/// 重启会话 runtime（V40）：执行模式（`--approval-mode`）是启动参数，omp 运行中改不了——
+/// 会话 idle 且队列空时 kill + resume 是壳侧能给的「立即生效」路径（队列非空会丢消息，
+/// 一律拒绝；running / awaiting 不打断）。
+#[tauri::command]
+pub async fn restart_session_runtime(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<SessionView, CmdError> {
+    {
+        let map = state.runtime.lock().await;
+        match map.get(&id) {
+            None => {}
+            Some(r) => {
+                if r.activity.state() != crate::runtime::ACT_IDLE {
+                    return Err(cmd_err("BUSY", "会话正在工作，稍后再试".into(), None));
+                }
+                if r.meta.queued_count.unwrap_or(0) > 0 {
+                    return Err(cmd_err("BUSY", "还有排队消息未投递，稍后再试".into(), None));
+                }
+            }
+        }
+    }
+    kill_runtime(&state, &id);
+    spawn_session_runtime(&app, &state, &id).await?;
+    open_session(app, state, id).await
+}
+
+/// 单文件工作区 diff（`git diff HEAD -- <path>`；untracked 给文件全文当「全新增」）。
+/// 输出截断上限：超大 diff 不整份进前端内存。
+const GIT_DIFF_MAX: usize = 400_000;
+
+#[tauri::command]
+pub async fn git_file_diff(path: String) -> Result<serde_json::Value, CmdError> {
+    let p = PathBuf::from(&path);
+    if !p.is_file() {
+        return Err(cmd_err("NOT_FOUND", "文件不存在".into(), None));
+    }
+    let dir = p
+        .parent()
+        .map(|d| d.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let Some(git) = crate::git_info::git_bin().await else {
+        return Ok(serde_json::json!({"kind": "error", "text": "", "error": "未找到 git"}));
+    };
+    let status = crate::git_info::run_git(&git, &dir, &["status", "--porcelain", "--", path.as_str()]).await;
+    match status {
+        Ok(out) if out.trim_start().starts_with("??") => {
+            let mut text = std::fs::read_to_string(&p).unwrap_or_default();
+            if text.len() > GIT_DIFF_MAX {
+                text.truncate(GIT_DIFF_MAX);
+            }
+            Ok(serde_json::json!({"kind": "untracked", "text": text}))
+        }
+        Ok(_) => {
+            let mut diff = crate::git_info::run_git(&git, &dir, &["diff", "HEAD", "--no-color", "--", path.as_str()])
+                .await
+                .unwrap_or_default();
+            if diff.trim().is_empty() {
+                Ok(serde_json::json!({"kind": "none", "text": ""}))
+            } else {
+                if diff.len() > GIT_DIFF_MAX {
+                    diff.truncate(GIT_DIFF_MAX);
+                }
+                Ok(serde_json::json!({"kind": "diff", "text": diff}))
+            }
+        }
+        Err(e) => Ok(serde_json::json!({"kind": "error", "text": "", "error": e})),
+    }
+}
+
+/// 子代理注册表快照（V41）：`{subagents:[…]}` 原样透传（条目形状由前端容错解析）。
+#[tauri::command]
+pub async fn get_subagents(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<serde_json::Value, CmdError> {
+    let req = serde_json::json!({
+        "id": format!("sub-{}", chrono::Utc::now().timestamp_millis()),
+        "type": "get_subagents",
+    });
+    rpc_request(&app, &state, &id, req, 15_000).await
+}
+
+/// 取消一个运行中的子代理（V41）→ `{cancelled}`（未知 / 已结束的 id 返回 false，幂等）。
+#[tauri::command]
+pub async fn cancel_subagent(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    subagent_id: String,
+) -> Result<serde_json::Value, CmdError> {
+    if subagent_id.trim().is_empty() {
+        return Err(cmd_err("BAD_ARG", "subagentId 不能为空".into(), None));
+    }
+    let req = serde_json::json!({
+        "id": format!("sax-{}", chrono::Utc::now().timestamp_millis()),
+        "type": "cancel_subagent",
+        "subagentId": subagent_id,
+    });
+    rpc_request(&app, &state, &id, req, 20_000).await
+}
+
+/// 读子代理转录（V41；增量读：`fromByte` 复用上次返回的 `nextByte`）。
+#[tauri::command]
+pub async fn get_subagent_messages(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    subagent_id: String,
+    from_byte: Option<i64>,
+) -> Result<serde_json::Value, CmdError> {
+    if subagent_id.trim().is_empty() {
+        return Err(cmd_err("BAD_ARG", "subagentId 不能为空".into(), None));
+    }
+    let mut req = serde_json::json!({
+        "id": format!("sam-{}", chrono::Utc::now().timestamp_millis()),
+        "type": "get_subagent_messages",
+        "subagentId": subagent_id,
+    });
+    if let Some(b) = from_byte {
+        req["fromByte"] = serde_json::json!(b.max(0));
+    }
+    rpc_request(&app, &state, &id, req, 20_000).await
+}
+
+/// fast 模式开关（V41）→ `{enabled, active}`；模型不支持时失败（错误文本原样给界面）。
+#[tauri::command]
+pub async fn set_fast_mode(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<serde_json::Value, CmdError> {
+    let req = serde_json::json!({
+        "id": format!("fm-{}", chrono::Utc::now().timestamp_millis()),
+        "type": "set_fast_mode",
+        "enabled": enabled,
+    });
+    rpc_request(&app, &state, &id, req, 15_000).await
+}
+
+/// slow 模式开关（V41）→ `{enabled}`；模型不支持时失败。
+#[tauri::command]
+pub async fn set_slow_mode(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<serde_json::Value, CmdError> {
+    let req = serde_json::json!({
+        "id": format!("sl-{}", chrono::Utc::now().timestamp_millis()),
+        "type": "set_slow_mode",
+        "enabled": enabled,
+    });
+    rpc_request(&app, &state, &id, req, 15_000).await
+}
+
+/// 导出会话为 HTML（V41）：omp 把文件写到**会话 cwd**（实测），这里拼成绝对路径返回，
+/// 前端用系统默认应用打开。要求进程在跑（RPC 命令），不在时明确报错。
+#[tauri::command]
+pub async fn export_session_html(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<serde_json::Value, CmdError> {
+    let base = state.runtime.lock().await.get(&id).map(|r| r.cwd.clone());
+    let Some(base) = base else {
+        return Err(cmd_err("NOT_RUNNING", "会话未启动，先打开会话再导出".into(), None));
+    };
+    let req = serde_json::json!({
+        "id": format!("ex-{}", chrono::Utc::now().timestamp_millis()),
+        "type": "export_html",
+    });
+    let out = rpc_request(&app, &state, &id, req, 60_000).await?;
+    let name = out.get("path").and_then(|p| p.as_str()).unwrap_or("").to_string();
+    let abs = if name.starts_with('/') || name.is_empty() {
+        name
+    } else {
+        format!("{}/{}", base.trim_end_matches('/'), name)
+    };
+    Ok(serde_json::json!({ "path": abs }))
+}
+
+/// 大段粘贴转文件引用（V41）：把一段长文本写进 `<appData>/omp-mini/paste/paste-<ts>.txt`，
+/// 返回绝对路径——前端把它以 `@<path>` 注入草稿，omp 在 prompt 阶段读进上下文（fileMention）。
+/// 文件名带毫秒时间戳，同毫秒连贴也互不覆盖；不自动清理（保留供用户回看，量级极小）。
+#[tauri::command]
+pub async fn save_paste(app: AppHandle, text: String) -> Result<serde_json::Value, CmdError> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| PathBuf::from("/tmp"))
+        .join("omp-mini")
+        .join("paste");
+    std::fs::create_dir_all(&dir).map_err(|e| cmd_err("IO", format!("创建粘贴目录失败：{e}"), None))?;
+    let name = format!("paste-{}.txt", chrono::Utc::now().format("%Y%m%dT%H%M%S%.3fZ"));
+    let path = dir.join(name);
+    std::fs::write(&path, text).map_err(|e| cmd_err("IO", format!("写入粘贴文件失败：{e}"), None))?;
+    Ok(serde_json::json!({ "path": path.to_string_lossy() }))
+}
+
+/// 本地 shell（V41，codex 的 `!` 前缀）：在**会话进程的工作目录**跑一条命令并取回输出
+/// （omp 的 `bash` RPC——concurrent 分发，输出整体返回：`{exitCode, output, truncated, …}`）。
+/// 超时放宽到 120s（交互式命令；`abort_bash` 的取消入口留待需要时接）。
+#[tauri::command]
+pub async fn run_bash(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    command: String,
+) -> Result<serde_json::Value, CmdError> {
+    if command.trim().is_empty() {
+        return Err(cmd_err("BAD_ARG", "命令不能为空".into(), None));
+    }
+    let req = serde_json::json!({
+        "id": format!("sh-{}", chrono::Utc::now().timestamp_millis()),
+        "type": "bash",
+        "command": command,
+    });
+    rpc_request(&app, &state, &id, req, 120_000).await
+}
+
+/// 组装会话视图（open / fork / rename 共用）：标题（覆盖层备注优先，存量兼容）、
+/// 项目归属（含 worktree 口径）、归档标记、cwd、时间、运行中。
+async fn build_session_view(
+    state: &State<'_, AppState>,
+    id: &str,
+    head_title: &str,
+    first_user_text: Option<&str>,
+    cwd: String,
+    timestamp: i64,
+    running: bool,
+) -> SessionView {
+    let (projects, archived, note) = {
+        let ov = state.overlay.lock().await;
+        (
+            ov.projects.iter().map(|p| (p.id.clone(), p.path.clone())).collect::<Vec<(String, String)>>(),
+            ov.archived.get(id).copied().unwrap_or(false),
+            ov.notes.get(id).cloned(),
+        )
+    };
+    let pid = owner_project(&ownership_scope(&projects).await, cwd.as_str());
+    SessionView {
+        title: display_title(note.as_ref(), head_title, first_user_text, timestamp),
+        project_id: pid,
+        cwd,
+        timestamp,
+        archived,
+        corrupt: false,
+        note,
+        running,
+        id: id.to_string(),
+    }
+}
+
+/// prompt 系列的统一发送：`prompt / steer / follow_up` 共用图片组装。
+/// 泛型 + `pub(crate)`：runtime.rs 的真实慢测试直接调它验「回收后发送自动恢复」。
+pub(crate) async fn send_prompt<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    state: &State<'_, AppState>,
+    id: &str,
+    kind: &str,
+    message: String,
+    images: Option<Vec<ImageAttachment>>,
+) -> Result<(), CmdError> {
+    let map = state.runtime.clone();
+    let mut tx = map.lock().await.get(id).map(|r| r.tx.clone());
+    if tx.is_none() && kind == "prompt" {
+        // 进程不在了（闲置回收 / 意外退出）：resume 拉起再发——「发消息」是用户的正常
+        // 入口，不该因为后台回收而失败（回收只发生在 idle，这里补一次就是无缝的）。
+        // steer / follow_up 不代偿：没有进行中的轮次时这两个语义本身不成立，按原样报错。
+        spawn_session_runtime(app, state, id).await?;
+        tx = map.lock().await.get(id).map(|r| r.tx.clone());
+    }
+    let Some(tx) = tx else {
+        return Err(cmd_err("NOT_RUNNING", "会话未启动，请先打开会话".into(), None));
+    };
+    // 图片随 prompt 一起发（实测 omp `prompt{message, images}`）；字段名按 omp 的 image 内容块：
+    // `{type:"image", data:<base64>, mimeType}`。
+    let imgs: Vec<serde_json::Value> = images
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|i| !i.data_base64.is_empty() && i.data_base64.len() <= IMAGE_MAX_BYTES * 2)
+        .map(|i| serde_json::json!({"type":"image","data":i.data_base64,"mimeType":i.mime_type}))
+        .collect();
+    let prefix = match kind {
+        "steer" => "s",
+        "follow_up" => "f",
+        _ => "p",
+    };
+    let mut req = serde_json::json!({"id": format!("{prefix}-{}", chrono::Utc::now().timestamp_millis()), "type": kind, "message": message});
+    if !imgs.is_empty() {
+        req["images"] = serde_json::Value::Array(imgs);
+    }
+    tx.send(format!("{}\n", serde_json::to_string(&req).unwrap()))
+        .map_err(|_| cmd_err("RPC_IO", "发送失败，进程可能已退出".into(), None))?;
+    let _ = app;
+    Ok(())
+}
+
+/// 读本地图片为附件（V2 M6）：WebView 拿不到任意本地路径的内容，
+/// 所以「点回形针选文件」这条入口走后端读 → base64 回前端（粘贴 / 拖拽仍在 WebView 内直接读 File）。
+#[tauri::command]
+pub async fn read_image_file(path: String) -> Result<ImageAttachment, CmdError> {
+    let p = PathBuf::from(&path);
+    let name = p
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.clone());
+    let mime = match p.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref() {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        Some("gif") => "image/gif",
+        _ => {
+            return Err(cmd_err(
+                "BAD_TYPE",
+                format!("{name}：只支持 PNG / JPEG / WebP / GIF"),
+                Some("换一张图片，或先用图片工具转成 PNG".into()),
+            ))
+        }
+    };
+    let meta = std::fs::metadata(&p)
+        .map_err(|e| cmd_err("NOT_FOUND", format!("读取 {name} 失败：{e}"), Some("确认文件仍然存在".into())))?;
+    if meta.len() as usize > IMAGE_MAX_BYTES {
+        return Err(cmd_err(
+            "TOO_LARGE",
+            format!("{name}：超过 10MB，请先压缩再发"),
+            Some("压缩到 10MB 以内（建议长边 ≤ 2048）".into()),
+        ));
+    }
+    let bytes = std::fs::read(&p)
+        .map_err(|e| cmd_err("IO", format!("读取 {name} 失败：{e}"), None))?;
+    Ok(ImageAttachment {
+        data_base64: crate::runtime::b64encode(&bytes),
+        mime_type: mime.to_string(),
+        name: Some(name),
+        bytes: Some(bytes.len()),
+    })
+}
+
+#[tauri::command]
+pub async fn stop_session(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<(), CmdError> {
+    let map = state.runtime.clone();
+    let tx = map.lock().await.get(&id).map(|r| r.tx.clone());
+    let Some(tx) = tx else {
+        return Err(cmd_err("NOT_RUNNING", "会话未运行".into(), None));
+    };
+    let req = serde_json::json!({"id": format!("a-{}", chrono::Utc::now().timestamp_millis()), "type": "abort"});
+    tx.send(format!("{}\n", serde_json::to_string(&req).unwrap()))
+        .map_err(|_| cmd_err("RPC_IO", "停止失败，进程可能已退出".into(), None))?;
+    let _ = app;
+    Ok(())
+}
+
+/// 杀掉一个会话的长驻进程（归档 / 删除 / 移除项目前调用）。
+pub fn kill_runtime(state: &State<AppState>, id: &str) {
+    let map = state.runtime.clone();
+    if let Ok(mut m) = map.try_lock() {
+        if let Some(r) = m.remove(id) {
+            let _ = r.tx.send(String::new());
+            // child kill 需要 async；此处发哨兵让 pump 退出，进程随 stdin 关闭退出（code 0）
+        }
+    }
+    if let Ok(mut run) = state.running.try_lock() {
+        run.remove(id);
+    }
+}
+
+#[tauri::command]
+pub async fn approve(app: AppHandle, state: State<'_, AppState>, id: String, ui_id: String, decision: String) -> Result<(), CmdError> {
+    let map = state.runtime.clone();
+    let tx = map.lock().await.get(&id).map(|r| r.tx.clone());
+    let Some(tx) = tx else {
+        return Err(cmd_err("NOT_RUNNING", "会话未运行，审批已失效".into(), None));
+    };
+    let resp = match decision.as_str() {
+        "once" | "always" => serde_json::json!({"type":"extension_ui_response","id":ui_id,"value":"Approve"}),
+        "deny" => serde_json::json!({"type":"extension_ui_response","id":ui_id,"cancelled":true}),
+        _ => return Err(cmd_err("BAD_ARG", "审批 decision 非法".into(), None)),
+    };
+    if decision == "always" {
+        // 会话级 yolo 意向（V1 不伪装逐工具 API）
+        if let Ok(mut ov) = state.overlay.try_lock() {
+            ov.session_approval.insert(id.clone(), "yolo".into());
+        }
+        let _ = save_overlay(&state);
+    }
+    tx.send(format!("{}\n", serde_json::to_string(&resp).unwrap()))
+        .map_err(|_| cmd_err("RPC_IO", "审批发送失败，进程可能已退出".into(), None))?;
+    // 审批放行即视为「等待结束」：活动态改回 running，与广播保持一致（回收只认 idle）
+    if let Some(r) = state.runtime.lock().await.get(&id) {
+        r.activity.set_state(crate::runtime::ACT_RUNNING);
+    }
+    let _ = app.emit(format!("omp-status://{id}").as_str(), serde_json::json!({"state":"running"}));
+    Ok(())
+}
+
+/// 通用 UI 请求回包（V2 M5）：omp `extension_ui_request` 里非审批的交互方法。
+/// 回包语义按方法区分（实测 omp 18.1.22 内嵌源码）：
+/// `confirm` → `{confirmed:bool}`；`input`/`editor`/非审批 `select` → `{value:string}`；
+/// 取消/跳过 → `{cancelled:true}`；`ask`（V40）→ `{answers:[{id,selectedOptions,customInput}]}`
+/// （每个问题一条、顺序与请求一致；单选至多一项且不与 customInput 并存）。审批仍走 `approve`。
+#[tauri::command]
+pub async fn respond_ui(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    ui_id: String,
+    kind: String,
+    value: Option<String>,
+    confirmed: Option<bool>,
+    answers: Option<serde_json::Value>,
+) -> Result<(), CmdError> {
+    let map = state.runtime.clone();
+    let tx = map.lock().await.get(&id).map(|r| r.tx.clone());
+    let Some(tx) = tx else {
+        return Err(cmd_err("NOT_RUNNING", "会话未运行，该请求已失效".into(), None));
+    };
+    let resp = match kind.as_str() {
+        "value" => serde_json::json!({"type":"extension_ui_response","id":ui_id,"value":value.unwrap_or_default()}),
+        "confirm" => serde_json::json!({"type":"extension_ui_response","id":ui_id,"confirmed":confirmed.unwrap_or(false)}),
+        "cancel" => serde_json::json!({"type":"extension_ui_response","id":ui_id,"cancelled":true}),
+        "answers" => serde_json::json!({"type":"extension_ui_response","id":ui_id,"answers":answers.unwrap_or_else(|| serde_json::json!([]))}),
+        _ => return Err(cmd_err("BAD_ARG", "UI 回包类型非法".into(), None)),
+    };
+    tx.send(format!("{}\n", serde_json::to_string(&resp).unwrap()))
+        .map_err(|_| cmd_err("RPC_IO", "回包发送失败，进程可能已退出".into(), None))?;
+    // 回包即视为「等待结束」，与 approve 一致把状态推回 running（omp 会继续跑）；
+    // 活动态同步落 running（回收只认 idle）。
+    if let Some(r) = state.runtime.lock().await.get(&id) {
+        r.activity.set_state(crate::runtime::ACT_RUNNING);
+    }
+    let _ = app.emit(format!("omp-status://{id}").as_str(), serde_json::json!({"state":"running"}));
+    Ok(())
+}
+
+/// `check_paths` 的单条结果。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathCheck {
+    pub path: String,
+    pub exists: bool,
+    pub is_dir: bool,
+}
+
+/// 相对路径按 base 解析并做**词法归一**（不触碰文件系统）：`.` 丢弃、`..` 回退一层。
+/// 绝对路径原样使用。
+pub fn resolve_path(base: &str, p: &str) -> PathBuf {
+    let raw = if p.starts_with('/') { PathBuf::from(p) } else { PathBuf::from(base).join(p) };
+    let mut out = PathBuf::new();
+    for c in raw.components() {
+        match c {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// `@` 路径补全的单条候选（只读目录列举，不读文件内容）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathCandidate {
+    pub path: String,
+    pub is_dir: bool,
+}
+
+/// 输入框 `@` 补全：按当前 token 列举 base 下的匹配项（前缀匹配，最多 20 条）。
+/// 只读目录名、不跟符号链接、不递归——补全够用即可，不做文件搜索。
+#[tauri::command]
+pub async fn complete_path(base: String, prefix: String) -> Vec<PathCandidate> {
+    if base.is_empty() || prefix.contains('\0') {
+        return vec![];
+    }
+    // token 含目录分隔符时按最后一段做前缀，搜索目录为前面部分
+    let (dir_rel, file_prefix) = match prefix.rsplit_once('/') {
+        Some((d, f)) => (d.to_string(), f.to_string()),
+        None => (String::new(), prefix.clone()),
+    };
+    if file_prefix.contains("..") || dir_rel.contains("..") {
+        return vec![];
+    }
+    let dir = if dir_rel.is_empty() {
+        PathBuf::from(&base)
+    } else {
+        resolve_path(&base, &dir_rel)
+    };
+    let entries = std::fs::read_dir(&dir)
+        .map(|rd| rd.filter_map(|e| e.ok()).take(200).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let mut out: Vec<PathCandidate> = entries
+        .into_iter()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || !name.starts_with(file_prefix.as_str()) {
+                return None;
+            }
+            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            let path = if dir_rel.is_empty() { name } else { format!("{dir_rel}/{name}") };
+            Some(PathCandidate { path, is_dir })
+        })
+        .collect();
+    out.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.path.cmp(&b.path),
+    });
+    out.truncate(20);
+    out
+}
+
+/// 输入框 `@提及` 的存在性提示（V2 M6b）：只 stat，不读内容、不写任何东西。
+/// 展开动作是 omp 做的，这里只回答「这个路径在会话 cwd 下存在吗」。
+#[tauri::command]
+pub async fn check_paths(base: String, paths: Vec<String>) -> Vec<PathCheck> {
+    paths
+        .into_iter()
+        .take(50)
+        .map(|p| {
+            let full = resolve_path(&base, &p);
+            match std::fs::metadata(&full) {
+                Ok(m) => PathCheck { path: p, exists: true, is_dir: m.is_dir() },
+                Err(_) => PathCheck { path: p, exists: false, is_dir: false },
+            }
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn set_model(app: AppHandle, state: State<'_, AppState>, id: String, provider: String, model_id: String) -> Result<(), CmdError> {
+    let map = state.runtime.clone();
+    let tx = map.lock().await.get(&id).map(|r| r.tx.clone());
+    let Some(tx) = tx else {
+        return Err(cmd_err("NOT_RUNNING", "会话未运行，无法切换模型".into(), None));
+    };
+    let req = serde_json::json!({"id": format!("m-{}", chrono::Utc::now().timestamp_millis()), "type": "set_model", "provider": provider, "modelId": model_id});
+    tx.send(format!("{}\n", serde_json::to_string(&req).unwrap()))
+        .map_err(|_| cmd_err("RPC_IO", "切换模型失败，进程可能已退出".into(), None))?;
+    let _ = app;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_thinking(app: AppHandle, state: State<'_, AppState>, id: String, level: String) -> Result<(), CmdError> {
+    if !["off","minimal","low","medium","high","xhigh","max","auto"].contains(&level.as_str()) {
+        return Err(cmd_err("BAD_ARG", "思考档非法".into(), None));
+    }
+    let map = state.runtime.clone();
+    let tx = map.lock().await.get(&id).map(|r| r.tx.clone());
+    let Some(tx) = tx else {
+        return Err(cmd_err("NOT_RUNNING", "会话未运行，无法切换思考档".into(), None));
+    };
+    let req = serde_json::json!({"id": format!("t-{}", chrono::Utc::now().timestamp_millis()), "type": "set_thinking_level", "level": level});
+    tx.send(format!("{}\n", serde_json::to_string(&req).unwrap()))
+        .map_err(|_| cmd_err("RPC_IO", "切换思考档失败，进程可能已退出".into(), None))?;
+    let _ = app;
+    Ok(())
+}
+
+/// 会话运行时真值（模型 / 可用思考档 / 当前档）。会话未运行返回 `None`。
+/// 前端打开会话后拉一次做回填；其后的变化经 `omp-state://<id>` 推送。
+#[tauri::command]
+pub async fn get_session_runtime(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Option<crate::runtime::SessionMeta>, CmdError> {
+    let map = state.runtime.lock().await;
+    Ok(map.get(&id).map(|r| {
+        let mut meta = r.meta.clone();
+        // 活动态真值：状态事件是推送，前端切走期间收不到——回读把当前状态带上，
+        // 切回一个正在跑的会话才不会被显示成 idle（见 `SessionMeta.status`）。
+        meta.status = Some(crate::runtime::activity_state_label(r.activity.state()).to_string());
+        meta
+    }))
+}
+
+/// 全局权限档（`tools.approvalMode`，读 omp 全局配置；cwd 钉 agentDir 与设置页同层）。
+#[tauri::command]
+pub async fn get_global_approval(state: State<'_, AppState>) -> Result<String, CmdError> {
+    let bin = state.omp_path.lock().await.clone();
+    let Some(p) = bin else {
+        return Err(cmd_err("OMP_MISSING", "未找到 omp".into(), None));
+    };
+    let dir = state.agent_dir.lock().await.clone();
+    let cwd = dir.is_dir().then_some(dir.as_path());
+    let out = crate::providers::run_omp_in(cwd, &p, &["config", "get", "tools.approvalMode", "--json"])
+        .await
+        .map_err(|e| cmd_err("CONFIG_READ", format!("读取权限失败：{e}"), None))?;
+    let v: serde_json::Value = serde_json::from_str(out.trim()).map_err(|e| cmd_err("CONFIG_PARSE", format!("解析失败：{e}"), None))?;
+    Ok(v.get("value").and_then(|x| x.as_str()).unwrap_or("write").to_string())
+}
+
+/// 写全局权限档（`omp config set tools.approvalMode`）。
+#[tauri::command]
+pub async fn set_global_approval(state: State<'_, AppState>, mode: String) -> Result<(), CmdError> {
+    if !["always-ask", "write", "yolo"].contains(&mode.as_str()) {
+        return Err(cmd_err("BAD_ARG", "权限档必须是 always-ask/write/yolo".into(), None));
+    }
+    let bin = state.omp_path.lock().await.clone();
+    let Some(p) = bin else {
+        return Err(cmd_err("OMP_MISSING", "未找到 omp".into(), None));
+    };
+    let dir = state.agent_dir.lock().await.clone();
+    let cwd = dir.is_dir().then_some(dir.as_path());
+    crate::providers::run_omp_in(cwd, &p, &["config", "set", "tools.approvalMode", "--", &mode])
+        .await
+        .map(|_| ())
+        .map_err(|e| cmd_err("CONFIG_WRITE", format!("写入权限失败：{e}"), None))
+}
+
+/// 会话级权限覆盖（覆盖层 `sessionApproval`；None = 移除覆盖回全局档）。
+#[tauri::command]
+pub async fn set_session_approval(state: State<'_, AppState>, id: String, mode: Option<String>) -> Result<(), CmdError> {
+    if let Some(m) = &mode {
+        if !["always-ask", "write", "yolo"].contains(&m.as_str()) {
+            return Err(cmd_err("BAD_ARG", "权限档必须是 always-ask/write/yolo".into(), None));
+        }
+    }
+    {
+        let mut ov = state.overlay.lock().await;
+        match mode {
+            Some(m) => {
+                ov.session_approval.insert(id, m);
+            }
+            None => {
+                ov.session_approval.remove(&id);
+            }
+        }
+    }
+    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+    Ok(())
+}
+
+/// 输入框上方上下文条的 git **只读**查询：当前分支 + 本地分支清单 + 脏工作区标记。
+/// 目录不存在 / 不是仓库 / 找不到 git 都返回降级值（`isRepo:false`），不算命令失败——
+/// 前端据此只隐藏分支展示，绝不把「这里不是 git 仓库」变成一条错误横幅。
+#[tauri::command]
+pub async fn get_git_info(path: String) -> Result<crate::git_info::GitInfo, CmdError> {
+    if !crate::git_info::dir_exists(&path) {
+        return Ok(crate::git_info::GitInfo::not_repo(Some("目录不存在".into())));
+    }
+    let Some(git) = crate::git_info::git_bin().await else {
+        return Ok(crate::git_info::GitInfo::not_repo(Some("未找到 git".into())));
+    };
+    Ok(crate::git_info::read_git_info(&git, &path).await)
+}
+
+pub fn load_state<R: tauri::Runtime>(app: &AppHandle<R>) -> AppState {
+    let dir = app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
+    let overlay_path = dir.join("omp-mini").join("overlay.json");
+    let (ov, reset) = load_overlay(&overlay_path);
+    if reset {
+        let _ = std::fs::create_dir_all(overlay_path.parent().unwrap());
+        let _ = std::fs::write(&overlay_path, serde_json::to_string_pretty(&ov).unwrap());
+    }
+    AppState {
+        overlay_path,
+        overlay: Mutex::new(ov),
+        agent_dir: Mutex::new(resolve_agent_dir(None)),
+        omp_path: Mutex::new(None),
+        omp_version: Mutex::new(None),
+        models_cache: Mutex::new(None),
+        models_fetch: Mutex::new(()),
+        login: std::sync::Arc::new(Mutex::new(None)),
+        login_status: std::sync::Arc::new(Mutex::new(Default::default())),
+        roles_edit: Mutex::new(()),
+        retry_edit: Mutex::new(()),
+        models_edit: Mutex::new(()),
+        extensions_edit: Mutex::new(()),
+        runtime: std::sync::Arc::new(Mutex::new(HashMap::new())),
+        running: Mutex::new(HashMap::new()),
+        pty: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
+        commit_tasks: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
+        omp_update_task: std::sync::Arc::new(std::sync::Mutex::new(None)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        apply_project_order, assign_members, catalog_fresh, clean_workspace_name, derived_title, display_title,
+        find_message_entry_in, kill_runtime, list_archived_in, load_cached, load_state, owner_project, rpc_request,
+        scan_window, session_file_for, spawn_session_runtime, AppState, MODELS_TTL_MS,
+    };
+    use crate::overlay::{Overlay, Project};
+    use std::collections::HashMap;
+
+    /// 显示标题的兜底链（V44）：备注 > omp 真标题 > 首条用户消息派生（12 字 + 省略号）> 未命名 + 日期。
+    /// 派生档服务的是 rpc-ui 会话——omp 在该模式强制 `PI_NO_TITLE=1`，从来没有自动标题。
+    #[test]
+    fn display_title_fallback_chain() {
+        let note = "我的备注".to_string();
+        let ts = 1_760_000_000_000_i64; // 2025-10-09（UTC）
+        // 备注最优先（即便 omp 真标题与派生源都在）
+        assert_eq!(display_title(Some(&note), "真标题", Some("首条消息"), ts), "我的备注");
+        // 空白备注不算
+        let blank = "   ".to_string();
+        assert_eq!(display_title(Some(&blank), "真标题", None, ts), "真标题");
+        // 真标题 > 派生
+        assert_eq!(display_title(None, "真标题", Some("首条消息"), ts), "真标题");
+        // 无真标题：首条用户消息派生
+        assert_eq!(display_title(None, "", Some("  帮我把登录页重构一下  "), ts), "帮我把登录页重构一下");
+        assert_eq!(display_title(None, "  ", Some("帮我把登录页重构一下登录页重构一下"), ts), "帮我把登录页重构一下登录…");
+        // 都没有：未命名 + 日期
+        assert!(display_title(None, "", None, ts).starts_with("未命名会话 "));
+        assert!(display_title(None, "", Some("   "), ts).starts_with("未命名会话 "), "纯空白派生源不算");
+    }
+
+    #[test]
+    fn derived_title_folds_and_truncates() {
+        assert_eq!(derived_title("第一行\n第二行   第三行").as_deref(), Some("第一行 第二行 第三行"));
+        // 恰好 12 字符：原样
+        assert_eq!(derived_title("一二三四五六七八九十一二").as_deref(), Some("一二三四五六七八九十一二"));
+        // 13 字符：截到 12 + 省略号（按字符不按字节——中文不许切坏）
+        assert_eq!(derived_title("一二三四五六七八九十一二三").as_deref(), Some("一二三四五六七八九十一二…"));
+        assert_eq!(derived_title("   "), None);
+    }
+
+    /// V21 工作区成员重设：在列表里的进组（跨组则改归属），其余原成员回归未分组。
+    #[test]
+    fn assign_members_moves_and_releases() {
+        let mk = |id: &str, ws: Option<&str>| Project {
+            id: id.into(),
+            path: format!("/{id}"),
+            workspace_id: ws.map(|s| s.to_string()),
+            ..Default::default()
+        };
+        let mut ov = Overlay {
+            version: 1,
+            projects: vec![mk("p1", None), mk("p2", Some("w1")), mk("p3", Some("w2"))],
+            ..Default::default()
+        };
+        // p1 进 w1、p2 留在 w1、p3 从 w2 改归 w1；未知 id 静默忽略
+        assign_members(&mut ov, "w1", &["p1".into(), "p2".into(), "p3".into(), "ghost".into()]);
+        assert_eq!(ov.projects[0].workspace_id.as_deref(), Some("w1"));
+        assert_eq!(ov.projects[1].workspace_id.as_deref(), Some("w1"));
+        assert_eq!(ov.projects[2].workspace_id.as_deref(), Some("w1"));
+        // 再用只含 p2 的列表更新 w1：p1 / p3 回归未分组
+        assign_members(&mut ov, "w1", &["p2".into()]);
+        assert_eq!(ov.projects[0].workspace_id, None);
+        assert_eq!(ov.projects[1].workspace_id.as_deref(), Some("w1"));
+        assert_eq!(ov.projects[2].workspace_id, None);
+    }
+
+    /// 左栏拖拽排序（V26）：`order` 认得的按序在前、认不得的忽略、缺席的按原相对顺序补末尾。
+    #[test]
+    fn apply_project_order_keeps_every_project() {
+        let mk = |id: &str| Project { id: id.into(), path: format!("/{id}"), ..Default::default() };
+        let out = apply_project_order(
+            vec![mk("a"), mk("b"), mk("c")],
+            &["c".into(), "ghost".into(), "a".into()],
+        );
+        let ids: Vec<&str> = out.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, vec!["c", "a", "b"]);
+        // 空 order 原样返回
+        let same = apply_project_order(vec![mk("a"), mk("b")], &[]);
+        assert_eq!(same.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), vec!["a", "b"]);
+    }
+
+    /// 工作区名清洗：首尾空白裁掉、内部换行折成空格；全空白 = 空（调用方拒绝）。
+    #[test]
+    fn clean_workspace_name_trims_and_flattens() {
+        assert_eq!(clean_workspace_name("  全栈  "), "全栈");
+        assert_eq!(clean_workspace_name("front\nback"), "front back");
+        assert_eq!(clean_workspace_name(" \t \n "), "");
+    }
+
+    /// 会话归属：与 `list_sessions` 同一条规则（真实路径前缀匹配、最长优先）。
+    #[test]
+    fn owner_project_matches_by_real_prefix() {
+        // 用**真实存在**的临时目录：路径归一依赖 canonicalize，纯字符串造的数据在
+        // macOS（/tmp 是 /private/tmp 的符号链接）与 Linux 上行为不同——CI 的 Linux
+        // runner 上翻过车（不存在的 /tmp/x 被当成 /private/tmp/x）。
+        let root = std::env::temp_dir().join(format!("omp-owner-test-{}", std::process::id()));
+        let demo = root.join("demo");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(demo.join("sub")).unwrap();
+        std::fs::create_dir_all(root.join("other")).unwrap();
+        let p = |x: &std::path::Path| x.to_string_lossy().to_string();
+
+        let projects = vec![
+            ("p1".to_string(), p(&root)),
+            ("p2".to_string(), p(&demo)),
+        ];
+        // 子目录归最长的那个项目，父目录归父项目
+        assert_eq!(owner_project(&projects, &p(&demo.join("sub"))).as_deref(), Some("p2"));
+        assert_eq!(owner_project(&projects, &p(&root.join("other"))).as_deref(), Some("p1"));
+        // 符号链接写法与真实路径必须归到同一个项目（macOS 的 /tmp ↔ /private/tmp 同一机制）
+        #[cfg(unix)]
+        {
+            let link = root.join("link");
+            std::os::unix::fs::symlink(&demo, &link).unwrap();
+            std::fs::create_dir_all(link.join("sub")).unwrap();
+            assert_eq!(owner_project(&projects, &p(&link.join("sub"))).as_deref(), Some("p2"));
+        }
+        // 读不到 cwd（新会话懒写盘）不归属，由调用方决定兜底
+        assert_eq!(owner_project(&projects, ""), None);
+        assert_eq!(owner_project(&[], &p(&demo)), None);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 在临时目录里造一个 sessions/<slug>/*.jsonl 结构（归档清单的测试用）。
+    fn tmp_sessions_root(tag: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("omp-search-test-{}-{}", std::process::id(), tag));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("--tmp-demo--")).unwrap();
+        root
+    }
+
+    fn write_session(root: &std::path::Path, file: &str, id: &str, title: &str, lines: &[&str]) {
+        let mut body = format!(
+            "{}\n",
+            serde_json::json!({"type":"session","id":id,"timestamp":"2026-09-15T10:00:00.000Z","cwd":"/tmp/demo","title":title})
+        );
+        for l in lines {
+            body.push_str(l);
+            body.push('\n');
+        }
+        std::fs::write(root.join("--tmp-demo--").join(file), body).unwrap();
+    }
+
+    #[test]
+    fn list_archived_in_lists_only_archived_and_maps_project() {
+        let root = tmp_sessions_root("arch");
+        write_session(&root, "2026-09-15T10-00-00_s-keep.jsonl", "s-keep", "保住的会话", &[]);
+        write_session(&root, "2026-09-15T11-00-00_s-live.jsonl", "s-live", "没归档的会话", &[]);
+        let archived = HashMap::from([
+            ("s-keep".to_string(), true),
+            ("s-live".to_string(), false),
+            // 覆盖层里的失效 id（文件已删）：定位不到就落空，不该冒出一条空壳
+            ("s-gone".to_string(), true),
+        ]);
+        let projects = vec![("p1".to_string(), "/tmp/demo".to_string())];
+        let notes = HashMap::from([("s-keep".to_string(), "备注名".to_string())]);
+        let out = list_archived_in(&root, &archived, &projects, &HashMap::new(), &notes);
+        assert_eq!(out.len(), 1, "只列归档的：没归档与失效 id 都不进");
+        assert_eq!(out[0].id, "s-keep");
+        assert_eq!(out[0].title, "备注名", "备注覆盖标题，与左栏同一口径");
+        assert_eq!(out[0].project_id.as_deref(), Some("p1"), "按 cwd 归属回项目 id");
+        assert!(out[0].archived);
+        assert!(!out[0].corrupt);
+    }
+
+    #[test]
+    fn list_archived_in_sorts_newest_first_and_keeps_orphans() {
+        let root = tmp_sessions_root("arch-sort");
+        let head = |id: &str, title: &str, ts: &str| {
+            format!(
+                "{}\n",
+                serde_json::json!({"type":"session","id":id,"timestamp":ts,"cwd":"/tmp/demo","title":title})
+            )
+        };
+        let dir = root.join("--tmp-demo--");
+        // 文件名按真实布局带会话 id（`<时间戳>_<id>.jsonl`）：覆盖层里的 id 靠文件名里的前缀定位
+        std::fs::write(dir.join("2026-09-14T10-00-00Z_s-old.jsonl"), head("s-old", "旧的", "2026-09-14T10:00:00.000Z")).unwrap();
+        std::fs::write(dir.join("2026-09-16T10-00-00Z_s-new.jsonl"), head("s-new", "新的", "2026-09-16T10:00:00.000Z")).unwrap();
+        let archived = HashMap::from([("s-old".to_string(), true), ("s-new".to_string(), true)]);
+        let out = list_archived_in(&root, &archived, &[], &HashMap::new(), &HashMap::new());
+        assert_eq!(
+            out.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+            vec!["s-new", "s-old"],
+            "最新归档排前面"
+        );
+        assert!(out.iter().all(|s| s.project_id.is_none()), "没有项目时全部算未归属");
+    }
+
+    /// 会话定位（`session_file_for`）只认**完整 id**：8 字符前缀在同一分钟内建的两个会话间
+    /// 必然相同（uuid v7 前 8 位 = 毫秒时间戳高 32 位），拿前缀找文件会命中「文件名更大的
+    /// 那个」= **另一个会话**——真机表现：读历史读错文件、删除删错文件、`--resume` 拉起
+    /// 另一个会话（omp 侧同口径取最新，实测）。
+    #[test]
+    fn session_file_for_matches_full_id_only() {
+        let root = std::env::temp_dir().join(format!("omp-session-id-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("sessions").join("--tmp-demo--")).unwrap();
+        let dir = root.join("sessions");
+        // 同一分钟建的两个会话（真机形状：id 前 8 位相同）
+        let old_id = "01a123c6-9b8c-76a4-85ab-10ba5ee9d179";
+        let new_id = "01a123c6-f958-7524-b1be-53b4fb030bf6";
+        let old_file = "2026-10-10T03-06-20-940Z_01a123c6-9b8c-76a4-85ab-10ba5ee9d179.jsonl";
+        let new_file = "2026-10-10T03-06-44-952Z_01a123c6-f958-7524-b1be-53b4fb030bf6.jsonl";
+        write_session(&dir, old_file, old_id, "旧会话", &[]);
+        write_session(&dir, new_file, new_id, "新会话", &[]);
+
+        assert_eq!(session_file_for(&root, old_id).unwrap(), dir.join("--tmp-demo--").join(old_file));
+        assert_eq!(session_file_for(&root, new_id).unwrap(), dir.join("--tmp-demo--").join(new_file));
+        // 8 字符前缀不再命中任何文件（旧的 contains 口径会命中更大的那个 = 新会话）
+        assert!(session_file_for(&root, "01a123c6").is_none());
+        // 损坏兜底给的「文件名主干」id 也能定位自己
+        assert_eq!(
+            session_file_for(&root, "2026-10-10T03-06-20-940Z_01a123c6-9b8c-76a4-85ab-10ba5ee9d179").unwrap(),
+            dir.join("--tmp-demo--").join(old_file)
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `spawn_session_runtime` 的 `--resume` 必须给**完整会话 id**（前缀会拉起同一分钟里
+    /// 另一个会话，那个会话若在跑就被同 id 补位顶掉 = 进行中的轮次被中止）。
+    ///
+    /// 用桩 omp（把 argv 落文件 + 走三行握手回包）验证参数，不依赖真实 omp / AI 调用。
+    #[tokio::test]
+    async fn spawn_session_runtime_resumes_by_full_id() {
+        use tauri::Manager;
+        let root = std::env::temp_dir().join(format!("omp-session-spawn-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("sessions").join("--tmp-demo--")).unwrap();
+        let dir = root.join("sessions");
+        let old_id = "01a123c6-9b8c-76a4-85ab-10ba5ee9d179";
+        let new_id = "01a123c6-f958-7524-b1be-53b4fb030bf6";
+        write_session(&dir, "2026-10-10T03-06-20-940Z_01a123c6-9b8c-76a4-85ab-10ba5ee9d179.jsonl", old_id, "旧会话", &[]);
+        write_session(&dir, "2026-10-10T03-06-44-952Z_01a123c6-f958-7524-b1be-53b4fb030bf6.jsonl", new_id, "新会话", &[]);
+        let old_file = dir.join("--tmp-demo--").join("2026-10-10T03-06-20-940Z_01a123c6-9b8c-76a4-85ab-10ba5ee9d179.jsonl");
+
+        // 桩 omp：记录 argv → 回 ready → 对 h-state 回身份（其余握手命令忽略），直到 stdin 关闭
+        let argv_path = root.join("argv.txt");
+        let resp = serde_json::json!({
+            "id": "h-state",
+            "type": "response",
+            "success": true,
+            "data": {"sessionId": old_id, "sessionFile": old_file.to_string_lossy()},
+        })
+        .to_string();
+        let stub = root.join("stub-omp.sh");
+        std::fs::write(
+            &stub,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{argv}'\nprintf '{{\"type\":\"ready\"}}\\n'\nwhile IFS= read -r line; do\n  case \"$line\" in\n    *h-state*) printf '%s\\n' '{resp}' ;;\n  esac\ndone\n",
+                argv = argv_path.display(),
+                resp = resp,
+            ),
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app 构建失败");
+        let state = load_state(app.handle());
+        *state.agent_dir.lock().await = root.clone();
+        *state.omp_path.lock().await = Some(stub.to_string_lossy().to_string());
+        app.manage(state);
+
+        let head = spawn_session_runtime(app.handle(), &app.state::<AppState>(), old_id)
+            .await
+            .expect("resume 拉起失败");
+        assert_eq!(head.id, old_id, "读到的文件头必须是目标会话自己的");
+        let argv = std::fs::read_to_string(&argv_path).unwrap();
+        let args: Vec<&str> = argv.lines().collect();
+        let i = args.iter().position(|a| *a == "--resume").expect("argv 里没有 --resume");
+        assert_eq!(args[i + 1], old_id, "--resume 必须是完整会话 id（前缀会拉起另一个会话）");
+
+        // 收尾：哨兵让 pump 退出（stdin 关闭 → 桩的 read 循环结束、进程退出）
+        kill_runtime(&app.state::<AppState>(), old_id);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn scan_window_defaults_and_clamps() {
+        assert_eq!(scan_window(None, None), (500, 0));
+        assert_eq!(scan_window(Some(1000), Some(500)), (1000, 500));
+        // 过小/过大都夹回合法区间，offset 原样透传
+        assert_eq!(scan_window(Some(0), None), (1, 0));
+        assert_eq!(scan_window(Some(99999), None), (5000, 0));
+    }
+
+    /// 目录快照的新鲜判定：TTL 内算新鲜，刚好到 TTL 就算过期（严格小于）。
+    #[test]
+    fn catalog_freshness_boundary() {
+        assert!(catalog_fresh(1_000, 1_000 + MODELS_TTL_MS - 1));
+        assert!(!catalog_fresh(1_000, 1_000 + MODELS_TTL_MS));
+        assert!(!catalog_fresh(1_000, 1_000 + MODELS_TTL_MS + 5_000));
+    }
+
+    /// 目录缓存核心：TTL 内命中、过期重拉、**并发只真拉一次**（单飞 + 等锁二次检查）。
+    #[tokio::test]
+    async fn load_cached_single_flight_and_ttl() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use tokio::sync::Mutex;
+        let cache: Mutex<Option<(i64, i32)>> = Mutex::new(None);
+        let lock = Mutex::new(());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let fetch = |calls: Arc<AtomicUsize>| async move {
+            calls.fetch_add(1, Ordering::SeqCst);
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            Ok::<i32, String>(7)
+        };
+        let n = || calls.load(Ordering::SeqCst);
+
+        // 冷缓存并发三个：只有第一个真拉，其余等锁后复用
+        let (a, b, c) = tokio::join!(
+            load_cached(&cache, &lock, false, 60_000, || fetch(calls.clone())),
+            load_cached(&cache, &lock, false, 60_000, || fetch(calls.clone())),
+            load_cached(&cache, &lock, false, 60_000, || fetch(calls.clone())),
+        );
+        assert_eq!((a.unwrap(), b.unwrap(), c.unwrap()), (7, 7, 7));
+        assert_eq!(n(), 1, "并发只真拉一次");
+
+        // 新鲜缓存：再读不拉
+        assert_eq!(load_cached(&cache, &lock, false, 60_000, || fetch(calls.clone())).await.unwrap(), 7);
+        assert_eq!(n(), 1);
+
+        // 过期（ttl 0 → 任何缓存都过期）→ 真拉一次。同样睡 2ms：同一毫秒内刚写入的快照
+        // 会被二次检查当成「别人刚拉过」而复用（时间戳是毫秒精度）
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        assert_eq!(load_cached(&cache, &lock, false, 0, || fetch(calls.clone())).await.unwrap(), 7);
+        assert_eq!(n(), 2);
+
+        // force：即使新鲜也真拉（用户点「刷新」的语义）。睡 2ms 让请求起点严格晚于上次
+        // 写入——同一毫秒内的并发写入会被复用（等锁二次检查按毫秒判定）。
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        assert_eq!(load_cached(&cache, &lock, true, 60_000, || fetch(calls.clone())).await.unwrap(), 7);
+        assert_eq!(n(), 3);
+    }
+
+    /// 落盘 message 行的最小构造器（与 jsonl 形状对齐：type/id/parentId/message）。
+    fn msg_line(id: &str, role: &str, blocks: &[(&str, &str)]) -> String {
+        let content: Vec<serde_json::Value> = blocks
+            .iter()
+            .map(|(t, v)| {
+                if *t == "text" {
+                    serde_json::json!({ "type": "text", "text": v })
+                } else {
+                    serde_json::json!({ "type": t, "id": v })
+                }
+            })
+            .collect();
+        serde_json::json!({
+            "type": "message",
+            "id": id,
+            "parentId": serde_json::Value::Null,
+            "message": { "role": role, "content": content }
+        })
+        .to_string()
+    }
+
+    /// V40 fork 定位器：user 按「全部 text 块 \n 拼接」匹配、nth 取第 n 次出现、
+    /// 返回该行前最近一条 message 行（编辑重发的分叉点）。
+    #[test]
+    fn find_message_entry_matches_user_full_text_and_prev() {
+        let content = format!(
+            "{}\n{}\n{}\n",
+            msg_line("a1", "user", &[("text", "你好")]),
+            msg_line("a2", "assistant", &[("text", "回复一")]),
+            msg_line("a3", "user", &[("text", "你好")]),
+        );
+        // 第二条同文本 user（nth=1）→ id a3、其前最近 message 行 = a2
+        assert_eq!(
+            find_message_entry_in(&content, "user", "你好", 1),
+            Some(("a3".to_string(), Some("a2".to_string())))
+        );
+        // 第一条（nth=0）之前没有 message 行（首条消息没有可回退的分叉点）
+        assert_eq!(find_message_entry_in(&content, "user", "你好", 0), Some(("a1".to_string(), None)));
+        // nth 越界 / 文本不存在 → None
+        assert_eq!(find_message_entry_in(&content, "user", "你好", 2), None);
+        assert_eq!(find_message_entry_in(&content, "user", "不存在", 0), None);
+    }
+
+    /// assistant 按「任一 text 块相等」匹配（一条行的多个块算一个匹配；与前端逐块渲染的口径对齐）。
+    #[test]
+    fn find_message_entry_matches_any_assistant_text_block() {
+        let content = format!(
+            "{}\n{}\n",
+            msg_line("a1", "user", &[("text", "问题")]),
+            msg_line("a2", "assistant", &[("text", "第一段"), ("toolCall", "t1"), ("text", "第二段")]),
+        );
+        assert_eq!(
+            find_message_entry_in(&content, "assistant", "第二段", 0),
+            Some(("a2".to_string(), Some("a1".to_string())))
+        );
+        assert_eq!(find_message_entry_in(&content, "assistant", "不存在", 0), None);
+    }
+
+    /// user 的文本口径 = 全部 text 块以 \n 拼接（与前端 `viewMsgsFromJsonlLines` 一致），
+    /// 非 message 行不参与 match 也不更新 prev。
+    #[test]
+    fn find_message_entry_joins_user_blocks_with_newline() {
+        let content = format!(
+            "{}\n{}\n",
+            r#"{"type":"model_change","id":"m1","parentId":null}"#,
+            msg_line("u1", "user", &[("text", "一"), ("image", "img"), ("text", "二")]),
+        );
+        assert_eq!(find_message_entry_in(&content, "user", "一\n二", 0), Some(("u1".to_string(), None)));
+        assert_eq!(find_message_entry_in(&content, "user", "一二", 0), None);
+    }
+
+    /// 写一个可执行的 stub「omp」脚本（V40 的 rpc_request 测试用）。
+    fn write_v40_stub(dir: &std::path::Path, script: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let p = dir.join("omp-stub.sh");
+        std::fs::write(&p, script).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p
+    }
+
+    /// `rpc_request`（V40 新通路：临时监听 `omp-event://<sid>` + 按请求 id 匹配回包）三条路径：
+    /// 成功取 `data`、失败响应转 CmdError（带 code / message）、无回包超时。
+    /// 用 stub 脚本模拟 omp 的 ready / 身份 / 动态回显。
+    #[tokio::test]
+    async fn rpc_request_matches_by_id_ok_fail_timeout() {
+        use tauri::Manager;
+        let root = std::env::temp_dir().join(format!("omp-v40-rpc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        // stub：ready → 身份回包（h-state）；含 "__fail" 回失败；含 "__never" 不回；其余回显 id + data
+        let script = r#"#!/bin/sh
+printf '{"type":"ready"}\n'
+while IFS= read -r line; do
+  case "$line" in
+    *'"h-state"'*) printf '%s\n' '{"type":"response","id":"h-state","command":"get_state","success":true,"data":{"sessionId":"stub-old","sessionFile":"/tmp/stub-old.jsonl"}}' ;;
+    *'"__fail"'*)
+      id=$(printf '%s' "$line" | sed -E 's/.*"id":"([^"]+)".*/\1/')
+      printf '{"type":"response","id":"%s","command":"x","success":false,"error":"stub-rejected","code":"STUB_FAIL"}\n' "$id" ;;
+    *'"__never"'*) : ;;
+    *)
+      id=$(printf '%s' "$line" | sed -E 's/.*"id":"([^"]+)".*/\1/')
+      printf '{"type":"response","id":"%s","command":"x","success":true,"data":{"echo":"ok"}}\n' "$id" ;;
+  esac
+done
+"#;
+        let stub = write_v40_stub(&root, script);
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app 构建失败");
+        let state = load_state(app.handle());
+        *state.omp_path.lock().await = Some(stub.to_string_lossy().to_string());
+        app.manage(state);
+
+        let (sid, _file, _meta) = crate::runtime::spawn_long_lived(
+            app.handle(),
+            app.state::<AppState>().runtime.clone(),
+            crate::runtime::SpawnOpts {
+                bin: stub.to_string_lossy().to_string(),
+                cwd: root.to_string_lossy().to_string(),
+                resume: None,
+                model: None,
+                thinking: None,
+                approval: None,
+            },
+        )
+        .await
+        .expect("stub 握手失败");
+        let st = app.state::<AppState>();
+
+        // 成功路径：回包 data 原样取出
+        let ok = rpc_request(app.handle(), &st, &sid, serde_json::json!({"id": "ok-1", "type": "get_state"}), 5_000)
+            .await
+            .expect("成功请求应取到 data");
+        assert_eq!(ok.get("echo").and_then(|v| v.as_str()), Some("ok"));
+
+        // 失败路径：转 CmdError（code / message 来自 omp 回包）
+        let err = rpc_request(
+            app.handle(),
+            &st,
+            &sid,
+            serde_json::json!({"id": "bad-1", "type": "goal", "__fail": true}),
+            5_000,
+        )
+        .await
+        .expect_err("失败响应应转 CmdError");
+        assert_eq!(err.code, "STUB_FAIL");
+        assert_eq!(err.message, "stub-rejected");
+
+        // 超时路径：stub 不回 → RPC_TIMEOUT
+        let err = rpc_request(
+            app.handle(),
+            &st,
+            &sid,
+            serde_json::json!({"id": "never-1", "type": "goal", "__never": true}),
+            400,
+        )
+        .await
+        .expect_err("无回包应超时");
+        assert_eq!(err.code, "RPC_TIMEOUT");
+
+        kill_runtime(&st, &sid);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `fork_at`（V40 全链：fork → get_state 拿新身份 → kill 旧进程 → resume 新会话 → 视图）。
+    /// stub 回固定新身份；新会话的 jsonl 预置在 agent_dir（resume 要 `session_file_for` 找得到）。
+    #[tokio::test]
+    async fn fork_at_full_chain_with_stub() {
+        use tauri::Manager;
+        let root = std::env::temp_dir().join(format!("omp-v40-fork-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let agent = root.join("agent");
+        std::fs::create_dir_all(agent.join("sessions").join("--tmp-demo--")).unwrap();
+        // 新会话文件（fork 产物在真实场景由 omp 写盘；这里预置给 resume 读）
+        let new_id = "01a123c6-f958-7524-b1be-53b4fb030bf6";
+        std::fs::write(
+            agent.join("sessions").join("--tmp-demo--").join(format!("2026-10-12T10-00-00Z_{new_id}.jsonl")),
+            format!(
+                "{}\n",
+                serde_json::json!({"type":"session","id":new_id,"timestamp":"2026-10-12T10:00:00.000Z","cwd":"/tmp/demo"})
+            ),
+        )
+        .unwrap();
+
+        // stub：h-state / 首次 get_state（id=h-get）回旧身份；fork 回成功；其余 get_state 回新身份。
+        // 「第一次 h-state 回旧、之后回新」用计数文件区分（同一脚本会被 fork 前后两个进程各跑一次）。
+        let script = format!(
+            r#"#!/bin/sh
+counter="{hcount}"
+printf '{{"type":"ready"}}\n'
+while IFS= read -r line; do
+  case "$line" in
+    *'"h-state"'*)
+      if [ -f "$counter" ]; then
+        printf '%s\n' '{{"type":"response","id":"h-state","command":"get_state","success":true,"data":{{"sessionId":"{new}","sessionFile":"{newfile}"}}}}'
+      else
+        : > "$counter"
+        printf '%s\n' '{{"type":"response","id":"h-state","command":"get_state","success":true,"data":{{"sessionId":"stub-old","sessionFile":"/tmp/stub-old.jsonl"}}}}'
+      fi
+      ;;
+    *'"type":"fork"'*)
+      id=$(printf '%s' "$line" | sed -E 's/.*"id":"([^"]+)".*/\1/')
+      printf '{{"type":"response","id":"%s","command":"fork","success":true,"data":{{"cancelled":false}}}}\n' "$id" ;;
+    *'"type":"get_state"'*)
+      id=$(printf '%s' "$line" | sed -E 's/.*"id":"([^"]+)".*/\1/')
+      printf '{{"type":"response","id":"%s","command":"get_state","success":true,"data":{{"sessionId":"{new}","sessionFile":"{newfile}"}}}}\n' "$id" ;;
+    *) : ;;
+  esac
+done
+"#,
+            hcount = root.join(".hcount").to_string_lossy(),
+            new = new_id,
+            newfile = agent
+                .join("sessions")
+                .join("--tmp-demo--")
+                .join(format!("2026-10-12T10-00-00Z_{new_id}.jsonl"))
+                .to_string_lossy()
+        );
+        let stub = write_v40_stub(&root, &script);
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app 构建失败");
+        let state = load_state(app.handle());
+        *state.agent_dir.lock().await = agent.clone();
+        *state.omp_path.lock().await = Some(stub.to_string_lossy().to_string());
+        app.manage(state);
+
+        let (sid, _file, _meta) = crate::runtime::spawn_long_lived(
+            app.handle(),
+            app.state::<AppState>().runtime.clone(),
+            crate::runtime::SpawnOpts {
+                bin: stub.to_string_lossy().to_string(),
+                cwd: root.to_string_lossy().to_string(),
+                resume: None,
+                model: None,
+                thinking: None,
+                approval: None,
+            },
+        )
+        .await
+        .expect("stub 握手失败");
+        assert_eq!(sid, "stub-old");
+
+        let st = app.state::<AppState>();
+        let view = super::fork_at(app.handle(), &st, &sid, None).await.expect("fork 全链应成功");
+        assert_eq!(view.id, new_id, "视图应指向新会话");
+        // 旧进程杀掉了、新会话被 resume 拉起（runtime 表里是新 id 的进程）
+        let map = st.runtime.clone();
+        let keys: Vec<String> = map.lock().await.keys().cloned().collect();
+        assert!(!keys.contains(&"stub-old".to_string()), "fork 后旧进程应被清出表");
+        assert!(keys.contains(&new_id.to_string()), "新会话应已被 resume 拉起");
+
+        kill_runtime(&st, new_id);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}

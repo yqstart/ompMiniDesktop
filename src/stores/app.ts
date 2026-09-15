@@ -1,0 +1,738 @@
+import { create } from "zustand";
+import type { BtwRecord, CheckoutView, CommitOutcome, CommitTaskView, Goal, HealthInfo, ImageAttachment, ModelCatalog, OmpUpdate, OmpUpdateRun, ProjectView, QueuedMessages, RefPickerTarget, SessionRuntime, SessionStatus, SessionView, SidebarSelection, SubAgentInfo, TerminalStatus, TerminalView, TodoPhase, UpdateState, ViewMsg, WorkspaceGitState, WorkspaceView } from "@shared/types";
+import type { Locale, LocaleMode } from "../lib/locale";
+import { loadLocaleMode, resolveLocale, saveLocaleMode, systemLang } from "../lib/locale";
+import { applyTheme, loadTheme, saveTheme, type ThemeMode } from "../lib/theme";
+import { loadMyModels, saveMyModels } from "../lib/myModels";
+import { loadCommitLangPrefs, saveCommitLangPrefs, type CommitLangPref } from "../lib/commitLang";
+import { parseTermTitle, isWorkspaceNameFallback } from "../lib/termTitle";
+import { checkoutGroupId, selectionScopePaths } from "../lib/workspaceGroups";
+
+type AppState = {
+ health: HealthInfo | null;
+ /** 项目列表（覆盖层；工作区树由 `workspaces` 管）。 */
+ projects: ProjectView[];
+ /** 模型目录（设置页模型页签用；启动时静默加载一次）。 */
+ models: ModelCatalog | null;
+ /** 我的模型（本应用偏好，localStorage 持久化；模型选择器的候选范围，空 = 全部；见 src/lib/myModels.ts）。 */
+ myModels: string[];
+ setMyModels: (list: string[]) => void;
+ /** 设置标签（单例）是否打开：打开后在标签栏里与终端标签并列；关闭才卸载设置页。 */
+ settingsTabOpen: boolean;
+ /** 主区当前显示的是设置标签（`activeTerminalId` 保持不变，作为「上次的终端」）。 */
+ settingsTabActive: boolean;
+ /** 打开 / 聚焦设置标签（已打开则只切过去）。 */
+ openSettingsTab: () => void;
+ /** 关闭设置标签：主区回到最近激活的终端标签（一个终端都没有则回到空态）。 */
+ closeSettingsTab: () => void;
+ sidebarOpen: boolean;
+ update: UpdateState;
+ updateDismissedVersion: string | null;
+ /** 更新弹窗显隐（入口 = 左栏字标行的应用版本 chip；弹窗可单独关闭=稍后）。 */
+ updateDialogOpen: boolean;
+ /**
+  * omp 运行时更新检查状态（`lib/ompUpdate.ts`；左栏字标行的版本 chip 与详情弹窗用）。
+  * 与本应用的 `update` 互不相干：那条走 Tauri updater，这条跑 `omp update --check`。
+  */
+ ompUpdate: OmpUpdate;
+ /** omp 更新详情弹窗显隐（App 常驻挂载，由字标行的版本 chip 打开）。 */
+ ompUpdateDialogOpen: boolean;
+ /**
+  * 正在跑 / 刚跑完的 `omp update`（V24；null = 本次运行还没发起过）。
+  * 日志有上限（见 `lib/ompUpdate.ts` 的 `OMP_UPDATE_LOG_MAX`）；终态保留到下次发起，
+  * 失败 / 取消可以直接重试。
+  */
+ ompUpdateRun: OmpUpdateRun | null;
+ /** 界面语言偏好三档（跟随系统 / 简体中文 / English；只作用于本应用展示，localStorage 持久化）。 */
+ localeMode: LocaleMode;
+ /** 实际生效的语言（`localeMode` 解析后的结果；字典与 `<html lang>` 用它）。 */
+ locale: Locale;
+ setLocaleMode: (mode: LocaleMode) => void;
+ /** 皮肤（只作用于本应用展示，localStorage 持久化；`system` 跟随系统偏好）。 */
+ theme: ThemeMode;
+ setTheme: (theme: ThemeMode) => void;
+ set: (p: Partial<AppState>) => void;
+ /** 左侧栏宽度（292–480，默认 292，持久化 localStorage）。 */
+ sidebarWidth: number;
+ setSidebarWidth: (w: number) => void;
+
+ /**
+  * 形态（V32）：`terminal` = 终端工作区（V11 起），`chat` = 聊天界面（V1–V10 形态的恢复）。
+  * 全局单值、持久化 localStorage（`omp.appMode.v1`）；切换只换主区与交互口径，
+  * 两侧的运行中进程都不停（终端面板与聊天会话都常驻，切回来还在）。
+  */
+ appMode: AppMode;
+ setAppMode: (m: AppMode) => void;
+ /**
+  * 聊天形态**是否已被使用过**（V32）：首次切到 `chat` 时置位、本次运行内不回退。
+  * `App` 用它做懒挂载——纯终端用户不付聊天侧的启动调用（挂载即触发 `get_global_approval` /
+  * `omp usage` 这类读取）；挂载后只切显隐（卸载会断事件订阅，切走期间的帧就丢了）。
+  */
+ chatFormUsed: boolean;
+
+ // ---------- V32 聊天形态（恢复自 V1–V10） ----------
+
+ /**
+  * 已知的聊天会话视图（新建 / 打开 / 从会话弹窗进入时补进；顶栏标题与上下文条从这里取）。
+  * 不是「全部会话」的镜像——会话列表仍在 `list_sessions`（弹窗按需拉）。
+  */
+ sessions: SessionView[];
+ /** 当前在聊天视图里打开的会话 id（终端形态不看它）。 */
+ activeSessionId: string | null;
+ /** 会话消息流（ViewMsg 归一；高频流式增量只改这里，不进终端）。 */
+ eventsBySession: Record<string, ViewMsg[]>;
+ /** 会话运行状态（`omp-status://<id>` 事件的落点；状态胶囊 / 通知用）。 */
+ statusBySession: Record<string, SessionStatus>;
+ /** 输入草稿（按会话隔离，内存态）。 */
+ drafts: Record<string, string>;
+ /** 待发送图片附件（按会话隔离，只存在内存里，发送成功即清空）。 */
+ attachmentsBySession: Record<string, ImageAttachment[]>;
+ /** 待发队列真值（V40）：`queue_update` 帧与运行时回读的落点（omp 侧是权威，可撤回 / 提升）。 */
+ queuedBySession: Record<string, QueuedMessages>;
+ /** goal 目标模式状态（V40）：`goal_updated` 帧与回读的落点；null = 没有目标。 */
+ goalBySession: Record<string, Goal | null>;
+ /** 子代理注册表（V41）：`subagent_lifecycle` 帧与打开会话时 `get_subagents` 补拉的落点。 */
+ subagentsBySession: Record<string, SubAgentInfo[]>;
+ /** 当前会话的模型 selector（`provider/id`；工具行选择器显示与用量入口用）。 */
+ currentModel: string | null;
+ /** 当前思考档（omp 真值回填；null = 未知）。 */
+ currentThinking: string | null;
+ /** 当前模型可用思考档（omp 真值；null = 不支持思考）。驱动思考档下拉只列支持项。 */
+ currentEfforts: string[] | null;
+ /** 当前会话的运行时真值快照（上下文占用 / 本轮用量 / 耗时）：状态条纯透传的数据源。 */
+ currentRuntime: SessionRuntime | null;
+ /** 任务计划（`todoPhases` 真值 + `todo_reminder` 事件合并，按会话隔离；只读展示）。 */
+ plansBySession: Record<string, TodoPhase[]>;
+ /** 会话级权限覆盖（覆盖层 `sessionApproval` 的水合；徽标显示用）。 */
+ sessionApprovals: Record<string, string>;
+ /** 输入框工具行与上方上下文条的下拉互斥：同一时刻只开一个（model/thinking/permission/project/branch/context/usage）。 */
+ composerMenu: "model" | "thinking" | "permission" | "project" | "branch" | "context" | "usage" | null;
+ /** 消息流「首屏增量」窗口：当前会话已渲染的消息条数（首屏 200 条）。 */
+ threadLimitSid: string | null;
+ threadLimit: number;
+ draftOf: (sid: string | null) => string;
+ setDraft: (sid: string | null, text: string) => void;
+ attachmentsOf: (sid: string | null) => ImageAttachment[];
+ addAttachments: (sid: string | null, items: ImageAttachment[]) => void;
+ removeAttachment: (sid: string | null, index: number) => void;
+ clearAttachments: (sid: string | null) => void;
+ queuedOf: (sid: string | null) => QueuedMessages;
+ /** 队列快照写入（`queue_update` 帧 / 运行时回读的唯一入口）。 */
+ applyQueue: (sid: string, q: QueuedMessages) => void;
+ goalOf: (sid: string | null) => Goal | null;
+ /** goal 状态写入（`goal_updated` 帧 / 回读的唯一入口）。 */
+ setGoal: (sid: string, goal: Goal | null) => void;
+ subagentsOf: (sid: string | null) => SubAgentInfo[];
+ /** upsert 一个子代理（生命周期帧；按 id 覆盖全量字段）。 */
+ upsertSubagent: (sid: string, info: SubAgentInfo) => void;
+ /** 整表替换（打开会话时的 `get_subagents` 补拉；不动已有 running 条目——注册表可能滞后于帧）。 */
+ setSubagents: (sid: string, list: SubAgentInfo[]) => void;
+ /** 会话导航（⌘[ / ⌘]，V40）：打开过的会话顺序栈（新的在后，上限 50）。 */
+ navStack: string[];
+ /** 栈内当前位置（-1 = 空）。 */
+ navIdx: number;
+ /** 打开会话时压栈；返回导航目标（`navStep`）由调用方打开。 */
+ pushNav: (sid: string) => void;
+ /** 前后一步（-1 后退 / +1 前进）；返回目标会话 id（没有则 null，调用方不动）。 */
+ navStep: (dir: -1 | 1) => string | null;
+ /** 执行模式切换的挂起重启标记（V40）：running 时切档挂标记，idle 收敛后自动重启生效。 */
+ approvalRestartBySession: Record<string, true>;
+ markApprovalRestart: (sid: string) => void;
+ clearApprovalRestart: (sid: string) => void;
+ /** 旁问面板状态（V40；`/btw` 与划选「旁问」的落点）。 */
+ btw: BtwPanelState;
+ setBtw: (p: Partial<BtwPanelState>) => void;
+ /** 消息流查找条显隐（⌘F，V40）。 */
+ findOpen: boolean;
+ setFindOpen: (v: boolean) => void;
+ /** 查找条查询串（V40）：放 store 统一「关闭即清 / 切会话自然隔离」（组件本地态会被 lint 的级联渲染规则挡住）。 */
+ findQuery: string;
+ /** 查询串所属会话（切会话后旧查询不生效——FindBar 按 `findQuerySid === activeSessionId` 取）。 */
+ findQuerySid: string | null;
+ setFindQuery: (q: string) => void;
+ /** 全局执行模式档（omp `tools.approvalMode`；启动与切换时落 store，Shift+Tab 循环读它）。 */
+ globalApproval: string;
+ setGlobalApproval: (mode: string) => void;
+ /** 会话统计弹窗显隐（`/status` 与上下文面板入口；V40）。 */
+ statsOpen: boolean;
+ setStatsOpen: (v: boolean) => void;
+ /** 文件改动弹窗的目标路径（工具卡「查看改动」按钮；null = 关闭；V40）。 */
+ diffPath: string | null;
+ setDiffPath: (path: string | null) => void;
+ /** 命令中心（⌘K，V41）：聊天形态的全局动作面板开关。 */
+ paletteOpen: boolean;
+ setPaletteOpen: (v: boolean) => void;
+ appendEvents: (sid: string, msgs: ViewMsg[]) => void;
+ /** 展开更早的消息（按页递增）；打开新会话时由 openSessionWithHistory 重置。 */
+ growThreadLimit: (by: number) => void;
+ resetThreadLimit: (sid: string) => void;
+
+ // ---------- V11 终端工作区 ----------
+
+ /** 工作区清单（V21 多项目容器；`lib/checkouts.ts` 的 `loadCheckouts` 是唯一刷新入口，与目录行一起拉）。 */
+ workspaceGroups: WorkspaceView[];
+ /** 目录行清单（项目主目录 + git worktree；同上，唯一刷新入口）。 */
+ checkouts: CheckoutView[];
+ /** 打开中的终端（tab 元数据；PTY 进程与高频字节流都不进 store）。 */
+ terminals: TerminalView[];
+ /** 终端标签里当前激活的那个（切去设置标签时保持不变，回来就是「上次的终端」）。
+  *  不变式：它**要么是 null，要么落在 `selection` 的范围里**——右栏视图按选中项过滤，
+  *  范围外的激活项会让标签栏与面板同时空掉。`openTerminal` / `focusTerminal` / `closeTerminal` /
+  *  `loadCheckouts` 四处负责维持。 */
+ activeTerminalId: string | null;
+ /** 左栏选中项（V21）：右栏终端视图的**范围真相**（`lib/workspaceGroups.ts` 的
+  *  `selectionScopePaths`）、`＋` 新建终端的目标、左栏高亮。跟随 `openTerminal` / `focusTerminal` 走。 */
+ selection: SidebarSelection | null;
+ /** 快速切换面板是否打开（不持久化；仅在打开时挂载，关闭即卸载）。 */
+ quickSwitcherOpen: boolean;
+ /** 「供应商用量」弹窗是否打开（V15；入口 = 终端标签栏右上角与聊天顶栏右端的 `Gauge` 键，同样只在打开时挂载）。 */
+ providerUsageOpen: boolean;
+ /** 引用工作区文件浮层（V22）的目标（null = 关闭；同样只在打开时挂载）。
+  *  V32 二次口径起两种形态共用这个浮层：终端形态注入 PTY 输入框，聊天形态追加进 Composer 草稿。 */
+ refPickerTarget: RefPickerTarget | null;
+ /** 终端聚焦序号：每次成功打开或聚焦终端 +1，让选择同一终端也能恢复 xterm 焦点。 */
+ terminalFocusSeq: number;
+ /** Composer 聚焦序号（聊天形态）：引用浮层注入草稿后 +1，让输入框拿回焦点接着写。 */
+ composerFocusSeq: number;
+ /** 打开一个新终端并聚焦（返回新 id）。`resume` = 以 `omp --resume` 恢复历史会话。 */
+ openTerminal: (opts: {
+  projectId: string | null;
+  cwd: string;
+  label: string;
+  resume?: string | null;
+ }) => string;
+ focusTerminal: (id: string) => void;
+ /** 选中工作区（V21；`id: null` = 未分组区）：范围切到整组，激活终端收敛到范围内最近一个。 */
+ selectGroup: (id: string | null) => void;
+ closeTerminal: (id: string) => void;
+ setTerminalStatus: (id: string, status: TerminalStatus, code: number | null) => void;
+ /**
+  * OSC 0/2 标题到达时更新 tab：解析 `π <状态> <会话名>`（`lib/termTitle.ts`），
+  * 落会话标题与 π 的状态；omp 的「还没有标题」回退值（cwd 末段目录名）落 null。
+  * 标题帧率很高（工作态转轮每 80ms 一帧），解析后只有「名字或状态真的变了」才写 store。
+  */
+ setTerminalTitle: (id: string, title: string) => void;
+ /** spawn 时把「实际挂上的协作根」写回（V21；tab 悬停提示用；无变化不写，避免多余渲染）。 */
+ setTerminalCollab: (id: string, dirs: string[]) => void;
+ /** 启动失败（omp 缺失 / cwd 不存在等）：进程没起来，π 直接落失败态。 */
+ failTerminal: (id: string) => void;
+ /** 重启已退出的终端：`spawnSeq + 1` 触发 TerminalPane 重新 spawn；状态回落未知（新进程还没开口）。 */
+ restartTerminal: (id: string) => void;
+ /** 等待确认关闭的终端 id（运行中终端的 × / ⌘W 都先落到这里，由 ConfirmDialog 收口）。 */
+ closingTerminalId: string | null;
+ /** 请求关闭：运行中 → 弹出确认；已退出 → 直接关。 */
+ requestCloseTerminal: (id: string) => void;
+ confirmCloseTerminal: () => void;
+ cancelCloseTerminal: () => void;
+
+ // ---------- V14 工作区「提交并推送」（omp commit 集成，见 lib/commitTasks.ts） ----------
+
+ /**
+  * 工作区 git 快照（行徽章）：有改动小点 / 待推送 `BranchUp` / 非仓库降级。
+  * 刷新时机（启动 / 任务结束 / 窗口可见或获得焦点 / 终端转就绪 / 30s 兜底轮询）在 `App`
+  * 与 `lib/commitTasks.ts`；面板里的变更集与提交前的暂存复查才是最终裁决。
+  */
+ workspaceGitStates: Record<string, WorkspaceGitState>;
+ setWorkspaceGitStates: (states: WorkspaceGitState[]) => void;
+ /**
+  * 提交任务（按 cwd 存）：运行中关闭浮层 = 转后台（任务继续，行徽章指示）；
+  * 失败任务保留到「重试 / 新任务 / 用户清除」，成功任务在关闭浮层时清除（git 快照接管）。
+  */
+ commitTasks: Record<string, CommitTaskView>;
+ /** 浮层当前查看的任务（cwd）；null = 浮层关着（任务本身不受影响）。 */
+ activeCommitCwd: string | null;
+ setCommitTask: (task: CommitTaskView) => void;
+ patchCommitTask: (cwd: string, patch: Partial<CommitTaskView>) => void;
+ appendCommitLog: (cwd: string, line: string) => void;
+ /** 追加生成流（快速轨的模型输出直接进编辑框；有上限，防异常输出撑爆 store）。 */
+ appendCommitMessage: (cwd: string, text: string) => void;
+ finishCommitTask: (cwd: string, outcome: CommitOutcome) => void;
+ /** 清除任务记录（浮层关闭时对非运行中的任务调用；见 `lib/commitTasks.ts` 的 `closeCommitPanel`）。 */
+ dropCommitTask: (cwd: string) => void;
+ setActiveCommitCwd: (cwd: string | null) => void;
+ /**
+  * 提交信息语言偏好（**按项目 id**，V14 增补）：同一项目的主目录与全部 worktree 共用，
+  * 项目之间互不影响。「记住选择」= `remembered`（已写 localStorage），未记住的只在本次
+  * 运行期间生效。任务发起时由 `lib/commitTasks.ts` 解析成给模型的要求文本（快速轨进提示词、
+  * 完整轨走 `omp commit --context=`，见 `src/lib/commitLang.ts`）。
+  */
+ commitLangPrefs: Record<string, CommitLangPref>;
+ setCommitLangPref: (projectId: string, pref: CommitLangPref) => void;
+};
+
+/**
+ * 侧栏宽度下限由左栏底部那一行的**内容**决定：设置按钮（图标 + 全称）+ 语言切换 + 皮肤切换
+ * 并排不挤压所需的最小宽度（最宽文案按英文界面算，`Settings` 比「设置」长）。比这更窄，
+ * 设置按钮的文案就会开始 `truncate`——那不该是「用户可以拖到的状态」。
+ *
+ * 实测（真实渲染）：英文界面下这一行需要 287px，即侧栏 288px 是临界；这里留 4px 给
+ * 字体渲染差异（换平台 / 换字体时 `Settings` 会宽一点点）。
+ */
+export const SIDEBAR_MIN = 292;
+export const SIDEBAR_MAX = 480;
+/** 默认宽度 = 下限：默认就取「底部行刚好完整」的宽度，内容区拿到最多的横向空间。 */
+export const SIDEBAR_DEFAULT = SIDEBAR_MIN;
+
+/** 提交任务日志行数上限（保尾）：异常输出不撑爆 store；与后端的错误摘要上限（TAIL_MAX）不是一回事。 */
+const COMMIT_LOG_MAX = 1000;
+/** 生成流的字符上限（保尾）：模型跑飞时的兜底；后端解析结果本身也有 4000 字符上限。 */
+const COMMIT_MSG_MAX = 8000;
+
+/** 启动时的语言偏好（模块加载时读一次，供 store 初始化解析出实际语言）。 */
+const INITIAL_LOCALE_MODE = loadLocaleMode();
+/** 消息流单页条数：首屏只渲染最后 200 条，其余按需向上加载（MASTER §7）。 */
+export const THREAD_PAGE = 200;
+
+/** 应用形态（V32）：终端工作区 / 聊天界面。 */
+export type AppMode = "terminal" | "chat";
+
+/**
+ * 旁问面板状态（V40，`/btw` 与划选「旁问」的落点）。
+ * 面板是单会话单通道：omp 每个会话同一时刻只跑一个旁问（运行中不允许再开）。
+ */
+export type BtwPanelState = {
+ open: boolean;
+ sessionId: string | null;
+ /** 话题记录（最新在前；omp `get_btw_history` 口径；运行中的记录带部分答案）。 */
+ records: BtwRecord[];
+ /** 正在流式作答的记录 id（该条显示为运行中 + 取消按钮）。 */
+ busyRecordId: string | null;
+ /** 输入框草稿（放 store：划选「旁问」的预填与新打开面板都直接写它，组件无本地拷贝）。 */
+ draft: string;
+ /** 最近一次提问失败信息（成功提问 / 关闭面板时清）。 */
+ error: string | null;
+};
+
+const BTW_CLOSED: BtwPanelState = { open: false, sessionId: null, records: [], busyRecordId: null, draft: "", error: null };
+export const EMPTY_QUEUE: QueuedMessages = { steering: [], followUp: [] };
+/** 无子代理时的稳定空引用（选择器返回同引用，避免无谓重渲染）。 */
+export const EMPTY_SUBAGENTS: SubAgentInfo[] = [];
+const APP_MODE_KEY = "omp.appMode.v1";
+/** 形态偏好（默认终端形态——V11 起的现行形态不动摇；显式切到聊天才落盘）。 */
+function loadAppMode(): AppMode {
+ try {
+  if (typeof localStorage === "undefined") return "terminal";
+  return localStorage.getItem(APP_MODE_KEY) === "chat" ? "chat" : "terminal";
+ } catch {
+  // 无痕模式等取不到持久化时用默认形态
+  return "terminal";
+ }
+}
+function saveAppMode(mode: AppMode): void {
+ try {
+  localStorage.setItem(APP_MODE_KEY, mode);
+ } catch {
+  // 持久化失败不阻断本次切换
+ }
+}
+
+function loadSidebarWidth(): number {
+ try {
+  if (typeof localStorage === "undefined") return SIDEBAR_DEFAULT;
+  const v = Number(localStorage.getItem("omp.sidebarWidth"));
+  if (!Number.isFinite(v)) return SIDEBAR_DEFAULT;
+  return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, v));
+ } catch {
+  // 无痕模式等取不到持久化时回默认宽度
+  return SIDEBAR_DEFAULT;
+ }
+}
+
+export const useApp = create<AppState>((set, get) => ({
+ health: null,
+ projects: [],
+ models: null,
+ myModels: loadMyModels(),
+ setMyModels: (list) => {
+  saveMyModels(list);
+  set({ myModels: list });
+ },
+ settingsTabOpen: false,
+ settingsTabActive: false,
+ openSettingsTab: () => set({ settingsTabOpen: true, settingsTabActive: true }),
+ closeSettingsTab: () => set({ settingsTabOpen: false, settingsTabActive: false }),
+ sidebarOpen: false,
+ update: { status: "idle" },
+ updateDismissedVersion: null,
+ updateDialogOpen: false,
+ ompUpdate: { status: "idle", current: null, latest: null, channel: null, message: null, checkedAt: null },
+ ompUpdateDialogOpen: false,
+ ompUpdateRun: null,
+ localeMode: INITIAL_LOCALE_MODE,
+ locale: resolveLocale(INITIAL_LOCALE_MODE, systemLang()),
+ setLocaleMode: (mode) => {
+  saveLocaleMode(mode);
+  const locale = resolveLocale(mode, systemLang());
+  try {
+   document.documentElement.lang = locale;
+  } catch {
+   // 非 DOM 环境（单测）忽略
+  }
+  set({ localeMode: mode, locale });
+ },
+ theme: loadTheme(),
+ setTheme: (theme) => {
+  saveTheme(theme);
+  // 同步落 class：useEffect 在 paint 之后跑，只靠它会让切皮肤先闪一帧旧皮肤
+  applyTheme(theme);
+  set({ theme });
+ },
+ set: (p) => set(p),
+ sidebarWidth: loadSidebarWidth(),
+ setSidebarWidth: (w) => {
+  const v = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(w)));
+  try {
+   localStorage.setItem("omp.sidebarWidth", String(v));
+  } catch {
+   // 持久化失败不阻断本次拖拽
+  }
+  set({ sidebarWidth: v });
+ },
+
+ // ---------- V32 形态切换 + 聊天状态 ----------
+
+ appMode: loadAppMode(),
+ chatFormUsed: loadAppMode() === "chat",
+ setAppMode: (m) => {
+  saveAppMode(m);
+  set(m === "chat" ? { appMode: m, chatFormUsed: true } : { appMode: m });
+ },
+ sessions: [],
+ activeSessionId: null,
+ eventsBySession: {},
+ statusBySession: {},
+ drafts: {},
+ attachmentsBySession: {},
+ queuedBySession: {},
+ goalBySession: {},
+ subagentsBySession: {},
+ navStack: [],
+ navIdx: -1,
+ approvalRestartBySession: {},
+ btw: BTW_CLOSED,
+ findOpen: false,
+ findQuery: "",
+ findQuerySid: null,
+ globalApproval: "write",
+ statsOpen: false,
+ diffPath: null,
+ paletteOpen: false,
+ currentModel: null,
+ currentThinking: null,
+ currentEfforts: null,
+ currentRuntime: null,
+ plansBySession: {},
+ sessionApprovals: {},
+ composerMenu: null,
+ threadLimitSid: null,
+ threadLimit: THREAD_PAGE,
+ draftOf: (sid) => (sid ? get().drafts[sid] ?? "" : ""),
+ setDraft: (sid, text) =>
+  set((s) => (sid ? { drafts: { ...s.drafts, [sid]: text } } : {})),
+ attachmentsOf: (sid) => (sid ? get().attachmentsBySession[sid] ?? [] : []),
+ addAttachments: (sid, items) =>
+  set((s) =>
+   sid && items.length > 0
+    ? { attachmentsBySession: { ...s.attachmentsBySession, [sid]: [...(s.attachmentsBySession[sid] ?? []), ...items] } }
+    : {},
+  ),
+ removeAttachment: (sid, index) =>
+  set((s) => {
+   if (!sid) return {};
+   const cur = s.attachmentsBySession[sid] ?? [];
+   return { attachmentsBySession: { ...s.attachmentsBySession, [sid]: cur.filter((_, i) => i !== index) } };
+  }),
+ clearAttachments: (sid) =>
+  set((s) => (sid ? { attachmentsBySession: { ...s.attachmentsBySession, [sid]: [] } } : {})),
+ queuedOf: (sid) => (sid ? get().queuedBySession[sid] ?? EMPTY_QUEUE : EMPTY_QUEUE),
+ applyQueue: (sid, q) => set((s) => ({ queuedBySession: { ...s.queuedBySession, [sid]: q } })),
+ goalOf: (sid) => (sid ? get().goalBySession[sid] ?? null : null),
+ setGoal: (sid, goal) => set((s) => ({ goalBySession: { ...s.goalBySession, [sid]: goal } })),
+ subagentsOf: (sid) => (sid ? get().subagentsBySession[sid] ?? EMPTY_SUBAGENTS : EMPTY_SUBAGENTS),
+ upsertSubagent: (sid, info) =>
+  set((s) => {
+   const cur = s.subagentsBySession[sid] ?? [];
+   const idx = cur.findIndex((x) => x.id === info.id);
+   const next = idx >= 0 ? cur.map((x) => (x.id === info.id ? info : x)) : [...cur, info];
+   return { subagentsBySession: { ...s.subagentsBySession, [sid]: next } };
+  }),
+ setSubagents: (sid, list) =>
+  set((s) => {
+   const cur = s.subagentsBySession[sid] ?? [];
+   // 合并口径：以补拉为准，但保留补拉里没有的 running 条目（帧比注册表快是常态）
+   const byId = new Map(list.map((x) => [x.id, x]));
+   const next = [...list.map((x) => byId.get(x.id) ?? x)];
+   for (const x of cur) {
+    if (x.status === "running" && !byId.has(x.id)) next.push(x);
+   }
+   return { subagentsBySession: { ...s.subagentsBySession, [sid]: next } };
+  }),
+ pushNav: (sid) => {
+  if (!sid) return;
+  const { navStack, navIdx } = get();
+  if (navIdx >= 0 && navStack[navIdx] === sid) return;
+  const trimmed = navIdx >= 0 ? navStack.slice(0, navIdx + 1) : [];
+  const next = [...trimmed.filter((x) => x !== sid), sid].slice(-50);
+  set({ navStack: next, navIdx: next.length - 1 });
+ },
+ navStep: (dir) => {
+  const { navStack, navIdx } = get();
+  const next = navIdx + dir;
+  if (next < 0 || next >= navStack.length) return null;
+  set({ navIdx: next });
+  return navStack[next];
+ },
+ markApprovalRestart: (sid) => set((s) => ({ approvalRestartBySession: { ...s.approvalRestartBySession, [sid]: true } })),
+ clearApprovalRestart: (sid) =>
+  set((s) => {
+   if (!(sid in s.approvalRestartBySession)) return {};
+   const next = { ...s.approvalRestartBySession };
+   delete next[sid];
+   return { approvalRestartBySession: next };
+  }),
+ setBtw: (p) => set((s) => ({ btw: { ...s.btw, ...p } })),
+ setFindOpen: (v) => set(v ? { findOpen: true } : { findOpen: false, findQuery: "", findQuerySid: null }),
+ setFindQuery: (q) => set((s) => ({ findQuery: q, findQuerySid: s.activeSessionId })),
+ setGlobalApproval: (mode) => set({ globalApproval: mode }),
+ setStatsOpen: (v) => set({ statsOpen: v }),
+ setDiffPath: (path) => set({ diffPath: path }),
+ setPaletteOpen: (v) => set({ paletteOpen: v }),
+ appendEvents: (sid, msgs) =>
+  set((s) => ({ eventsBySession: { ...s.eventsBySession, [sid]: [...(s.eventsBySession[sid] ?? []), ...msgs] } })),
+ growThreadLimit: (by) => set((s) => ({ threadLimit: s.threadLimit + by })),
+ resetThreadLimit: (sid) => set({ threadLimitSid: sid, threadLimit: THREAD_PAGE }),
+
+ // ---------- V11 终端工作区 ----------
+
+ workspaceGroups: [],
+ checkouts: [],
+ terminals: [],
+ activeTerminalId: null,
+ selection: null,
+ quickSwitcherOpen: false,
+ providerUsageOpen: false,
+ refPickerTarget: null,
+ terminalFocusSeq: 0,
+ composerFocusSeq: 0,
+ openTerminal: ({ projectId, cwd, label, resume = null }) => {
+  const id = crypto.randomUUID();
+  const term: TerminalView = {
+   id,
+   projectId,
+   cwd,
+   label,
+   title: null,
+   state: "unknown",
+   status: "running",
+   exitCode: null,
+   resume,
+   collab: [],
+   spawnSeq: 0,
+   createdAt: Date.now(),
+  };
+  const s = get();
+  // 工作区视图里开的终端保持组视图（范围不缩窄——组内别的目录的终端不该从标签栏消失）；
+  // 其余情况切到目录视图。未分组项目（group = null）与工作区一样按「组」比对。
+  const keepGroup = s.selection?.kind === "group" && s.selection.id === checkoutGroupId(cwd, s.checkouts, s.projects)
+   ? s.selection
+   : null;
+  set({
+   terminals: [...s.terminals, term],
+   activeTerminalId: id,
+   selection: keepGroup ?? { kind: "checkout", path: cwd },
+   terminalFocusSeq: s.terminalFocusSeq + 1,
+   // 新终端必然切回终端视图（设置标签留在标签栏里）
+   settingsTabActive: false,
+  });
+  return id;
+ },
+ focusTerminal: (id) =>
+  set((s) => {
+   const hit = s.terminals.find((t) => t.id === id);
+   if (!hit) return {};
+   // 终端已在当前范围里 → 只切激活（工作区视图点组内终端不缩窄视图）；
+   // 范围外（⌘⇧K 跨组跳转）→ 切到它的目录视图。`scope === null`（不过滤）时不算越界。
+   const scope = selectionScopePaths(s.selection, s.workspaceGroups, s.checkouts, s.projects);
+   const inScope = scope === null || scope.has(hit.cwd);
+   return {
+    activeTerminalId: id,
+    selection: inScope ? s.selection : { kind: "checkout", path: hit.cwd },
+    terminalFocusSeq: s.terminalFocusSeq + 1,
+    settingsTabActive: false,
+   };
+  }),
+ selectGroup: (id) =>
+  set((s) => {
+   const scope = selectionScopePaths({ kind: "group", id }, s.workspaceGroups, s.checkouts, s.projects);
+   const scoped = scope === null ? s.terminals : s.terminals.filter((t) => scope.has(t.cwd));
+   // 激活终端收敛到新范围内最近一个（在范围内就保持不动——不让视图跳来跳去）
+   const keep = s.activeTerminalId !== null && scoped.some((t) => t.id === s.activeTerminalId)
+    ? s.activeTerminalId
+    : scoped[scoped.length - 1]?.id ?? null;
+   return { selection: { kind: "group", id }, activeTerminalId: keep };
+  }),
+ closeTerminal: (id) =>
+  set((s) => {
+   const idx = s.terminals.findIndex((t) => t.id === id);
+   if (idx < 0) return {};
+   const scope = selectionScopePaths(s.selection, s.workspaceGroups, s.checkouts, s.projects);
+   const inScope = (t: TerminalView) => scope === null || scope.has(t.cwd);
+   const terminals = s.terminals.filter((t) => t.id !== id);
+   // 关闭当前 tab 后聚焦**同一范围**里相邻的一个（优先右邻，退回左邻）：
+   // 右栏视图按选中项过滤，跳到范围外的终端等于把人从当前视图里踢出去；
+   // 范围内都关完就交回空态（`selection` 不动，空态里能接着新建）。
+   let activeTerminalId = s.activeTerminalId;
+   if (activeTerminalId === id) {
+    const siblings = terminals.filter(inScope);
+    const at = s.terminals.slice(0, idx).filter(inScope).length;
+    const next = siblings[Math.min(at, siblings.length - 1)] ?? null;
+    activeTerminalId = next ? next.id : null;
+   }
+   // 最后一个终端也关掉时：设置标签开着就切过去（否则主区回到空态）
+   const settingsTabActive = terminals.length === 0 && s.settingsTabOpen ? true : s.settingsTabActive;
+   return { terminals, activeTerminalId, settingsTabActive };
+  }),
+ setTerminalStatus: (id, status, code) =>
+  set((s) => ({
+   terminals: s.terminals.map((t) =>
+    t.id === id
+     ? {
+      ...t,
+      status,
+      exitCode: code,
+      // 进程结局直接落定 π：正常退出（0 / 信号收尾）绿、异常退出红；回到运行中则回落未知
+      state: status === "exited" ? (code == null || code === 0 ? "exited" : "failed") : "unknown",
+     }
+     : t,
+   ),
+  })),
+ setTerminalTitle: (id, title) =>
+  set((s) => {
+   const t = s.terminals.find((x) => x.id === id);
+   // 已退出 / 启动失败的不再接收标题：收尾阶段可能还有缓冲输出，别把终态改回去
+   if (!t || t.status !== "running" || !title.trim()) return {};
+   const { phase, label } = parseTermTitle(title);
+   // 名字为空（`π ⠋`）= 这一帧没带名字，保留上一次的会话标题；
+   // 名字 == cwd 末段目录名 = omp 的「会话还没有标题」回退值（是项目名，不是会话标题）→ 清掉，
+   // 展示层回退到工作区显示名（`terminalDisplayName`）。
+   const nextTitle = !label ? t.title : isWorkspaceNameFallback(label, t.cwd) ? null : label;
+   if (t.title === nextTitle && t.state === phase) return {};
+   return { terminals: s.terminals.map((x) => (x.id === id ? { ...x, title: nextTitle, state: phase } : x)) };
+  }),
+ setTerminalCollab: (id, dirs) =>
+  set((s) => {
+   const t = s.terminals.find((x) => x.id === id);
+   if (!t) return {};
+   if (t.collab.length === dirs.length && t.collab.every((d, i) => d === dirs[i])) return {};
+   return { terminals: s.terminals.map((x) => (x.id === id ? { ...x, collab: dirs } : x)) };
+  }),
+ failTerminal: (id) =>
+  set((s) => ({
+   terminals: s.terminals.map((t) =>
+    t.id === id ? { ...t, status: "exited", exitCode: null, state: "failed" } : t,
+   ),
+  })),
+ restartTerminal: (id) =>
+  set((s) => ({
+   terminals: s.terminals.map((t) =>
+    // 重启 = 新进程（可能带 --resume）：清掉旧会话标题，等新的 OSC 标题到达（回退到工作区名）
+    t.id === id ? { ...t, title: null, status: "running", exitCode: null, spawnSeq: t.spawnSeq + 1, state: "unknown" } : t,
+   ),
+  })),
+ closingTerminalId: null,
+ requestCloseTerminal: (id) => {
+  const term = get().terminals.find((t) => t.id === id);
+  if (!term) return;
+  if (term.status === "running") {
+   set({ closingTerminalId: id });
+   return;
+  }
+  get().closeTerminal(id);
+ },
+ confirmCloseTerminal: () => {
+  const id = get().closingTerminalId;
+  if (id) get().closeTerminal(id);
+  set({ closingTerminalId: null });
+ },
+ cancelCloseTerminal: () => set({ closingTerminalId: null }),
+
+ // ---------- V19 工作区提交 / 推送（见 lib/commitTasks.ts） ----------
+
+ workspaceGitStates: {},
+ setWorkspaceGitStates: (states) =>
+  set((s) => {
+   const next = { ...s.workspaceGitStates };
+   for (const st of states) next[st.path] = st;
+   return { workspaceGitStates: next };
+  }),
+ commitTasks: {},
+ activeCommitCwd: null,
+ setCommitTask: (task) => set((s) => ({ commitTasks: { ...s.commitTasks, [task.cwd]: task } })),
+ patchCommitTask: (cwd, patch) =>
+  set((s) => {
+   const t = s.commitTasks[cwd];
+   if (!t) return {};
+   return { commitTasks: { ...s.commitTasks, [cwd]: { ...t, ...patch } } };
+  }),
+ appendCommitLog: (cwd, line) =>
+  set((s) => {
+   const t = s.commitTasks[cwd];
+   if (!t) return {};
+   const log =
+    t.log.length >= COMMIT_LOG_MAX
+     ? [...t.log.slice(t.log.length - COMMIT_LOG_MAX + 1), line]
+     : [...t.log, line];
+   return { commitTasks: { ...s.commitTasks, [cwd]: { ...t, log } } };
+  }),
+ appendCommitMessage: (cwd, text) =>
+  set((s) => {
+   const t = s.commitTasks[cwd];
+   if (!t) return {};
+   const raw = t.message + text;
+   // 生成流可能很长（模型跑飞）：保头也保尾没意义，直接截到上限（编辑框里本来就只是草稿）
+   const message = raw.length <= COMMIT_MSG_MAX ? raw : raw.slice(raw.length - COMMIT_MSG_MAX);
+   return { commitTasks: { ...s.commitTasks, [cwd]: { ...t, message } } };
+  }),
+ finishCommitTask: (cwd, outcome) =>
+  set((s) => {
+   const t = s.commitTasks[cwd];
+   if (!t) return {};
+   // 浮层关着时任务结束：**失败保留**（行徽章亮起，等用户查看），其余终态即清
+   // （「待推送 / 已推送」由 git 快照的行徽章接管，不清会让行上失去入口）。
+   if (s.activeCommitCwd !== cwd && outcome.phase !== "failed") {
+    const next = { ...s.commitTasks };
+    delete next[cwd];
+    return { commitTasks: next };
+   }
+   return {
+    commitTasks: {
+     ...s.commitTasks,
+     [cwd]: {
+      ...t,
+      phase: outcome.phase,
+      commits: outcome.commits,
+      // 生成的信息随终态回来（编辑框里可能只有流式原文，落定用解析后的那份）
+      message: outcome.message ?? t.message,
+      generated: t.generated || outcome.phase === "generated",
+      error: outcome.error,
+      hint: outcome.hint,
+     },
+    },
+   };
+  }),
+ dropCommitTask: (cwd) =>
+  set((s) => {
+   if (!s.commitTasks[cwd]) return {};
+   const next = { ...s.commitTasks };
+   delete next[cwd];
+   return { commitTasks: next };
+  }),
+ setActiveCommitCwd: (cwd) => set({ activeCommitCwd: cwd }),
+ commitLangPrefs: loadCommitLangPrefs(),
+ setCommitLangPref: (projectId, pref) => {
+  // 内存态与已记住的盘上副本一起更新（未记住的项目写盘时会被过滤掉）
+  const next = { ...get().commitLangPrefs, [projectId]: pref };
+  saveCommitLangPrefs(next);
+  set({ commitLangPrefs: next });
+ },
+}));
