@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ImageAttachment, OmpInfo } from "./types";
+import type { ImageAttachment, OmpInfo, PathCheck } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -39,6 +39,8 @@ export const api = {
     call<void>("send_message", { id, message, images }),
   /** 图片附件走「系统文件选择器 → 后端读文件」：WebView 拿不到任意本地路径的内容。 */
   readImageFile: (path: string) => call<ImageAttachment>("read_image_file", { path }),
+  /** 输入框 @提及 的存在性提示（后端只 stat，不读内容、不写任何东西）。 */
+  checkPaths: (base: string, paths: string[]) => call<PathCheck[]>("check_paths", { base, paths }),
   stop: (id: string) => call<void>("stop_session", { id }),
   approve: (id: string, uiId: string, decision: "once" | "always" | "deny") =>
     call<void>("approve", { id, uiId, decision }),

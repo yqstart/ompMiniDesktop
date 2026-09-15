@@ -200,11 +200,25 @@ async function main() {
     .join("");
   assert(!plain.includes("images="), "不带图片时 prompt 里没有 images 字段（不塞空数组）");
 
+  // --- 8. @文件 提及（V2 M6b）：omp 自动读文件后落的 fileMention 消息 ---
+  console.log("场景 mentions（@文件 提及）");
+  const mentions = await drive("mentions");
+  const fmFrames = kinds(mentions.frames, "message_start").filter((f) => f.message?.role === "fileMention");
+  assert(fmFrames.length === 1, "fileMention 消息按 markdown 之外的独立角色出现（前端归一成一排芯片）");
+  assert(
+    fmFrames[0]?.message?.files?.[0]?.path === "docs/rpc-memo.md" && fmFrames[0]?.message?.files?.[0]?.lineCount === 69,
+    "fileMention.files 带 path 与 lineCount（芯片上显示行数）",
+  );
+  assert(
+    fmFrames[0]?.message?.files?.[1]?.skippedReason === "tooLarge",
+    "被跳过的文件带 skippedReason（芯片按 warn 色标出，避免以为读进去了）",
+  );
+
   if (failures > 0) {
     console.error(`\ne2e:rpc 失败：${failures} 项断言未通过`);
     process.exit(1);
   }
-  console.log("\ne2e:rpc 通过：握手 / 通过分支 / 拒绝分支 / 多工具并行 / 流式中断 / 通用 UI 请求 / 图片附件");
+  console.log("\ne2e:rpc 通过：握手 / 通过分支 / 拒绝分支 / 多工具并行 / 流式中断 / 通用 UI 请求 / 图片附件 / @文件 提及");
 }
 
 main().catch((e) => {

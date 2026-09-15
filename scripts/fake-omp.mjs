@@ -10,6 +10,7 @@
  *   multi    同一条 assistant 消息里两个工具并行（一成一败），验证不串卡
  *   abort    流式中断：只吐前半段，收到 abort 才补 agent_end
  *   ui       通用 UI 请求（V2 M5）：confirm → input → editor → select，外加一条被服务端撤回的请求
+ *   mentions @文件 提及（V2 M6b）：role=fileMention 消息（含跳过项）
  * 行协议与真实 omp --mode rpc 一致（ready/response/事件），便于 Rust pump 照单解析。
  * 自动化驱动见 scripts/e2e-rpc.mjs（`pnpm e2e:rpc`）。
  */
@@ -215,6 +216,25 @@ function runScenario(message) {
       title: "清理临时文件？",
       message: "将删除 /tmp/omp-fake 下的 3 个文件",
     });
+    return;
+  }
+  // scenario=mentions：`@文件` 提及（V2 M6b）。omp 在 prompt 时先自动读命中的文件，
+  // 落成 role=fileMention 的消息（跳过项带 skippedReason），随后才走模型。
+  if (scenario === "mentions") {
+    const files = [
+      { path: "docs/rpc-memo.md", content: "# omp RPC 驱动协议备忘…", lineCount: 69 },
+      { path: "assets/huge.bin", content: "(skipped auto-read: too large, 12.0MB)", byteSize: 12582912, skippedReason: "tooLarge" },
+    ];
+    out({ type: "message_start", message: { role: "fileMention", files, timestamp: Date.now() } });
+    out({ type: "message_end", message: { role: "fileMention", files, timestamp: Date.now() } });
+    out({ type: "turn_end" });
+    out({ type: "turn_start" });
+    out({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "" }] } });
+    out({ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 0 } });
+    out({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: `mentions=${files.length}` } });
+    out({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: `mentions=${files.length}` }] } });
+    out({ type: "turn_end" });
+    out({ type: "agent_end", isTerminal: true, messages: [] });
     return;
   }
   // toolcall 流

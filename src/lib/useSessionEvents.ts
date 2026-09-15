@@ -4,7 +4,7 @@ import { IPC } from "@shared/ipc";
 import { api } from "@shared/api";
 import { useApp } from "../stores/app";
 import type { SessionRuntime, SessionStatus, ViewMsg } from "@shared/types";
-import { summarizeArgs } from "./viewmsg";
+import { summarizeArgs, mentionFilesOf } from "./viewmsg";
 import { imagesFromContent } from "./attachments";
 import { resolveThinking } from "./thinking";
 import { mergeViewMsgs, type IncomingViewMsg } from "./mergeEvents";
@@ -55,9 +55,19 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>): Vi
   const t = frame.type as string;
   const fold = getFold(sid);
   const out: ViewMsg[] = [];
-  if (t === "message_start") {
-    const m = frame.message as { role?: string; content?: { type?: string; text?: string }[] };
-    if (m?.role === "user") {
+  if (t === "message_start" || t === "message_end") {
+    const m = frame.message as { role?: string; content?: { type?: string; text?: string }[]; files?: unknown };
+    // @文件 提及（V2 M6b）：omp 读进上下文的文件，渲染成一排芯片。
+    // id 由文件清单决定：message_start / message_end 重复推同一条消息时只出一排芯片。
+    if (m?.role === "fileMention") {
+      const files = mentionFilesOf(m as unknown as Record<string, unknown>);
+      if (files.length > 0 && t === "message_start") {
+        out.push({ kind: "files", id: `fm:${files.map((f) => f.path).join("|")}`, files });
+      }
+      return out;
+    }
+    // message_end 还有 assistant / toolResult 两套终态处理，继续走下面的分支
+    if (t === "message_start" && m?.role === "user") {
       const text = (m.content ?? []).filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n");
       // 图片块（V2 M6）：随消息发出的图直接渲染在气泡里
       const { images, omitted } = imagesFromContent(m.content);
@@ -69,8 +79,9 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>): Vi
         ...(images.length > 0 ? { images } : {}),
         ...(omitted > 0 ? { imagesOmitted: omitted } : {}),
       });
+      return out;
     }
-    return out;
+    if (t === "message_start") return out;
   }
   if (t === "message_update") {
     const e = frame.assistantMessageEvent as { type?: string; contentIndex?: number; delta?: string; content?: string; toolCall?: { id?: string; name?: string; arguments?: Record<string, unknown>; streamIndex?: number; intent?: string } };

@@ -17,7 +17,7 @@
 | 里程碑 | 目标 | 来源 | 状态 |
 |---|---|---|---|
 | M5 通用 UI 请求 | `extension_ui_request` 全方法正确处理：`confirm` / `input` / `editor` / 非审批 `select` 回包语义正确、服务端 `cancel` 能撤回卡片、`notify` 可见、单向方法不误判为审批 | `docs/rpc-memo.md` §6-2「Phase 2 补」 | 已完成 |
-| M6 图片与 @文件 | `prompt.images` 透传（粘贴 / 拖拽 / 选择文件），用户气泡缩略图；`@文件` 文本芯片与路径补全 | `docs/v1-design.md` §8.4「images 透传是 Phase 2 事项」 | 图片已完成，`@文件` 待做 |
+| M6 图片与 @文件 | `prompt.images` 透传（粘贴 / 拖拽 / 选择文件），用户气泡缩略图；`@文件` 文本芯片与路径补全 | `docs/v1-design.md` §8.4「images 透传是 Phase 2 事项」 | 已完成 |
 | M7 会话发现与规模 | 扫描分页 / 后台补全（>500 个 jsonl 不再截断）；左栏搜索覆盖会话内容 | `docs/v1-schedule.md` §3.3「分页/后台补全留 V2」 | 待做 |
 | M8 长会话渲染 | windowing 级虚拟化复议（>2000 条上限） | `docs/v1-schedule.md` M3-5「留 V2 复议」 | 待做 |
 | M9 消息操作与导出 | 单条复制 / 重发、会话导出 Markdown（只读，不写 omp） | 二期新增（候选） | 候选 |
@@ -57,9 +57,9 @@
 - `pnpm e2e:rpc` 新增 `ui` 场景：fake-omp 依次发 `confirm → input → editor → select( + cancel)`，脚本按方法回包并断言 fake-omp 收到的回包语义正确（含 cancel 后卡片不再等待）。
 - vitest：`frameToViewMsgs` 对四类方法 + `cancel` + 单向方法的映射断言；`mergeViewMsgs` 去重与撤回断言。
 
-## 4. M6 图片与 @文件（图片已完成，`@文件` 待做）
+## 4. M6 图片与 @文件（已完成）
 
-**图片（已完成）**
+**图片**
 
 - composer 三条入口：粘贴（`onPaste`）、拖拽（`onDrop`）、点回形针（`dialog.open` → 后端 `read_image_file` 读文件转 base64）；三条都做类型 / 体积校验（PNG/JPEG/WebP/GIF，单张 ≤ 10MB），不合法给中文内联提示。
 - 发送：`prompt{message, images:[{type:"image", data:<base64>, mimeType}]}`，字段口径取自 omp 内嵌源码（`RpcClient.prompt(message, images)`）；**不发空数组**，应用不落盘、不写覆盖层。
@@ -67,10 +67,12 @@
 - 内存保护：历史回放里单张 base64 > 512KB 的块省略并以「N 张图片因体积过大未在回放中展开」提示，不做无上限常驻。
 - 交互提示：模型目录 `input` 不含 `image` 时给内联 warn（目录未加载不做判断，不误报）。
 
-**`@文件`（待做）**
+**`@文件` 提及**
 
-- 输入框识别 `@path`，展开为芯片并按 MASTER §3 用 mono 显示；V2 只做**路径芯片 + 存在性提示**，不做全文内联。
-- 消息里的 `fileMention` 角色消息（omp 自己写进 jsonl）在气泡里显示为文件芯片。
+- 关键事实（omp 内嵌源码实测）：**展开是 omp 自己在 prompt 路径里做的**——`extractFileMentions(text)` 抽出 `@路径`，`_Rs()` 把命中的文件读成 `{role:"fileMention", files:[{path, content, lineCount, byteSize?, skippedReason?}]}` 消息塞进本轮上下文。所以壳侧**不自己读文件**，只做两件事：
+  1. 输入框把草稿里的提及显示成芯片，并用后端 `check_paths`（只 stat、相对会话 cwd 词法归一）标出「路径不存在」——omp 对不存在的路径是静默跳过，不提示就会以为读进去了；
+  2. 转录区把 `fileMention` 渲染成一排文件芯片（`MentionChips`），`skippedReason`（binary / tooLarge）走 warn 色。
+- 解析规则与上游逐条对齐（`src/lib/mentions.ts` + 单测）：引号形式 `@"a b.md"`、`@` 必须在行首或紧跟 `空白([{<"'`、ASCII 首尾修剪（全角标点不在规则内，刻意保持一致——**规则漂移会让芯片与真正读进上下文的文件对不上**）。
 
 ## 5. M7 / M8（后续）
 

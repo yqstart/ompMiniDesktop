@@ -256,3 +256,38 @@ describe("实时流：用户消息的图片块", () => {
     });
   });
 });
+
+/** V2 M6b：@文件 提及的 fileMention 只出一排芯片（start/end 各推一次也不许出两排）。 */
+describe("实时流：@文件 提及", () => {
+  beforeEach(() => __resetFolds());
+
+  it("fileMention 的 start/end 各推一次，只出一排芯片", () => {
+    const frame = {
+      type: "message_start",
+      message: {
+        role: "fileMention",
+        files: [
+          { path: "docs/rpc-memo.md", content: "…", lineCount: 69 },
+          { path: "a.bin", byteSize: 1024, skippedReason: "tooLarge" },
+        ],
+      },
+    };
+    const msgs = replay([frame, { ...frame, type: "message_end" }]);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toMatchObject({ kind: "files" });
+    expect((msgs[0] as Extract<ViewMsg, { kind: "files" }>).files).toHaveLength(2);
+  });
+
+  it("fileMention 不影响同一批次里的文本流", () => {
+    const msgs = replay([
+      {
+        type: "message_start",
+        message: { role: "fileMention", files: [{ path: "a.ts", lineCount: 3 }] },
+      },
+      { type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "" }] } },
+      { type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 0 } },
+      { type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "读完" } },
+    ]);
+    expect(msgs.map((m) => m.kind)).toEqual(["files", "text"]);
+  });
+});

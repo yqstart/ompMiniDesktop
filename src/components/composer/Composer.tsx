@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { ImagePlus, X } from "lucide-react";
+import { FileText, FileWarning, ImagePlus, X } from "lucide-react";
 import { useApp } from "../../stores/app";
 import { api } from "@shared/api";
 import { attachmentFromFile, dataUrl } from "../../lib/attachments";
+import { extractMentions } from "../../lib/mentions";
 import { ModelPicker } from "../pickers/ModelPicker";
 import { ThinkingPicker } from "../pickers/ThinkingPicker";
 import { PermissionBadge } from "../pickers/PermissionBadge";
@@ -27,8 +28,31 @@ export function Composer() {
   const running = status === "running" || status === "awaiting-approval";
   const awaiting = status === "awaiting-approval";
   const archived = sessions.find((s) => s.id === activeSessionId)?.archived;
+  // @文件 提及（V2 M6b）：展开由 omp 做，这里只把草稿里的提及显示成芯片并问一次「路径存在吗」
+  const cwd = sessions.find((s) => s.id === activeSessionId)?.cwd ?? "";
+  const mentions = useMemo(() => extractMentions(draft), [draft]);
+  const mentionKey = `${cwd}\u0000${mentions.join("\u0000")}`;
+  const [checks, setChecks] = useState<{ key: string; exists: Record<string, boolean> }>({ key: "", exists: {} });
   const [attachError, setAttachError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    if (mentions.length === 0 || !cwd) return;
+    let alive = true;
+    // 打字期间不做请求：停 300ms 再问后端（只 stat，无副作用）
+    const timer = setTimeout(() => {
+      void api
+        .checkPaths(cwd, mentions)
+        .then((rs) => {
+          if (alive) setChecks({ key: mentionKey, exists: Object.fromEntries(rs.map((r) => [r.path, r.exists])) });
+        })
+        .catch(() => undefined);
+    }, 300);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [mentionKey, cwd, mentions]);
 
   // 模型是否支持图片（模型目录里 `input` 含 image）；目录没加载出来时不做判断，不误报
   const model = models?.models.find((m) => `${m.provider}/${m.id}` === currentModel);
@@ -145,6 +169,28 @@ export function Composer() {
           </div>
         )}
         {attachError && <div className="px-4 pt-2 text-xs text-danger">{attachError}</div>}
+        {mentions.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2" aria-label="@提及的文件">
+            {mentions.map((p) => {
+              const exists = checks.key === mentionKey ? checks.exists[p] : undefined;
+              const missing = exists === false;
+              return (
+                <span
+                  key={p}
+                  title={missing ? "这个路径在会话目录下不存在，omp 会跳过" : p}
+                  className={`inline-flex max-w-full items-center gap-1.5 rounded-lg border px-2 py-0.5 font-mono text-xs ${
+                    missing ? "border-warn/50 text-warn" : "border-border/70 text-muted"
+                  }`}
+                >
+                  {missing ? <FileWarning size={12} aria-hidden /> : <FileText size={12} aria-hidden />}
+                  <span className="truncate">{p}</span>
+                  <span className="sr-only">{missing ? "路径不存在" : "路径存在"}</span>
+                </span>
+              );
+            })}
+            <span className="text-xs text-muted">发送时由 omp 读进上下文</span>
+          </div>
+        )}
         {imageUnsupported && (
           <div className="px-4 pt-2 text-xs text-warn">当前模型可能不支持图片，发送前请确认模型是否带视觉能力</div>
         )}
@@ -173,7 +219,7 @@ export function Composer() {
             }
           }}
           disabled={awaiting}
-          placeholder={awaiting ? "先处理上面的审批" : dragging ? "松手即可添加图片" : "随心输入"}
+          placeholder={awaiting ? "先处理上面的审批" : dragging ? "松手即可添加图片" : "随心输入（@ 引用文件）"}
           className="max-h-44 w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-sm leading-6 outline-none placeholder:text-muted/70 disabled:opacity-60"
         />
         <div className="flex flex-wrap items-center gap-0.5 gap-y-1 px-2.5 pb-2.5">

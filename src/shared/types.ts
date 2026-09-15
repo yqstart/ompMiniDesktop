@@ -6,6 +6,20 @@ export type ApprovalMode = "always-ask" | "write" | "yolo";
 export type ImageBlock = { mimeType: string; data: string };
 
 /**
+ * `@文件` 提及被 omp 读进上下文后，`fileMention` 消息里的一条文件记录（V2 M6b）。
+ * `skippedReason` 有值时表示 omp 跳过了自动读取（binary / tooLarge）。
+ */
+export type MentionFile = {
+  path: string;
+  lineCount?: number;
+  byteSize?: number;
+  skippedReason?: string;
+};
+
+/** `check_paths` 的返回：输入框里 @提及 的存在性提示（只读 stat，不读内容）。 */
+export type PathCheck = { path: string; exists: boolean; isDir: boolean };
+
+/**
  * 待发送的图片附件（本地读取，随 `prompt.images` 一次性发给 omp，不落覆盖层、不进草稿）。
  * `dataBase64` 与 `ImageBlock.data` 同格式；`name` 只用于输入框里的可读标签。
  */
@@ -221,7 +235,9 @@ export type ViewMsg =
       options?: string[];
     }
   /** 服务端撤回（`method:"cancel"`，请求已 abort/超时）：把对应卡片从流里去掉。 */
-  | { kind: "ui-cancel"; id: string; uiId: string };
+  | { kind: "ui-cancel"; id: string; uiId: string }
+  /** `@文件` 提及被 omp 读进上下文（`fileMention` 消息）：渲染成一排文件芯片。 */
+  | { kind: "files"; id: string; files: MentionFile[] };
 
 export type SessionStatus =
   | { state: "running" }

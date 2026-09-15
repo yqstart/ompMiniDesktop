@@ -33,17 +33,17 @@ src/
   components/SettingsPage.tsx  # 设置占位页（omp 诊断区：路径/版本/agentDir + 重新检测 + 指定路径 + 复制）
   components/ConfirmDialog.tsx # 通用二次确认浮层（受控；跨分组危险操作用它，分组内仍是轻量内联浮层）
   components/sidebar/      # Sidebar（分组会话列表 + 缺失态重定位）、EmptyState
-  components/thread/       # TopBar（标题备注 + 窄窗抽屉入口 + UpdateBell）、Thread（首屏 200 条 + 增量加载）、AssistantText（Markdown + 代码高亮 + 复制 + 流式骨架）、ToolCard、ApprovalCard（审批 select）、UiRequestCard（confirm/input/editor/非审批 select）、StatusBar（OmpStatusPill + RuntimeStats 用量透传）
+  components/thread/       # TopBar（标题备注 + 窄窗抽屉入口 + UpdateBell）、Thread（首屏 200 条 + 增量加载）、AssistantText（Markdown + 代码高亮 + 复制 + 流式骨架）、ToolCard、ApprovalCard（审批 select）、UiRequestCard（confirm/input/editor/非审批 select）、MentionChips（@文件 芯片排）、StatusBar（OmpStatusPill + RuntimeStats 用量透传）
   components/composer/     # Composer（一体式输入框 + 工具行 + 图片附件：粘贴/拖拽/选文件，发送随 prompt.images）、ContextBar（输入框上方一行：项目 + git 分支）
   components/pickers/      # ModelPicker、ThinkingPicker、PermissionBadge（挂输入框工具行）；ProjectPicker、BranchPicker（挂 ContextBar）
   components/update/       # UpdateBell、UpdateDialog（应用内更新）
-  lib/                     # viewmsg（ViewMsg 归一 + 单测）、attachments（图片附件校验/base64/内容块提取 + 单测）、mergeEvents（实时流按 id 合并 + 单测）、thinking（思考档推导 + 单测）、sessions（分组 + 单测）、context（上下文条取值 + 单测）、sessionOpen（打开/新建会话的唯一实现）、projects（添加项目 / 切换项目）、ompDiag（omp 自检与手动指定路径）、useSessionEvents（事件归一 + 真值回填）、useDropdown、appUpdate、rpc-types
+  lib/                     # viewmsg（ViewMsg 归一 + 单测）、attachments（图片附件校验/base64/内容块提取 + 单测）、mentions（@文件 解析，与 omp 同规则 + 单测）、mergeEvents（实时流按 id 合并 + 单测）、thinking（思考档推导 + 单测）、sessions（分组 + 单测）、context（上下文条取值 + 单测）、sessionOpen（打开/新建会话的唯一实现）、projects（添加项目 / 切换项目）、ompDiag（omp 自检与手动指定路径）、useSessionEvents（事件归一 + 真值回填）、useDropdown、appUpdate、rpc-types
   shared/                  # api（invoke 唯一入口）、ipc（通道常量）、types
   stores/app.ts            # Zustand 全局状态（含 currentModel/currentThinking/currentEfforts/currentRuntime、composerMenu、sidebarWidth、threadLimit、update）
 eslint.config.js           # ESLint flat config（typescript-eslint + react-hooks + react-refresh）
 src-tauri/src/
   main.rs / lib.rs         # 插件注册（dialog/opener/process/updater/store）
-  commands/mod.rs          # 32 个 Tauri commands（与 src/shared/ipc.ts 一一对应，见 e2e:ipc）
+  commands/mod.rs          # 33 个 Tauri commands（与 src/shared/ipc.ts 一一对应，见 e2e:ipc）
   runtime.rs               # per-会话长驻 omp 子进程 + rpc_chunk 重组 + 事件分发 + 真值回读（omp-state）+ 切模型自动最高档
   overlay.rs               # overlay.json 读写与版本归一（含单测）
   session_scan.rs          # agentDir 解析 + jsonl 头解析 + cwd 归组（含单测）
@@ -58,6 +58,7 @@ scripts/                   # fake-omp.mjs（canned RPC 联调：history|approve|
 - 后端 per-会话 spawn `omp --mode rpc`，stdout 行解析 → `rpc_chunk` 重组 → `omp-event://<sessionId>`，状态机推 `omp-status://<sessionId>`；运行时真值（模型 / 可用思考档 / 当前档 / 上下文占用 / 本轮用量与耗时）推 `omp-state://<sessionId>`，打开会话时另经 `get_session_runtime` 补拉一次以消除订阅竞态。用量真值来自 `message_end.message.usage`（`duration` / `ttft` 实测就是毫秒，原样透传不换算）；`get_state` 回读时保留用量字段，不许被抹掉。
 - `prompt` 的即时 ack 只代表接受，完成信号以 `agent_end(isTerminal !== false)` 为准；流式中 composer 只允许停止（`abort`），不排队。
 - 图片附件（V2 M6）：三条入口（粘贴 / 拖拽 / 点回形针选文件）都读成 base64 存内存（`attachmentsBySession`），发送时随 `prompt{message, images:[{type:"image",data,mimeType}]}` 一次性交给 omp——**不落盘、不写覆盖层、不塞草稿**；选文件走后端 `read_image_file`（WebView 拿不到任意本地路径内容）。渲染只认消息内容块里的 `type:"image"`（实时与 jsonl 同构）；单张上限 10MB，历史回放里超过 512KB base64 的块按 `imagesOmitted` 计数省略，不许无上限常驻内存。
+- `@文件` 提及（V2 M6b）：**展开动作是 omp 做的**（prompt 时把命中的文件读成 `role:"fileMention"` 消息），壳侧只做两件事——输入框把草稿里的提及显示成芯片并用后端 `check_paths`（只 stat）标出「路径不存在」，转录区把 `fileMention` 渲染成一排文件芯片（跳过项 `skippedReason` 用 warn 色）。解析规则与 omp 的 `extractFileMentions` 逐条对齐（`src/lib/mentions.ts`：引号形式、行首/空白边界、ASCII 首尾修剪）——**规则漂移会让芯片与真正读进上下文的文件对不上**。
 - V1 最小命令集：`negotiate_protocol、get_state、prompt、abort、set_model、set_thinking_level` 走 stdin 长驻通道（命令名以 `src/lib/rpc-types.ts` 为准）；`get_available_models、switch_session、get_messages_page、bash（诊断）` 仅在该类型声明中保留，Rust 后端当前未发送。历史回放走后端 `get_history`（直读 jsonl，前 5000 行、最多 2000 条 message/custom 系），不是 `get_messages_page`。
 - 切模型发 `set_model{provider, modelId}`（两个字段，非 selector 字符串）；切思考档发 `set_thinking_level{level}`。**omp 切模型后不会修正思考档**（切到无思考模型直接丢档）：后端收到 `set_model` 成功回包即自动跟进 `set_thinking_level`（新模型 `efforts` 最高档，无思考则 `off`），再 `get_state` 回读真值推 `omp-state`；失败也回读以纠正前端乐观态。
 - 思考档可用集 = omp 真值 `currentEfforts`（`omp-state` / `get_session_runtime`）∪ `{off}`（`off` 恒合法）；下拉**只列支持档**，禁止列全集再置灰或先发再报错（非法档 omp 静默忽略且回 success）。
@@ -99,7 +100,7 @@ pnpm tauri:build            # 本机发布构建，产物见 src-tauri/target/re
 pnpm icon                   # 从 design-system/icon/omp-mini-icon.svg 重生成桌面图标
 ```
 
-联调无需真实 LLM：`OMP_FAKE_SCENARIO=approve|deny|history|multi|abort|ui node scripts/fake-omp.mjs`（canned RPC 事件，覆盖审批双分支、多工具并行、流式中断与通用 UI 请求全方法）。
+联调无需真实 LLM：`OMP_FAKE_SCENARIO=approve|deny|history|multi|abort|ui|mentions node scripts/fake-omp.mjs`（canned RPC 事件，覆盖审批双分支、多工具并行、流式中断、通用 UI 请求全方法与 @文件 提及）。
 
 ## 发版与更新
 
@@ -110,7 +111,7 @@ pnpm icon                   # 从 design-system/icon/omp-mini-icon.svg 重生成
 ## 范围边界（V1 不做 / 二期已排）
 
 自动化/定时任务、插件/Skill/MCP/Hook 管理、主题市场、云同步、多窗口协作、终端 PTY 仿真、diff 合并编辑器、用量统计面板（只透传 omp 给的单轮用量与上下文占用，不做聚合/报表/成本分析）——这些仍在范围外，要做得单独决策。
-二期（V2）已排的是 V1 文档里显式留下的坑 + 上游已给的能力：M5 通用 UI 请求（`confirm`/`input`/`editor`/非审批 `select`，已完成）、M6 图片与 `@文件`、M7 会话扫描分页与搜索、M8 长会话 windowing 复议；明细见 `docs/v2-schedule.md`。
+二期（V2）已排的是 V1 文档里显式留下的坑 + 上游已给的能力：M5 通用 UI 请求（`confirm`/`input`/`editor`/非审批 `select`，已完成）、M6 图片与 `@文件`（已完成）、M7 会话扫描分页与搜索、M8 长会话 windowing 复议；明细见 `docs/v2-schedule.md`。
 
 ## 命名与变更约定
 

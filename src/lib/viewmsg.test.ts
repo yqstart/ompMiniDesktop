@@ -63,6 +63,35 @@ describe("viewMsgFromJsonlLine", () => {
     expect(msgs).toHaveLength(1);
     expect(msgs[0]).toMatchObject({ kind: "user", text: "", images: [{ mimeType: "image/jpeg", data: "BBB" }] });
   });
+
+  // V2 M6b：@文件 提及被 omp 读进上下文 → fileMention 消息 → 一排文件芯片
+  it("fileMention 消息归一成 files 芯片排（含跳过项与行数）", () => {
+    const msgs = viewMsgFromJsonlLine({
+      type: "message",
+      message: {
+        role: "fileMention",
+        files: [
+          { path: "docs/rpc-memo.md", content: "全文…", lineCount: 69 },
+          { path: "a.bin", content: "(skipped)", byteSize: 12582912, skippedReason: "tooLarge" },
+        ],
+      },
+    });
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toMatchObject({
+      kind: "files",
+      files: [
+        { path: "docs/rpc-memo.md", lineCount: 69 },
+        { path: "a.bin", byteSize: 12582912, skippedReason: "tooLarge" },
+      ],
+    });
+    // 文件全文不许进前端 ViewMsg（jsonl 里已经有了）
+    expect(JSON.stringify(msgs[0])).not.toContain("全文");
+  });
+
+  it("fileMention 没有 files 时不出空芯片排", () => {
+    expect(viewMsgFromJsonlLine({ type: "message", message: { role: "fileMention", files: [] } })).toEqual([]);
+    expect(viewMsgFromJsonlLine({ type: "message", message: { role: "fileMention" } })).toEqual([]);
+  });
 });
 
 describe("viewMsgsFromJsonlLines（历史批量归一）", () => {

@@ -1,4 +1,4 @@
-import type { ViewMsg } from "@shared/types";
+import type { MentionFile, ViewMsg } from "@shared/types";
 import { imagesFromContent } from "./attachments";
 
 let seq = 0;
@@ -7,6 +7,30 @@ const nid = (p: string) => `${p}-${Date.now().toString(36)}-${seq++}`;
 function truncate(text: string, limit = 2000): { out: string; full?: string } {
   if (text.length <= limit) return { out: text };
   return { out: text.slice(0, limit), full: text };
+}
+
+/**
+ * `fileMention` 消息 → 文件芯片数据（V2 M6b）。
+ * omp 侧形状：`{role:"fileMention", files:[{path, content, lineCount, byteSize?, skippedReason?}]}`；
+ * 这里只取展示需要的字段，**不保留 content**（文件全文在 jsonl 里，不进前端内存）。
+ */
+export function mentionFilesOf(message: Record<string, unknown>): MentionFile[] {
+  const raw = message.files;
+  if (!Array.isArray(raw)) return [];
+  const out: MentionFile[] = [];
+  for (const f of raw) {
+    if (!f || typeof f !== "object") continue;
+    const o = f as Record<string, unknown>;
+    const path = typeof o.path === "string" ? o.path : "";
+    if (!path) continue;
+    out.push({
+      path,
+      ...(typeof o.lineCount === "number" ? { lineCount: o.lineCount } : {}),
+      ...(typeof o.byteSize === "number" ? { byteSize: o.byteSize } : {}),
+      ...(typeof o.skippedReason === "string" ? { skippedReason: o.skippedReason } : {}),
+    });
+  }
+  return out;
 }
 
 /** 按工具名定制参数摘要行（docs/v1-design.md §8.3）。 */
@@ -207,6 +231,12 @@ export function viewMsgsFromJsonlLines(lines: unknown[]): ViewMsg[] {
         });
         return;
       }
+      if (m.role === "fileMention") {
+        // @文件 提及（V2 M6b）：omp 把命中的文件读进上下文时落的一条消息，渲染成文件芯片
+        const files = mentionFilesOf(m as Record<string, unknown>);
+        if (files.length > 0) out.push({ kind: "files", id: `fm:${lid}`, files });
+        return;
+      }
       if (m.role === "toolResult") {
         // 结果已合并进调用处的卡；孤儿结果（调用行被截断时）才在此处补一卡
         const id = String((m as Record<string, unknown>).toolCallId ?? "");
@@ -268,6 +298,11 @@ export function viewMsgFromJsonlLine(line: unknown): ViewMsg[] {
   const type = o.type as string | undefined;
   if (type === "message") {
     const m = o.message as { role?: string; content?: unknown[] } | undefined;
+    // fileMention 消息没有 content 数组，先于 content 检查处理
+    if (m?.role === "fileMention") {
+      const files = mentionFilesOf(m as unknown as Record<string, unknown>);
+      return files.length > 0 ? [{ kind: "files", id: nid("fm"), files }] : [];
+    }
     if (!m || !Array.isArray(m.content)) return [];
     const out: ViewMsg[] = [];
     for (const b of m.content as Record<string, unknown>[]) {

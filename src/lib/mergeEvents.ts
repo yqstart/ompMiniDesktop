@@ -103,6 +103,14 @@ export function mergeViewMsgs(cur: ViewMsg[], incoming: IncomingViewMsg[]): View
         continue;
       }
     }
+    // @文件 芯片排：同一批文件重复推送只留一排（message_start/end 各推一次的情况）
+    if (next.kind === "files") {
+      const idx = out.findIndex((x) => x.kind === "files" && x.id === next.id);
+      if (idx >= 0) {
+        out[idx] = next;
+        continue;
+      }
+    }
     // 服务端撤回：连同对应卡片一起从流里移除（用户已无法回包，留着就是死卡）
     if (next.kind === "ui-cancel") {
       const idx = out.findIndex((x) => x.kind === "ui" && x.uiId === next.uiId);

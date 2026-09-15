@@ -4,6 +4,7 @@ import { api } from "@shared/api";
 import { ToolCard } from "./ToolCard";
 import { ApprovalCard } from "./ApprovalCard";
 import { UiRequestCard } from "./UiRequestCard";
+import { MentionChips } from "./MentionChips";
 import { AssistantText } from "./AssistantText";
 import { EmptyState } from "../sidebar/EmptyState";
 
@@ -121,6 +122,7 @@ export function Thread() {
             <ApprovalCard m={m} sessionId={activeSessionId} />
           )}
           {m.kind === "ui" && activeSessionId && <UiRequestCard m={m} sessionId={activeSessionId} />}
+          {m.kind === "files" && <MentionChips m={m} />}
           {m.kind === "ui-cancel" && null}
           {m.kind === "divider" && (
             <div className="flex items-center gap-3 py-1">

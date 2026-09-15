@@ -42,6 +42,7 @@ fn main() {
             get_history,
             send_message,
             read_image_file,
+            check_paths,
             stop_session,
             approve,
             respond_ui,

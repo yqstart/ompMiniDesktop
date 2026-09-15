@@ -22,6 +22,7 @@ export const IPC = {
   getHistory: "get_history",
   sendMessage: "send_message",
   readImageFile: "read_image_file",
+  checkPaths: "check_paths",
   stopSession: "stop_session",
   approve: "approve",
   respondUi: "respond_ui",

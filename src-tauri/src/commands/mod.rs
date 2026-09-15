@@ -1011,6 +1011,49 @@ pub async fn respond_ui(
     Ok(())
 }
 
+/// `check_paths` 的单条结果。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathCheck {
+    pub path: String,
+    pub exists: bool,
+    pub is_dir: bool,
+}
+
+/// 相对路径按 base 解析并做**词法归一**（不触碰文件系统）：`.` 丢弃、`..` 回退一层。
+/// 绝对路径原样使用。
+pub fn resolve_path(base: &str, p: &str) -> PathBuf {
+    let raw = if p.starts_with('/') { PathBuf::from(p) } else { PathBuf::from(base).join(p) };
+    let mut out = PathBuf::new();
+    for c in raw.components() {
+        match c {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// 输入框 `@提及` 的存在性提示（V2 M6b）：只 stat，不读内容、不写任何东西。
+/// 展开动作是 omp 做的，这里只回答「这个路径在会话 cwd 下存在吗」。
+#[tauri::command]
+pub async fn check_paths(base: String, paths: Vec<String>) -> Vec<PathCheck> {
+    paths
+        .into_iter()
+        .take(50)
+        .map(|p| {
+            let full = resolve_path(&base, &p);
+            match std::fs::metadata(&full) {
+                Ok(m) => PathCheck { path: p, exists: true, is_dir: m.is_dir() },
+                Err(_) => PathCheck { path: p, exists: false, is_dir: false },
+            }
+        })
+        .collect()
+}
+
 #[tauri::command]
 pub async fn set_model(app: AppHandle, state: State<'_, AppState>, id: String, provider: String, model_id: String) -> Result<(), CmdError> {
     let map = state.runtime.clone();
@@ -1132,5 +1175,21 @@ pub fn load_state(app: &AppHandle) -> AppState {
         models_cache: Mutex::new(None),
         running: Mutex::new(HashMap::new()),
         runtime: std::sync::Arc::new(Mutex::new(HashMap::new())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_path;
+
+    #[test]
+    fn resolve_path_joins_and_normalizes() {
+        assert_eq!(resolve_path("/a/b", "x/y"), std::path::PathBuf::from("/a/b/x/y"));
+        assert_eq!(resolve_path("/a/b", "../c"), std::path::PathBuf::from("/a/c"));
+        assert_eq!(resolve_path("/a/b", "./c/./d"), std::path::PathBuf::from("/a/b/c/d"));
+        // 绝对路径无视 base
+        assert_eq!(resolve_path("/a/b", "/x/y"), std::path::PathBuf::from("/x/y"));
+        // 回退超过根目录不 panic，停在根
+        assert_eq!(resolve_path("/a", "../../../x"), std::path::PathBuf::from("/x"));
     }
 }
