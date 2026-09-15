@@ -43,6 +43,7 @@ fn main() {
             send_message,
             stop_session,
             approve,
+            respond_ui,
             set_model,
             set_thinking,
             get_session_runtime,

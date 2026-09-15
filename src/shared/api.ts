@@ -40,6 +40,16 @@ export const api = {
   stop: (id: string) => call<void>("stop_session", { id }),
   approve: (id: string, uiId: string, decision: "once" | "always" | "deny") =>
     call<void>("approve", { id, uiId, decision }),
+  /**
+   * 通用 UI 请求回包（非审批）：`confirm` → `{confirmed}`，`value` → `{value}`，`cancel` → `{cancelled}`。
+   * 与 `approve` 分开：审批的「总是允许」还要写会话级 yolo 意向，语义不同。
+   */
+  respondUi: (
+    id: string,
+    uiId: string,
+    kind: "value" | "confirm" | "cancel",
+    opts?: { value?: string; confirmed?: boolean },
+  ) => call<void>("respond_ui", { id, uiId, kind, value: opts?.value, confirmed: opts?.confirmed }),
   setModel: (id: string, provider: string, modelId: string) =>
     call<void>("set_model", { id, provider, modelId }),
   setThinking: (id: string, level: string) =>

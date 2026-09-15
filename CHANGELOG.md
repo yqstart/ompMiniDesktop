@@ -6,6 +6,8 @@
 
 ### 新增
 
+- **二期 M5：omp 通用 UI 请求全类型接住**（此前只精做审批 `select`，其余一律塞进审批卡且**回包格式错误**——`confirm` 回了 `{value:"Approve"}`，`input`/`editor` 干脆不渲染，agent 侧等一个永远不来的回包）。现在按上游真实语义分流：`confirm`（双按钮，回 `{confirmed}`）、`input`（单行 + Enter 提交）、`editor`（多行 + ⌘/Ctrl+Enter 提交）、非审批 `select`（选项按钮，回 `{value}`）走新组件 `UiRequestCard`，取消/跳过统一回 `{cancelled:true}`；`notify` 渲染为分隔线，`setStatus`/`setWidget`/`setTitle`/`set_editor_text` 作为单向宿主指令丢弃且不告警；服务端 `cancel{targetId}` 会撤回对应卡片（不留点不动的死卡）。后端新增 `respond_ui(id, uiId, kind, value?, confirmed?)` 命令（与 `approve` 分工：审批多一步会话级 yolo 意向）；`awaiting-approval` 状态只由这四类交互方法触发，单向方法与撤回不再误锁 composer。上游方法集与回包字段取自 omp 18.1.22 内嵌源码实测，记入 `docs/v2-schedule.md` §2。
+- 新增二期排期 `docs/v2-schedule.md`：M5 通用 UI 请求（本批）/ M6 图片与 `@文件` / M7 会话扫描分页与搜索 / M8 长会话 windowing 复议，含从 `prompt{message, images}` 实测到的图片透传口径。
 - 项目分组头新增「删除工作区」入口（`FolderMinus`，hover 操作区第三个按钮）：二次确认后只解绑目录、不删任何 jsonl 文件；名下对话（含进行中）由后端 `remove_project` 按 cwd 扫描后全部标记归档保留，可在「未归属会话」的已归档里找回。
 - 思考档新增真值回读通道：后端 `get_session_runtime` 命令 + `omp-state://<sessionId>` 事件推送模型 / 可用思考档（omp `thinking.efforts`）/ 当前档，打开会话即回填，不再靠前端猜。
 - 输入框上方新增**上下文条**（`ContextBar`）：左「项目」右「git 分支」。项目认会话归属（会话未归属就显示「未归属」，不回退左栏 `activeProjectId`），点开列全部项目、选中即切上下文并打开该项目最近会话；分支为**只读**展示——收起态显示分支名（detached 显示短 sha + 「游离」角标，有未提交改动带 warn 圆点），展开态列本地分支（当前分支置顶打勾）+ 手动刷新 + 「切分支请在终端操作」，非 git 目录显示「非 Git 目录」。两者与工具行下拉共用互斥槽 `composerMenu`，同一时刻只开一个。
@@ -41,6 +43,7 @@
 ### 修复
 
 - 审批拒绝分支在 `message_end{toolResult}` 路径不再显示 omp 原文（英文 `Tool call denied by user: bash`），统一渲染为「被用户拒绝」并置失败态（`isError` 也计入——此前只看文本关键字）。
+- `confirm` 类 UI 请求的回包格式修正：此前复用审批回包 `{value:"Approve"}`，omp 侧期待的是 `{confirmed:true/false}`（实测内嵌源码 `WOt` 解析器），现在按方法组装。
 - 修掉新 lint 配置查出的一批 React 反模式：拖拽态在 render 期读 ref（改 state）、`ContextBar` / `PermissionBadge` 在 effect 里同步 setState（改为派生值 / 直接订阅 store）、`useSessionEvents` 在 render 期写 ref（移到 effect）。
 - 会话头解析不再整个读文件：大文件只读「头 64KB + 尾 64KB」两段（头段取 session/title、尾段取最新 title_change，各自跳过被切断的残行），列表扫描不再为每个会话把几十 MB 读进内存；补 4 个单测覆盖正常 / 缺 title / 损坏 / 超大头尾。
 - 审批卡出现即滚入视野（长会话里审批可能落在视口之外）；下拉打开时自动聚焦首个可聚焦元素（模型下拉即搜索框）。

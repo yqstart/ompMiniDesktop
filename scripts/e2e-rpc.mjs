@@ -22,7 +22,7 @@ const bad = (msg) => {
 const assert = (cond, msg) => (cond ? ok(msg) : bad(msg));
 
 /** 跑一个场景：返回收到的全部帧与 response 表。 */
-async function drive(scenario, { decide = "approve", abort = false, extra = [] } = {}) {
+async function drive(scenario, { decide = "approve", abort = false, extra = [], respond } = {}) {
   const child = spawn(process.execPath, [FAKE], {
     stdio: ["pipe", "pipe", "pipe"],
     env: { ...process.env, OMP_FAKE_SCENARIO: scenario },
@@ -60,7 +60,9 @@ async function drive(scenario, { decide = "approve", abort = false, extra = [] }
           send({ id: "p1", type: "prompt", message: "跑一下 echo" });
         }
         if (f.type === "extension_ui_request") {
-          if (decide === "deny") send({ type: "extension_ui_response", id: f.id, cancelled: true });
+          // respond 回调给"按方法回不同包"的场景用（V2 M5 通用 UI 请求）
+          if (respond) respond(f, send);
+          else if (decide === "deny") send({ type: "extension_ui_response", id: f.id, cancelled: true });
           else send({ type: "extension_ui_response", id: f.id, value: "Approve" });
         }
         if (f.type === "agent_end" && f.isTerminal !== false) {
@@ -148,11 +150,42 @@ async function main() {
     "中断前确有流式输出（不是空跑）",
   );
 
+  // --- 6. 通用 UI 请求（V2 M5）：confirm / input / editor / 非审批 select + 服务端撤回 ---
+  console.log("场景 ui（通用 UI 请求全方法）");
+  const seenUi = [];
+  const uiRun = await drive("ui", {
+    respond: (f, send) => {
+      // 只有需要回包的方法算一次交互：cancel（服务端撤回）与 notify（单向）都不回包
+      if (!["confirm", "input", "editor", "select"].includes(f.method)) return;
+      seenUi.push(f.method);
+      // 回包语义按方法区分（实测 omp 18.1.22）：confirm 用 {confirmed}，
+      // input/editor/非审批 select 用 {value}，cancel 不需要回包。
+      if (f.method === "confirm") send({ type: "extension_ui_response", id: f.id, confirmed: true });
+      else if (f.method === "input") send({ type: "extension_ui_response", id: f.id, value: "release/2.0" });
+      else if (f.method === "editor") send({ type: "extension_ui_response", id: f.id, value: "feat: 二期\n\n- ui 请求" });
+      else if (f.method === "select") send({ type: "extension_ui_response", id: f.id, value: "release/2.0" });
+    },
+  });
+  const uiText = kinds(uiRun.frames, "message_update")
+    .map((f) => f.assistantMessageEvent?.delta ?? "")
+    .join("");
+  assert(
+    seenUi.slice(0, 4).join(",") === "confirm,input,editor,select",
+    "四类交互请求按序到达（confirm → input → editor → select；第 5 条是被撤回的那张）",
+  );
+  assert(uiText.includes("confirm=true"), "confirm 回包用 {confirmed:true}（不是审批的 {value:\"Approve\"}）");
+  assert(uiText.includes("input=release/2.0"), "input 回包用 {value}，原样透传");
+  assert(uiText.includes("editor=feat: 二期||- ui 请求"), "editor 回包用 {value} 且换行保留");
+  assert(uiText.includes("select=release/2.0"), "非审批 select 回包是选中项");
+  const cancelFrame = kinds(uiRun.frames, "extension_ui_request").find((f) => f.method === "cancel");
+  assert(cancelFrame?.targetId === "ui-x1", "服务端撤回帧带 targetId（前端据此撤掉卡片）");
+  assert(kinds(uiRun.frames, "agent_end").length === 1, "UI 请求处理完 turn 正常收尾");
+
   if (failures > 0) {
     console.error(`\ne2e:rpc 失败：${failures} 项断言未通过`);
     process.exit(1);
   }
-  console.log("\ne2e:rpc 通过：握手 / 通过分支 / 拒绝分支 / 多工具并行 / 流式中断");
+  console.log("\ne2e:rpc 通过：握手 / 通过分支 / 拒绝分支 / 多工具并行 / 流式中断 / 通用 UI 请求");
 }
 
 main().catch((e) => {

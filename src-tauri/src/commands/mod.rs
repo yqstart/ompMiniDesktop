@@ -911,6 +911,38 @@ pub async fn approve(app: AppHandle, state: State<'_, AppState>, id: String, ui_
     Ok(())
 }
 
+/// 通用 UI 请求回包（V2 M5）：omp `extension_ui_request` 里非审批的交互方法。
+/// 回包语义按方法区分（实测 omp 18.1.22 内嵌源码）：
+/// `confirm` → `{confirmed:bool}`；`input`/`editor`/非审批 `select` → `{value:string}`；
+/// 取消/跳过 → `{cancelled:true}`。审批仍走 `approve`（多一步会话级 yolo 意向）。
+#[tauri::command]
+pub async fn respond_ui(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    ui_id: String,
+    kind: String,
+    value: Option<String>,
+    confirmed: Option<bool>,
+) -> Result<(), CmdError> {
+    let map = state.runtime.clone();
+    let tx = map.lock().await.get(&id).map(|r| r.tx.clone());
+    let Some(tx) = tx else {
+        return Err(cmd_err("NOT_RUNNING", "会话未运行，该请求已失效".into(), None));
+    };
+    let resp = match kind.as_str() {
+        "value" => serde_json::json!({"type":"extension_ui_response","id":ui_id,"value":value.unwrap_or_default()}),
+        "confirm" => serde_json::json!({"type":"extension_ui_response","id":ui_id,"confirmed":confirmed.unwrap_or(false)}),
+        "cancel" => serde_json::json!({"type":"extension_ui_response","id":ui_id,"cancelled":true}),
+        _ => return Err(cmd_err("BAD_ARG", "UI 回包类型非法".into(), None)),
+    };
+    tx.send(format!("{}\n", serde_json::to_string(&resp).unwrap()))
+        .map_err(|_| cmd_err("RPC_IO", "回包发送失败，进程可能已退出".into(), None))?;
+    // 回包即视为「等待结束」，与 approve 一致把状态推回 running（omp 会继续跑）
+    let _ = app.emit(format!("omp-status://{id}").as_str(), serde_json::json!({"state":"running"}));
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn set_model(app: AppHandle, state: State<'_, AppState>, id: String, provider: String, model_id: String) -> Result<(), CmdError> {
     let map = state.runtime.clone();

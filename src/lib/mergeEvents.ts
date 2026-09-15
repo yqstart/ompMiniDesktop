@@ -95,6 +95,20 @@ export function mergeViewMsgs(cur: ViewMsg[], incoming: IncomingViewMsg[]): View
         continue;
       }
     }
+    // 通用 UI 请求同理按 uiId 去重（同一条 request 重放不会出两张卡）
+    if (next.kind === "ui") {
+      const idx = out.findIndex((x) => x.kind === "ui" && x.uiId === next.uiId);
+      if (idx >= 0) {
+        out[idx] = next;
+        continue;
+      }
+    }
+    // 服务端撤回：连同对应卡片一起从流里移除（用户已无法回包，留着就是死卡）
+    if (next.kind === "ui-cancel") {
+      const idx = out.findIndex((x) => x.kind === "ui" && x.uiId === next.uiId);
+      if (idx >= 0) out.splice(idx, 1);
+      continue;
+    }
     out.push(next);
   }
   return out;

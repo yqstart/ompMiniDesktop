@@ -582,8 +582,11 @@ fn dispatch(app: &AppHandle, evt: &str, status: &str, v: &serde_json::Value) {
             }
         }
         "extension_ui_request" => {
+            // 需要用户回包的方法才会进「等待输入」状态（审批 + 通用 UI 请求）；
+            // 单向方法（notify / setStatus / setWidget / setTitle / set_editor_text）
+            // 与服务端撤回（cancel）都不是等待，别把 composer 锁住。
             let method = v.get("method").and_then(|m| m.as_str()).unwrap_or("");
-            if method == "select" || method == "confirm" {
+            if matches!(method, "select" | "confirm" | "input" | "editor") {
                 let _ = app.emit(status, serde_json::json!({"state":"awaiting-approval"}));
             }
             let _ = app.emit(evt, v);

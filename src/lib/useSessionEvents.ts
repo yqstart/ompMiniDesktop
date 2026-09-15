@@ -199,7 +199,26 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>): Vi
   }
   if (t === "extension_ui_request") {
     const method = frame.method as string;
-    if (method === "select" || method === "confirm") {
+    // 服务端撤回（请求被 abort / 超时）：撤掉卡片，别留下点不动的死卡
+    if (method === "cancel") {
+      const target = String(frame.targetId ?? "");
+      if (target) out.push({ kind: "ui-cancel", id: `uic-${target}`, uiId: target });
+      return out;
+    }
+    // 单向通知：不需要用户回包。notify 给一行分隔线，其余（setStatus / setWidget /
+    // setTitle / set_editor_text）是宿主 UI 指令，桌面壳不实现，静默丢弃且不告警。
+    if (method === "notify") {
+      out.push({ kind: "divider", id: `n-${String(frame.id)}`, divider: "turn", text: String(frame.message ?? "") });
+      return out;
+    }
+    if (method === "setStatus" || method === "setWidget" || method === "setTitle" || method === "set_editor_text") {
+      return out;
+    }
+    const options = Array.isArray(frame.options) ? (frame.options as unknown[]).map(String) : [];
+    // 审批是 select 的专用分支（options 含 Approve）：走 ApprovalCard，
+    // 「总是允许」还要写会话级 yolo 意向，语义与通用 UI 回包不同。
+    // options 缺失的 select 也按审批兜底（宁可让用户决定，也不静默丢一个请求）。
+    if (method === "select" && (options.length === 0 || options.includes("Approve"))) {
       out.push({
         kind: "approval",
         id: `ap-${String(frame.id)}`,
@@ -208,6 +227,22 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>): Vi
         command: "",
         cwd: "",
         title: String(frame.title ?? "需要你的确认"),
+      });
+      return out;
+    }
+    // 其余交互方法：confirm / input / editor / 非审批 select，统一走 UiRequestCard，
+    // 回包由后端 respond_ui 按方法组装（confirm 回 {confirmed}，input/editor/select 回 {value}）。
+    if (method === "confirm" || method === "input" || method === "editor" || method === "select") {
+      out.push({
+        kind: "ui",
+        id: `ui-${String(frame.id)}`,
+        uiId: String(frame.id),
+        method,
+        title: String(frame.title ?? ""),
+        ...(typeof frame.message === "string" ? { message: frame.message } : {}),
+        ...(typeof frame.placeholder === "string" ? { placeholder: frame.placeholder } : {}),
+        ...(typeof frame.prefill === "string" ? { prefill: frame.prefill } : {}),
+        ...(options.length > 0 ? { options } : {}),
       });
     }
     return out;

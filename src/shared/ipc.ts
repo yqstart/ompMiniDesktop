@@ -23,6 +23,7 @@ export const IPC = {
   sendMessage: "send_message",
   stopSession: "stop_session",
   approve: "approve",
+  respondUi: "respond_ui",
   setModel: "set_model",
   setThinking: "set_thinking",
   getSessionRuntime: "get_session_runtime",

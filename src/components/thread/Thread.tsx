@@ -3,6 +3,7 @@ import { THREAD_PAGE, useApp } from "../../stores/app";
 import { api } from "@shared/api";
 import { ToolCard } from "./ToolCard";
 import { ApprovalCard } from "./ApprovalCard";
+import { UiRequestCard } from "./UiRequestCard";
 import { AssistantText } from "./AssistantText";
 import { EmptyState } from "../sidebar/EmptyState";
 
@@ -100,6 +101,8 @@ export function Thread() {
           {m.kind === "approval" && activeSessionId && (
             <ApprovalCard m={m} sessionId={activeSessionId} />
           )}
+          {m.kind === "ui" && activeSessionId && <UiRequestCard m={m} sessionId={activeSessionId} />}
+          {m.kind === "ui-cancel" && null}
           {m.kind === "divider" && (
             <div className="flex items-center gap-3 py-1">
               <span className="h-px flex-1 bg-border/60" aria-hidden />

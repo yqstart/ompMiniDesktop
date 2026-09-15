@@ -2,13 +2,14 @@
 /**
  * fake-omp：canned RPC 事件脚本，用于历史回放 / 实时全链路联调与自动化验收。
  *
- * 用法：OMP_FAKE_SCENARIO=history|approve|deny|multi|abort node scripts/fake-omp.mjs
+ * 用法：OMP_FAKE_SCENARIO=history|approve|deny|multi|abort|ui node scripts/fake-omp.mjs
  * 场景：
  *   history  只回历史帧（列表/回放联调）
  *   approve  审批通过分支（默认场景）
  *   deny     审批拒绝分支（回 cancelled:true 走"被用户拒绝"）
  *   multi    同一条 assistant 消息里两个工具并行（一成一败），验证不串卡
  *   abort    流式中断：只吐前半段，收到 abort 才补 agent_end
+ *   ui       通用 UI 请求（V2 M5）：confirm → input → editor → select，外加一条被服务端撤回的请求
  * 行协议与真实 omp --mode rpc 一致（ready/response/事件），便于 Rust pump 照单解析。
  * 自动化驱动见 scripts/e2e-rpc.mjs（`pnpm e2e:rpc`）。
  */
@@ -198,6 +199,20 @@ function runScenario(message) {
     }
     return;
   }
+  // scenario=ui：通用 UI 请求全方法（V2 M5）。后续由 extension_ui_response 一步步推进
+  // （见 uiAdvance），最后用一段 text 汇报收到的回包语义，供 e2e:rpc 断言。
+  if (scenario === "ui") {
+    uiStep = 0;
+    uiLog = [];
+    out({
+      type: "extension_ui_request",
+      id: "ui-c1",
+      method: "confirm",
+      title: "清理临时文件？",
+      message: "将删除 /tmp/omp-fake 下的 3 个文件",
+    });
+    return;
+  }
   // toolcall 流
   const args = JSON.stringify({ command: "echo hi" });
   out({ type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 1 } });
@@ -303,6 +318,52 @@ function runScenario(message) {
 let pendingApprove = null;
 let pendingDeny = null;
 
+// --- scenario=ui 的状态机（V2 M5）------------------------------------------
+// 每收到一个 extension_ui_response 推进一步：confirm → input → editor → select，
+// 然后发一条**服务端主动撤回**的请求（omp 在请求方 abort/超时时会发 method:"cancel" + targetId）
+// 与一条单向 notify，最后用 text 汇报收到的回包，供 e2e:rpc 断言回包语义。
+let uiStep = 0;
+let uiLog = [];
+
+function uiAdvance(cmd) {
+  if (uiStep === 0) {
+    uiLog.push(`confirm=${cmd.confirmed === true}`);
+    out({ type: "extension_ui_request", id: "ui-i1", method: "input", title: "新分支名？", placeholder: "feature/…" });
+  } else if (uiStep === 1) {
+    uiLog.push(`input=${cmd.value}`);
+    out({ type: "extension_ui_request", id: "ui-e1", method: "editor", title: "提交信息", prefill: "chore: " });
+  } else if (uiStep === 2) {
+    uiLog.push(`editor=${String(cmd.value ?? "").replace(/\n/g, "|")}`);
+    out({
+      type: "extension_ui_request",
+      id: "ui-s1",
+      method: "select",
+      title: "选一个目标分支",
+      options: ["main", "release/2.0"],
+    });
+  } else if (uiStep === 3) {
+    uiLog.push(`select=${cmd.value}`);
+    out({ type: "extension_ui_request", id: "ui-x1", method: "select", title: "这条会被撤回", options: ["A", "B"] });
+    out({ type: "extension_ui_request", method: "cancel", targetId: "ui-x1" });
+    out({ type: "extension_ui_request", id: "ui-n1", method: "notify", message: "已收到全部输入", notifyType: "info" });
+    uiFinish();
+    return;
+  }
+  uiStep += 1;
+}
+
+function uiFinish() {
+  const text = `ui-ok ${uiLog.join(" ")}`;
+  out({ type: "turn_end" });
+  out({ type: "turn_start" });
+  out({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "" }] } });
+  out({ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 0 } });
+  out({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: text } });
+  out({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text }] } });
+  out({ type: "turn_end" });
+  out({ type: "agent_end", isTerminal: true, messages: [] });
+}
+
 // stdin 里混入 extension_ui_response 时由外层 handle 截获
 const origHandle = handle;
 
@@ -373,6 +434,10 @@ process.stdin.on("data", (d) => {
       continue;
     }
     if (cmd.type === "extension_ui_response") {
+      if (scenario === "ui") {
+        uiAdvance(cmd);
+        continue;
+      }
       if (pendingApprove) clearTimeout(pendingApprove);
       if (pendingDeny) clearTimeout(pendingDeny);
       if (cmd.cancelled) finishDenied();

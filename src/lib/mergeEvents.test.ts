@@ -156,3 +156,78 @@ describe("mergeViewMsgs 基础语义", () => {
     expect(mergeViewMsgs(cur, [])).toEqual(cur);
   });
 });
+
+/**
+ * V2 M5：`extension_ui_request` 不再"除 select 外一律当审批"。
+ * 审批只认 select（options 含 Approve，或 options 缺失时兜底），
+ * confirm / input / editor / 非审批 select 走通用 UI 请求卡，回包语义由后端按方法组装。
+ */
+describe("实时流合并：通用 UI 请求", () => {
+  beforeEach(() => __resetFolds());
+
+  it("confirm / input / editor 各出一张通用 UI 卡，字段不丢", () => {
+    const confirm = replay([
+      { type: "extension_ui_request", id: "c1", method: "confirm", title: "清理？", message: "删 3 个文件" },
+    ]);
+    expect(confirm).toHaveLength(1);
+    const c = confirm[0] as Extract<ViewMsg, { kind: "ui" }>;
+    expect(c.kind).toBe("ui");
+    expect(c.method).toBe("confirm");
+    expect(c.uiId).toBe("c1");
+    expect(c.message).toBe("删 3 个文件");
+
+    const input = replay([
+      { type: "extension_ui_request", id: "i1", method: "input", title: "分支名？", placeholder: "feature/…" },
+    ]);
+    expect((input[0] as Extract<ViewMsg, { kind: "ui" }>).placeholder).toBe("feature/…");
+
+    const editor = replay([
+      { type: "extension_ui_request", id: "e1", method: "editor", title: "提交信息", prefill: "chore: " },
+    ]);
+    const e = editor[0] as Extract<ViewMsg, { kind: "ui" }>;
+    expect(e.method).toBe("editor");
+    expect(e.prefill).toBe("chore: ");
+  });
+
+  it("审批只认 select：含 Approve 或 options 缺失都走审批卡", () => {
+    const withApprove = replay([
+      { type: "extension_ui_request", id: "a1", method: "select", title: "Allow tool: bash", options: ["Approve", "Deny"] },
+    ]);
+    expect(withApprove[0].kind).toBe("approval");
+    const noOptions = replay([{ type: "extension_ui_request", id: "a2", method: "select", title: "Allow tool: bash" }]);
+    expect(noOptions[0].kind).toBe("approval");
+  });
+
+  it("非审批 select 带选项清单，走通用 UI 卡", () => {
+    const msgs = replay([
+      { type: "extension_ui_request", id: "s1", method: "select", title: "选分支", options: ["main", "release/2.0"] },
+    ]);
+    const s = msgs[0] as Extract<ViewMsg, { kind: "ui" }>;
+    expect(s.kind).toBe("ui");
+    expect(s.options).toEqual(["main", "release/2.0"]);
+  });
+
+  it("同一条请求重复推送只留一张卡；服务端撤回后卡片消失", () => {
+    const req = { type: "extension_ui_request", id: "d1", method: "input", title: "说点什么" };
+    expect(replay([req, req])).toHaveLength(1);
+
+    const cancelled = replay([req, { type: "extension_ui_request", method: "cancel", targetId: "d1" }]);
+    expect(cancelled.filter((m) => m.kind === "ui")).toHaveLength(0);
+  });
+
+  it("单向方法不占交互位：notify 走分隔线，其余忽略", () => {
+    const notify = replay([
+      { type: "extension_ui_request", id: "n1", method: "notify", message: "构建完成", notifyType: "info" },
+    ]);
+    expect(notify).toHaveLength(1);
+    expect(notify[0].kind).toBe("divider");
+
+    const quiet = replay([
+      { type: "extension_ui_request", id: "w1", method: "setWidget", widgetKey: "k", widgetLines: ["a"] },
+      { type: "extension_ui_request", id: "t1", method: "setTitle", title: "x" },
+      { type: "extension_ui_request", id: "st1", method: "setStatus", statusKey: "k", statusText: "跑着呢" },
+      { type: "extension_ui_request", id: "et1", method: "set_editor_text", text: "abc" },
+    ]);
+    expect(quiet).toHaveLength(0);
+  });
+});

@@ -73,7 +73,7 @@
 
 ## 4. 公共 API、Schema、数据流（冻结口径，实现照此）
 
-**Tauri commands（2026-09 复核后的实际全集，共 30 个，`pnpm e2e:ipc` 校验其与 `src/shared/ipc.ts` 一一对应）**：`locate_omp、set_omp_path、get_health、get_overlay、get_models、refresh_models、list_projects、add_project、remove_project、relocate_project、list_sessions、create_session、open_session、archive_session、unarchive_session、archive_sessions、delete_sessions、delete_session、rename_session_note、get_history、get_git_info、get_session_runtime、send_message、stop_session、approve、set_model、set_thinking、get_global_approval、set_global_approval、set_session_approval`。失败统一 `{ok:false, code, message, hint?}`，message 面向用户中文，hint 给修复动作。
+**Tauri commands（2026-09 复核后的实际全集，共 31 个，`pnpm e2e:ipc` 校验其与 `src/shared/ipc.ts` 一一对应）**：`locate_omp、set_omp_path、get_health、get_overlay、get_models、refresh_models、list_projects、add_project、remove_project、relocate_project、list_sessions、create_session、open_session、archive_session、unarchive_session、archive_sessions、delete_sessions、delete_session、rename_session_note、get_history、get_git_info、get_session_runtime、send_message、stop_session、approve、respond_ui、set_model、set_thinking、get_global_approval、set_global_approval、set_session_approval`。失败统一 `{ok:false, code, message, hint?}`，message 面向用户中文，hint 给修复动作。`respond_ui` 为二期 M5 新增（通用 UI 请求回包，见 `docs/v2-schedule.md`）。
 
 **前端事件**：`omp-event://<sessionId>`（ViewMsg 载荷）、`omp-status://<sessionId>`（`running|idle|awaiting-approval|error|exited + detail`）、`omp-status://health`（自检）。未知 `type` 事件透传 `unknown` 进日志不崩溃。
 
@@ -122,7 +122,7 @@
 - M3-3 权限三档 + 会话覆盖 + yolo 红警告。
 - M3-4 StatusBar（token/上下文%/耗时/TTFT，纯透传不自算）：后端从 `get_state.contextUsage` 与 `message_end.message.usage/duration/ttft` 提取真值，经 `omp-state://<id>` 推送；前端 `RuntimeStats`（挂输入框工具行）只做格式化，无真值整块不渲染。`duration`/`ttft` 单位经真实会话 jsonl 确认为毫秒。
 - M3-5 虚拟化 + 首屏 200 条增量 + 代码块横滚不撑破：首屏增量已实现（`THREAD_PAGE=200`，按会话重置，向上滚动/按钮按页展开并保持视口）；代码块外层横滚；未做 windowing 级虚拟化（2000 条上限 + 增量渲染下收益有限，留 V2 复议）。
-- M3-6 快捷键/焦点/aria/对比度扫一遍；`confirm/input` 类 UI 通用框补齐。
+- M3-6 快捷键/焦点/aria/对比度扫一遍；`confirm/input` 类 UI 通用框**延后到二期 M5**（V1 的通用确认框回包格式不对，已在二期按上游语义重做，见 `docs/v2-schedule.md`）。
 - M3-7 设置占位定稿 + 诊断信息：设置页现有「omp 诊断」区（omp 路径 / 版本 / agentDir + 复制 + 重新检测 + 手动指定路径）与「应用更新」区；仍不提供 Provider Key、模型目录等 omp 侧配置（一律交给 omp CLI），也不写 omp 配置文件。
 - M3-8 输入框上方上下文条：项目（认会话归属，切项目后自动打开该项目最近会话）+ git 分支只读指示（分支名 / detached 短 sha + 游离角标 / 脏工作区圆点 / 本地分支清单 / 手动刷新，非 git 目录给文案）；后端 `get_git_info` 只读命令（git CLI + 路径探测缓存 + 4s 超时，非仓库与无 git 一律降级不报错）。
 - M3 验收：设计稿 §13 DoD 全过（逐项打勾，窄窗/深浅色截图留档）。

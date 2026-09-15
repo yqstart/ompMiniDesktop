@@ -10,6 +10,7 @@ Tauri v2 + React + TS + Tailwind v4 + Zustand，包管理 pnpm。
 | 产品冻结稿 | `docs/v1-design.md` | 范围、布局、事件→组件映射、权限、数据接口 |
 | RPC 实测备忘 | `docs/rpc-memo.md` | `omp --mode rpc` 握手/流式/审批/切换的实测结论 |
 | 功能排期 | `docs/v1-schedule.md` | M0–M4 里程碑与任务明细 |
+| 二期排期 | `docs/v2-schedule.md` | M5–M8 里程碑、上游协议事实、完成口径 |
 | 设计真相 | `design-system/MASTER.md` | token、布局、交互、组件命名（改 UI 先读） |
 | 应用图标 | `design-system/icon/omp-mini-icon.svg` | π 字标矢量唯一源，`pnpm icon` 重新生成 `src-tauri/icons/` |
 | 更新日志 | `CHANGELOG.md` | Keep a Changelog 风格，发版时归入新版本节 |
@@ -32,7 +33,7 @@ src/
   components/SettingsPage.tsx  # 设置占位页（omp 诊断区：路径/版本/agentDir + 重新检测 + 指定路径 + 复制）
   components/ConfirmDialog.tsx # 通用二次确认浮层（受控；跨分组危险操作用它，分组内仍是轻量内联浮层）
   components/sidebar/      # Sidebar（分组会话列表 + 缺失态重定位）、EmptyState
-  components/thread/       # TopBar（标题备注 + 窄窗抽屉入口 + UpdateBell）、Thread（首屏 200 条 + 增量加载）、AssistantText（Markdown + 代码高亮 + 复制 + 流式骨架）、ToolCard、ApprovalCard、StatusBar（OmpStatusPill + RuntimeStats 用量透传）
+  components/thread/       # TopBar（标题备注 + 窄窗抽屉入口 + UpdateBell）、Thread（首屏 200 条 + 增量加载）、AssistantText（Markdown + 代码高亮 + 复制 + 流式骨架）、ToolCard、ApprovalCard（审批 select）、UiRequestCard（confirm/input/editor/非审批 select）、StatusBar（OmpStatusPill + RuntimeStats 用量透传）
   components/composer/     # Composer（一体式输入框 + 工具行）、ContextBar（输入框上方一行：项目 + git 分支）
   components/pickers/      # ModelPicker、ThinkingPicker、PermissionBadge（挂输入框工具行）；ProjectPicker、BranchPicker（挂 ContextBar）
   components/update/       # UpdateBell、UpdateDialog（应用内更新）
@@ -42,12 +43,12 @@ src/
 eslint.config.js           # ESLint flat config（typescript-eslint + react-hooks + react-refresh）
 src-tauri/src/
   main.rs / lib.rs         # 插件注册（dialog/opener/process/updater/store）
-  commands/mod.rs          # 30 个 Tauri commands（与 src/shared/ipc.ts 一一对应，见 e2e:ipc）
+  commands/mod.rs          # 31 个 Tauri commands（与 src/shared/ipc.ts 一一对应，见 e2e:ipc）
   runtime.rs               # per-会话长驻 omp 子进程 + rpc_chunk 重组 + 事件分发 + 真值回读（omp-state）+ 切模型自动最高档
   overlay.rs               # overlay.json 读写与版本归一（含单测）
   session_scan.rs          # agentDir 解析 + jsonl 头解析 + cwd 归组（含单测）
   git_info.rs              # git 只读查询（当前分支 / 本地分支 / 脏工作区）+ git 路径探测缓存（含单测与真实仓库端到端测试）
-scripts/                   # fake-omp.mjs（canned RPC 联调：history|approve|deny|multi|abort 全为分支实现）、e2e-ipc-selfcheck.mjs（IPC 静态契约自检）、e2e-rpc.mjs（fake-omp 驱动的行为级端到端）、generate-icons.mjs（从矢量源重生成桌面图标）
+scripts/                   # fake-omp.mjs（canned RPC 联调：history|approve|deny|multi|abort|ui 全为分支实现）、e2e-ipc-selfcheck.mjs（IPC 静态契约自检）、e2e-rpc.mjs（fake-omp 驱动的行为级端到端）、generate-icons.mjs（从矢量源重生成桌面图标）
 ```
 
 ## 核心数据流（不许违背）
@@ -60,6 +61,7 @@ scripts/                   # fake-omp.mjs（canned RPC 联调：history|approve|
 - 切模型发 `set_model{provider, modelId}`（两个字段，非 selector 字符串）；切思考档发 `set_thinking_level{level}`。**omp 切模型后不会修正思考档**（切到无思考模型直接丢档）：后端收到 `set_model` 成功回包即自动跟进 `set_thinking_level`（新模型 `efforts` 最高档，无思考则 `off`），再 `get_state` 回读真值推 `omp-state`；失败也回读以纠正前端乐观态。
 - 思考档可用集 = omp 真值 `currentEfforts`（`omp-state` / `get_session_runtime`）∪ `{off}`（`off` 恒合法）；下拉**只列支持档**，禁止列全集再置灰或先发再报错（非法档 omp 静默忽略且回 success）。
 - 审批线序：`toolcall_end` → `tool_execution_start` → `extension_ui_request{method:select, options:["Approve","Deny"]}`；通过回 `value:"Approve"`，拒绝回 `cancelled:true`（turn 正常结束，不是中断）。
+- 其余 UI 请求（V2 M5）：`confirm` / `input` / `editor` / 非审批 `select` 走 `UiRequestCard`，回包统一经后端 `respond_ui`——`confirm` 回 `{confirmed:bool}`、`input`/`editor`/`select` 回 `{value}`、取消回 `{cancelled:true}`；`notify` 渲染为分隔线，`setStatus`/`setWidget`/`setTitle`/`set_editor_text` 是单向宿主指令（丢弃不告警），服务端 `cancel{targetId}` 撤回对应卡片。**只有这四类方法进 `awaiting-approval` 状态**（单向方法与服务端撤回不许锁 composer）。
 - git 上下文**只读**：`get_git_info(path)` 走 git CLI 只读查询（`rev-parse --is-inside-work-tree` / `symbolic-ref --short HEAD` / `for-each-ref refs/heads` / `status --porcelain --untracked-files=no`），不写仓库、不切分支；结果只用于输入框上方上下文条展示。
 
 ## 前端约定（血泪规则）
@@ -96,7 +98,7 @@ pnpm tauri:build            # 本机发布构建，产物见 src-tauri/target/re
 pnpm icon                   # 从 design-system/icon/omp-mini-icon.svg 重生成桌面图标
 ```
 
-联调无需真实 LLM：`OMP_FAKE_SCENARIO=approve|deny|history|multi|abort node scripts/fake-omp.mjs`（canned RPC 事件，覆盖审批双分支、多工具并行与流式中断）。
+联调无需真实 LLM：`OMP_FAKE_SCENARIO=approve|deny|history|multi|abort|ui node scripts/fake-omp.mjs`（canned RPC 事件，覆盖审批双分支、多工具并行、流式中断与通用 UI 请求全方法）。
 
 ## 发版与更新
 
@@ -104,9 +106,10 @@ pnpm icon                   # 从 design-system/icon/omp-mini-icon.svg 重生成
 - updater 需签名校验：`src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey` 当前为 TODO 占位；正式发版前用 `pnpm tauri signer generate` 生成密钥对，公钥填配置、私钥全文进仓库 Secrets `TAURI_SIGNING_PRIVATE_KEY`（见 README「应用内更新」节）。
 - 升版本号发 Release 前，必须同步更新 `CHANGELOG.md`（将 Unreleased 条目归入新版本节并写明日期）。
 
-## V1 明确不做
+## 范围边界（V1 不做 / 二期已排）
 
-自动化/定时任务、插件/Skill/MCP/Hook 管理、主题市场、云同步、多窗口协作、终端 PTY 仿真、diff 合并编辑器、用量统计面板（只透传 omp 给的单轮用量与上下文占用，不做聚合/报表/成本分析）。相关需求直接归档到 V2，不在本仓库讨论实现。
+自动化/定时任务、插件/Skill/MCP/Hook 管理、主题市场、云同步、多窗口协作、终端 PTY 仿真、diff 合并编辑器、用量统计面板（只透传 omp 给的单轮用量与上下文占用，不做聚合/报表/成本分析）——这些仍在范围外，要做得单独决策。
+二期（V2）已排的是 V1 文档里显式留下的坑 + 上游已给的能力：M5 通用 UI 请求（`confirm`/`input`/`editor`/非审批 `select`，已完成）、M6 图片与 `@文件`、M7 会话扫描分页与搜索、M8 长会话 windowing 复议；明细见 `docs/v2-schedule.md`。
 
 ## 命名与变更约定
 

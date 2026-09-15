@@ -59,7 +59,7 @@ omp --mode rpc --cwd <项目目录> [--resume <sessionId前缀>] [--model <selec
 | # | 事项 | 状态 | 缓解 |
 |---|---|---|---|
 | 1 | v2 `rpc_chunk` 大帧分片重组 | 未实测（V1 消息小，行解析够用） | 解析层预留分片接口；`get_messages_page` 本身就是防大帧设计 |
-| 2 | `confirm/input/editor` 类 UI 请求的具体 title/字段 | 未触发（只实测了审批 `select`） | V1 只处理 `select`（审批），其余透显为通用确认框（Phase 2 补） |
+| 2 | `confirm/input/editor` 类 UI 请求的具体 title/字段 | **已解决（二期 M5）**：从本机 omp 18.1.22 内嵌源码取到权威口径——`confirm{title,message,timeout?}` 回 `{confirmed}`、`input{title,placeholder,timeout?}` 与 `editor{title,prefill,promptStyle?}` 回 `{value}`、`notify{message,notifyType}` / `setStatus` / `setWidget` / `setTitle` / `set_editor_text` 为单向、服务端 `cancel{targetId}` 撤回。见 `docs/v2-schedule.md` §2 | 已落地：`respond_ui` + `UiRequestCard`，`pnpm e2e:rpc` 的 `ui` 场景覆盖 |
 | 3 | 双开同一会话（TUI + app） | 未测 | V1 文档警告 + 后开只读提示（§12 设计稿） |
 | 4 | 上游协议漂移（`can1357` fork vs 主仓版本） | 持续风险 | 启动时 `negotiate_protocol` + `--version` 记录；`unknown command` 回包 `id:undefined`，解析层不硬依赖 id 回显 |
 | 5 | `set_session_name` 是否污染远端标题 | 未测 | V1 不用该命令，改名只写覆盖层 notes |

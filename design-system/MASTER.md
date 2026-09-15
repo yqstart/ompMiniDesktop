@@ -80,9 +80,10 @@
 - 会话流虚拟化，toolResult 默认截断（前 2000 字符 + 「展开全文」），首屏增量渲染前 200 条。
 - 异步内容预留占位，禁止内容跳动（content-jumping）。
 
-## 8. 组件速查（V1）
+## 8. 组件速查（V1 + 二期 M5）
 
-- `ProjectRow` / `SessionRow` / `EmptyState` / `UserBubble` / `AssistantText` / `ThinkingFold` / `ToolCard` / `ApprovalCard` / `SystemDivider` / `Composer`（会话输入框：工具行含 `ModelPicker` / `ThinkingPicker` / `PermissionBadge`，三者只在此出现） / `ModelPicker` / `ThinkingPicker` / `PermissionBadge` / `ContextBar` / `ProjectPicker` / `BranchPicker` / `StatusBar` / `ConfirmDialog`。
+- `ProjectRow` / `SessionRow` / `EmptyState` / `UserBubble` / `AssistantText` / `ThinkingFold` / `ToolCard` / `ApprovalCard` / `UiRequestCard` / `SystemDivider` / `Composer`（会话输入框：工具行含 `ModelPicker` / `ThinkingPicker` / `PermissionBadge`，三者只在此出现） / `ModelPicker` / `ThinkingPicker` / `PermissionBadge` / `ContextBar` / `ProjectPicker` / `BranchPicker` / `StatusBar` / `ConfirmDialog`。
+- `ApprovalCard` 与 `UiRequestCard` 分工固定，不许互相替代：`ApprovalCard` 只管审批（`extension_ui_request{method:"select", options 含 "Approve"}`，三按钮 = 允许一次 / 总是允许（本会话）/ 拒绝，warn 色边 + 盾牌）；`UiRequestCard` 管其余交互请求（`confirm` 双按钮、`input` 单行、`editor` 多行、非审批 `select` 选项按钮，accent 色边 + 引号图标），两者出现都滚入视野、等待期间 composer 锁定、取消都回 `{cancelled:true}`。
 - `ContextBar` = 输入框上方一行，由 `ProjectPicker`（项目下拉：切上下文 + 打开该项目最近会话）与 `BranchPicker`（git 分支只读指示器）组成；下拉展开列表里分支项是**静态文本不是按钮**（没有切换动作，只给「刷新」），项目项才是可点按钮。三者只在此出现，左栏分组头不再重复一套。
 - `ModelPicker` 行角标只留 context（`1M`/`200K`）与图片（`图`），不显示 thinking 档数；`ThinkingPicker` 只列当前模型支持的档位（`off` 恒在首位），无思考模型在下拉内提示「当前模型不支持思考」。两者触发按钮**按内容自适应宽度、不截断**（`whitespace-nowrap` + `shrink-0`，不设 `max-w-*`），空间不足时由工具行 `flex-wrap` 换行兜底；`ProjectPicker` / `BranchPicker` 触发按钮同规矩。
 - 新增组件先查此表，禁止同义重复（如第二种 confirm 框、第二种 tool 卡）。

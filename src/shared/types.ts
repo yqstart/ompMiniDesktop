@@ -143,6 +143,13 @@ export const THINKING_LEVELS = [
 ] as const;
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
+/**
+ * omp `extension_ui_request` 里**需要用户回包**的交互方法（V2 M5 实测口径）。
+ * 其余方法（notify / setStatus / setWidget / setTitle / set_editor_text）是单向通知，
+ * `cancel` 是服务端撤回，都不进这张卡。
+ */
+export type UiMethod = "select" | "confirm" | "input" | "editor";
+
 /** ViewMsg：RPC delta 与 jsonl 文件块的统一渲染模型。 */
 export type ViewMsg =
   | { kind: "user"; id: string; text: string; mentions: string[] }
@@ -174,7 +181,28 @@ export type ViewMsg =
       id: string;
       divider: "model" | "thinking" | "title" | "exit" | "turn";
       text: string;
-    };
+    }
+  /**
+   * 通用 UI 请求（非审批）：omp 的 `confirm` / `input` / `editor` 与非审批 `select`。
+   * 回包语义各不相同（`{confirmed}` / `{value}` / `{cancelled}`），由后端 `respond_ui` 按 `method` 组装。
+   */
+  | {
+      kind: "ui";
+      id: string;
+      uiId: string;
+      method: UiMethod;
+      title: string;
+      /** `confirm` 的正文。 */
+      message?: string;
+      /** `input` 的占位文案。 */
+      placeholder?: string;
+      /** `editor` 的预填内容。 */
+      prefill?: string;
+      /** 非审批 `select` 的选项。 */
+      options?: string[];
+    }
+  /** 服务端撤回（`method:"cancel"`，请求已 abort/超时）：把对应卡片从流里去掉。 */
+  | { kind: "ui-cancel"; id: string; uiId: string };
 
 export type SessionStatus =
   | { state: "running" }
