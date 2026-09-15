@@ -1,9 +1,16 @@
 {
   "name": "omp-mini-desktop",
-  "private": true,
   "version": "0.1.0",
   "description": "oh-my-pi 极简桌面端（Tauri v2 + React）",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yqstart/ompMiniDesktop.git"
+  },
+  "homepage": "https://github.com/yqstart/ompMiniDesktop#readme",
+  "bugs": {
+    "url": "https://github.com/yqstart/ompMiniDesktop/issues"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",

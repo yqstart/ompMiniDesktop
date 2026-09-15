@@ -224,7 +224,7 @@ RPC 流（stdout JSONL）与 jsonl 文件是同一套语义的两面，V1 统一
 ```jsonc
 {
   "version": 1,
-  "projects": [{ "id": "p1", "path": "/Users/yanqi/Desktop/WorkSpace/mino",
+  "projects": [{ "id": "p1", "path": "/path/to/your/project",
                  "addedAt": 1789455000000, "lastModel": "commandcode/claude-haiku-4-5-20251001",
                  "lastThinking": "off" }],
   "archived":   { "<sessionId>": true },
