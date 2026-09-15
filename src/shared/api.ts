@@ -20,8 +20,9 @@ export const api = {
   removeProject: (id: string) => call<void>("remove_project", { id }),
   relocateProject: (id: string, path: string) =>
     call<import("./types").ProjectView>("relocate_project", { id, path }),
-  listSessions: (projectId?: string) =>
-    call<import("./types").SessionView[]>("list_sessions", { projectId }),
+  /** 会话列表（分页）：`limit` 为扫描窗口大小（后端默认 500，夹在 1..=5000）。 */
+  listSessions: (projectId?: string, limit?: number) =>
+    call<import("./types").SessionPage>("list_sessions", { projectId, limit }),
   createSession: (projectId: string) =>
     call<import("./types").SessionView>("create_session", { projectId }),
   openSession: (id: string) => call<import("./types").SessionView>("open_session", { id }),

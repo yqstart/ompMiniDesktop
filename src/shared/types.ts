@@ -63,6 +63,17 @@ export type SessionView = {
   running: boolean;
 };
 
+/**
+ * 会话列表分页（V2 M7a）：`totalFiles` = sessions 目录下 jsonl 总数，
+ * `scannedFiles` = 本次真正解析了头部的文件数。`totalFiles > scannedFiles` 时
+ * 左栏给「继续扫描」入口——超出窗口的都是更老的会话，不是不存在。
+ */
+export type SessionPage = {
+  sessions: SessionView[];
+  totalFiles: number;
+  scannedFiles: number;
+};
+
 export type ModelInfo = {
   provider: string;
   id: string;

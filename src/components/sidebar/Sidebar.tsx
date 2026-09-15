@@ -18,6 +18,7 @@ import { useApp } from "../../stores/app";
 import { pickAndAddProject, switchProject } from "../../lib/projects";
 import { groupSessionsByProject } from "../../lib/sessions";
 import { createSessionIn, openSessionWithHistory } from "../../lib/sessionOpen";
+import { SCAN_MAX, SCAN_STEP, loadSessions, scanMoreSessions } from "../../lib/sessionList";
 import { ConfirmDialog } from "../ConfirmDialog";
 import type { SessionView } from "@shared/types";
 
@@ -120,7 +121,7 @@ function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void })
 }
 
 export function Sidebar() {
-  const { projects, sessions, activeProjectId, set } = useApp();
+  const { projects, sessions, activeProjectId, set, sessionScan, sessionScanLimit } = useApp();
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -133,24 +134,16 @@ export function Sidebar() {
   useEffect(() => {
     // 会话一次全量拉取，前端按项目分组（修复：之前按 activeProjectId 传参，
     // 后端过滤不可靠会导致各项目会话全堆在“进行中”）。
-    api
-      .listSessions()
-      .then((all) => set({ sessions: all }))
-      .catch(() => undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void loadSessions();
   }, []);
 
   const refreshAll = () =>
     Promise.all([
       api.listProjects().then((all) => set({ projects: all })).catch(() => undefined),
-      api.listSessions().then((all) => set({ sessions: all })).catch(() => undefined),
+      loadSessions(),
     ]).then(() => undefined);
 
-  const refreshSessions = () =>
-    api
-      .listSessions()
-      .then((all) => set({ sessions: all }))
-      .catch(() => undefined);
+  const refreshSessions = () => loadSessions();
 
   // 打开/切换项目时刷新项目与会话：终端里新建的会话（同 cwd）会实时归属进来，
   // 而不是等下次启动才出现在项目下。左栏分组头只切上下文，不抢着打开会话；
@@ -580,6 +573,21 @@ export function Sidebar() {
           )}
         </div>
       </div>
+      {/* 扫描窗口提示（V2 M7a）：超出窗口的老会话不是不存在，给一次性入口继续往老里扫 */}
+      {sessionScan.totalFiles > sessionScan.scannedFiles && (
+        <div className="shrink-0 border-t border-border/70 px-3 py-2 text-[11px] text-muted">
+          <div>
+            已扫描最近 {sessionScan.scannedFiles} 个会话（共 {sessionScan.totalFiles} 个）
+          </div>
+          <button
+            onClick={() => void scanMoreSessions()}
+            disabled={sessionScanLimit >= SCAN_MAX}
+            className="mt-1 cursor-pointer rounded-lg border border-border px-2 py-0.5 transition-colors duration-150 hover:bg-background hover:text-foreground disabled:cursor-default disabled:opacity-50"
+          >
+            {sessionScanLimit >= SCAN_MAX ? `已达上限（${SCAN_MAX}）` : `继续扫描更早的 ${SCAN_STEP} 个`}
+          </button>
+        </div>
+      )}
       <div className="shrink-0 border-t border-border px-2 py-2">
         {/* 底部只留设置：「添加项目」已上移到顶部主入口，不在两处重复。 */}
         <button

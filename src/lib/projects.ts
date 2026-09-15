@@ -2,6 +2,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "@shared/api";
 import { useApp } from "../stores/app";
 import { openSessionWithHistory } from "./sessionOpen";
+import { loadSessions } from "./sessionList";
 
 /** 添加项目的结果：`null` = 用户取消选择；`ok:false` 由调用方决定提示位置。 */
 export type AddProjectResult = { ok: true } | { ok: false; message: string } | null;
@@ -39,15 +40,12 @@ export async function switchProject(
 ): Promise<void> {
   const st = useApp.getState();
   st.set({ activeProjectId: projectId });
-  const [projects, sessions] = await Promise.all([
-    api.listProjects().catch(() => null),
-    api.listSessions().catch(() => null),
-  ]);
+  const [projects] = await Promise.all([api.listProjects().catch(() => null), loadSessions()]);
   if (projects) st.set({ projects });
-  if (sessions) st.set({ sessions });
   if (!opts.openRecent) return;
-  const recent = (sessions ?? useApp.getState().sessions)
-    .filter((s) => s.projectId === projectId && !s.archived)
+  const recent = useApp
+    .getState()
+    .sessions.filter((s) => s.projectId === projectId && !s.archived)
     .sort((a, b) => b.timestamp - a.timestamp)[0];
   if (recent) await openSessionWithHistory(recent.id);
   else st.set({ activeSessionId: null });

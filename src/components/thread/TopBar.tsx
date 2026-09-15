@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Menu } from "lucide-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
+import { loadSessions } from "../../lib/sessionList";
 import { UpdateBell } from "../update/UpdateDialog";
 
 export function TopBar() {
@@ -34,9 +35,10 @@ export function TopBar() {
           onBlur={() => setEditing(false)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && cur) {
-              void api.renameSessionNote(cur.id, note).then(() =>
-                api.listSessions().then((all) => set({ sessions: all })),
-              );
+              void api
+                .renameSessionNote(cur.id, note)
+                .then(() => loadSessions())
+                .catch(() => undefined);
               setEditing(false);
             }
             if (e.key === "Escape") setEditing(false);

@@ -6,6 +6,10 @@ type AppState = {
   projects: ProjectView[];
   activeProjectId: string | null;
   sessions: SessionView[];
+  /** 会话扫描统计（V2 M7a）：目录里共多少 jsonl / 本次解析了多少。 */
+  sessionScan: { totalFiles: number; scannedFiles: number };
+  /** 当前扫描窗口大小（点「继续扫描」按 500 递增，上限 5000）。 */
+  sessionScanLimit: number;
   activeSessionId: string | null;
   eventsBySession: Record<string, ViewMsg[]>;
   statusBySession: Record<string, SessionStatus>;
@@ -70,6 +74,8 @@ export const useApp = create<AppState>((set, get) => ({
   projects: [],
   activeProjectId: null,
   sessions: [],
+  sessionScan: { totalFiles: 0, scannedFiles: 0 },
+  sessionScanLimit: 500,
   activeSessionId: null,
   eventsBySession: {},
   statusBySession: {},

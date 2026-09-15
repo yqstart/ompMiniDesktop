@@ -436,8 +436,30 @@ fn display_title(note: Option<&String>, head_title: &str, ts: i64) -> String {
     format!("未命名会话 {}", chrono::DateTime::from_timestamp_millis(ts).map(|d| d.format("%m-%d").to_string()).unwrap_or_default())
 }
 
+/// 会话列表分页（V2 M7a）：`totalFiles` = sessions 目录下的 jsonl 总数，
+/// `scannedFiles` = 本次真正解析头部的文件数（默认最近 500 个）。
+/// 前端据此显示「已扫描最近 N 个（共 M 个）」并允许继续加载更老的会话。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionPage {
+    pub sessions: Vec<SessionView>,
+    pub total_files: usize,
+    pub scanned_files: usize,
+}
+
+/// 扫描窗口：`limit` 默认 500、夹在 1..=5000；`offset` 无上限（超出即空窗口）。
+pub fn scan_window(limit: Option<usize>, offset: Option<usize>) -> (usize, usize) {
+    let limit = limit.unwrap_or(500).clamp(1, 5000);
+    (limit, offset.unwrap_or(0))
+}
+
 #[tauri::command]
-pub async fn list_sessions(state: State<'_, AppState>, project_id: Option<String>) -> Result<Vec<SessionView>, CmdError> {
+pub async fn list_sessions(
+    state: State<'_, AppState>,
+    project_id: Option<String>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> Result<SessionPage, CmdError> {
     let ov = state.overlay.lock().await;
     let agent = state.agent_dir.lock().await.clone();
     let running = state.running.lock().await.clone();
@@ -447,12 +469,15 @@ pub async fn list_sessions(state: State<'_, AppState>, project_id: Option<String
     let mut out: Vec<SessionView> = vec![];
     // 损坏文件也列出（M1-1 要求可删）：按文件兜底一行
     let root = agent.join("sessions");
-    // 规模保护：sessions 目录先按修改时间取最近 MAX_FILES 个再解析。
+    // 规模保护（V2 M7a 起可分页）：sessions 目录按修改时间倒序取「窗口」再解析。
     // 共享 agentDir / 长期使用后动辄上千个会话文件，逐个读头尾也会拖慢列表；
-    // 列表本来就按时间倒序展示，被截掉的都是最老的会话。
-    const MAX_FILES: usize = 500;
+    // 列表本来就按时间倒序展示，窗口外都是更老的会话——前端用 `scannedFiles/totalFiles`
+    // 告诉用户还有多少没扫，并按 500 递增重扫。
+    let (limit, offset) = scan_window(limit, offset);
     let mut candidates: Vec<(std::time::SystemTime, PathBuf)> = vec![];
-    let Ok(rd) = std::fs::read_dir(&root) else { return Ok(out) };
+    let Ok(rd) = std::fs::read_dir(&root) else {
+        return Ok(SessionPage { sessions: out, total_files: 0, scanned_files: 0 });
+    };
     for entry in rd.flatten() {
         let Ok(files) = std::fs::read_dir(entry.path()) else { continue };
         for f in files.flatten() {
@@ -464,16 +489,18 @@ pub async fn list_sessions(state: State<'_, AppState>, project_id: Option<String
             candidates.push((mtime, p));
         }
     }
-    if candidates.len() > MAX_FILES {
+    let total_files = candidates.len();
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    if total_files > limit + offset {
         eprintln!(
-            "[list_sessions] {} 个会话文件超过上限，本轮只扫描最近 {} 个",
-            candidates.len(),
-            MAX_FILES
+            "[list_sessions] 共 {} 个会话文件，本次窗口 offset={} limit={}",
+            total_files, offset, limit
         );
     }
-    candidates.sort_by(|a, b| b.0.cmp(&a.0));
-    candidates.truncate(MAX_FILES);
-    for (_mtime, p) in candidates {
+    let window: Vec<(std::time::SystemTime, PathBuf)> =
+        candidates.into_iter().skip(offset).take(limit).collect();
+    let scanned_files = window.len();
+    for (_mtime, p) in window {
         {
             let head = parse_session_head(&p);
             let ov = state.overlay.lock().await;
@@ -516,7 +543,7 @@ pub async fn list_sessions(state: State<'_, AppState>, project_id: Option<String
         }
     }
     out.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-    Ok(out)
+    Ok(SessionPage { sessions: out, total_files, scanned_files })
 }
 
 pub(crate) fn session_file_for(agent: &std::path::Path, id_prefix: &str) -> Option<PathBuf> {
@@ -1180,7 +1207,16 @@ pub fn load_state(app: &AppHandle) -> AppState {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_path;
+    use super::{resolve_path, scan_window};
+
+    #[test]
+    fn scan_window_defaults_and_clamps() {
+        assert_eq!(scan_window(None, None), (500, 0));
+        assert_eq!(scan_window(Some(1000), Some(500)), (1000, 500));
+        // 过小/过大都夹回合法区间，offset 原样透传
+        assert_eq!(scan_window(Some(0), None), (1, 0));
+        assert_eq!(scan_window(Some(99999), None), (5000, 0));
+    }
 
     #[test]
     fn resolve_path_joins_and_normalizes() {

@@ -48,7 +48,7 @@
 
 ### 3.3 项目与会话管理（M1）
 
-- 会话扫描：扫 `sessions/<slug>/*.jsonl`，**头尾窗口读取**（头 64KB 取 `session` 行，尾 64KB 取最新 `title_change`），按 `cwd` 真实路径前缀归属项目，不猜 slug；损坏文件标记 `corrupt` 不阻塞列表；规模保护 = 先按修改时间取最近 **500** 个文件再解析（超出打日志；分页/后台补全留 V2）。
+- 会话扫描：扫 `sessions/<slug>/*.jsonl`，**头尾窗口读取**（头 64KB 取 `session` 行，尾 64KB 取最新 `title_change`），按 `cwd` 真实路径前缀归属项目，不猜 slug；损坏文件标记 `corrupt` 不阻塞列表；规模保护 = 先按修改时间取最近 **500** 个文件再解析（超出打日志）。**分页已在二期 M7a 补齐**：`list_sessions` 返回 `{sessions, totalFiles, scannedFiles}` 并接受 `limit/offset`，左栏给「继续扫描」入口（见 `docs/v2-schedule.md`）。
 - 项目命令：`add_project(path)` 校验存在可读、拒绝 `$HOME` 根、去重按规范化路径；`remove_project(id)` 按**工作区语义**——仅解绑目录，名下会话全部标记归档保留（备注/权限覆盖也保留，可进「未归属会话」找回），流式中的会话先停；目录缺失标 `missing`，禁新建、可在分组内重定位/移除/回放。
 - 会话命令：`create_session`（不带 resume，开后用 `get_state` 的 sessionFile/sessionId 回填并选中）、`open_session`（已有子进程直接聚焦，否则 `--resume <id前缀> --cwd` 重建；历史回放走后端 `get_history` 直读 jsonl）、`archive/unarchive`（只改覆盖层，流式中先停）、`delete_session`（二次确认：kill → 删 `<ts>_<id>.jsonl` 及同名前缀目录 → 清覆盖层键）。顶栏改名只写 `notes`，禁用 `set_session_name`。
 

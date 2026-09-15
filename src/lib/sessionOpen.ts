@@ -1,6 +1,7 @@
 import { api } from "@shared/api";
 import { useApp } from "../stores/app";
 import { viewMsgsFromJsonlLines } from "./viewmsg";
+import { loadSessions } from "./sessionList";
 
 /**
  * 消息流回底（Thread 的 `role="log"` 容器）：双 rAF 等首帧绘制完成再读底，
@@ -31,14 +32,10 @@ export async function createSessionIn(
   }
   try {
     const created = await api.createSession(projectId);
-    const [projects, sessions] = await Promise.all([
-      api.listProjects().catch(() => null),
-      api.listSessions().catch(() => null),
-    ]);
+    const [projects] = await Promise.all([api.listProjects().catch(() => null), loadSessions()]);
     const st = useApp.getState();
     st.set({
       ...(projects ? { projects } : {}),
-      ...(sessions ? { sessions } : {}),
       activeProjectId: projectId,
       activeSessionId: created.id,
       sidebarOpen: false,
