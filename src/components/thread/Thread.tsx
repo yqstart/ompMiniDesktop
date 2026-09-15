@@ -1,4 +1,5 @@
-import { memo, useEffect, useLayoutEffect, useRef } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Check, Copy } from "lucide-react";
 import { THREAD_PAGE, useApp } from "../../stores/app";
 import { api } from "@shared/api";
 import type { ViewMsg } from "@shared/types";
@@ -104,28 +105,44 @@ const ThreadRow = memo(function ThreadRow({ m, sessionId }: { m: ViewMsg; sessio
   return (
     <div className="mb-5 text-sm leading-7">
       {m.kind === "user" && (
-        <div className="ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-md bg-surface px-3.5 py-2 shadow-[inset_0_0_0_1px_var(--color-border)]">
-          {m.text && <div className="whitespace-pre-wrap">{m.text}</div>}
-          {(m.images?.length ?? 0) > 0 && (
-            <div className={`flex flex-wrap gap-2 ${m.text ? "mt-2" : ""}`}>
-              {m.images?.map((img, i) => (
-                <img
-                  key={i}
-                  src={`data:${img.mimeType};base64,${img.data}`}
-                  alt={`图片 ${i + 1}`}
-                  className="max-h-64 max-w-[240px] rounded-lg border border-border/70 object-contain"
-                />
-              ))}
-            </div>
-          )}
-          {(m.imagesOmitted ?? 0) > 0 && (
-            <div className="mt-1.5 text-xs text-muted">
-              {m.imagesOmitted} 张图片因体积过大未在回放中展开
+        <div className="group/user ml-auto w-fit max-w-[85%]">
+          <div className="rounded-2xl rounded-br-md bg-surface px-3.5 py-2 shadow-[inset_0_0_0_1px_var(--color-border)]">
+            {m.text && <div className="whitespace-pre-wrap">{m.text}</div>}
+            {(m.images?.length ?? 0) > 0 && (
+              <div className={`flex flex-wrap gap-2 ${m.text ? "mt-2" : ""}`}>
+                {m.images?.map((img, i) => (
+                  <img
+                    key={i}
+                    src={`data:${img.mimeType};base64,${img.data}`}
+                    alt={`图片 ${i + 1}`}
+                    className="max-h-64 max-w-[240px] rounded-lg border border-border/70 object-contain"
+                  />
+                ))}
+              </div>
+            )}
+            {(m.imagesOmitted ?? 0) > 0 && (
+              <div className="mt-1.5 text-xs text-muted">
+                {m.imagesOmitted} 张图片因体积过大未在回放中展开
+              </div>
+            )}
+          </div>
+          {m.text.trim() && (
+            <div className="mt-0.5 flex justify-end opacity-0 transition-opacity duration-150 group-hover/user:opacity-100 focus-within:opacity-100">
+              <CopyAction text={m.text} label="复制这条提问" />
             </div>
           )}
         </div>
       )}
-      {m.kind === "text" && <AssistantText text={m.text} complete={m.complete} />}
+      {m.kind === "text" && (
+        <div className="group/msg">
+          <AssistantText text={m.text} complete={m.complete} />
+          {m.complete && m.text.trim() && (
+            <div className="mt-0.5 flex opacity-0 transition-opacity duration-150 group-hover/msg:opacity-100 focus-within:opacity-100">
+              <CopyAction text={m.text} label="复制这条回复" />
+            </div>
+          )}
+        </div>
+      )}
       {m.kind === "thinking" && (
         <details className="rounded-xl border border-border/70 bg-surface/60 px-3 py-2 text-sm text-muted">
           <summary className="cursor-pointer transition-colors duration-150 hover:text-foreground [&::-webkit-details-marker]:hidden">
@@ -150,8 +167,36 @@ const ThreadRow = memo(function ThreadRow({ m, sessionId }: { m: ViewMsg; sessio
   );
 });
 
-export function SessionActions() {
-  const { activeSessionId } = useApp();
+/**
+ * 单条消息的复制按钮（V2 M9）：hover 才出现，纯剪贴板、不碰 store/草稿。
+ * 独立组件 + 自带 copied 状态，避免把状态提到 `ThreadRow` 里破坏行级 memo。
+ */
+function CopyAction({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      // 复制失败不打断阅读（与代码块复制同一策略）
+      setCopied(false);
+    }
+    setTimeout(() => setCopied(false), 1200);
+  };
+  return (
+    <button
+      onClick={() => void copy()}
+      className="flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted transition-colors duration-150 hover:bg-surface hover:text-foreground"
+      aria-label={label}
+      title={label}
+    >
+      {copied ? <Check size={11} aria-hidden /> : <Copy size={11} aria-hidden />}
+      {copied ? "已复制" : "复制"}
+    </button>
+  );
+}
+
+export function SessionActions() {  const { activeSessionId } = useApp();
   if (!activeSessionId) return null;
   return (
     <button

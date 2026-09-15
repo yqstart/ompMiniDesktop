@@ -97,6 +97,7 @@
 - `MentionChips`（`src/components/thread/MentionChips.tsx`）= `@文件` 提及被 omp 读进上下文后的芯片排：11px mono、`rounded-lg` 细边、`FileText` 图标 + 路径 + 「N 行 / NKB」；被跳过的文件（`skippedReason`）换 `FileWarning` + warn 色，tooltip 写「已跳过自动读取（原因）」。输入框里的**草稿芯片**复用同一视觉（在 `Composer` 内联，不另起组件），路径不存在时同样走 warn 色。
 - `ConfirmDialog`（`src/components/ConfirmDialog.tsx`）已落地：受控浮层、Esc/遮罩取消、焦点默认在「取消」、危险操作走 danger 色；批量删除等**跨分组**的危险操作走它，项目分组内的轻量确认仍是分组内联浮层（不撑布局）。`Toast` 仍未落地——新增提示优先用内联错误条，不要临时造第三种提示样式。
 - `TopBar`（`src/components/thread/TopBar.tsx`）= 标题备注（点击改名）+ 窄窗抽屉入口 + **复制会话为 Markdown**（`Copy`/`Check` 图标按钮，纯前端剪贴板，导出内容 = 界面上看到的 `ViewMsg`，生成规则见 `src/lib/exportMd.ts`）+ `UpdateBell`。会话为空或未选中时导出按钮禁用。
+- 消息行的复制（V2 M9）走 `ThreadRow` 内部 hover 出现的 `CopyAction`（11px muted + `Copy`/`Check`，用户气泡靠右下、助手正文靠左下；只在消息有正文且助手正文已完成时出现）。它**自带 copied 状态、不碰 store 与草稿**——这样行级 `memo` 不被破坏（把状态提到行上会让每次点击重渲染整列）。
 
 ## 9. 应用图标
 
