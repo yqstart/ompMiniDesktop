@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { memo, useEffect, useLayoutEffect, useRef } from "react";
 import { THREAD_PAGE, useApp } from "../../stores/app";
 import { api } from "@shared/api";
+import type { ViewMsg } from "@shared/types";
 import { ToolCard } from "./ToolCard";
 import { ApprovalCard } from "./ApprovalCard";
 import { UiRequestCard } from "./UiRequestCard";
@@ -85,57 +86,69 @@ export function Thread() {
         </div>
       )}
       {shown.map((m) => (
-        <div key={m.id} className="mb-5 text-sm leading-7">
-          {m.kind === "user" && (
-            <div className="ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-md bg-surface px-3.5 py-2 shadow-[inset_0_0_0_1px_var(--color-border)]">
-              {m.text && <div className="whitespace-pre-wrap">{m.text}</div>}
-              {(m.images?.length ?? 0) > 0 && (
-                <div className={`flex flex-wrap gap-2 ${m.text ? "mt-2" : ""}`}>
-                  {m.images?.map((img, i) => (
-                    <img
-                      key={i}
-                      src={`data:${img.mimeType};base64,${img.data}`}
-                      alt={`图片 ${i + 1}`}
-                      className="max-h-64 max-w-[240px] rounded-lg border border-border/70 object-contain"
-                    />
-                  ))}
-                </div>
-              )}
-              {(m.imagesOmitted ?? 0) > 0 && (
-                <div className="mt-1.5 text-xs text-muted">
-                  {m.imagesOmitted} 张图片因体积过大未在回放中展开
-                </div>
-              )}
-            </div>
-          )}
-          {m.kind === "text" && <AssistantText text={m.text} complete={m.complete} />}
-          {m.kind === "thinking" && (
-            <details className="rounded-xl border border-border/70 bg-surface/60 px-3 py-2 text-sm text-muted">
-              <summary className="cursor-pointer transition-colors duration-150 hover:text-foreground [&::-webkit-details-marker]:hidden">
-                {m.complete ? `已思考 ${m.seconds} 秒` : "思考中…"}
-              </summary>
-              <div className="mt-1 whitespace-pre-wrap">{m.text}</div>
-            </details>
-          )}
-          {m.kind === "tool" && <ToolCard m={m} />}
-          {m.kind === "approval" && activeSessionId && (
-            <ApprovalCard m={m} sessionId={activeSessionId} />
-          )}
-          {m.kind === "ui" && activeSessionId && <UiRequestCard m={m} sessionId={activeSessionId} />}
-          {m.kind === "files" && <MentionChips m={m} />}
-          {m.kind === "ui-cancel" && null}
-          {m.kind === "divider" && (
-            <div className="flex items-center gap-3 py-1">
-              <span className="h-px flex-1 bg-border/60" aria-hidden />
-              <span className="text-xs text-muted">{m.text}</span>
-              <span className="h-px flex-1 bg-border/60" aria-hidden />
-            </div>
-          )}
-        </div>
+        <ThreadRow key={m.id} m={m} sessionId={activeSessionId} />
       ))}
     </div>
   );
 }
+
+/**
+ * 单条消息行（V2 M8）。
+ *
+ * 为什么必须 memo：流式输出每个 delta 都会更新 store，整列如果跟着重渲染，
+ * 展开到几百上千条时每次 token 都要重算所有 Markdown / 工具卡。
+ * `mergeViewMsgs` 只替换发生变化的那条消息、其余保持**同一对象引用**，
+ * 所以浅比较即能让"只有正在流式的那一行"重渲染。
+ */
+const ThreadRow = memo(function ThreadRow({ m, sessionId }: { m: ViewMsg; sessionId: string | null }) {
+  return (
+    <div className="mb-5 text-sm leading-7">
+      {m.kind === "user" && (
+        <div className="ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-md bg-surface px-3.5 py-2 shadow-[inset_0_0_0_1px_var(--color-border)]">
+          {m.text && <div className="whitespace-pre-wrap">{m.text}</div>}
+          {(m.images?.length ?? 0) > 0 && (
+            <div className={`flex flex-wrap gap-2 ${m.text ? "mt-2" : ""}`}>
+              {m.images?.map((img, i) => (
+                <img
+                  key={i}
+                  src={`data:${img.mimeType};base64,${img.data}`}
+                  alt={`图片 ${i + 1}`}
+                  className="max-h-64 max-w-[240px] rounded-lg border border-border/70 object-contain"
+                />
+              ))}
+            </div>
+          )}
+          {(m.imagesOmitted ?? 0) > 0 && (
+            <div className="mt-1.5 text-xs text-muted">
+              {m.imagesOmitted} 张图片因体积过大未在回放中展开
+            </div>
+          )}
+        </div>
+      )}
+      {m.kind === "text" && <AssistantText text={m.text} complete={m.complete} />}
+      {m.kind === "thinking" && (
+        <details className="rounded-xl border border-border/70 bg-surface/60 px-3 py-2 text-sm text-muted">
+          <summary className="cursor-pointer transition-colors duration-150 hover:text-foreground [&::-webkit-details-marker]:hidden">
+            {m.complete ? `已思考 ${m.seconds} 秒` : "思考中…"}
+          </summary>
+          <div className="mt-1 whitespace-pre-wrap">{m.text}</div>
+        </details>
+      )}
+      {m.kind === "tool" && <ToolCard m={m} />}
+      {m.kind === "approval" && sessionId && <ApprovalCard m={m} sessionId={sessionId} />}
+      {m.kind === "ui" && sessionId && <UiRequestCard m={m} sessionId={sessionId} />}
+      {m.kind === "files" && <MentionChips m={m} />}
+      {m.kind === "ui-cancel" && null}
+      {m.kind === "divider" && (
+        <div className="flex items-center gap-3 py-1">
+          <span className="h-px flex-1 bg-border/60" aria-hidden />
+          <span className="text-xs text-muted">{m.text}</span>
+          <span className="h-px flex-1 bg-border/60" aria-hidden />
+        </div>
+      )}
+    </div>
+  );
+});
 
 export function SessionActions() {
   const { activeSessionId } = useApp();

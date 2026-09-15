@@ -78,7 +78,12 @@
 
 - icon-only 按钮必须 `aria-label`；图片/fileMention 芯片有文字替代；表单/select 有 label。
 - 颜色不作唯一信号：状态同时有文字（运行中/成功/失败/等待审批）。
-- 会话流虚拟化，toolResult 默认截断（前 2000 字符 + 「展开全文」），首屏增量渲染前 200 条。
+- 会话流首屏增量渲染前 200 条 + 行级 `memo`（V2 M8 实测结论）：真实最大会话 8.1MB / 1411 块 → 归一只要 ~2ms，
+  瓶颈在渲染而不在数据层，所以**不上虚拟列表**，改为 `ThreadRow` 行级 `React.memo`（依赖 `mergeViewMsgs`
+  对未变化消息保持同一对象引用）——流式每个 delta 只重渲染正在流式的那一行，其余行跳过。
+  复评阈值：单个会话 > 5000 条消息、或文件 > 30MB、或展开后交互明显掉帧，再回来做 windowing。
+  测量夹具：`OMP_BENCH=1 pnpm test src/lib/historyScale.test.ts`（默认跳过，避免 CI 依赖本机数据）。
+- toolResult 默认截断（前 2000 字符 + 「展开全文」）。
 - 异步内容预留占位，禁止内容跳动（content-jumping）。
 
 ## 8. 组件速查（V1 + 二期 M5）

@@ -155,6 +155,32 @@ describe("mergeViewMsgs 基础语义", () => {
     const cur: ViewMsg[] = [{ kind: "text", id: "t:1", seq: 0, text: "x", complete: true }];
     expect(mergeViewMsgs(cur, [])).toEqual(cur);
   });
+
+  // V2 M8：行级 memo（ThreadRow）成立的前提——没变化的消息必须保持同一对象引用，
+  // 否则流式每个 delta 都会让整列重渲染（上千条时每次 token 重算全部 Markdown）。
+  it("未变化的消息保持同一对象引用", () => {
+    const first = mergeViewMsgs([], [
+      { kind: "text", id: "t:1", seq: 0, text: "已有内容", complete: true } as ViewMsg,
+    ]);
+    const second = mergeViewMsgs(first, [
+      { kind: "text", id: "t:2", seq: 0, text: "新来的一条", complete: true } as ViewMsg,
+    ]);
+    expect(second[0]).toBe(first[0]);
+    expect(second[1]).not.toBe(first[0]);
+  });
+
+  it("流式覆盖只替换被覆盖的那一行", () => {
+    const first = mergeViewMsgs([], [
+      { kind: "text", id: "t:1", seq: 0, text: "旧", complete: true } as ViewMsg,
+      { kind: "text", id: "t:2", seq: 0, text: "流式中", complete: false } as ViewMsg,
+    ]);
+    const second = mergeViewMsgs(first, [
+      { kind: "text", id: "t:2", seq: 0, text: "流式中（新）", complete: false, __append: true } as IncomingViewMsg,
+    ]);
+    expect(second[0]).toBe(first[0]);
+    expect(second[1]).not.toBe(first[1]);
+    expect(second[1].kind === "text" && second[1].text).toBe("流式中（新）");
+  });
 });
 
 /**

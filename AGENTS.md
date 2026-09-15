@@ -79,6 +79,7 @@ scripts/                   # fake-omp.mjs（canned RPC 联调：history|approve|
 - 状态收敛：标题框外无独立状态条（`StatusBar` 仅保留读屏播报位）；状态统一进输入框工具行——`OmpStatusPill`（常驻，就绪也占位显示「就绪」）+ `RuntimeStats`（上下文占用 / 本轮 token / 耗时 / TTFT，全部来自 `omp-state` 真值，**无真值整块不渲染**，前端只做格式化不自算）。
 - 助手正文渲染走 `AssistantText`（`react-markdown` + `remark-gfm` + `rehype-highlight`）：**不许 `dangerouslySetInnerHTML`**（正文按不可信输入处理）；代码高亮配色只写在 `src/index.css`（项目 token 派生，深浅色自动跟随），不引第三方主题 CSS；代码块横滚不撑破布局，流式中未闭合围栏给 skeleton。
 - 消息流首屏增量：默认只渲染最后 `THREAD_PAGE`（200）条（`stores/app.ts` 的 `threadLimit`，按会话重置），向上滚动或点按钮按页展开，加载后保持视口位置；不许一次性 map 全部消息（MASTER §7）。
+- 消息行必须 `memo`（V2 M8 实测结论）：`Thread.tsx` 的 `ThreadRow` 是 `React.memo` 组件，前提是 `mergeViewMsgs` 对**未变化的消息保持同一对象引用**（有单测守着）。真实数据（8.1MB / 1411 块 → 698 条 ViewMsg，归一 2ms）证明瓶颈在渲染不在数据层，所以**不做虚拟列表**；复评阈值见 `docs/v2-schedule.md` M8（>5000 条 / >30MB / 明显掉帧）。测规模用 `OMP_BENCH=1 pnpm test src/lib/historyScale.test.ts`（默认跳过）。
 - 会话行单行 `● 标题 … 时间/操作`：右侧 68px 固定槽位，时间与操作按钮互斥（hover 时时间 `visibility` 藏、按钮绝对覆盖淡入），行高锁定，悬浮零跳动；删除二次确认用浮层，不撑布局。
 - 会话行不设复选框：不做多选、不做「已选 N」批量工具条；批量归档/删除只挂在分组头——项目分组头三个入口 = 归档全部对话 / 删除全部对话 / 删除工作区（后两者各自走分组内浮层二次确认；删除工作区只解绑目录、名下会话全部归档保留），「未归属会话」分组头 = 归档全部 / 删除全部对话。批量走 `archive_sessions`/`delete_sessions`，单次上限 200，前端 `BATCH_LIMIT` 分批。
 - 左侧栏可拖拽调宽 220–480px（默认 264，`sidebarWidth` 持久化 localStorage）；窄窗 <768px 收抽屉。
@@ -113,7 +114,7 @@ pnpm icon                   # 从 design-system/icon/omp-mini-icon.svg 重生成
 ## 范围边界（V1 不做 / 二期已排）
 
 自动化/定时任务、插件/Skill/MCP/Hook 管理、主题市场、云同步、多窗口协作、终端 PTY 仿真、diff 合并编辑器、用量统计面板（只透传 omp 给的单轮用量与上下文占用，不做聚合/报表/成本分析）——这些仍在范围外，要做得单独决策。
-二期（V2）已排的是 V1 文档里显式留下的坑 + 上游已给的能力：M5 通用 UI 请求（已完成）、M6 图片与 `@文件`（已完成）、M7 扫描分页与内容搜索（已完成）、M8 长会话 windowing 复议（待做）；明细见 `docs/v2-schedule.md`。
+二期（V2）已排的是 V1 文档里显式留下的坑 + 上游已给的能力：M5 通用 UI 请求、M6 图片与 `@文件`、M7 扫描分页与内容搜索、M8 长会话渲染复议（结论：不做虚拟列表，改行级 memo）——**M5–M8 全部完成**，明细与实测数据见 `docs/v2-schedule.md`。
 
 ## 命名与变更约定
 
