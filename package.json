@@ -1,0 +1,42 @@
+{
+  "name": "omp-mini-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "oh-my-pi 极简桌面端（Tauri v2 + React）",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src --ext .ts,.tsx --max-warnings 0",
+    "e2e:ipc": "node scripts/e2e-ipc-selfcheck.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
+    "@tauri-apps/plugin-opener": "^2",
+    "lucide-react": "^0.525.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zustand": "^5.0.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.11",
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "eslint": "^9.28.0",
+    "tailwindcss": "^4.1.11",
+    "typescript": "5.9.3",
+    "vite": "^7.0.0",
+    "vitest": "^3.2.4"
+  }
+}

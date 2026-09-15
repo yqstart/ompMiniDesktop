@@ -1,0 +1,65 @@
+import { useState } from "react";
+import { Check, ChevronRight, Loader2, X } from "lucide-react";
+import type { ViewMsg } from "@shared/types";
+
+export function ToolCard({ m }: { m: Extract<ViewMsg, { kind: "tool" }> }) {
+  const [open, setOpen] = useState(m.state === "error");
+  const [showFull, setShowFull] = useState(false);
+  const stateText = m.state === "ok" ? "成功" : m.state === "error" ? "失败" : m.state === "running" ? "运行中" : "输入中";
+  const dot =
+    m.state === "ok" ? "bg-ok" : m.state === "error" ? "bg-danger" : "bg-accent animate-pulse";
+  return (
+    <div
+      className={`rounded border bg-surface ${m.state === "error" ? "border-danger" : "border-border"}`}
+      role="group"
+      aria-label={`工具 ${m.name} ${stateText}`}
+    >
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left"
+        aria-expanded={open}
+      >
+        {m.state === "ok" ? (
+          <Check size={14} className="shrink-0 text-ok" aria-hidden />
+        ) : m.state === "error" ? (
+          <X size={14} className="shrink-0 text-danger" aria-hidden />
+        ) : (
+          <Loader2 size={14} className="shrink-0 animate-spin text-accent" aria-hidden />
+        )}
+        <span className="font-mono text-[13px] font-medium">{m.name}</span>
+        {m.intent && <span className="truncate text-[13px] text-muted">· {m.intent}</span>}
+        <ChevronRight
+          size={14}
+          aria-hidden
+          className={`ml-auto shrink-0 text-muted transition-transform duration-200 ${open ? "rotate-90" : ""}`}
+        />
+        <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} title={stateText} aria-hidden />
+        <span className="sr-only">{stateText}</span>
+      </button>
+      {open && (
+        <div className="border-t border-border px-3 py-2">
+          {m.argsSummary && (
+            <div className="truncate font-mono text-xs text-muted" title={m.argsSummary}>
+              {m.argsSummary}
+            </div>
+          )}
+          {m.output && (
+            <div className="mt-1">
+              <pre className="max-h-60 overflow-auto rounded bg-code p-2 font-mono text-xs whitespace-pre-wrap">
+                {showFull && m.outputFull ? m.outputFull : m.output}
+              </pre>
+              {m.outputFull && (
+                <button
+                  onClick={() => setShowFull((v) => !v)}
+                  className="mt-1 cursor-pointer text-xs text-accent"
+                >
+                  {showFull ? "收起" : "展开全文"}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+/* ---- ompMiniDesktop tokens（design-system/MASTER.md §2 冻结） ---- */
+:root {
+  --background: hsl(60 9% 98%);
+  --foreground: hsl(20 8% 11%);
+  --muted: hsl(30 5% 32%);
+  --surface: hsl(0 0% 100%);
+  --border: hsl(30 8% 90%);
+  --accent: hsl(243 75% 59%);
+  --danger: hsl(0 72% 51%);
+  --warn: hsl(32 95% 44%);
+  --ok: hsl(160 84% 32%);
+  --code: hsl(60 5% 96%);
+}
+
+.dark {
+  --background: hsl(0 0% 5%);
+  --foreground: hsl(30 8% 90%);
+  --muted: hsl(30 5% 66%);
+  --surface: hsl(0 0% 9%);
+  --border: hsl(20 6% 16%);
+  --accent: hsl(234 97% 74%);
+  --danger: hsl(0 91% 71%);
+  --warn: hsl(43 96% 62%);
+  --ok: hsl(160 71% 52%);
+  --code: hsl(20 6% 11%);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-surface: var(--surface);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-danger: var(--danger);
+  --color-warn: var(--warn);
+  --color-ok: var(--ok);
+  --color-code: var(--code);
+  --font-sans: -apple-system, "PingFang SC", "Microsoft YaHei", Inter, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+/* 可见焦点环（MASTER §5） */
+:where(button, a, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
