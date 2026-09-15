@@ -14,7 +14,7 @@ function fmtCtx(n: number | null): string {
   return `${Math.round(n / 1000)}K`;
 }
 
-export function ModelPicker() {
+export function ModelPicker({ compact = false }: { compact?: boolean }) {
   const { models, set } = useApp();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -53,7 +53,9 @@ export function ModelPicker() {
           setOpen((v) => !v);
           if (!models) void load(false);
         }}
-        className="flex max-w-44 cursor-pointer items-center gap-1 truncate rounded px-2 py-1 text-[13px] transition-colors duration-200 hover:bg-background"
+        className={`flex cursor-pointer items-center gap-1 truncate rounded px-2 py-1 text-[13px] transition-colors duration-200 hover:bg-background ${
+          compact ? "max-w-32 text-xs" : "max-w-44"
+        }`}
         aria-label="选择模型"
         aria-expanded={open}
       >

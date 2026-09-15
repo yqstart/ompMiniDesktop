@@ -4,7 +4,7 @@ import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
 import { THINKING_LEVELS } from "@shared/types";
 
-export function ThinkingPicker() {
+export function ThinkingPicker({ compact = false }: { compact?: boolean }) {
   const { models, activeSessionId } = useApp();
   const [open, setOpen] = useState(false);
   const selector = useApp.getState().currentModel as string | undefined;
@@ -16,7 +16,9 @@ export function ThinkingPicker() {
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-[13px] transition-colors duration-200 hover:bg-background"
+        className={`flex cursor-pointer items-center gap-1 rounded px-2 py-1 transition-colors duration-200 hover:bg-background ${
+          compact ? "text-xs" : "text-[13px]"
+        }`}
         aria-label="选择思考等级"
         aria-expanded={open}
       >

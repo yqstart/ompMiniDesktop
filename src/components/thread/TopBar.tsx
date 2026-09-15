@@ -1,9 +1,6 @@
 import { useState } from "react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
-import { ModelPicker } from "../pickers/ModelPicker";
-import { ThinkingPicker } from "../pickers/ThinkingPicker";
-import { PermissionBadge } from "../pickers/PermissionBadge";
 import { UpdateBell } from "../update/UpdateDialog";
 
 export function TopBar() {
@@ -48,9 +45,6 @@ export function TopBar() {
       )}
       <div className="ml-auto flex items-center">
         <UpdateBell />
-        <ModelPicker />
-        <ThinkingPicker />
-        <PermissionBadge />
       </div>
     </header>
   );

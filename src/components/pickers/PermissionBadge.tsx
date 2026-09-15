@@ -9,7 +9,7 @@ const LABEL: Record<string, string> = {
   yolo: "自动通过",
 };
 
-export function PermissionBadge() {
+export function PermissionBadge({ compact = false, align = "right" }: { compact?: boolean; align?: "left" | "right" }) {
   const { activeSessionId } = useApp();
   const [open, setOpen] = useState(false);
   const [global, setGlobal] = useState("write");
@@ -47,7 +47,7 @@ export function PermissionBadge() {
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className={`flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-[13px] transition-colors duration-200 hover:bg-background ${danger ? "text-danger" : ""}`}
+        className={`flex cursor-pointer items-center gap-1 rounded px-2 py-1 transition-colors duration-200 hover:bg-background ${compact ? "text-xs" : "text-[13px]"} ${danger ? "text-danger" : ""}`}
         aria-label={`权限：${LABEL[shown] ?? shown}`}
         aria-expanded={open}
       >
@@ -55,7 +55,7 @@ export function PermissionBadge() {
         <span>{LABEL[shown] ?? shown}</span>
       </button>
       {open && (
-        <div className="absolute top-8 right-0 z-10 w-56 rounded border border-border bg-surface p-1 shadow-lg">
+        <div className={`absolute top-8 z-10 w-56 rounded border border-border bg-surface p-1 shadow-lg ${align === "left" ? "left-0" : "right-0"}`}>
           <div className="px-2 py-1 text-xs text-muted">全局</div>
           {Object.keys(LABEL).map((m) => (
             <button

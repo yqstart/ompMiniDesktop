@@ -9,11 +9,12 @@ import {
   Trash2,
 } from "lucide-react";
 import { api } from "@shared/api";
-import { useApp, activeSessionsOf } from "../../stores/app";
+import { useApp } from "../../stores/app";
+import { groupSessionsByProject } from "../../lib/sessions";
 import { viewMsgFromJsonlLine } from "../../lib/viewmsg";
 import type { SessionView } from "@shared/types";
 
-function SessionRow({ s }: { s: SessionView }) {
+function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void }) {
   const { activeSessionId, set, appendEvents } = useApp();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const active = s.id === activeSessionId;
@@ -45,7 +46,7 @@ function SessionRow({ s }: { s: SessionView }) {
       <div className="mt-0.5 hidden gap-1 group-hover:flex">
         {!s.archived ? (
           <button
-            onClick={() => api.archiveSession(s.id).then(() => api.listSessions().then((all) => set({ sessions: all })))}
+            onClick={() => api.archiveSession(s.id).then(onChanged)}
             className="cursor-pointer rounded p-1.5 text-muted transition-colors duration-200 hover:text-foreground"
             aria-label={s.running ? "先停止再归档" : "归档会话"}
           >
@@ -53,7 +54,7 @@ function SessionRow({ s }: { s: SessionView }) {
           </button>
         ) : (
           <button
-            onClick={() => api.unarchiveSession(s.id).then(() => api.listSessions().then((all) => set({ sessions: all })))}
+            onClick={() => api.unarchiveSession(s.id).then(onChanged)}
             className="cursor-pointer rounded p-1.5 text-muted transition-colors duration-200 hover:text-foreground"
             aria-label="取消归档"
           >
@@ -73,12 +74,10 @@ function SessionRow({ s }: { s: SessionView }) {
             <span className="text-danger">不可恢复，确认？</span>
             <button
               onClick={() =>
-                api.deleteSession(s.id).then(() =>
-                  api.listSessions().then((all) => {
-                    set({ sessions: all });
-                    setConfirmDelete(false);
-                  }),
-                )
+                api.deleteSession(s.id).then(() => {
+                  onChanged();
+                  setConfirmDelete(false);
+                })
               }
               className="cursor-pointer rounded bg-danger px-2 py-1 text-white"
               aria-label="确认删除"
@@ -100,19 +99,25 @@ function SessionRow({ s }: { s: SessionView }) {
 }
 
 export function Sidebar() {
-  const app = useApp();
-  const { projects, activeProjectId, set } = app;
+  const { projects, sessions, activeProjectId, set } = useApp();
 
   useEffect(() => {
+    // 会话一次全量拉取，前端按项目分组（修复：之前按 activeProjectId 传参，
+    // 后端过滤不可靠会导致各项目会话全堆在“进行中”）。
     api
-      .listSessions(activeProjectId ?? undefined)
+      .listSessions()
       .then((all) => set({ sessions: all }))
       .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProjectId]);
+  }, []);
 
-  const active = activeSessionsOf(app, false);
-  const archived = activeSessionsOf(app, true);
+  const refreshSessions = () =>
+    api
+      .listSessions()
+      .then((all) => set({ sessions: all }))
+      .catch(() => undefined);
+
+  const { groups, orphanActive, orphanArchived } = groupSessionsByProject(projects, sessions);
 
   return (
     <aside className="flex h-full w-full flex-col border-r border-border bg-surface md:w-66">
@@ -139,41 +144,78 @@ export function Sidebar() {
             </button>
           ))
         )}
-        <div className="mt-2 border-t border-border px-3 pt-2 pb-1">
-          <div className="flex items-center">
-            <span className="text-xs text-muted">会话</span>
-            <button
-              onClick={async () => {
-                if (!activeProjectId) return;
-                try {
-                  const created = await api.createSession(activeProjectId);
-                  const all = await api.listSessions(activeProjectId);
-                  set({ sessions: all, activeSessionId: created.id });
-                } catch {
-                  // M1-6 补内联错误条
-                }
-              }}
-              disabled={!activeProjectId}
-              className="ml-auto flex cursor-pointer items-center gap-1 rounded border border-accent px-2 py-1 text-xs text-accent transition-colors duration-200 hover:bg-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label="新建会话"
-            >
-              <Plus size={12} /> 新建会话
-            </button>
-          </div>
-        </div>
         <div className="px-2 py-1">
-          <div className="px-1 py-1 text-xs text-muted">进行中（{active.length}）</div>
-          {active.map((s) => (
-            <SessionRow key={s.id} s={s} />
+          {groups.map(({ project, active, archived }) => (
+            <details key={project.id} className="mt-1" open>
+              <summary
+                className="cursor-pointer rounded px-1 py-1 text-xs text-muted transition-colors duration-200 hover:bg-background"
+                aria-label={`项目 ${project.name} 的会话，进行中 ${active.length}，已归档 ${archived.length}`}
+              >
+                <span className="font-medium text-foreground">{project.name}</span>
+                <span className="ml-1">
+                  进行中 {active.length} · 已归档 {archived.length}
+                </span>
+                {project.missing && <span className="ml-1 text-warn">目录缺失</span>}
+              </summary>
+              <div className="px-1 pt-1">
+                <button
+                  onClick={async () => {
+                    try {
+                      const created = await api.createSession(project.id);
+                      await refreshSessions();
+                      set({ activeProjectId: project.id, activeSessionId: created.id });
+                    } catch {
+                      // M1-6 补内联错误条
+                    }
+                  }}
+                  disabled={project.missing}
+                  className="mb-1 ml-auto flex cursor-pointer items-center gap-1 rounded border border-accent px-2 py-1 text-xs text-accent transition-colors duration-200 hover:bg-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label={`在 ${project.name} 新建会话`}
+                >
+                  <Plus size={12} /> 新建会话
+                </button>
+                {active.length === 0 && (
+                  <div className="px-1 py-1 text-xs text-muted">暂无进行中的会话</div>
+                )}
+                {active.map((s) => (
+                  <SessionRow key={s.id} s={s} onChanged={refreshSessions} />
+                ))}
+                {archived.length > 0 && (
+                  <details className="mt-1">
+                    <summary className="cursor-pointer px-1 py-1 text-xs text-muted">
+                      已归档（{archived.length}）
+                    </summary>
+                    {archived.map((s) => (
+                      <SessionRow key={s.id} s={s} onChanged={refreshSessions} />
+                    ))}
+                  </details>
+                )}
+              </div>
+            </details>
           ))}
-          <details className="mt-1">
-            <summary className="cursor-pointer px-1 py-1 text-xs text-muted">
-              已归档（{archived.length}）
-            </summary>
-            {archived.map((s) => (
-              <SessionRow key={s.id} s={s} />
-            ))}
-          </details>
+          {(orphanActive.length > 0 || orphanArchived.length > 0) && (
+            <details className="mt-1">
+              <summary className="cursor-pointer px-1 py-1 text-xs text-muted">
+                未归属会话（{orphanActive.length + orphanArchived.length}）
+              </summary>
+              {orphanActive.map((s) => (
+                <SessionRow key={s.id} s={s} onChanged={refreshSessions} />
+              ))}
+              {orphanArchived.length > 0 && (
+                <details className="mt-1">
+                  <summary className="cursor-pointer px-1 py-1 text-xs text-muted">
+                    已归档（{orphanArchived.length}）
+                  </summary>
+                  {orphanArchived.map((s) => (
+                    <SessionRow key={s.id} s={s} onChanged={refreshSessions} />
+                  ))}
+                </details>
+              )}
+            </details>
+          )}
+          {projects.length === 0 && (
+            <div className="px-1 py-1 text-xs text-muted">暂无会话，先添加项目</div>
+          )}
         </div>
       </div>
       <div className="shrink-0 border-t border-border p-2">

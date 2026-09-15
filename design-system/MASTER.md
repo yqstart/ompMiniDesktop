@@ -37,9 +37,9 @@
 
 ## 4. 布局
 
-- V1 两栏：左栏 264px（项目上段 + 会话下段 + 底设置入口），中央流式列居中 `max-w-3xl`。右侧栏 V1 不做。
-- 左栏分区：项目组（名 + 路径尾段 + 会话数）→ 分隔 → 会话组（进行中 / 已归档折叠）→ 底固定「添加项目 / 设置」。
-- 中央三段：顶栏 48px（标题 + 模型 + 思考档 + 权限徽标 + 状态点）→ 消息流（虚拟化）→ composer（多行输入 + 发送/停止）。
+- V1 两栏：左栏 264px（项目上段 + 按项目分组的会话下段 + 底设置入口），中央流式列居中 `max-w-3xl`。右侧栏 V1 不做。
+- 左栏分区：项目组（名 + 路径尾段 + 会话数）→ 分隔 → 按项目分组的会话组（每组内「进行中 / 已归档折叠」+ 组内新建会话）+ 未归属会话组（仅 projectId 对不上时出现）→ 底固定「添加项目 / 设置」。
+- 中央三段：顶栏 48px（标题 + 更新入口）→ 消息流（虚拟化）→ 会话输入框（随心输入 + 底部工具行：＋ / 权限 ｜ 模型 / 思考档 / 发送-停止）。
 - 间距：4 / 8 / 12 / 16 / 24 五档，卡内 padding 12，卡间距 8，流内消息间距 16。
 - z-index：`10` 下拉菜单，`20` 审批卡吸顶提示，`30` 对话框，`50` toast。
 - 响应：窄窗（375px）左栏收成抽屉，中央列占满；禁止横向滚动（代码块内部滚除外）。
@@ -68,5 +68,5 @@
 
 ## 8. 组件速查（V1）
 
-- `ProjectRow` / `SessionRow` / `EmptyState` / `UserBubble` / `AssistantText` / `ThinkingFold` / `ToolCard` / `ApprovalCard` / `SystemDivider` / `Composer` / `ModelPicker` / `ThinkingPicker` / `PermissionBadge` / `StatusBar` / `ConfirmDialog`。
+- `ProjectRow` / `SessionRow` / `EmptyState` / `UserBubble` / `AssistantText` / `ThinkingFold` / `ToolCard` / `ApprovalCard` / `SystemDivider` / `Composer`（会话输入框：工具行含 `ModelPicker` / `ThinkingPicker` / `PermissionBadge`，三者只在此出现） / `ModelPicker` / `ThinkingPicker` / `PermissionBadge` / `StatusBar` / `ConfirmDialog`。
 - 新增组件先查此表，禁止同义重复（如第二种 confirm 框、第二种 tool 卡）。
