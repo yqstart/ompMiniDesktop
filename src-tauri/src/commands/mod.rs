@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::{collections::HashMap, path::PathBuf};
 use tokio::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -22,12 +22,6 @@ pub struct CmdError {
     pub code: String,
     pub message: String,
     pub hint: Option<String>,
-}
-
-impl CmdError {
-    pub fn new(code: &str, message: &str) -> Self {
-        Self { ok: false, code: code.into(), message: message.into(), hint: None }
-    }
 }
 
 pub fn cmd_err(code: &str, message: String, hint: Option<String>) -> CmdError {
@@ -437,6 +431,11 @@ pub async fn list_sessions(state: State<'_, AppState>, project_id: Option<String
     let mut out: Vec<SessionView> = vec![];
     // 损坏文件也列出（M1-1 要求可删）：按文件兜底一行
     let root = agent.join("sessions");
+    // 规模保护：sessions 目录先按修改时间取最近 MAX_FILES 个再解析。
+    // 共享 agentDir / 长期使用后动辄上千个会话文件，逐个读头尾也会拖慢列表；
+    // 列表本来就按时间倒序展示，被截掉的都是最老的会话。
+    const MAX_FILES: usize = 500;
+    let mut candidates: Vec<(std::time::SystemTime, PathBuf)> = vec![];
     let Ok(rd) = std::fs::read_dir(&root) else { return Ok(out) };
     for entry in rd.flatten() {
         let Ok(files) = std::fs::read_dir(entry.path()) else { continue };
@@ -445,6 +444,21 @@ pub async fn list_sessions(state: State<'_, AppState>, project_id: Option<String
             if p.extension().and_then(|s| s.to_str()) != Some("jsonl") {
                 continue;
             }
+            let mtime = f.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+            candidates.push((mtime, p));
+        }
+    }
+    if candidates.len() > MAX_FILES {
+        eprintln!(
+            "[list_sessions] {} 个会话文件超过上限，本轮只扫描最近 {} 个",
+            candidates.len(),
+            MAX_FILES
+        );
+    }
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    candidates.truncate(MAX_FILES);
+    for (_mtime, p) in candidates {
+        {
             let head = parse_session_head(&p);
             let ov = state.overlay.lock().await;
             if head.corrupt {
@@ -728,7 +742,8 @@ pub async fn archive_sessions(state: State<'_, AppState>, ids: Vec<String>) -> R
         return Err(cmd_err("BAD_ARG", "一次最多归档 200 个会话".into(), None));
     }
     let mut ok = 0usize;
-    let mut failed: Vec<serde_json::Value> = vec![];
+    // 归档只改覆盖层键，逐个都不该失败；失败明细字段保留为空，与 delete_sessions 的返回结构对齐
+    let failed: Vec<serde_json::Value> = vec![];
     {
         let mut ov = state.overlay.lock().await;
         for id in &ids {
@@ -1018,8 +1033,4 @@ pub fn load_state(app: &AppHandle) -> AppState {
         running: Mutex::new(HashMap::new()),
         runtime: std::sync::Arc::new(Mutex::new(HashMap::new())),
     }
-}
-
-pub fn emit_health(app: &AppHandle) {
-    let _ = app;
 }

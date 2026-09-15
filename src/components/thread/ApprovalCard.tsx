@@ -1,5 +1,5 @@
 import { ShieldAlert } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
 import type { ViewMsg } from "@shared/types";
@@ -7,6 +7,11 @@ import type { ViewMsg } from "@shared/types";
 export function ApprovalCard({ m, sessionId }: { m: Extract<ViewMsg, { kind: "approval" }>; sessionId: string }) {
   const { set, statusBySession } = useApp();
   const [busy, setBusy] = useState<"once" | "always" | "deny" | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  // 审批是"最高优先级"的中断：出现时必须把卡带进视野（长会话里它可能落在视口之外）
+  useEffect(() => {
+    ref.current?.scrollIntoView({ block: "nearest" });
+  }, []);
   const locked = statusBySession[sessionId]?.state !== "awaiting-approval";
   const decide = async (d: "once" | "always" | "deny") => {
     setBusy(d);
@@ -21,6 +26,7 @@ export function ApprovalCard({ m, sessionId }: { m: Extract<ViewMsg, { kind: "ap
   };
   return (
     <div
+      ref={ref}
       role="alertdialog"
       aria-label="需要你的确认"
       className="rounded-xl border border-warn/50 bg-surface p-3.5 shadow-sm"

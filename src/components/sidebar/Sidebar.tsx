@@ -18,6 +18,7 @@ import { useApp } from "../../stores/app";
 import { pickAndAddProject, switchProject } from "../../lib/projects";
 import { groupSessionsByProject } from "../../lib/sessions";
 import { createSessionIn, openSessionWithHistory } from "../../lib/sessionOpen";
+import { ConfirmDialog } from "../ConfirmDialog";
 import type { SessionView } from "@shared/types";
 
 /** 后端 archive_sessions / delete_sessions 单次上限，前端按此分批调用。 */
@@ -126,6 +127,8 @@ export function Sidebar() {
   // 正在二次确认的项目操作（浮层确认，不撑布局；一次只确认一个）：
   // purge = 删除该工作区全部对话（真删 jsonl）；remove = 删除工作区（解绑 + 名下对话全部归档）
   const [confirmProject, setConfirmProject] = useState<{ id: string; kind: "purge" | "remove" } | null>(null);
+  /** 批量删除的通用二次确认（ConfirmDialog）；项目内联浮层仍走 confirmProject。 */
+  const [confirmBatch, setConfirmBatch] = useState<{ ids: string[]; title: string; detail: string } | null>(null);
 
   useEffect(() => {
     // 会话一次全量拉取，前端按项目分组（修复：之前按 activeProjectId 传参，
@@ -190,7 +193,7 @@ export function Sidebar() {
   };
 
   /** 项目 / 分组级批量操作：按 BATCH_LIMIT 分批、聚合失败明细。
-   *  delete 默认走 window.confirm；项目浮层已二次确认时传 confirmed 跳过重复确认。
+   *  delete 先弹通用 ConfirmDialog（MASTER §8）；项目内浮层已二次确认时传 confirmed 跳过。
    *  会话行本身不做批量，只做单个会话的归档、取消归档与删除。 */
   const runBatch = async (
     kind: "archive" | "delete",
@@ -198,7 +201,13 @@ export function Sidebar() {
     opts: { confirmed?: boolean } = {},
   ) => {
     if (ids.length === 0) return;
-    if (kind === "delete" && !opts.confirmed && !window.confirm(`确定删除这 ${ids.length} 个对话？不可恢复。`)) {
+    if (kind === "delete" && !opts.confirmed) {
+      // 统一走 ConfirmDialog：此前这里用 window.confirm，成了第二种确认样式
+      setConfirmBatch({
+        ids,
+        title: `删除这 ${ids.length} 个对话？`,
+        detail: "会连同 jsonl 会话文件一起删除，不可恢复。",
+      });
       return;
     }
     setBusy(true);
@@ -581,10 +590,19 @@ export function Sidebar() {
           <Settings size={15} /> 设置
         </button>
       </div>
+      <ConfirmDialog
+        open={confirmBatch !== null}
+        title={confirmBatch?.title ?? ""}
+        detail={confirmBatch?.detail}
+        confirmLabel="删除"
+        danger
+        onCancel={() => setConfirmBatch(null)}
+        onConfirm={() => {
+          const batch = confirmBatch;
+          setConfirmBatch(null);
+          if (batch) void runBatch("delete", batch.ids, { confirmed: true });
+        }}
+      />
     </aside>
   );
-}
-
-export function SessionList() {
-  return null;
 }

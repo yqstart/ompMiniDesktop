@@ -19,6 +19,9 @@
 - 项目目录缺失时，左栏分组内新增「重定位」入口（后端 `relocate_project` 此前没有 UI 入口）。
 - 窄窗（<768px）顶栏新增「打开侧栏」按钮：桌面侧栏是 `hidden md:block`，而抽屉状态此前无人置 true，窄窗下项目列表与设置完全不可达。
 - 中央空态补「会话会在哪个项目下新建」说明与 3 个示例问题（点示例即新建会话并填入草稿）；「新建会话」按钮此前只关抽屉、不建会话。
+- 新增通用 `ConfirmDialog`（MASTER §8）：受控浮层、Esc/遮罩取消、焦点默认落在「取消」、危险操作走 danger 色。批量删除改走它，仓库里最后一处 `window.confirm` 随之消失（项目分组内的轻量确认仍是内联浮层，不撑布局）。
+- 会话扫描加**规模保护**：`list_sessions` 先按修改时间取最近 500 个 jsonl 再解析（超出打日志），避免共享 agentDir 上千文件时拖慢列表。
+- 协议漂移可观测：前端遇到未知事件类型时按类型各告警一次（`console.warn` 带原始帧），不再是"静默忽略、出问题只能猜"。
 
 ### 变更
 
@@ -39,6 +42,9 @@
 
 - 审批拒绝分支在 `message_end{toolResult}` 路径不再显示 omp 原文（英文 `Tool call denied by user: bash`），统一渲染为「被用户拒绝」并置失败态（`isError` 也计入——此前只看文本关键字）。
 - 修掉新 lint 配置查出的一批 React 反模式：拖拽态在 render 期读 ref（改 state）、`ContextBar` / `PermissionBadge` 在 effect 里同步 setState（改为派生值 / 直接订阅 store）、`useSessionEvents` 在 render 期写 ref（移到 effect）。
+- 会话头解析不再整个读文件：大文件只读「头 64KB + 尾 64KB」两段（头段取 session/title、尾段取最新 title_change，各自跳过被切断的残行），列表扫描不再为每个会话把几十 MB 读进内存；补 4 个单测覆盖正常 / 缺 title / 损坏 / 超大头尾。
+- 审批卡出现即滚入视野（长会话里审批可能落在视口之外）；下拉打开时自动聚焦首个可聚焦元素（模型下拉即搜索框）。
+- 清理 Rust 死代码：`CmdError::new`、`emit_health`、`RunningChild` 未读字段，`cargo build` 回到零警告。
 - 换图标后 cargo 不重建：`tauri-build` 的 `rerun-if-changed` 不覆盖 `icons/`，改由 `src-tauri/build.rs` 显式声明 `cargo:rerun-if-changed=icons`。
 - 修掉模型/思考档两处「看着生效、实际没生效」的老问题：点选模型只改了前端 store、从未下发 `set_model`（omp 侧模型其实没切）；打开会话从不回填 omp 真值（界面显示的模型与档位可能与 omp 实际不一致）。同时把两个选择器改为响应式取值（此前选完按钮文字不更新）。
 

@@ -9,6 +9,12 @@ export function useDropdown(open: boolean, onClose: () => void) {
 
   useEffect(() => {
     if (!open) return;
+    // 打开即聚焦首个可聚焦元素（模型下拉是搜索框、其余是首个选项）：
+    // 键盘用户不用先 Tab 一圈，Esc 关闭后焦点回到触发按钮由浏览器接管。
+    const first = ref.current?.querySelector<HTMLElement>(
+      'input, button, [href], select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    first?.focus();
     const onDown = (e: PointerEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };

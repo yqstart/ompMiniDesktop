@@ -30,6 +30,7 @@ src/
   app/App.tsx              # 顶层装配 + SidebarShell（拖拽调宽）+ 主题/自检/updater 启动
   components/HealthBanner.tsx  # omp 不可用横幅（与 OmpStatusPill 的常驻位区分）
   components/SettingsPage.tsx  # 设置占位页（omp 诊断区：路径/版本/agentDir + 重新检测 + 指定路径 + 复制）
+  components/ConfirmDialog.tsx # 通用二次确认浮层（受控；跨分组危险操作用它，分组内仍是轻量内联浮层）
   components/sidebar/      # Sidebar（分组会话列表 + 缺失态重定位）、EmptyState
   components/thread/       # TopBar（标题备注 + 窄窗抽屉入口 + UpdateBell）、Thread（首屏 200 条 + 增量加载）、AssistantText（Markdown + 代码高亮 + 复制 + 流式骨架）、ToolCard、ApprovalCard、StatusBar（OmpStatusPill + RuntimeStats 用量透传）
   components/composer/     # Composer（一体式输入框 + 工具行）、ContextBar（输入框上方一行：项目 + git 分支）

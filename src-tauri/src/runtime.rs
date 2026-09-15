@@ -50,9 +50,7 @@ impl SpawnOpts {
 pub struct RunningChild {
     pub tx: mpsc::UnboundedSender<String>,
     pub child: Child,
-    pub session_file: String,
-    pub session_id: String,
-    /// 运行时真值快照（模型 / 可用思考档 / 当前档），供打开会话时回填。
+    /// 运行时真值快照（模型 / 可用思考档 / 当前档 / 用量），供打开会话时回填。
     pub meta: SessionMeta,
 }
 
@@ -349,19 +347,13 @@ pub async fn spawn_long_lived(
     start_pump(app.clone(), key.clone(), reader, stdin, rx, sid.clone());
 
     let mut m = map.lock().await;
-    // 旧进程先杀
+    // 同名会话的旧进程先杀；stdin 关闭等于进程退出（code 0），open_session 会重建
     if let Some(old) = m.remove(&key) {
         let _ = old.tx.send(String::new());
         let mut c = old.child;
         let _ = c.kill().await;
     }
-    // pump 里持有 child？此处需要把 child 放回 map。简化：pump 自己 spawn？
-    // 为保持实现简单：map 存 tx + “已启动”标记，child 所有权移交 pump 任务。
-    // 这里用一个已退出的占位 child 无法表达——改为 map 只存 tx，kill 走 tx 哨兵。
-    m.insert(
-        key,
-        RunningChild { tx, child, session_file: sfile.clone(), session_id: sid.clone(), meta: meta.clone() },
-    );
+    m.insert(key, RunningChild { tx, child, meta: meta.clone() });
     Ok((sid, sfile, meta))
 }
 

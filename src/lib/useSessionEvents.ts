@@ -32,6 +32,9 @@ type Fold = {
 const toolCardId = (toolCallId: string): string =>
   toolCallId ? `tool:${toolCallId}` : `tool-anon-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
+/** 已经告警过的未知帧类型（每类只提示一次，避免日志被同一帧刷屏）。 */
+const unknownFrameTypes = new Set<string>();
+
 const folds = new Map<string, Fold>();
 /** 单测隔离用：清掉按会话累积的流式折叠态。 */
 export function __resetFolds() {
@@ -226,7 +229,12 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>): Vi
     return out;
   }
   if (t === "turn_start" || t === "turn_end" || t === "agent_start" || t === "agent_end") return out;
-  // 其余未知帧：忽略不崩（历史归一入口只处理文件行，实时未知帧由 Rust 透传日志）
+  // 其余未知帧：忽略不崩，但每个类型只告警一次（M4 协议漂移 guard——
+  // omp 大版本升级后事件名对不上时，日志里能直接看出来是哪一类帧变了）。
+  if (!unknownFrameTypes.has(t)) {
+    unknownFrameTypes.add(t);
+    console.warn(`[omp] 未知事件类型（已忽略，仅提示一次）：${t}`, frame);
+  }
   return out;
 }
 
