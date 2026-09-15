@@ -1,16 +1,31 @@
 import { useState } from "react";
-import { Menu } from "lucide-react";
+import { Check, Copy, Menu } from "lucide-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
 import { loadSessions } from "../../lib/sessionList";
+import { sessionToMarkdown } from "../../lib/exportMd";
 import { UpdateBell } from "../update/UpdateDialog";
 
 export function TopBar() {
-  const { activeSessionId, sessions, set } = useApp();
+  const { activeSessionId, sessions, eventsBySession, set } = useApp();
   const cur = sessions.find((s) => s.id === activeSessionId);
   const [editing, setEditing] = useState(false);
   const [note, setNote] = useState(cur?.note ?? "");
+  const [copyState, setCopyState] = useState<"idle" | "ok" | "error">("idle");
   const title = cur?.title?.trim() || "未命名会话";
+
+  /** 复制本会话为 Markdown：复用界面上已渲染的 ViewMsg，不额外读盘、不落盘。 */
+  const copyMarkdown = async () => {
+    if (!activeSessionId) return;
+    const md = sessionToMarkdown(cur?.note?.trim() || title, eventsBySession[activeSessionId] ?? []);
+    try {
+      await navigator.clipboard.writeText(md);
+      setCopyState("ok");
+    } catch {
+      setCopyState("error");
+    }
+    setTimeout(() => setCopyState("idle"), 1500);
+  };
 
   return (
     // Overlay 标题栏：左侧留 72px 给 macOS 红绿灯，标题缺省取当前任务标题
@@ -61,6 +76,16 @@ export function TopBar() {
         </button>
       )}
       <div className="ml-auto flex items-center">
+        {/* 复制会话为 Markdown（V2 M9）：纯前端剪贴板，导出的就是界面上看到的内容 */}
+        <button
+          onClick={() => void copyMarkdown()}
+          disabled={!activeSessionId || (eventsBySession[activeSessionId]?.length ?? 0) === 0}
+          className="mr-1 cursor-pointer rounded p-1.5 text-muted transition-colors duration-150 hover:bg-surface hover:text-foreground disabled:cursor-default disabled:opacity-40"
+          aria-label="复制会话为 Markdown"
+          title="复制本会话为 Markdown"
+        >
+          {copyState === "ok" ? <Check size={15} aria-hidden /> : <Copy size={15} aria-hidden />}
+        </button>
         <UpdateBell />
       </div>
     </header>

@@ -53,7 +53,7 @@
 - 左栏项目结构（单层分组，禁止双层）：顶部「添加项目」→ 一体搜索框 → 按项目分组的手风琴会话组（分组头即项目入口：名 + mono 路径尾段 + 右侧 76px 固定槽位；点击分组头切换 `activeProjectId`，新建会话落到它；缺失态在标题旁常驻小角标）→ 未归属组。**禁止在分组上方另起一排项目快捷卡片**（之前红框那排与分组重复，造成“一个项目出现两次”，已删除）。
 - 输入框工具行与上方上下文条下拉互斥：`composerMenu: model | thinking | permission | project | branch | null` 存 Zustand，同时只开一个；点击外部 / Esc 关闭（`useDropdown`）。
 - 输入框上方上下文条（`ContextBar`，在输入框卡片**外**、卡片上方，与卡片内文字左对齐）：左「项目」右「git 分支」，13px muted，与卡片同宽 `max-w-3xl` + 容器 `px-4`；两者都可点开且统一向上弹（只遮消息流，不遮正在打字的输入框）。一个项目都没有时整条不渲染。项目名 / 分支名不截断，窄窗口由整行 `flex-wrap` 换行兜底。分支是**只读**控件：非 git 目录显示「非 Git 目录」，不无声消失。
-- 中央三段：顶栏 44px（标题 + 更新入口，无边框感）→ 消息流（用户气泡右对齐圆角 `rounded-2xl rounded-br-md` + inset ring）→ 会话输入框（整块 `rounded-2xl` 卡：`focus-within` accent 边 + 悬浮阴影，发送为圆形箭头按钮）。
+- 中央三段：顶栏 44px（标题 + 复制会话为 Markdown + 更新入口，无边框感）→ 消息流（用户气泡右对齐圆角 `rounded-2xl rounded-br-md` + inset ring）→ 会话输入框（整块 `rounded-2xl` 卡：`focus-within` accent 边 + 悬浮阴影，发送为圆形箭头按钮）。
 - 圆角：卡片 `rounded-xl`（12px）、输入框/气泡 `rounded-2xl`（16px）、小按钮 `rounded-lg`、发送按钮圆形。边框一律 `border-border/70` 起步，选中/焦点才加深。
 - 间距：4 / 8 / 12 / 16 / 24 五档，卡内 padding 12，卡间距 8，流内消息间距 20。
 - 间距：4 / 8 / 12 / 16 / 24 五档，卡内 padding 12，卡间距 8，流内消息间距 16。
@@ -96,6 +96,7 @@
 - `AssistantText` = 助手正文（Markdown 渲染 + 代码高亮 + 代码块复制 + 流式未闭合围栏 skeleton），实现见 `src/components/thread/AssistantText.tsx`；用户气泡、工具输出不走 Markdown（前者是用户原话，后者是日志）。`RuntimeStats`（用量透传）与 `OmpStatusPill` 同属 `StatusBar.tsx`，只挂输入框工具行。
 - `MentionChips`（`src/components/thread/MentionChips.tsx`）= `@文件` 提及被 omp 读进上下文后的芯片排：11px mono、`rounded-lg` 细边、`FileText` 图标 + 路径 + 「N 行 / NKB」；被跳过的文件（`skippedReason`）换 `FileWarning` + warn 色，tooltip 写「已跳过自动读取（原因）」。输入框里的**草稿芯片**复用同一视觉（在 `Composer` 内联，不另起组件），路径不存在时同样走 warn 色。
 - `ConfirmDialog`（`src/components/ConfirmDialog.tsx`）已落地：受控浮层、Esc/遮罩取消、焦点默认在「取消」、危险操作走 danger 色；批量删除等**跨分组**的危险操作走它，项目分组内的轻量确认仍是分组内联浮层（不撑布局）。`Toast` 仍未落地——新增提示优先用内联错误条，不要临时造第三种提示样式。
+- `TopBar`（`src/components/thread/TopBar.tsx`）= 标题备注（点击改名）+ 窄窗抽屉入口 + **复制会话为 Markdown**（`Copy`/`Check` 图标按钮，纯前端剪贴板，导出内容 = 界面上看到的 `ViewMsg`，生成规则见 `src/lib/exportMd.ts`）+ `UpdateBell`。会话为空或未选中时导出按钮禁用。
 
 ## 9. 应用图标
 
