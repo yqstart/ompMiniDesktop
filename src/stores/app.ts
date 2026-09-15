@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { HealthInfo, ModelCatalog, ProjectView, SessionRuntime, SessionStatus, SessionView, UpdateState, ViewMsg } from "@shared/types";
+import type { HealthInfo, ImageAttachment, ModelCatalog, ProjectView, SessionRuntime, SessionStatus, SessionView, UpdateState, ViewMsg } from "@shared/types";
 
 type AppState = {
   health: HealthInfo | null;
@@ -10,6 +10,8 @@ type AppState = {
   eventsBySession: Record<string, ViewMsg[]>;
   statusBySession: Record<string, SessionStatus>;
   drafts: Record<string, string>;
+  /** 待发送图片附件（按会话隔离，只存在内存里，发送成功即清空）。 */
+  attachmentsBySession: Record<string, ImageAttachment[]>;
   models: ModelCatalog | null;
   currentModel: string | null;
   currentThinking: string | null;
@@ -29,6 +31,10 @@ type AppState = {
   set: (p: Partial<AppState>) => void;
   draftOf: (sid: string | null) => string;
   setDraft: (sid: string | null, text: string) => void;
+  attachmentsOf: (sid: string | null) => ImageAttachment[];
+  addAttachments: (sid: string | null, items: ImageAttachment[]) => void;
+  removeAttachment: (sid: string | null, index: number) => void;
+  clearAttachments: (sid: string | null) => void;
   appendEvents: (sid: string, msgs: ViewMsg[]) => void;
   /** 左侧栏宽度（220–480，默认 264，持久化 localStorage）。 */
   sidebarWidth: number;
@@ -68,6 +74,7 @@ export const useApp = create<AppState>((set, get) => ({
   eventsBySession: {},
   statusBySession: {},
   drafts: {},
+  attachmentsBySession: {},
   models: null,
   currentModel: null,
   currentThinking: null,
@@ -98,6 +105,22 @@ export const useApp = create<AppState>((set, get) => ({
   draftOf: (sid) => (sid ? (get().drafts[sid] ?? "") : ""),
   setDraft: (sid, text) =>
     set((s) => ({ drafts: sid ? { ...s.drafts, [sid]: text } : s.drafts })),
+  attachmentsOf: (sid) => (sid ? (get().attachmentsBySession[sid] ?? []) : []),
+  addAttachments: (sid, items) =>
+    set((s) =>
+      sid && items.length > 0
+        ? { attachmentsBySession: { ...s.attachmentsBySession, [sid]: [...(s.attachmentsBySession[sid] ?? []), ...items] } }
+        : s,
+    ),
+  removeAttachment: (sid, index) =>
+    set((s) => {
+      if (!sid) return s;
+      const cur = s.attachmentsBySession[sid] ?? [];
+      const next = cur.filter((_, i) => i !== index);
+      return { attachmentsBySession: { ...s.attachmentsBySession, [sid]: next } };
+    }),
+  clearAttachments: (sid) =>
+    set((s) => (sid ? { attachmentsBySession: { ...s.attachmentsBySession, [sid]: [] } } : s)),
   appendEvents: (sid, msgs) =>
     set((s) => ({
       eventsBySession: {

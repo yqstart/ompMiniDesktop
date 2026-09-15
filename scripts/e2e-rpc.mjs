@@ -22,7 +22,7 @@ const bad = (msg) => {
 const assert = (cond, msg) => (cond ? ok(msg) : bad(msg));
 
 /** 跑一个场景：返回收到的全部帧与 response 表。 */
-async function drive(scenario, { decide = "approve", abort = false, extra = [], respond } = {}) {
+async function drive(scenario, { decide = "approve", abort = false, extra = [], respond, images } = {}) {
   const child = spawn(process.execPath, [FAKE], {
     stdio: ["pipe", "pipe", "pipe"],
     env: { ...process.env, OMP_FAKE_SCENARIO: scenario },
@@ -32,7 +32,12 @@ async function drive(scenario, { decide = "approve", abort = false, extra = [], 
   let buf = "";
   let started = false;
 
-  const send = (o) => child.stdin.write(`${JSON.stringify(o)}\n`);
+  // 子进程已在 agent_end 后被 kill 时，晚到的帧不再回包（否则 EPIPE 会炸掉整个测试进程）
+  const send = (o) => {
+    if (!child.stdin.writable) return;
+    child.stdin.write(`${JSON.stringify(o)}\n`);
+  };
+  child.stdin.on("error", () => {});
   const settle = new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${scenario}: 10s 内没等到 agent_end`)), 10000);
     child.stdout.on("data", (d) => {
@@ -57,7 +62,7 @@ async function drive(scenario, { decide = "approve", abort = false, extra = [], 
           send({ id: "n1", type: "negotiate_protocol", protocolVersion: 2 });
           send({ id: "g1", type: "get_state" });
           for (const e of extra) send(e);
-          send({ id: "p1", type: "prompt", message: "跑一下 echo" });
+          send({ id: "p1", type: "prompt", message: "跑一下 echo", ...(images ? { images } : {}) });
         }
         if (f.type === "extension_ui_request") {
           // respond 回调给"按方法回不同包"的场景用（V2 M5 通用 UI 请求）
@@ -181,11 +186,25 @@ async function main() {
   assert(cancelFrame?.targetId === "ui-x1", "服务端撤回帧带 targetId（前端据此撤掉卡片）");
   assert(kinds(uiRun.frames, "agent_end").length === 1, "UI 请求处理完 turn 正常收尾");
 
+  // --- 7. 图片附件（V2 M6）：prompt.images 与文本一起发，字段照 omp 的 image 内容块 ---
+  console.log("场景 approve + 图片附件");
+  // 1x1 透明 PNG（真实 base64，仅用于验证线路形状；fake-omp 不做解码）
+  const TINY_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+  const withImg = await drive("approve", { images: [{ type: "image", data: TINY_PNG, mimeType: "image/png" }] });
+  const imgText = kinds(withImg.frames, "message_update")
+    .map((f) => f.assistantMessageEvent?.delta ?? "")
+    .join("");
+  assert(imgText.includes("images=1"), "prompt.images 与消息一起被上游收到（图片数与发送一致）");
+  const plain = kinds(approve.frames, "message_update")
+    .map((f) => f.assistantMessageEvent?.delta ?? "")
+    .join("");
+  assert(!plain.includes("images="), "不带图片时 prompt 里没有 images 字段（不塞空数组）");
+
   if (failures > 0) {
     console.error(`\ne2e:rpc 失败：${failures} 项断言未通过`);
     process.exit(1);
   }
-  console.log("\ne2e:rpc 通过：握手 / 通过分支 / 拒绝分支 / 多工具并行 / 流式中断 / 通用 UI 请求");
+  console.log("\ne2e:rpc 通过：握手 / 通过分支 / 拒绝分支 / 多工具并行 / 流式中断 / 通用 UI 请求 / 图片附件");
 }
 
 main().catch((e) => {

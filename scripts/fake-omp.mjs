@@ -52,6 +52,9 @@ const MODELS = {
 let modelKey = "commandcode/claude-opus-5";
 let thinkingLevel = "xhigh";
 
+/** 最近一次 prompt 带的图片数（V2 M6：验证 prompt.images 透传）。 */
+let promptImageCount = 0;
+
 function stateData() {
   const m = MODELS[modelKey];
   const d = {
@@ -133,6 +136,7 @@ function handle(line) {
       break;
     case "prompt":
       out({ id, type: "response", command: "prompt", success: true });
+      promptImageCount = Array.isArray(cmd.images) ? cmd.images.length : 0;
       runScenario(cmd.message ?? "");
       break;
     case "abort":
@@ -368,6 +372,8 @@ function uiFinish() {
 const origHandle = handle;
 
 function finishApproved() {
+  // 图片附件回执（V2 M6）：把收到的 images 数量写进收尾文本，供 e2e:rpc 断言
+  const done = promptImageCount > 0 ? `已执行，输出 \`hi\`。images=${promptImageCount}` : "已执行，输出 `hi`。";
   out({
     type: "tool_execution_end",
     toolCallId: "call_00_fake1",
@@ -387,10 +393,10 @@ function finishApproved() {
   out({ type: "turn_start" });
   out({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "" }] } });
   out({ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 0 } });
-  out({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "已执行，输出 `hi`。" } });
+  out({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: done } });
   out({
     type: "message_end",
-    message: { role: "assistant", content: [{ type: "text", text: "已执行，输出 `hi`。" }] },
+    message: { role: "assistant", content: [{ type: "text", text: done }] },
   });
   out({ type: "turn_end" });
   out({ type: "agent_end", isTerminal: true, messages: [] });

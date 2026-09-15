@@ -5,6 +5,22 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{overlay::*, session_scan::*};
 
+/// 图片附件（V2 M6）：只用得上 base64 与 mime，`name`/`bytes` 供前端展示。
+/// 前端传 camelCase（`dataBase64` / `mimeType`），omp 侧 image 内容块用 `data` / `mimeType`。
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageAttachment {
+    pub data_base64: String,
+    pub mime_type: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub bytes: Option<usize>,
+}
+
+/// 单张图片上限：与前端 `ATTACH_MAX_BYTES` 对齐，后端再兜一道（RPC 帧别被几十 MB 撑爆）。
+const IMAGE_MAX_BYTES: usize = 10 * 1024 * 1024;
+
 pub struct AppState {
     pub overlay_path: PathBuf,
     pub overlay: Mutex<Overlay>,
@@ -846,17 +862,69 @@ pub async fn get_history(state: State<'_, AppState>, id: String) -> Result<Vec<s
 }
 
 #[tauri::command]
-pub async fn send_message(app: AppHandle, state: State<'_, AppState>, id: String, message: String) -> Result<(), CmdError> {
+pub async fn send_message(app: AppHandle, state: State<'_, AppState>, id: String, message: String, images: Option<Vec<ImageAttachment>>) -> Result<(), CmdError> {
     let map = state.runtime.clone();
     let tx = map.lock().await.get(&id).map(|r| r.tx.clone());
     let Some(tx) = tx else {
         return Err(cmd_err("NOT_RUNNING", "会话未启动，请先打开会话".into(), None));
     };
-    let req = serde_json::json!({"id": format!("p-{}", chrono::Utc::now().timestamp_millis()), "type": "prompt", "message": message});
+    // 图片随 prompt 一起发（实测 omp `prompt{message, images}`）；字段名按 omp 的 image 内容块：
+    // `{type:"image", data:<base64>, mimeType}`。
+    let imgs: Vec<serde_json::Value> = images
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|i| !i.data_base64.is_empty() && i.data_base64.len() <= IMAGE_MAX_BYTES * 2)
+        .map(|i| serde_json::json!({"type":"image","data":i.data_base64,"mimeType":i.mime_type}))
+        .collect();
+    let mut req = serde_json::json!({"id": format!("p-{}", chrono::Utc::now().timestamp_millis()), "type": "prompt", "message": message});
+    if !imgs.is_empty() {
+        req["images"] = serde_json::Value::Array(imgs);
+    }
     tx.send(format!("{}\n", serde_json::to_string(&req).unwrap()))
         .map_err(|_| cmd_err("RPC_IO", "发送失败，进程可能已退出".into(), None))?;
     let _ = app;
     Ok(())
+}
+
+/// 读本地图片为附件（V2 M6）：WebView 拿不到任意本地路径的内容，
+/// 所以「点回形针选文件」这条入口走后端读 → base64 回前端（粘贴 / 拖拽仍在 WebView 内直接读 File）。
+#[tauri::command]
+pub async fn read_image_file(path: String) -> Result<ImageAttachment, CmdError> {
+    let p = PathBuf::from(&path);
+    let name = p
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.clone());
+    let mime = match p.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref() {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        Some("gif") => "image/gif",
+        _ => {
+            return Err(cmd_err(
+                "BAD_TYPE",
+                format!("{name}：只支持 PNG / JPEG / WebP / GIF"),
+                Some("换一张图片，或先用图片工具转成 PNG".into()),
+            ))
+        }
+    };
+    let meta = std::fs::metadata(&p)
+        .map_err(|e| cmd_err("NOT_FOUND", format!("读取 {name} 失败：{e}"), Some("确认文件仍然存在".into())))?;
+    if meta.len() as usize > IMAGE_MAX_BYTES {
+        return Err(cmd_err(
+            "TOO_LARGE",
+            format!("{name}：超过 10MB，请先压缩再发"),
+            Some("压缩到 10MB 以内（建议长边 ≤ 2048）".into()),
+        ));
+    }
+    let bytes = std::fs::read(&p)
+        .map_err(|e| cmd_err("IO", format!("读取 {name} 失败：{e}"), None))?;
+    Ok(ImageAttachment {
+        data_base64: crate::runtime::b64encode(&bytes),
+        mime_type: mime.to_string(),
+        name: Some(name),
+        bytes: Some(bytes.len()),
+    })
 }
 
 #[tauri::command]

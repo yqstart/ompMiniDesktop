@@ -25,7 +25,7 @@ const COMMANDS = [
   "list_sessions", "create_session", "open_session", "archive_session",
   "unarchive_session", "delete_session", "archive_sessions", "delete_sessions",
   "rename_session_note", "get_history",
-  "send_message", "stop_session", "approve", "respond_ui", "set_model", "set_thinking",
+  "send_message", "read_image_file", "stop_session", "approve", "respond_ui", "set_model", "set_thinking",
   "get_session_runtime", "get_git_info",
   "get_global_approval", "set_global_approval", "set_session_approval",
   "set_omp_path",

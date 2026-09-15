@@ -2,6 +2,16 @@
 
 export type ApprovalMode = "always-ask" | "write" | "yolo";
 
+/** 消息里的一张图片：与 omp jsonl / prompt.images 的 image 内容块同构（base64，不带 data: 前缀）。 */
+export type ImageBlock = { mimeType: string; data: string };
+
+/**
+ * 待发送的图片附件（本地读取，随 `prompt.images` 一次性发给 omp，不落覆盖层、不进草稿）。
+ * `dataBase64` 与 `ImageBlock.data` 同格式；`name` 只用于输入框里的可读标签。
+ */
+export type ImageAttachment = { name: string; mimeType: string; dataBase64: string; bytes: number };
+
+/** 会话真相里的模型引用之外，覆盖层与视图共用的小类型集合。 */
 export type Project = {
   id: string;
   path: string;
@@ -152,7 +162,16 @@ export type UiMethod = "select" | "confirm" | "input" | "editor";
 
 /** ViewMsg：RPC delta 与 jsonl 文件块的统一渲染模型。 */
 export type ViewMsg =
-  | { kind: "user"; id: string; text: string; mentions: string[] }
+  | {
+      kind: "user";
+      id: string;
+      text: string;
+      mentions: string[];
+      /** 随消息发出的图片（实时帧或 jsonl 的 image 内容块）；渲染为气泡内缩略图。 */
+      images?: ImageBlock[];
+      /** 因体积过大被刻意省略的图片数（历史回放不做无上限 base64 常驻）。 */
+      imagesOmitted?: number;
+    }
   | { kind: "text"; id: string; seq: number; text: string; complete: boolean }
   | { kind: "thinking"; id: string; text: string; seconds: number; complete: boolean }
   | {

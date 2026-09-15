@@ -41,6 +41,7 @@ fn main() {
             rename_session_note,
             get_history,
             send_message,
+            read_image_file,
             stop_session,
             approve,
             respond_ui,

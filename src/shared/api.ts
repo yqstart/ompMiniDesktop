@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { OmpInfo } from "./types";
+import type { ImageAttachment, OmpInfo } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -35,8 +35,10 @@ export const api = {
   renameSessionNote: (id: string, note: string) =>
     call<void>("rename_session_note", { id, note }),
   getHistory: (id: string) => call<import("./types").ViewMsg[]>("get_history", { id }),
-  sendMessage: (id: string, message: string) =>
-    call<void>("send_message", { id, message }),
+  sendMessage: (id: string, message: string, images?: ImageAttachment[]) =>
+    call<void>("send_message", { id, message, images }),
+  /** 图片附件走「系统文件选择器 → 后端读文件」：WebView 拿不到任意本地路径的内容。 */
+  readImageFile: (path: string) => call<ImageAttachment>("read_image_file", { path }),
   stop: (id: string) => call<void>("stop_session", { id }),
   approve: (id: string, uiId: string, decision: "once" | "always" | "deny") =>
     call<void>("approve", { id, uiId, decision }),

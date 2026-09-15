@@ -215,8 +215,7 @@ describe("实时流合并：通用 UI 请求", () => {
     expect(cancelled.filter((m) => m.kind === "ui")).toHaveLength(0);
   });
 
-  it("单向方法不占交互位：notify 走分隔线，其余忽略", () => {
-    const notify = replay([
+  it("单向方法不占交互位：notify 走分隔线，其余忽略", () => {    const notify = replay([
       { type: "extension_ui_request", id: "n1", method: "notify", message: "构建完成", notifyType: "info" },
     ]);
     expect(notify).toHaveLength(1);
@@ -229,5 +228,31 @@ describe("实时流合并：通用 UI 请求", () => {
       { type: "extension_ui_request", id: "et1", method: "set_editor_text", text: "abc" },
     ]);
     expect(quiet).toHaveLength(0);
+  });
+});
+
+/** V2 M6：随消息发出的图片在实时帧里也要落到 user 气泡（不是被丢掉）。 */
+describe("实时流：用户消息的图片块", () => {
+  beforeEach(() => __resetFolds());
+
+  it("message_start(user) 的图片块并入同一条 user 消息", () => {
+    const msgs = replay([
+      {
+        type: "message_start",
+        message: {
+          role: "user",
+          content: [
+            { type: "text", text: "看图" },
+            { type: "image", data: "AAA", mimeType: "image/png" },
+          ],
+        },
+      },
+    ]);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toMatchObject({
+      kind: "user",
+      text: "看图",
+      images: [{ mimeType: "image/png", data: "AAA" }],
+    });
   });
 });

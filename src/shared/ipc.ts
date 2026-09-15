@@ -21,6 +21,7 @@ export const IPC = {
   renameSessionNote: "rename_session_note",
   getHistory: "get_history",
   sendMessage: "send_message",
+  readImageFile: "read_image_file",
   stopSession: "stop_session",
   approve: "approve",
   respondUi: "respond_ui",

@@ -6,6 +6,7 @@
 
 ### 新增
 
+- **二期 M6（图片部分）：输入框支持图片附件**——粘贴（⌘V）、拖拽文件、点回形针选文件三条入口都可用；图片读成 base64 只存在内存里（`attachmentsBySession`，按会话隔离），发送时随 `prompt{message, images:[{type:"image",data,mimeType}]}` 一次性交给 omp，应用不落盘、不写覆盖层。用户气泡内直接渲染缩略图（`data:` URL，本地显示），历史回放读 omp 写进 jsonl 的 `image` 内容块（兼容 anthropic 风格 `source.data`）；模型目录 `input` 不含 `image` 时给内联提醒。校验：只收 PNG/JPEG/WebP/GIF、单张 ≤ 10MB（前后端各兜一道），历史回放里单张 base64 超过 512KB 的块省略并提示张数，避免长会话把内存吃光。新增后端 `read_image_file`（选文件入口用：WebView 拿不到任意本地路径内容）与 `b64encode`。
 - **二期 M5：omp 通用 UI 请求全类型接住**（此前只精做审批 `select`，其余一律塞进审批卡且**回包格式错误**——`confirm` 回了 `{value:"Approve"}`，`input`/`editor` 干脆不渲染，agent 侧等一个永远不来的回包）。现在按上游真实语义分流：`confirm`（双按钮，回 `{confirmed}`）、`input`（单行 + Enter 提交）、`editor`（多行 + ⌘/Ctrl+Enter 提交）、非审批 `select`（选项按钮，回 `{value}`）走新组件 `UiRequestCard`，取消/跳过统一回 `{cancelled:true}`；`notify` 渲染为分隔线，`setStatus`/`setWidget`/`setTitle`/`set_editor_text` 作为单向宿主指令丢弃且不告警；服务端 `cancel{targetId}` 会撤回对应卡片（不留点不动的死卡）。后端新增 `respond_ui(id, uiId, kind, value?, confirmed?)` 命令（与 `approve` 分工：审批多一步会话级 yolo 意向）；`awaiting-approval` 状态只由这四类交互方法触发，单向方法与撤回不再误锁 composer。上游方法集与回包字段取自 omp 18.1.22 内嵌源码实测，记入 `docs/v2-schedule.md` §2。
 - 新增二期排期 `docs/v2-schedule.md`：M5 通用 UI 请求（本批）/ M6 图片与 `@文件` / M7 会话扫描分页与搜索 / M8 长会话 windowing 复议，含从 `prompt{message, images}` 实测到的图片透传口径。
 - 项目分组头新增「删除工作区」入口（`FolderMinus`，hover 操作区第三个按钮）：二次确认后只解绑目录、不删任何 jsonl 文件；名下对话（含进行中）由后端 `remove_project` 按 cwd 扫描后全部标记归档保留，可在「未归属会话」的已归档里找回。

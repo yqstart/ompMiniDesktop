@@ -1,4 +1,5 @@
 import type { ViewMsg } from "@shared/types";
+import { imagesFromContent } from "./attachments";
 
 let seq = 0;
 const nid = (p: string) => `${p}-${Date.now().toString(36)}-${seq++}`;
@@ -193,7 +194,17 @@ export function viewMsgsFromJsonlLines(lines: unknown[]): ViewMsg[] {
               .map((b) => String(b.text ?? ""))
               .join("\n")
           : "";
-        out.push({ kind: "user", id: `u:${lid}`, text, mentions: [] });
+        // 图片块（V2 M6）：用户随消息发出的图，渲染在气泡里；
+        // 过大的块按 imagesFromContent 的上限省略并计数，不无上限常驻内存。
+        const { images, omitted } = imagesFromContent(m.content);
+        out.push({
+          kind: "user",
+          id: `u:${lid}`,
+          text,
+          mentions: [],
+          ...(images.length > 0 ? { images } : {}),
+          ...(omitted > 0 ? { imagesOmitted: omitted } : {}),
+        });
         return;
       }
       if (m.role === "toolResult") {
@@ -274,6 +285,23 @@ export function viewMsgFromJsonlLine(line: unknown): ViewMsg[] {
         }
       } else if (b.type === "thinking") {
         out.push({ kind: "thinking", id: nid("th"), text: String(b.thinking ?? ""), seconds: 0, complete: true });
+      } else if (b.type === "image") {
+        // 用户消息里的图片块（V2 M6）：并进同一条 user 消息的气泡
+        const { images, omitted } = imagesFromContent([b]);
+        const last = out[out.length - 1];
+        if (last && last.kind === "user") {
+          if (images.length > 0) last.images = [...(last.images ?? []), ...images];
+          if (omitted > 0) last.imagesOmitted = (last.imagesOmitted ?? 0) + omitted;
+        } else {
+          out.push({
+            kind: "user",
+            id: nid("u"),
+            text: "",
+            mentions: [],
+            ...(images.length > 0 ? { images } : {}),
+            ...(omitted > 0 ? { imagesOmitted: omitted } : {}),
+          });
+        }
       } else if (b.type === "toolCall") {
         const args =
           b.arguments && typeof b.arguments === "object"

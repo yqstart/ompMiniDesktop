@@ -5,6 +5,7 @@ import { api } from "@shared/api";
 import { useApp } from "../stores/app";
 import type { SessionRuntime, SessionStatus, ViewMsg } from "@shared/types";
 import { summarizeArgs } from "./viewmsg";
+import { imagesFromContent } from "./attachments";
 import { resolveThinking } from "./thinking";
 import { mergeViewMsgs, type IncomingViewMsg } from "./mergeEvents";
 
@@ -58,7 +59,16 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>): Vi
     const m = frame.message as { role?: string; content?: { type?: string; text?: string }[] };
     if (m?.role === "user") {
       const text = (m.content ?? []).filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n");
-      out.push({ kind: "user", id: `u-${Date.now()}`, text, mentions: [] });
+      // 图片块（V2 M6）：随消息发出的图直接渲染在气泡里
+      const { images, omitted } = imagesFromContent(m.content);
+      out.push({
+        kind: "user",
+        id: `u-${Date.now()}`,
+        text,
+        mentions: [],
+        ...(images.length > 0 ? { images } : {}),
+        ...(omitted > 0 ? { imagesOmitted: omitted } : {}),
+      });
     }
     return out;
   }

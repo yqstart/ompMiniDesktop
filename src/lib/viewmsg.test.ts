@@ -38,6 +38,31 @@ describe("viewMsgFromJsonlLine", () => {
   it("未知 type 不崩", () => {
     expect(viewMsgFromJsonlLine({ type: "something_new" })).toEqual([]);
   });
+
+  // V2 M6：带图片的用户消息，图片并进同一条 user 气泡（不是新增一条空消息）
+  it("用户消息里的图片块并入同一条 user 消息", () => {
+    const msgs = viewMsgFromJsonlLine({
+      type: "message",
+      message: {
+        role: "user",
+        content: [
+          { type: "text", text: "看看这张图" },
+          { type: "image", data: "AAA", mimeType: "image/png" },
+        ],
+      },
+    });
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toMatchObject({ kind: "user", text: "看看这张图", images: [{ mimeType: "image/png", data: "AAA" }] });
+  });
+
+  it("只有图片没有文字时也出一条 user 消息", () => {
+    const msgs = viewMsgFromJsonlLine({
+      type: "message",
+      message: { role: "user", content: [{ type: "image", data: "BBB", mimeType: "image/jpeg" }] },
+    });
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toMatchObject({ kind: "user", text: "", images: [{ mimeType: "image/jpeg", data: "BBB" }] });
+  });
 });
 
 describe("viewMsgsFromJsonlLines（历史批量归一）", () => {

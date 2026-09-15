@@ -86,7 +86,26 @@ export function Thread() {
       {shown.map((m) => (
         <div key={m.id} className="mb-5 text-sm leading-7">
           {m.kind === "user" && (
-            <div className="ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-md bg-surface px-3.5 py-2 shadow-[inset_0_0_0_1px_var(--color-border)]">{m.text}</div>
+            <div className="ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-md bg-surface px-3.5 py-2 shadow-[inset_0_0_0_1px_var(--color-border)]">
+              {m.text && <div className="whitespace-pre-wrap">{m.text}</div>}
+              {(m.images?.length ?? 0) > 0 && (
+                <div className={`flex flex-wrap gap-2 ${m.text ? "mt-2" : ""}`}>
+                  {m.images?.map((img, i) => (
+                    <img
+                      key={i}
+                      src={`data:${img.mimeType};base64,${img.data}`}
+                      alt={`图片 ${i + 1}`}
+                      className="max-h-64 max-w-[240px] rounded-lg border border-border/70 object-contain"
+                    />
+                  ))}
+                </div>
+              )}
+              {(m.imagesOmitted ?? 0) > 0 && (
+                <div className="mt-1.5 text-xs text-muted">
+                  {m.imagesOmitted} 张图片因体积过大未在回放中展开
+                </div>
+              )}
+            </div>
           )}
           {m.kind === "text" && <AssistantText text={m.text} complete={m.complete} />}
           {m.kind === "thinking" && (

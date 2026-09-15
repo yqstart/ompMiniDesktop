@@ -628,9 +628,38 @@ pub fn b64decode(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// base64 编码（不带换行）：图片附件读文件后用（`read_image_file`）。
+/// 与 `b64decode` 成对，避免为一个方向新增依赖。
+pub fn b64encode(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    for c in data.chunks(3) {
+        let b0 = c[0] as u32;
+        let b1 = *c.get(1).unwrap_or(&0) as u32;
+        let b2 = *c.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push(if c.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if c.len() > 2 { T[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn b64encode_roundtrip() {
+        // 与解码器互为逆运算（含 padding 的三种长度）
+        for raw in [b"".as_slice(), b"a", b"ab", b"abc", b"\x00\xff\x10\x20"] {
+            let enc = b64encode(raw);
+            assert_eq!(b64decode(&enc).unwrap(), raw.to_vec(), "roundtrip 失败: {enc}");
+        }
+        assert_eq!(b64encode(b"hello world"), "aGVsbG8gd29ybGQ=");
+        assert_eq!(b64encode(&[0xff, 0xd8, 0xff]), "/9j/");
+    }
 
     #[test]
     fn chunk_reassemble_roundtrip() {
