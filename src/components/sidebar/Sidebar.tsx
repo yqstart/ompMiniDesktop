@@ -17,9 +17,11 @@ import { viewMsgFromJsonlLine } from "../../lib/viewmsg";
 import type { SessionView } from "@shared/types";
 
 /**
- * 会话行：单行结构 `● 标题 … 时间 操作`，对齐截图。
- * - 标题单行省略；右侧时间 mono 小字；hover / 选中时右侧浮现归档、删除。
- * - 归档、删除都在行内展示（hover 出现，触屏常显），不再另起第二行。
+ * 会话行：单行结构 `● 标题 … 时间/操作`，对齐截图。
+ * - 标题单行省略；右侧固定 68px 槽位：平时显示 mono 时间，hover / focus-within 时
+ *   时间 visibility 隐藏（占位保留），操作按钮绝对覆盖同一槽位淡入——两者互斥、
+ *   外层布局零变化，悬浮不跳动。
+ * - 归档、删除都在行内展示，不另起第二行；删除二次确认以浮层覆盖，不撑布局。
  */
 function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void }) {
   const { activeSessionId, set, appendEvents } = useApp();
@@ -30,7 +32,7 @@ function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void })
     : new Date(s.timestamp).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
   return (
     <div
-      className={`group flex min-w-0 items-center gap-1 rounded-lg py-[7px] pr-1.5 pl-2 transition-colors duration-150 ${
+      className={`group relative flex h-9 min-w-0 items-center rounded-lg pr-1.5 pl-2 transition-colors duration-150 ${
         active ? "bg-background shadow-[inset_0_0_0_1px_var(--color-border)]" : "hover:bg-background/60"
       }`}
     >
@@ -50,69 +52,70 @@ function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void })
         className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
         aria-label={`会话 ${s.title}`}
       >
-        {/* 运行中圆点（占位保持对齐，无状态时隐藏不断行） */}
         <span
           className={`h-1.5 w-1.5 shrink-0 rounded-full ${s.running ? "bg-ok" : "bg-transparent"}`}
           aria-label={s.running ? "运行中" : undefined}
           aria-hidden={!s.running}
         />
         <span className={`min-w-0 flex-1 truncate text-[13px] ${active ? "font-medium" : ""}`}>{s.title}</span>
-        <span className="shrink-0 font-mono text-[11px] text-muted/80">{time}</span>
+        <span className="w-[68px] shrink-0 truncate text-right font-mono text-[11px] text-muted/80 group-focus-within:invisible group-hover:invisible">
+          {time}
+        </span>
       </button>
-      <span className="flex shrink-0 items-center">
-        {!s.archived ? (
-          <button
-            onClick={() => api.archiveSession(s.id).then(onChanged)}
-            className="hidden cursor-pointer rounded-md p-1.5 text-muted transition-all duration-150 group-hover:block hover:bg-background hover:text-foreground"
-            aria-label={s.running ? "先停止再归档" : "归档会话"}
-            title={s.running ? "先停止再归档" : "归档会话"}
-          >
-            <Archive size={13} />
-          </button>
-        ) : (
-          <button
-            onClick={() => api.unarchiveSession(s.id).then(onChanged)}
-            className="hidden cursor-pointer rounded-md p-1.5 text-muted transition-all duration-150 group-hover:block hover:bg-background hover:text-foreground"
-            aria-label="取消归档"
-            title="取消归档"
-          >
-            <ArchiveRestore size={13} />
-          </button>
-        )}
-        {!confirmDelete ? (
+      {!confirmDelete ? (
+        <span className="invisible absolute top-1/2 right-1.5 flex w-[68px] -translate-y-1/2 items-center justify-end gap-0.5 opacity-0 transition-opacity duration-150 group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100">
+          {!s.archived ? (
+            <button
+              onClick={() => api.archiveSession(s.id).then(onChanged)}
+              className="cursor-pointer rounded-md p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground"
+              aria-label={s.running ? "先停止再归档" : "归档会话"}
+              title={s.running ? "先停止再归档" : "归档会话"}
+            >
+              <Archive size={13} />
+            </button>
+          ) : (
+            <button
+              onClick={() => api.unarchiveSession(s.id).then(onChanged)}
+              className="cursor-pointer rounded-md p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground"
+              aria-label="取消归档"
+              title="取消归档"
+            >
+              <ArchiveRestore size={13} />
+            </button>
+          )}
           <button
             onClick={() => setConfirmDelete(true)}
-            className="hidden cursor-pointer rounded-md p-1.5 text-muted transition-all duration-150 group-hover:block hover:bg-background hover:text-danger"
+            className="cursor-pointer rounded-md p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-danger"
             aria-label="删除会话"
             title="删除会话"
           >
             <Trash2 size={13} />
           </button>
-        ) : (
-          <span className="flex items-center gap-1 pl-1 text-xs whitespace-nowrap">
-            <span className="text-danger">确认删？</span>
-            <button
-              onClick={() =>
-                api.deleteSession(s.id).then(() => {
-                  onChanged();
-                  setConfirmDelete(false);
-                })
-              }
-              className="cursor-pointer rounded-md bg-danger px-1.5 py-0.5 text-white"
-              aria-label="确认删除"
-            >
-              删除
-            </button>
-            <button
-              onClick={() => setConfirmDelete(false)}
-              className="cursor-pointer rounded-md border border-border px-1.5 py-0.5"
-              aria-label="取消删除"
-            >
-              取消
-            </button>
-          </span>
-        )}
-      </span>
+        </span>
+      ) : (
+        <span className="absolute top-1/2 right-1 z-10 flex -translate-y-1/2 items-center gap-1 rounded-md border border-border bg-surface px-1.5 py-1 text-xs whitespace-nowrap shadow-lg">
+          <span className="text-danger">确认删？</span>
+          <button
+            onClick={() =>
+              api.deleteSession(s.id).then(() => {
+                onChanged();
+                setConfirmDelete(false);
+              })
+            }
+            className="cursor-pointer rounded-md bg-danger px-1.5 py-0.5 text-white"
+            aria-label="确认删除"
+          >
+            删除
+          </button>
+          <button
+            onClick={() => setConfirmDelete(false)}
+            className="cursor-pointer rounded-md border border-border px-1.5 py-0.5"
+            aria-label="取消删除"
+          >
+            取消
+          </button>
+        </span>
+      )}
     </div>
   );
 }
