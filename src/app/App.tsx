@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useApp, SIDEBAR_MAX, SIDEBAR_MIN } from "../stores/app";
 import { api } from "@shared/api";
 import { Sidebar } from "../components/sidebar/Sidebar";
@@ -34,6 +34,8 @@ function SidebarShell({
   children: React.ReactNode;
 }) {
   const dragging = useRef(false);
+  // hover 才加宽热区：平时 3px 细线，悬停/拖拽时 7px 好抓
+  const [hot, setHot] = useState(false);
 
   useEffect(() => {
     const move = (e: PointerEvent) => {
@@ -77,7 +79,13 @@ function SidebarShell({
             document.body.style.userSelect = "none";
             (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
           }}
-          className="absolute top-0 -right-1 z-10 h-full w-2 cursor-col-resize touch-none transition-colors hover:bg-accent/30 focus-visible:bg-accent/40 focus-visible:outline-none"
+          onPointerEnter={() => setHot(true)}
+          onPointerLeave={() => {
+            if (!dragging.current) setHot(false);
+          }}
+          className={`absolute top-0 -right-0.5 z-10 h-full cursor-col-resize touch-none transition-colors focus-visible:outline-none ${
+            hot || dragging.current ? "w-[7px] bg-accent/30" : "w-[3px] bg-transparent hover:bg-accent/20"
+          }`}
         />
       </div>
       {/* 窄窗：抽屉由 sidebarOpen 控制（保持既有行为） */}
