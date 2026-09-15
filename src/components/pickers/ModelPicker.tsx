@@ -60,7 +60,7 @@ export function ModelPicker({ compact = false }: { compact?: boolean }) {
           if (!models && !open) void load(false);
         }}
         className={`flex cursor-pointer items-center gap-1 truncate rounded-full px-2.5 py-1 transition-colors duration-150 hover:bg-background ${
-          compact ? "max-w-32 text-xs text-muted hover:text-foreground" : "max-w-44 text-[13px]"
+          compact ? "max-w-32 text-xs text-muted hover:text-foreground" : "max-w-44 text-sm"
         }`}
         aria-label="选择模型"
         aria-expanded={open}
@@ -77,7 +77,7 @@ export function ModelPicker({ compact = false }: { compact?: boolean }) {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="搜索模型…"
-              className="flex-1 rounded border border-border bg-background px-2 py-1 text-[13px] outline-none"
+              className="flex-1 rounded border border-border bg-background px-2 py-1 text-sm outline-none"
             />
             <button
               onClick={() => void load(true)}
@@ -98,7 +98,7 @@ export function ModelPicker({ compact = false }: { compact?: boolean }) {
                     set({ currentModel: m.selector } as never);
                     setOpen(false);
                   }}
-                  className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] transition-colors duration-200 hover:bg-background"
+                  className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors duration-200 hover:bg-background"
                   aria-label={`使用模型 ${m.name}`}
                 >
                   <span className="truncate">{m.name}</span>

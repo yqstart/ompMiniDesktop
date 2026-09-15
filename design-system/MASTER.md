@@ -37,14 +37,15 @@
 
 - 界面：系统栈 `-apple-system, "PingFang SC", "Microsoft YaHei", Inter, sans-serif`。中文优先苹方 / 微软雅黑。
 - 等宽（工具参数、路径、session id 前缀）：`"JetBrains Mono", "SF Mono", Menlo, monospace`，12–13px。
-- 字阶：会话标题 15px/600，消息正文 14px/1.7，时间/角标 12px，顶栏选择器 13px。
+- 字阶：正文默认 14px（body 基准，`text-sm`）；会话标题 15px/600，消息正文 14px/1.7，时间/角标 11px mono，顶栏选择器 13px；工具行 compact 触发态 12px。元信息（时间/计数/路径）统一 11px mono muted，禁止再发明新字阶。
 - 行长：中央消息列 `max-w-3xl`（约 65–75 字符），超长代码块横向滚动不撑破布局。
 
 ## 4. 布局
 
 - V1 两栏：左栏可拖拽（220–480px，默认 264，`sidebarWidth` 存 Zustand + localStorage 持久化；窄窗 <768px 收抽屉）→ 中央流式列居中 `max-w-3xl`。右侧栏 V1 不做。
 - 左栏：顶部主入口「新建会话」（accent 实心）→ 会话搜索框 → 项目卡片 → 按项目分组的手风琴会话组（旋转 chevron + 左侧 hairline 引导线）+ 未归属组 → 底固定「添加项目 / 设置」。
-- 会话行：单行 `● 标题 … 时间 操作`（标题省略 + 右侧 mono 时间 + hover 浮现归档/删除icon，选中行描边高亮）；归档、删除都在行内展示，不另起第二行。
+- 会话行：单行 `● 标题 … 时间/操作`，右侧 68px 固定槽位（时间与操作按钮同槽互斥：hover 时时间 `visibility` 藏、按钮绝对覆盖淡入），行高锁定 `h-9`，悬浮零跳动；删除二次确认用浮层，不撑布局。
+- 项目分组头：单行（chevron + 弹性标题 + 右侧 52px 固定槽位：数量与批量归档/删除同槽互斥、垂直居中 `items-center`），悬浮零跳动；缺失态只在 hover 操作位展示，不常驻挤占标题。
 - 状态收敛：标题框外的独立状态条已下线（`StatusBar` 仅保留读屏播报位）；状态统一进输入框工具行的 `OmpStatusPill`，且仅非就绪（运行中/等待审批/出错/已退出/omp 不可用）才出现，就绪态不占位。
 - 输入框工具行下拉互斥：`composerMenu: model | thinking | permission | null` 存 Zustand，同时只开一个；点击外部 / Esc 关闭（`useDropdown`）。
 - 中央三段：顶栏 44px（标题 + 更新入口，无边框感）→ 消息流（用户气泡右对齐圆角 `rounded-2xl rounded-br-md` + inset ring）→ 会话输入框（整块 `rounded-2xl` 卡：`focus-within` accent 边 + 悬浮阴影，发送为圆形箭头按钮）。

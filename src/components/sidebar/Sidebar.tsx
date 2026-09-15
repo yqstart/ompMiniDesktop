@@ -90,7 +90,7 @@ function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void })
           aria-label={s.running ? "运行中" : undefined}
           aria-hidden={!s.running}
         />
-        <span className={`min-w-0 flex-1 truncate text-[13px] ${active ? "font-medium" : ""}`}>{s.title}</span>
+        <span className={`min-w-0 flex-1 truncate text-sm ${active ? "font-medium" : ""}`}>{s.title}</span>
         <span className="w-[68px] shrink-0 truncate text-right font-mono text-[11px] text-muted/80 group-focus-within:invisible group-hover:invisible">
           {time}
         </span>
@@ -169,11 +169,24 @@ export function Sidebar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const refreshAll = () =>
+    Promise.all([
+      api.listProjects().then((all) => set({ projects: all })).catch(() => undefined),
+      api.listSessions().then((all) => set({ sessions: all })).catch(() => undefined),
+    ]).then(() => undefined);
+
   const refreshSessions = () =>
     api
       .listSessions()
       .then((all) => set({ sessions: all }))
       .catch(() => undefined);
+
+  // 打开/切换项目时刷新项目与会话：终端里新建的会话（同 cwd）会实时归属进来，
+  // 而不是等下次启动才出现在项目下。
+  const openProject = (id: string) => {
+    set({ activeProjectId: id });
+    void refreshAll();
+  };
 
   /** 批量操作：ids 为空时 toast 提示；成功后清选择 + 刷新；失败逐条展示。 */
   const runBatch = async (kind: "archive" | "delete", ids: string[]) => {
@@ -211,10 +224,18 @@ export function Sidebar() {
   }));
   const visibleOrphanActive = orphanActive.filter(matchSession);
   const visibleOrphanArchived = orphanArchived.filter(matchSession);
+  // 项目卡片计数：用实时分组结果（与下方会话组一致），不用后端返回时
+  // sessionCount 快照（后端计数是 list_projects 时刻的值，会滞后）。
+  const liveCount = (pid: string) => {
+    const g = visibleGroups.find((x) => x.project.id === pid);
+    return g ? g.active.length + g.archived.length : 0;
+  };
 
   return (
     <aside className="flex h-full w-full flex-col overflow-hidden border-r border-border bg-sidebar">
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+      {/* macOS Overlay 红绿灯占位：与新建会话按钮错开，避免重叠 */}
+      <div data-tauri-drag-region className="h-9 shrink-0" aria-hidden />
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {/* 顶部：新建会话（DSH 式主入口） */}
         <button
           onClick={async () => {
@@ -230,13 +251,13 @@ export function Sidebar() {
             }
           }}
           disabled={projects.length === 0 || projects.every((p) => p.missing)}
-          className="mb-2 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-white transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          className="mb-2 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           aria-label="新建会话"
         >
           <Plus size={14} aria-hidden /> 新建会话
         </button>
         {/* 搜索入口（V1 仅占位过滤本地列表，后续接全局搜索） */}
-        <div className="mb-2 flex items-center gap-2 rounded-lg bg-background/70 px-2.5 py-2 text-[13px] text-muted">
+        <div className="mb-2 flex items-center gap-2 rounded-lg bg-background/70 px-2.5 py-2 text-sm text-muted">
           <Search size={14} aria-hidden className="shrink-0" />
           <input
             value={query}
@@ -248,23 +269,23 @@ export function Sidebar() {
         </div>
         <div className="px-2 pt-1 pb-1.5 text-[11px] font-medium tracking-wide text-muted">项目</div>
         {projects.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border px-3 py-3 text-[13px] text-muted">
+          <div className="rounded-lg border border-dashed border-border px-3 py-3 text-sm text-muted">
             暂无项目，先添加一个目录
           </div>
         ) : (
           projects.map((p) => (
             <button
               key={p.id}
-              onClick={() => set({ activeProjectId: p.id })}
+              onClick={() => openProject(p.id)}
               className={`mb-0.5 block w-full cursor-pointer rounded-lg px-2.5 py-2 text-left transition-colors duration-150 ${
                 p.id === activeProjectId ? "bg-background shadow-[inset_0_0_0_1px_var(--color-border)]" : "hover:bg-background/60"
               }`}
               aria-label={`项目 ${p.name}`}
             >
               <div className="flex items-center gap-2">
-                <span className="truncate text-[13px] font-medium">{p.name}</span>
+                <span className="truncate text-sm font-medium">{p.name}</span>
                 {p.missing && <span className="shrink-0 rounded bg-warn/15 px-1 py-px text-[11px] text-warn">目录缺失</span>}
-                <span className="ml-auto shrink-0 font-mono text-[11px] text-muted">{p.sessionCount}</span>
+                <span className="ml-auto shrink-0 font-mono text-[11px] text-muted">{liveCount(p.id)}</span>
               </div>
               <div className="mt-0.5 truncate font-mono text-[11px] text-muted">{p.path}</div>
             </button>
@@ -320,31 +341,38 @@ export function Sidebar() {
                 aria-label={`项目 ${project.name} 的会话，进行中 ${active.length}，已归档 ${archived.length}`}
               >
                 <ChevronRight size={12} aria-hidden className="shrink-0 transition-transform duration-150 group-open/proj:rotate-90" />
-                <span className="truncate font-medium text-foreground">{project.name}</span>
-                <span className="ml-auto flex shrink-0 items-center gap-0.5 font-mono">
-                  {active.length}{archived.length > 0 ? ` · ${archived.length}` : ""}
-                </span>
-                {project.missing && <span className="shrink-0 text-warn">缺失</span>}
-                {/* 项目级批量操作：归档/删除该项目全部进行中会话 */}
-                <span className="hidden shrink-0 items-center gap-0.5 group-hover/proj:flex" onClick={(e) => e.preventDefault()}>
-                  <button
-                    onClick={() => void runBatch("archive", active.map((s) => s.id))}
-                    disabled={busy || active.length === 0}
-                    className="cursor-pointer rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground disabled:opacity-40"
-                    aria-label={`归档 ${project.name} 全部进行中会话`}
-                    title="归档本项目全部进行中会话"
-                  >
-                    <Archive size={12} />
-                  </button>
-                  <button
-                    onClick={() => void runBatch("delete", active.map((s) => s.id))}
-                    disabled={busy || active.length === 0}
-                    className="cursor-pointer rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-danger disabled:opacity-40"
-                    aria-label={`删除 ${project.name} 全部进行中会话`}
-                    title="删除本项目全部进行中会话"
-                  >
-                    <Trash2 size={12} />
-                  </button>
+                <span className="min-w-0 flex-1 truncate font-medium text-foreground">{project.name}</span>
+                {/* 右侧固定槽位：数量与批量按钮同槽互斥，垂直居中，悬浮零跳动 */}
+                <span className="relative flex h-5 w-[52px] shrink-0 items-center justify-end">
+                  <span className="font-mono group-hover/proj:invisible">
+                    {active.length}{archived.length > 0 ? ` · ${archived.length}` : ""}
+                  </span>
+                  {project.missing ? (
+                    <span className="absolute inset-y-0 right-0 hidden items-center text-warn group-hover/proj:flex">
+                      缺失
+                    </span>
+                  ) : (
+                    <span className="absolute inset-y-0 right-0 hidden items-center gap-0.5 group-hover/proj:flex" onClick={(e) => e.preventDefault()}>
+                      <button
+                        onClick={() => void runBatch("archive", active.map((s) => s.id))}
+                        disabled={busy || active.length === 0}
+                        className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground disabled:opacity-40"
+                        aria-label={`归档 ${project.name} 全部进行中会话`}
+                        title="归档本项目全部进行中会话"
+                      >
+                        <Archive size={12} />
+                      </button>
+                      <button
+                        onClick={() => void runBatch("delete", active.map((s) => s.id))}
+                        disabled={busy || active.length === 0}
+                        className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-danger disabled:opacity-40"
+                        aria-label={`删除 ${project.name} 全部进行中会话`}
+                        title="删除本项目全部进行中会话"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </span>
+                  )}
                 </span>
               </summary>
               <div className="mt-0.5 space-y-px border-l border-border pl-1.5">
@@ -390,27 +418,29 @@ export function Sidebar() {
             <details className="group/orphan mt-1">
               <summary className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] text-muted transition-colors duration-150 hover:bg-background/70 [&::-webkit-details-marker]:hidden">
                 <ChevronRight size={12} aria-hidden className="transition-transform duration-150 group-open/orphan:rotate-90" />
-                未归属会话
-                <span className="ml-auto font-mono">{visibleOrphanActive.length + visibleOrphanArchived.length}</span>
-                <span className="hidden shrink-0 items-center gap-0.5 group-hover/orphan:flex" onClick={(e) => e.preventDefault()}>
-                  <button
-                    onClick={() => void runBatch("archive", visibleOrphanActive.map((s) => s.id))}
-                    disabled={busy || visibleOrphanActive.length === 0}
-                    className="cursor-pointer rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground disabled:opacity-40"
-                    aria-label="归档全部未归属会话"
-                    title="归档全部未归属会话"
-                  >
-                    <Archive size={12} />
-                  </button>
-                  <button
-                    onClick={() => void runBatch("delete", visibleOrphanActive.map((s) => s.id))}
-                    disabled={busy || visibleOrphanActive.length === 0}
-                    className="cursor-pointer rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-danger disabled:opacity-40"
-                    aria-label="删除全部未归属会话"
-                    title="删除全部未归属会话"
-                  >
-                    <Trash2 size={12} />
-                  </button>
+                <span className="min-w-0 flex-1 truncate">未归属会话</span>
+                <span className="relative flex h-5 w-[52px] shrink-0 items-center justify-end">
+                  <span className="font-mono group-hover/orphan:invisible">{visibleOrphanActive.length + visibleOrphanArchived.length}</span>
+                  <span className="absolute inset-y-0 right-0 hidden items-center gap-0.5 group-hover/orphan:flex" onClick={(e) => e.preventDefault()}>
+                    <button
+                      onClick={() => void runBatch("archive", visibleOrphanActive.map((s) => s.id))}
+                      disabled={busy || visibleOrphanActive.length === 0}
+                      className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground disabled:opacity-40"
+                      aria-label="归档全部未归属会话"
+                      title="归档全部未归属会话"
+                    >
+                      <Archive size={12} />
+                    </button>
+                    <button
+                      onClick={() => void runBatch("delete", visibleOrphanActive.map((s) => s.id))}
+                      disabled={busy || visibleOrphanActive.length === 0}
+                      className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-danger disabled:opacity-40"
+                      aria-label="删除全部未归属会话"
+                      title="删除全部未归属会话"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </span>
                 </span>
               </summary>
               <div className="mt-0.5 space-y-px border-l border-border pl-1.5">
@@ -451,14 +481,14 @@ export function Sidebar() {
               // M1-6 补 toast
             }
           }}
-          className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] transition-colors duration-150 hover:bg-background/70"
+          className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors duration-150 hover:bg-background/70"
           aria-label="添加项目"
         >
           <FolderPlus size={15} /> 添加项目
         </button>
         <button
           onClick={() => set({ settingsOpen: true, sidebarOpen: false })}
-          className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] transition-colors duration-150 hover:bg-background/70"
+          className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors duration-150 hover:bg-background/70"
           aria-label="设置"
         >
           <Settings size={15} /> 设置

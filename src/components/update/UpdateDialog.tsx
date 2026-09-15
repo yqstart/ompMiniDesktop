@@ -18,7 +18,7 @@ export function UpdateBell() {
     <>
       <button
         onClick={openUpdateDialog}
-        className="flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-[13px] text-accent transition-colors duration-200 hover:bg-background"
+        className="flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-sm text-accent transition-colors duration-200 hover:bg-background"
         aria-label={label}
       >
         <ArrowUpCircle size={14} aria-hidden />

@@ -11,10 +11,10 @@ export function EmptyState({ kind }: { kind: "no-project" | "no-session" | "arch
           </svg>
         </div>
         <h1 className="text-[17px] font-semibold tracking-tight">先添加一个项目</h1>
-        <p className="max-w-xs text-[13px] leading-6 text-muted">
+        <p className="max-w-xs text-sm leading-6 text-muted">
           选择一个本地目录作为项目，会话会绑定到它启动
         </p>
-        <button className="mt-1 cursor-pointer rounded-full bg-accent px-5 py-2 text-[13px] font-medium text-white transition-opacity duration-150 hover:opacity-90">
+        <button className="mt-1 cursor-pointer rounded-full bg-accent px-5 py-2 text-sm font-medium text-white transition-opacity duration-150 hover:opacity-90">
           选择目录
         </button>
       </div>
@@ -40,7 +40,7 @@ export function EmptyState({ kind }: { kind: "no-project" | "no-session" | "arch
       </p>
       <button
         onClick={() => set({ sidebarOpen: false })}
-        className="mt-1 cursor-pointer rounded-full border border-border px-5 py-2 text-[13px] text-foreground transition-colors duration-150 hover:bg-surface"
+        className="mt-1 cursor-pointer rounded-full border border-border px-5 py-2 text-sm text-foreground transition-colors duration-150 hover:bg-surface"
       >
         新建会话
       </button>

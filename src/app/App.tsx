@@ -142,7 +142,7 @@ export function App() {
   }, []);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background text-[13px] text-foreground">
+    <div className="flex h-screen overflow-hidden bg-background text-sm text-foreground">
       <SidebarShell
         width={sidebarWidth}
         onResize={(w) => {

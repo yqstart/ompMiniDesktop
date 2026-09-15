@@ -88,7 +88,7 @@ export function Composer() {
             {running ? (
               <button
                 onClick={() => activeSessionId && api.stop(activeSessionId).catch(() => undefined)}
-                className="ml-1 flex cursor-pointer items-center gap-1.5 rounded-full bg-accent px-3.5 py-1.5 text-[13px] text-white transition-opacity duration-150 hover:opacity-90"
+                className="ml-1 flex cursor-pointer items-center gap-1.5 rounded-full bg-accent px-3.5 py-1.5 text-sm text-white transition-opacity duration-150 hover:opacity-90"
                 aria-label="停止"
               >
                 <span className="h-2 w-2 rounded-sm bg-white" aria-hidden />

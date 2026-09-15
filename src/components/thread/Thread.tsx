@@ -19,7 +19,7 @@ export function Thread() {
           )}
           {m.kind === "text" && <div className="max-w-full overflow-x-auto whitespace-pre-wrap">{m.text}</div>}
           {m.kind === "thinking" && (
-            <details className="rounded-xl border border-border/70 bg-surface/60 px-3 py-2 text-[13px] text-muted">
+            <details className="rounded-xl border border-border/70 bg-surface/60 px-3 py-2 text-sm text-muted">
               <summary className="cursor-pointer transition-colors duration-150 hover:text-foreground [&::-webkit-details-marker]:hidden">
                 {m.complete ? `已思考 ${m.seconds} 秒` : "思考中…"}
               </summary>

@@ -53,7 +53,7 @@ export function PermissionBadge({ compact = false, align = "right" }: { compact?
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className={`flex cursor-pointer items-center gap-1.5 rounded-full px-2.5 py-1 transition-colors duration-150 hover:bg-background ${compact ? "text-xs" : "text-[13px]"} ${danger ? "text-danger" : "text-muted hover:text-foreground"}`}
+        className={`flex cursor-pointer items-center gap-1.5 rounded-full px-2.5 py-1 transition-colors duration-150 hover:bg-background ${compact ? "text-xs" : "text-sm"} ${danger ? "text-danger" : "text-muted hover:text-foreground"}`}
         aria-label={`权限：${LABEL[shown] ?? shown}`}
         aria-expanded={open}
       >
@@ -67,7 +67,7 @@ export function PermissionBadge({ compact = false, align = "right" }: { compact?
             <button
               key={m}
               onClick={() => void pick(m, "global")}
-              className="block w-full cursor-pointer rounded px-2 py-1.5 text-left text-[13px] transition-colors duration-200 hover:bg-background"
+              className="block w-full cursor-pointer rounded px-2 py-1.5 text-left text-sm transition-colors duration-200 hover:bg-background"
             >
               {LABEL[m]}
               {m === "yolo" && <span className="text-danger"> · 跳过所有确认</span>}
@@ -79,7 +79,7 @@ export function PermissionBadge({ compact = false, align = "right" }: { compact?
               key={m}
               onClick={() => void pick(m, "session")}
               disabled={!activeSessionId}
-              className="block w-full cursor-pointer rounded px-2 py-1.5 text-left text-[13px] transition-colors duration-200 hover:bg-background disabled:opacity-40"
+              className="block w-full cursor-pointer rounded px-2 py-1.5 text-left text-sm transition-colors duration-200 hover:bg-background disabled:opacity-40"
             >
               {LABEL[m]}
             </button>

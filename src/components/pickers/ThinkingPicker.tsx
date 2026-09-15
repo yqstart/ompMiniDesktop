@@ -23,7 +23,7 @@ export function ThinkingPicker({ compact = false }: { compact?: boolean }) {
       <button
         onClick={() => setOpen(!open)}
         className={`flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 transition-colors duration-150 hover:bg-background ${
-          compact ? "text-xs text-muted hover:text-foreground" : "text-[13px]"
+          compact ? "text-xs text-muted hover:text-foreground" : "text-sm"
         }`}
         aria-label="选择思考等级"
         aria-expanded={open}
@@ -45,7 +45,7 @@ export function ThinkingPicker({ compact = false }: { compact?: boolean }) {
                   setOpen(false);
                   if (activeSessionId) void api.setThinking(activeSessionId, lv).catch(() => undefined);
                 }}
-                className="block w-full cursor-pointer rounded px-2 py-1.5 text-left text-[13px] transition-colors duration-200 hover:bg-background disabled:cursor-not-allowed disabled:opacity-40"
+                className="block w-full cursor-pointer rounded px-2 py-1.5 text-left text-sm transition-colors duration-200 hover:bg-background disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label={`思考等级 ${lv}${ok ? "" : "（不支持）"}`}
               >
                 {lv}

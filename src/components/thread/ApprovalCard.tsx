@@ -27,7 +27,7 @@ export function ApprovalCard({ m, sessionId }: { m: Extract<ViewMsg, { kind: "ap
     >
       <div className="flex items-center gap-2">
         <ShieldAlert size={15} className="text-warn" aria-hidden />
-        <span className="text-[13px] font-medium">需要你的确认</span>
+        <span className="text-sm font-medium">需要你的确认</span>
       </div>
       <div className="mt-1.5 rounded-lg bg-code px-2.5 py-2 font-mono text-xs whitespace-pre-wrap">{m.title}</div>
       <div className="mt-2.5 flex flex-wrap gap-2">
@@ -35,21 +35,21 @@ export function ApprovalCard({ m, sessionId }: { m: Extract<ViewMsg, { kind: "ap
           onClick={() => decide("once")}
           disabled={busy !== null}
           autoFocus
-          className="cursor-pointer rounded-lg bg-accent px-3.5 py-1.5 text-[13px] text-white transition-opacity duration-150 hover:opacity-90 disabled:opacity-50"
+          className="cursor-pointer rounded-lg bg-accent px-3.5 py-1.5 text-sm text-white transition-opacity duration-150 hover:opacity-90 disabled:opacity-50"
         >
           {busy === "once" ? "处理中…" : "允许一次"}
         </button>
         <button
           onClick={() => decide("always")}
           disabled={busy !== null}
-          className="cursor-pointer rounded-lg border border-border px-3.5 py-1.5 text-[13px] transition-colors duration-150 hover:bg-background disabled:opacity-50"
+          className="cursor-pointer rounded-lg border border-border px-3.5 py-1.5 text-sm transition-colors duration-150 hover:bg-background disabled:opacity-50"
         >
           {busy === "always" ? "处理中…" : "总是允许（本会话）"}
         </button>
         <button
           onClick={() => decide("deny")}
           disabled={busy !== null}
-          className="cursor-pointer rounded-lg border border-danger/50 px-3.5 py-1.5 text-[13px] text-danger transition-colors duration-150 hover:bg-danger hover:text-white disabled:opacity-50"
+          className="cursor-pointer rounded-lg border border-danger/50 px-3.5 py-1.5 text-sm text-danger transition-colors duration-150 hover:bg-danger hover:text-white disabled:opacity-50"
         >
           {busy === "deny" ? "处理中…" : "拒绝"}
         </button>

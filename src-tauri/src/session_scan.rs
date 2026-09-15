@@ -92,6 +92,8 @@ fn parse_ts(s: &str) -> Option<i64> {
 }
 
 /// cwd 归组：按真实路径前缀匹配，不猜 slug。
+/// 归一化：去首尾空白与末尾 `/`；macOS 上 `/tmp` 常为 `/private/tmp` 符号链接，
+/// 两边统一展开后再比，避免“同目录不同写法”导致会话掉进未归属。
 pub fn project_of(cwd: &str, projects: &[String]) -> Option<String> {
     if cwd.is_empty() {
         return None;
@@ -100,6 +102,17 @@ pub fn project_of(cwd: &str, projects: &[String]) -> Option<String> {
         let mut s = p.trim().to_string();
         while s.len() > 1 && s.ends_with('/') {
             s.pop();
+        }
+        // /tmp -> /private/tmp（macOS 符号链接），失败则保留原文
+        if s == "/tmp" || s.starts_with("/tmp/") {
+            if let Ok(canon) = std::fs::canonicalize(&s) {
+                return canon.to_string_lossy().to_string();
+            }
+            return s.replacen("/tmp", "/private/tmp", 1);
+        }
+        // 项目侧也做一次 canonicalize（目录真实存在时），消掉一切符号链接差异
+        if let Ok(canon) = std::fs::canonicalize(&s) {
+            return canon.to_string_lossy().to_string();
         }
         s
     };

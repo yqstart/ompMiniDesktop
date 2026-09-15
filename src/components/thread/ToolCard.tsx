@@ -26,8 +26,8 @@ export function ToolCard({ m }: { m: Extract<ViewMsg, { kind: "tool" }> }) {
         ) : (
           <Loader2 size={14} className="shrink-0 animate-spin text-accent" aria-hidden />
         )}
-        <span className="font-mono text-[13px] font-medium">{m.name}</span>
-        {m.intent && <span className="truncate text-[13px] text-muted">· {m.intent}</span>}
+        <span className="font-mono text-sm font-medium">{m.name}</span>
+        {m.intent && <span className="truncate text-sm text-muted">· {m.intent}</span>}
         <ChevronRight
           size={14}
           aria-hidden
