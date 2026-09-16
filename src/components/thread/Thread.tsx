@@ -1,11 +1,11 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Check, Copy } from "reicon-react";
+import { Bulb, Check, ChevronRight, Copy } from "reicon-react";
 import { THREAD_PAGE, useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
 import { api } from "@shared/api";
 import type { ViewMsg } from "@shared/types";
-import { ToolCard } from "./ToolCard";
+import { ToolRow } from "./ToolRow";
 import { ApprovalCard } from "./ApprovalCard";
 import { UiRequestCard } from "./UiRequestCard";
 import { MentionChips } from "./MentionChips";
@@ -90,12 +90,19 @@ export function Thread() {
      </button>
     </div>
    )}
-   {shown.map((m) => (
-    <ThreadRow key={m.id} m={m} sessionId={activeSessionId} cwd={cwd} />
+   {shown.map((m, i) => (
+    <ThreadRow key={m.id} m={m} sessionId={activeSessionId} cwd={cwd} tight={isTrace(m) && isTrace(shown[i - 1])} />
    ))}
   </div>
  );
 }
+
+/**
+ * 「执行痕迹」类消息（工具调用 / 思考）：它们在流里成串出现，行与行之间收紧间距
+ * （`mb-4` → 无），读起来是一段紧凑的时间线；正文段落才用整档间距隔开。
+ */
+const isTrace = (m: ViewMsg | undefined): boolean =>
+ !!m && (m.kind === "tool" || m.kind === "thinking");
 
 /**
  * 单条消息行（V2 M8）。
@@ -105,10 +112,21 @@ export function Thread() {
  * `mergeViewMsgs` 只替换发生变化的那条消息、其余保持**同一对象引用**，
  * 所以浅比较即能让"只有正在流式的那一行"重渲染。
  */
-const ThreadRow = memo(function ThreadRow({ m, sessionId, cwd }: { m: ViewMsg; sessionId: string | null; cwd: string }) {
+const ThreadRow = memo(function ThreadRow({
+ m,
+ sessionId,
+ cwd,
+ tight,
+}: {
+ m: ViewMsg;
+ sessionId: string | null;
+ cwd: string;
+ /** 上一条也是执行痕迹：间距收紧，成串的工具行读成一段。 */
+ tight?: boolean;
+}) {
  const t = useText();
  return (
-  <div className="mb-4 text-sm leading-[1.7]">
+  <div className={`text-sm leading-[1.7] ${tight ? "mb-1" : "mb-4"}`}>
    {m.kind === "user" && (
     <div className="group/user ml-auto w-fit max-w-[85%]">
      <div className="rounded-lg rounded-br-sm border border-border bg-surface px-3.5 py-2">
@@ -147,14 +165,22 @@ const ThreadRow = memo(function ThreadRow({ m, sessionId, cwd }: { m: ViewMsg; s
     </div>
    )}
    {m.kind === "thinking" && (
-    <details className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-muted">
-     <summary className="cursor-pointer transition-colors duration-100 hover:text-foreground [&::-webkit-details-marker]:hidden">
+    <details className="group/think">
+     <summary className="flex w-fit cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-[3px] text-[13px] text-muted transition-colors duration-100 hover:bg-hover">
+      <Bulb size={13} className="shrink-0" aria-hidden />
       {m.complete ? fmt(t.thoughtDone, m.seconds) : t.thinking}
+      <ChevronRight
+       size={12}
+       aria-hidden
+       className="shrink-0 transition-transform duration-150 group-open/think:rotate-90"
+      />
      </summary>
-     <div className="mt-1 whitespace-pre-wrap">{m.text}</div>
+     <div className="mt-0.5 mb-1 ml-6 max-h-80 overflow-auto pr-1 text-[13px] leading-6 whitespace-pre-wrap text-muted">
+      {m.text}
+     </div>
     </details>
    )}
-   {m.kind === "tool" && <ToolCard m={m} cwd={cwd} />}
+   {m.kind === "tool" && <ToolRow m={m} cwd={cwd} />}
    {m.kind === "plan" && <PlanCard m={m} />}
    {m.kind === "approval" && sessionId && <ApprovalCard m={m} sessionId={sessionId} />}
    {m.kind === "ui" && sessionId && <UiRequestCard m={m} sessionId={sessionId} />}

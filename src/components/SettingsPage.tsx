@@ -1,20 +1,21 @@
-import { Check, Copy, FolderError, Language, Loader, Refresh } from "reicon-react";
+import { Check, Copy, FolderError, Loader, Refresh } from "reicon-react";
 import { useApp } from "../stores/app";
 import { checkForUpdate, getAppVersion, openUpdateDialog } from "../lib/appUpdate";
 import { pickOmpExecutable, refreshOmpHealth } from "../lib/ompDiag";
-import { LOCALES, fmt, type Locale } from "../lib/locale";
+import { fmt } from "../lib/locale";
 import { useText } from "../lib/useText";
 import { useEffect, useState } from "react";
 import { ArchivedSessions } from "./ArchivedSessions";
 import { MemoryPanel } from "./settings/MemoryPanel";
 import { ModelsPanel } from "./settings/ModelsPanel";
 import { ProvidersPanel } from "./settings/ProvidersPanel";
+import { UsagePanel } from "./settings/UsagePanel";
 
 /** 设置页分页签；顺序即界面顺序。 */
-const TABS = ["general", "providers", "models", "memories", "archived"] as const;
+const TABS = ["general", "providers", "models", "memories", "usage", "archived"] as const;
 
 export function SettingsPage() {
-  const { health, set, update, locale, setLocale } = useApp();
+  const { health, set, update } = useApp();
   const t = useText();
   const [version, setVersion] = useState("…");
   const [diagError, setDiagError] = useState<string | null>(null);
@@ -60,9 +61,10 @@ export function SettingsPage() {
     <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-4 overflow-hidden px-4 pt-6 pb-6">
       <h1 className="shrink-0 text-[17px] font-semibold tracking-tight">{t.title}</h1>
       <p className="shrink-0 text-[13px] text-muted">{t.subtitle}</p>
-      {/* 分页签：设置页五块——通用（本应用诊断 / 更新 / 语言）、供应商（omp 登录登出）、
+      {/* 分页签：设置页六块——通用（本应用诊断 / 更新；界面语言与皮肤是纯展示层偏好，
+          入口在左栏底部「设置」行，这里不重复放）、供应商（omp 登录登出）、
           模型（omp 的模型角色与可用模型目录）、记忆（omp 项目记忆的查看 / 删除）、
-          已归档对话（归档管理面，归档会话不在左栏出现，这里是它们唯一的入口）。 */}
+          使用统计（会话 jsonl 的用量聚合，只读）、已归档对话（归档管理面，归档会话不在左栏出现）。 */}
       <div role="tablist" aria-label={t.title} className="flex shrink-0 gap-1 border-b border-border">
         {TABS.map((k) => (
           <button
@@ -81,7 +83,9 @@ export function SettingsPage() {
                   ? t.tabModels
                   : k === "memories"
                     ? t.tabMemories
-                    : t.tabArchived}
+                    : k === "usage"
+                      ? t.tabUsage
+                      : t.tabArchived}
           </button>
         ))}
       </div>
@@ -95,34 +99,10 @@ export function SettingsPage() {
           <ModelsPanel />
         ) : tab === "memories" ? (
           <MemoryPanel />
+        ) : tab === "usage" ? (
+          <UsagePanel />
         ) : (
           <>
-            <section aria-label={t.languageSection} className="rounded-md border border-border bg-surface p-3.5">
-              <div className="flex items-center gap-2">
-                <Language size={14} aria-hidden className="text-muted" />
-                <h2 className="text-sm font-medium">{t.languageSection}</h2>
-              </div>
-              <div className="mt-2 flex gap-2" role="radiogroup" aria-label={t.languageSection}>
-                {LOCALES.map((l: Locale) => {
-                  const selected = locale === l;
-                  return (
-                    <button
-                      key={l}
-                      role="radio"
-                      aria-checked={selected}
-                      onClick={() => setLocale(l)}
-                      className={`cursor-pointer rounded-md border px-3 py-1.5 text-[13px] transition-colors duration-100 ${selected
-                        ? "border-accent/60 bg-accent/10 text-foreground"
-                        : "border-border text-muted hover:bg-hover hover:text-foreground"
-                        }`}
-                    >
-                      {l === "zh-CN" ? "简体中文" : "English"}
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="mt-1.5 text-[13px] text-faint">{t.languageHint}</p>
-            </section>
             <section aria-label={t.diagSection} className="rounded-md border border-border bg-surface p-3.5">
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-medium">{t.diagSection}</h2>

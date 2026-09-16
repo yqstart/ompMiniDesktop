@@ -3,44 +3,52 @@
 /* ---- ompMiniDesktop tokens（design-system/MASTER.md §2） ----
    稳重的分层灰：应用底 → 侧栏 → 卡片 → 悬浮，四层各差一档亮度，
    边界优先靠**亮度差**表达，边框只做最后一道描线。
-   中性灰不带暖色偏移（此前浅色偏暖、深色沉底过黑，是与 Cursor / Codex 差距的主因）。
-   唯一的彩色是 `accent`（稀释后同时充当全局悬浮色与选中色）。 */
+   侧栏比消息流亮一档（VSCode 式）：导航面稍亮、内容面沉下去，
+   两套皮肤同向。两套皮肤同一个色相家族（冷青灰 H≈200°）：中性、不带暖色偏移，
+   浅色不刺白、深色不落纯黑；唯一的彩色是 `accent`（稀释后同时充当全局悬浮色与选中色）。
+
+   皮肤切换（跟随系统 / 深色 / 浅色，见 src/lib/theme.ts）就落在这两个选择器上：
+   浅色是 `:root` 默认值，深色全挂在 `.dark` 下，切皮肤 = 切 `<html>` 的 class。 */
 :root {
- --background: #fbfbfc;
- --sidebar: #f4f4f6;
+ --background: #edf0f2;
+ --sidebar: #f6f8f9;
  --surface: #ffffff;
  --elevated: #ffffff;
- --foreground: #17171a;
- --muted: #5b5b66;
- --faint: #6e6e79;
- --border: #e5e5ea;
- --border-soft: #efeff2;
+ --foreground: #1e2226;
+ --muted: #4c565d;
+ --faint: #626c74;
+ --border: #d3dade;
+ --border-soft: #e6ebed;
  --accent: #4f46e5;
  --danger: #dc2626;
  --warn: #b45309;
  --ok: #047857;
- --code: #f1f1f4;
+ /* 代码块底比应用底（#EDF0F2）再深一点：对调后两者原本几乎同色，
+     代码块会糊在消息流里（实测对比度不到 1.03:1）。 */
+ --code: #e1e7e9;
  /* 全局悬浮色 = 会话选中底色的同一配方（accent 稀释 15%）。
      悬浮与选中同源，选中靠更实的填充 + 左侧细条拉开层次。 */
  --hover: color-mix(in srgb, var(--accent) 15%, transparent);
  --active: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
+/* 深色：侧栏取主色 `#222628`（比消息流亮一档），应用底退到 `#1B1F21`，
+   再往上卡片 / 浮层逐层变亮——四层从暗到亮：底 → 侧栏 → 卡片 → 悬浮。 */
 .dark {
- --background: #0b0b0d;
- --sidebar: #0f0f12;
- --surface: #16161a;
- --elevated: #1c1c21;
- --foreground: #e9e9ec;
- --muted: #9a9aa4;
- --faint: #7c7c87;
- --border: #232329;
- --border-soft: #1a1a1f;
+ --background: #1b1f21;
+ --sidebar: #222628;
+ --surface: #2a2f32;
+ --elevated: #31363a;
+ --foreground: #e9ecee;
+ --muted: #b0b7bc;
+ --faint: #8e969b;
+ --border: #3a4145;
+ --border-soft: #2f3538;
  --accent: #818cf8;
  --danger: #f87171;
  --warn: #fbbf24;
  --ok: #34d399;
- --code: #121216;
+ --code: #15181a;
  --hover: color-mix(in srgb, var(--accent) 15%, transparent);
  --active: color-mix(in srgb, var(--accent) 22%, transparent);
 }
@@ -166,9 +174,10 @@ body {
  outline-offset: 0;
 }
 
-/* 焦点已由容器表达的输入框关掉内层焦点环（左栏搜索框：容器 `focus-within` 变外框，
-   内层再来一圈就是双框）。这里的自定义 CSS 不分层，优先级高于 utilities——
-   Tailwind 的 `outline-none` 压不住上面那条，只能用这个类显式关掉。 */
+/* 焦点已由容器表达的输入框关掉内层焦点环（左栏搜索框、会话输入框：容器 `focus-within`
+   变外框，内层再来一圈就是双框——输入框比卡片小一圈且无圆角，那圈方形描边会横跨卡片圆角）。
+   这里的自定义 CSS 不分层，优先级高于 utilities——Tailwind 的 `outline-none` 压不住上面那条，
+   只能用这个类显式关掉。 */
 .no-focus-ring:focus-visible {
  outline: none;
 }

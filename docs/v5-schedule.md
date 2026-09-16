@@ -1,0 +1,107 @@
+# ompMiniDesktop 五期（V5）功能排期：使用统计页
+
+> 基线：V1–V4 已交付（见 `CHANGELOG.md`）；本文只排五期，不重开已冻结的口径。
+> 目标：把 omp 本地会话记录里的**用量**聚合进设置页——新增「使用统计」页签（当日 / 近 7 日 / 近 30 日 / 全部）。
+> 约束不变：真相在 omp/jsonl；覆盖层只有 `overlay.json`；不用轮询文件做伪实时；前端不自算 token（聚合与派生指标一律后端算）。
+
+## 0. 范围与口径
+
+用户口径：「在设置中新增一个『使用统计』tab，类似于 ZCode 中的使用统计功能。」
+
+| 页签 | 区块 | 映射的上游物 | 写入什么 |
+|---|---|---|---|
+| 使用统计 | 范围切换（今日 / 近 7 日 / 近 30 日 / 全部） | 会话 jsonl 里 assistant 消息的 `usage` | **不写** |
+| 使用统计 | 总览卡（tokens / 费用 / 请求 / 工具 / 命中率 / 活跃度 / 最常用模型 / 峰值时段 / 日均） | 同上（派生指标后端算） | — |
+| 使用统计 | 每日 Token 趋势、按模型、工具调用分布、时段分布、按项目 | 同上 + `session` 行的 cwd 归属 | — |
+
+**这一页只读**：不写 omp 配置、不写覆盖层、不落盘、不联网上报；刷新 = 重扫一遍 jsonl。设置页「唯一改 omp 状态的是供应商 / 模型两个页签」的口径不变。
+
+范围外（本批不做，见 §4）：导出 CSV / 报表、额度与预算告警、按 agent / 子代理拆分、成本预测、把统计做成独立窗口或左栏入口。
+
+## 1. 上游事实（本机 omp 18.x 实测）
+
+**① 用量真值只在 assistant 消息里**
+
+```jsonc
+// jsonl 一行（type=message, message.role=assistant）
+{"message": {
+  "role": "assistant", "provider": "opencode-go", "model": "deepseek-v4.1-flash",
+  "usage": { "input": 1493, "output": 207, "cacheRead": 35328, "cacheWrite": 0,
+             "totalTokens": 37028, "reasoningTokens": 77,
+             "cost": {"input": 0.00022395, "output": 0.0001242, "cacheRead": 0.00010598,
+                      "cacheWrite": 0, "total": 0.00045413} },
+  "timestamp": 1789544420709, "duration": 1200, "ttft": 320 }}
+```
+
+- **`totalTokens = input + output + cacheRead + cacheWrite`**——全量 1474 条实测逐条成立；`input` 是**未缓存**输入（缓存读 / 写是独立两项），`reasoningTokens` 是 `output` 的子集。所以「总 token」取 `totalTokens`，分段展示为 未缓存输入 / 输出 / 缓存读·写，**推理不重复计入**。
+- `cost.total` 是 omp 按模型定价算的**美元**值（本机 1474 条里 1471 条 > 0）；本地模型 / 无定价时为 0——界面据此把「费用」整块降级成「该模型没有定价数据」。
+- `timestamp` 是**毫秒数字**（不是 ISO 串；顶层 `timestamp` 才是 ISO），`duration` / `ttft` 实测是毫秒。没有 `timestamp` 的行无法按日归档，直接跳过（宁缺勿错算）。
+- 缺 `totalTokens` 的老数据按四段之和兜底。
+
+**② 工具调用在消息内容块里**
+
+`message.content[]` 里的 `{type:"toolCall", name}` 就是这次请求发起的工具调用（本机 2070 次 / 13 种）。另有 `custom` 行的 `tool_execution_start`（同样带 toolName），是**另一份**记录，不需要重复计数。
+
+**③ 会话 cwd 在 `session` 行，且不在首行**
+
+实测 11 个会话文件的**首行都是 `title` 行**，`session` 行在第 2 行（含 `id` / `cwd` / `timestamp`）。统计要按项目分组就得读这一行，所以只读**文件头 32KB** 找 `type:"session"`（不为一个 cwd 去读几十 MB 的文件）；命中不到就按「未归属」分组。
+
+**④ 统计必须全量读，和列表的「有窗口扫描」不是一回事**
+
+`list_sessions` 只看头尾 64KB（列表只需要标题 / cwd），而用量散落在文件各处，**必须整文件逐行读**。因此本页的预算是另一套：文件数 3000 / 读取 256MB / 墙钟 5s，任何一道到点即停并把 `truncated` 置 true（界面明写「已到扫描预算（已扫描 N 个会话文件），统计可能不全」）。
+行级预筛（先看原始行里有没有 `"usage"` / `"toolCall"` 再解析 JSON）让本机 29MB / 15 文件的整轮扫描保持在**百毫秒级**。
+
+**⑤ ZCode 的「使用统计」长什么样（对标口径）**
+
+ZCode 的统计页（`/Applications/ZCode.app` 内 `settings.usage.*` 文案）是：**来自本地应用会话历史**，档位 今日 / 近 7 日 / 近 30 日 / 自定义，指标 = tokens 用量、会话数量、消息数量、调用次数、工具调用合计、Cache 命中率、最常用模型（占比）、峰值时段、活跃天数、当前 / 最长连续天数、累计使用时长、日均积分，图表 = Token 活动热力图、每日 Token 趋势、模型用量、工具调用分布。
+omp 侧没有「积分 / 套餐额度」这套服务端概念，本页去掉额度块，其余指标按 omp 能给的真值对齐（见 §2）。统计表结构可参考 ZCode 的 `turn_usage` / `model_usage` / `tool_usage` 三张表（`~/.zcode/cli/db/db.sqlite`）——omp 没有这类表，所以聚合是**每次现扫 jsonl**。
+
+## 2. 实现
+
+**后端（`src-tauri/src/usage.rs`，1 个命令）**
+
+| 命令 | 干什么 |
+|---|---|
+| `get_usage_stats(days)` | 扫 `<agentDir>/sessions/*/*.jsonl`，按 `days`（1 / 7 / 30 / null = 全部）过滤后聚合：总量 + 按日 + 按模型 + 按项目 + 按工具 + 按小时 |
+
+- **范围语义**：`days = N` → 最近 N 个**自然日**（含今天，本地时区）；日期键是本地 `YYYY-MM-DD`，ISO 串字典序即时间序。
+- **按日补零**：趋势图要有连续的柱子，所以范围内没跑的日子也补 `0`；`全部` 从最早有数据的一天起算，**最多补 120 天**（`CHART_MAX_DAYS`，一年以上只画最近这段）。
+- **派生指标全部后端算**（与「前端不自算 token」同一条口径）：Cache 命中率 = `cacheRead / (input + cacheRead)`；活跃天数；当前 / 最长连续天数（今天没跑但昨天跑了不断签，GitHub 口径）；峰值时段（本地小时）；日均 token（按活跃天数摊）；最常用模型（按 token，带占比）；工具调用合计与种类数；模型耗时合计（`duration` 累加）。
+- **归属复用唯一入口** `owner_project`（真实路径前缀匹配、最长优先、符号链接展开），与左栏分组 / 归档面同一条规则；读不到 cwd 的分「未归属」（`projectId: null`、`name` 为空串，界面兜中文）。
+- **预算三道**（文件数 / 字节 / 墙钟）+ `truncated` 标志；单测把预算压到极小验证「到点即停、不硬扫」。
+- 10 项单测：行解析（含 `totalTokens` 兜底、ISO 时间戳兜底、非 assistant 行拒绝）、会话头解析、聚合（总量 / 模型 / 工具 / 时段 / 补零天）、范围过滤与边界、派生指标（命中率 / 连续天数 / 最常用模型占比）、项目归属与未归属、预算截断、坏行与缺失目录、非 jsonl 跳过。
+- 真机基准测试（默认 `#[ignore]`）：`OMP_BENCH=1 cargo test --manifest-path src-tauri/Cargo.toml scans_real -- --ignored --nocapture`。
+
+**前端（`src/components/settings/UsagePanel.tsx`）**
+
+- 设置页从五个页签扩到**六个**：`通用` / `供应商` / `模型` / `记忆` / **`使用统计`** / `已归档对话`（记忆与使用统计同属数据面，放在归档前面）。
+- 标题行：`ChartBar` 图标 + 「使用统计」+ 范围切换（`role="radiogroup"`，样式与「界面语言」同款稀释强调色）+ 右侧「刷新」；下面一行口径说明（数据来自本机 omp 会话记录、含已归档会话、本应用只读不上报）。
+- 总览 9 张卡（2 列 / 3 列自适应）：tokens 用量（含 未缓存输入 · 输出 · 缓存读·写，过长换行不截断关键数字）、预估费用（无定价时明说）、请求数（含会话数）、工具调用（含种类数）、Cache 命中率（含缓存读 token）、活跃天数（含连续 / 最长）、最常用模型（含占比）、峰值时段（含该时段 token）、日均 tokens。
+- 每日趋势：**堆叠柱**（自下而上 未缓存输入 `accent/25` / 缓存读·写 `accent/50` / 输出 `accent`——单强调色靠透明度分级，不引第二配色），柱高按峰值日缩放、柱宽上限 28px；悬停整列高亮并在标题行显示该日读数（不悬停显示范围合计）；柱子带 `role="img"` + 本地化 `aria-label` / `title`；补零天无柱但是完整列。
+- 按模型 / 按项目 / 工具分布：行 = 名称 + mono 副信息 + 比例条 + 次数 / token / 费用（费用列无定价时显示 `$0`）；工具分布最多 20 项（后端截断）。
+- 时段分布：24 根迷你柱，峰值小时用实心 accent、其余 `accent/30`，横轴 00 / 06 / 12 / 18 / 23。
+- 全部比例条、柱体都是纯 CSS（`height/width` 百分比），**不引图表库**；颜色只取 `accent` 的透明度档。
+- 切范围 / 刷新时保留上一份数据显示（按钮转 loader），不闪空、不跳布局。
+
+**契约与文案**
+
+- `src/shared/ipc.ts` 新增 `getUsageStats: "get_usage_stats"`；`src/shared/types.ts` 新增 `UsageBucket` / `UsageDayRow` / `UsageModelRow` / `UsageProjectRow` / `UsageToolRow` / `UsageHourRow` / `UsageTopModel` / `UsageTotals` / `UsageStats`（字段含义与 `usage.rs` 注释逐条对齐）；`src/shared/api.ts` 新增 `getUsageStats(days)`。
+- 字典新增 40 键 × 2 语言（`tabUsage` … `usageColSessions`）；上游数据（provider / model / 工具名 / 日期串）不进字典，原样透传。
+
+## 3. 完成口径
+
+- `pnpm check`（typecheck + lint + test + e2e:ipc + e2e:rpc）全绿：前端 **96** 项测试通过（1 项 bench 跳过）；`e2e:ipc` 覆盖 **55** 个命令（新增 1 个统计命令，实现位置扫描扩到 `usage.rs`）。
+- `cargo test` **71** 项通过（其中 usage 10 项，另 1 项 `#[ignore]` 的真机基准）。
+- 真机实测（本机 omp 18.x，`pnpm tauri:dev`，真实数据 11 个会话文件 / 10 个会话）：
+  - 后端基准：整轮扫描 **334ms**，`truncated=false`；token 合计 **286,330,226**（未缓存输入 6,237,183 / 输出 1,185,798 / 缓存读 278,907,245）、请求 1,474、工具调用 2,070、费用 **$2.1247**、最常用模型 `opencode-go/deepseek-v4.1-flash`。
+  - 界面数字与原始 jsonl **逐项对齐**（独立 Python 交叉核对）：tokens 286.33M、请求 1,474、会话 10、工具 2,070 / 13 种、命中率 98%、峰值时段 09:00–10:00（78.66M）、最常用模型占比 66%、按模型两行（1028 次 / 187.97M / $1.63 与 446 次 / 98.36M / $0.4951）、工具分布 read 551 / edit 496 / bash 486 / eval 306 / grep 81、按项目 1 行（ompMiniDesktop，10 个会话）。
+  - 六页签渲染与切换；范围切换（今日 → 1 根柱；近 7 日 → 补零 7 根柱）；趋势悬停读数；中英切换后页签与页内文案同步（Usage / Today / Last 7 days / Requests / Cache hit rate / Top model / By project…）。
+  - 视觉核对（截图）：卡片栅格、堆叠柱（单日数据时柱宽被 28px 上限收住、居中）、模型 / 工具 / 项目三组比例条与时段柱、费用列对齐，均无错位与溢出。
+
+## 4. 后续候选（需用户确认再开工）
+
+- **导出 / 报表**：把当前范围的聚合导出 CSV 或 Markdown——落盘涉及路径与格式，先定边界。
+- **额度与预算**：omp 没有套餐额度概念，只有费用估算；要「今天花了多少、超过 N 元提醒」这类功能得先定阈值存放位置（覆盖层 vs 本应用偏好）。
+- **按 agent / 子代理拆分**：jsonl 里能拿到 `querySource` 之类的来源字段（本机数据未见子代理行），要先在真实数据上验证字段再排。
+- **热力图**：ZCode 有 Token 活动热力图（按天 × 小时）；本页已有按日柱状与按时段柱状，是否再加一张热力图看真实使用是否觉得需要。
+- **项目筛选联动**：当前「按项目」是只读分布，若要「只看某个项目」需要给命令加参数并与左栏项目选择联动。

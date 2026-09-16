@@ -76,7 +76,7 @@ pub struct ModelRef {
 pub struct ContextUsage {
     pub tokens: Option<i64>,
     pub context_window: Option<i64>,
-    /// omp 给的是 0–1 比例；前端展示时统一换算成百分比。
+    /// omp 给的就是百分比（0–100，实测 `usedTokens / contextWindow * 100`，不是 0–1 比例）。
     pub percent: Option<f64>,
 }
 
@@ -130,6 +130,11 @@ pub struct SessionMeta {
     pub todo_phases: Option<serde_json::Value>,
     /// 可用命令（`available_commands_update` 缓存）。
     pub commands: Option<serde_json::Value>,
+    /// 上下文非消息部分的字符权重（`get_state` 的 systemPrompt / dumpTools 估算）。
+    /// **不进前端**：只给 `get_context_breakdown` 用，原始 systemPrompt / dumpTools 有几十 KB，
+    /// 留在快照里会让每次 `omp-state` 推送都背上它。
+    #[serde(skip)]
+    pub ctx_weights: Option<crate::context::Weights>,
 }
 
 impl SessionMeta {
@@ -152,6 +157,8 @@ impl SessionMeta {
             duration_ms: None,
             ttft_ms: None,
             commands: None,
+            // 系统提示词 / 工具定义只在 get_state 里有，就地折成字符权重后丢掉原文
+            ctx_weights: crate::context::weights_from_state(d),
         }
     }
 
@@ -591,6 +598,17 @@ async fn handle_frame(
             }
         }
     }
+    // 一轮终了回读状态：`contextUsage` 只出现在 get_state 回包里，不回读的话输入框工具行上的
+    // 上下文占用会一直停在「打开会话那一刻」，压缩入口（≥80%）也就永远不触发。
+    // 只认终态 agent_end：非终态（还有排队 / 子代理在跑）回读没有意义。
+    if v.get("type").and_then(|t| t.as_str()) == Some("agent_end")
+        && v.get("isTerminal").and_then(|b| b.as_bool()).unwrap_or(true)
+    {
+        if let Some(line) = jsonl_line(STATE_SYNC_ID, "get_state", serde_json::Value::Null) {
+            let _ = stdin.write_all(line.as_bytes()).await;
+            let _ = stdin.flush().await;
+        }
+    }
     dispatch(app, key, evt, status, v);
 }
 
@@ -786,13 +804,14 @@ mod tests {
         let d = serde_json::json!({
             "model": opus(),
             "thinkingLevel": "high",
-            "contextUsage": { "tokens": 22678, "contextWindow": 1000000, "percent": 0.023 }
+            // percent 是 0–100 的百分比（真机 18.2.1 实测 28529/1000000 → 2.8529）
+            "contextUsage": { "tokens": 22678, "contextWindow": 1000000, "percent": 2.2678 }
         });
         let m = SessionMeta::from_state(&d);
         let cu = m.context_usage.as_ref().expect("contextUsage 应被解析");
         assert_eq!(cu.tokens, Some(22678));
         assert_eq!(cu.context_window, Some(1000000));
-        assert!((cu.percent.unwrap_or_default() - 0.023).abs() < 1e-9);
+        assert!((cu.percent.unwrap_or_default() - 2.2678).abs() < 1e-9);
 
         let msg = serde_json::json!({
             "role": "assistant",

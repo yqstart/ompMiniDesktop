@@ -1,5 +1,6 @@
 import { useApp } from "../../stores/app";
 import { api } from "@shared/api";
+import { contextPercent } from "../../lib/ctxUsage";
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
 
@@ -87,8 +88,8 @@ function compact(n: number): string {
 export function CompactButton() {
  const t = useText();
  const { activeSessionId, currentRuntime, statusBySession } = useApp();
- const pct = currentRuntime?.contextUsage?.percent;
- const normalized = pct == null ? null : pct <= 1 ? pct * 100 : pct;
+ // 口径见 lib/ctxUsage：omp 的 percent 就是 0–100，不做区间猜测
+ const normalized = contextPercent(currentRuntime?.contextUsage);
  // 上下文占用 ≥80% 才露面：平时不占工具行，满了才是行动点。
  if (normalized == null || normalized < 80 || !activeSessionId) return null;
  const busy = statusBySession[activeSessionId]?.state === "running";
@@ -135,7 +136,7 @@ export function RuntimeStats() {
  const parts: string[] = [];
  const cu = rt.contextUsage;
  if (cu) {
-  const pct = cu.percent == null ? null : cu.percent <= 1 ? cu.percent * 100 : cu.percent;
+  const pct = contextPercent(cu);
   if (pct != null)
    parts.push(fmt(t.usageContextPercent, pct >= 10 ? Math.round(pct) : pct.toFixed(1)));
   else if (cu.tokens != null && cu.contextWindow)

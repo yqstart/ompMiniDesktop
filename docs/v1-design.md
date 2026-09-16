@@ -162,6 +162,11 @@ RPC 流（stdout JSONL）与 jsonl 文件是同一套语义的两面，V1 统一
 
 ### 8.3 ToolCard 四态（逐字抄 gallery 语义）
 
+> **形态已改（去卡片化，2026-09-16）**：四态语义不变，但工具调用不再是"卡片盒子"，
+> 而是**一行式执行痕迹**（`ToolRow` = 图标 + 本地化动词 + 文件基名 + 目录 + `+N −M`，
+> 点开才给意图 / 参数摘要 / 输出）。下面的盒子示意图只代表 V1 当时的样子，
+> 现行口径以 `design-system/MASTER.md` §8 `ToolRow` 为准。
+
 ```
 ▶ bash · 执行 echo 测试                    ●运行中
   $ echo hello-spike                       [等宽 12px]

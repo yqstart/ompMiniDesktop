@@ -7,33 +7,41 @@
 ## 1. 产品模式与风格
 
 - 产品模式：桌面端 agent 会话壳（dense chat + 回放），不是 landing 页，不是 dashboard。
-- 视觉风格：quiet utility（安静工具风）。分级靠**亮度**（background → sidebar → surface → elevated 四层）与 1px 低对比线，不靠装饰；唯一记忆点是「工具调用卡的紧凑时间线」。
+- 视觉风格：quiet utility（安静工具风）。分级靠**亮度**（background → sidebar → surface → elevated 四层）与 1px 低对比线，不靠装饰；唯一记忆点是「工具调用行的紧凑时间线」（一行一个调用，不许做成卡片，见 §8 `ToolRow`）。
 - 稳重 = 少动效、少圆角、少强调色占比；形状统一（同一类控件只有一种圆角/一种悬浮色），层次清楚（段落之间有明确分隔），密度紧凑（列表行 32px、正文 14px、控件 13px）。
 - 反模式：拒绝暖米色 + 衬线大标题、拒绝纯黑 + 荧光绿、拒绝报纸式 hairline 密排（三者都是 AI 默认脸，本项目禁用）。
 
 ## 2. 色彩（token 定义见 `src/index.css`）
 
-四层灰阶，深色从下往上逐层变亮、浅色从上往下逐层变暗；边界优先靠**亮度差**表达，
-1px 边框只做最后一道描线。浅色中性偏冷（不带暖偏移），深色不落纯黑。
+四层灰阶，两套皮肤**同向**：应用底 → 侧栏 → 卡片 → 悬浮逐层变亮（侧栏比消息流亮一档：
+导航面稍亮、内容面沉下去，VSCode 式）；边界优先靠**亮度差**表达，1px 边框只做最后一道描线。
+两套皮肤同一个冷青灰色相家族（H≈200°，不带暖偏移）：浅色不刺白、深色不落纯黑。
 
 | token | 浅色 | 深色 | 用途 |
 |---|---|---|---|
-| `background` | `#FBFBFC` | `#0B0B0D` | 应用底、消息流底 |
-| `sidebar` | `#F4F4F6` | `#0F0F12` | 左栏底 |
-| `surface` | `#FFFFFF` | `#16161A` | 卡片、气泡、工具卡、输入框 |
-| `elevated` | `#FFFFFF` | `#1C1C21` | 下拉面板、浮层、对话框 |
-| `foreground` | `#17171A` | `#E9E9EC` | 正文 |
-| `muted` | `#5B5B66` | `#9A9AA4` | 次要文字（≥4.5:1） |
-| `faint` | `#6E6E79` | `#7C7C87` | 元信息（时间 / 计数 / 路径，≥4.5:1） |
-| `border` | `#E5E5EA` | `#232329` | 分隔线、卡边、输入框边 |
-| `border-soft` | `#EFEFF2` | `#1A1A1F` | 弱分隔（分组引导线、卡内分隔线） |
+| `background` | `#EDF0F2` | `#1B1F21` | 应用底、消息流底 |
+| `sidebar` | `#F6F8F9` | `#222628` | 左栏底（**深色主色**） |
+| `surface` | `#FFFFFF` | `#2A2F32` | 卡片、气泡、工具卡、输入框 |
+| `elevated` | `#FFFFFF` | `#31363A` | 下拉面板、浮层、对话框 |
+| `foreground` | `#1E2226` | `#E9ECEE` | 正文 |
+| `muted` | `#4C565D` | `#B0B7BC` | 次要文字（≥4.5:1） |
+| `faint` | `#626C74` | `#8E969B` | 元信息（时间 / 计数 / 路径，≥4.5:1） |
+| `border` | `#D3DADE` | `#3A4145` | 分隔线、卡边、输入框边 |
+| `border-soft` | `#E6EBED` | `#2F3538` | 弱分隔（分组引导线、卡内分隔线） |
 | `accent` | `#4F46E5` | `#818CF8` | 发送、主按钮、运行态、链接、选中 |
 | `danger` | `#DC2626` | `#F87171` | 删除、拒绝、失败边 |
 | `warn` | `#B45309` | `#FBBF24` | 审批、yolo、目录缺失 |
 | `ok` | `#047857` | `#34D399` | 成功态 |
-| `code` | `#F1F1F4` | `#121216` | 行内代码与代码块底 |
+| `code` | `#E1E7E9` | `#15181A` | 行内代码与代码块底（比应用底再深一档，否则糊在消息流里） |
 | `hover` | accent 15% | accent 15% | **全局唯一悬浮底** |
 | `active` | accent 22% | accent 22% | 选中底（行 / 分组头 / 菜单当前项） |
+
+- **皮肤切换**（跟随系统 / 深色 / 浅色）落在 `<html class="dark">` 这一个 class 上：
+  浅色是 `:root` 默认值、深色全挂在 `.dark` 下（`src/index.css`），逻辑在 `src/lib/theme.ts`，
+  入口是左栏底部「设置」行右侧的三档分段控件（`ThemeToggle`），它**左边紧邻界面语言**三档分段控件
+  （`LanguageToggle`，跟随系统 / 中 / EN）——两个展示层偏好共用这一行，设置页都不重复放。纯展示层偏好，
+  存 localStorage（`omp.theme.v1` / `omp.locale.v1`），不写 omp 配置、不写覆盖层；
+  **侧栏最小值就是这一行的内容宽度**（§4）。
 
 - **强调色只用一个**（`accent`），禁止第二强调色。审批卡的「允许一次」用 `accent` 实心按钮、Deny 用 `danger` 描边（hover 走 `bg-danger/15`，不整块翻红）。
 - **悬浮色全局统一为 `hover`**：行、按钮、菜单项、下拉项、补全项、图标按钮一律 `hover:bg-hover`。禁止再出现 `hover:bg-background` / `hover:bg-surface` 这类第二套悬浮灰（同一个界面里飘着三四种灰是上一版最主要的不统一）。危险项 hover 用 `hover:bg-danger/15`，warning 项用 `hover:bg-warn/15`。
@@ -50,18 +58,18 @@
 
 ## 4. 布局
 
-- V1 两栏：左栏可拖拽（220–480px，默认 264，`sidebarWidth` 存 Zustand + localStorage 持久化；窄窗 <768px 收抽屉）→ 中央流式列居中 `max-w-3xl`。右侧栏 V1 不做。
-- 左栏：顶部主入口「添加项目」（稀释强调色，`FolderPlus`；与中央空态「选择目录」共用 `src/lib/projects.ts` 的 `pickAndAddProject`）→ 会话搜索框 → 按项目分组的手风琴会话组（旋转 chevron + 左侧 hairline 引导线）+ 未归属组 → 底固定「设置」。**「添加项目」+ 搜索框是固定区**（`sticky top-0` + `bg-sidebar` 不透明底 + `z-10`，`-mx-2 px-2` 让底色铺满）：只有会话列表滚，两块不跟着滚走；用 sticky 而不是拆成两个滚动容器，是为了让搜索框与会话行共用同一条滚动条留白、宽度始终对齐。**左栏只列进行中的会话**：已归档的对话不在左栏出现（V2 M11），统一在「设置 › 已归档对话」里看、恢复与删除。
+- V1 两栏：左栏可拖拽（**292–480px，默认 292**，`sidebarWidth` 存 Zustand + localStorage 持久化；窄窗 <768px 收抽屉）→ 中央流式列居中 `max-w-3xl`。右侧栏 V1 不做。**下限 = 左栏底部那一行的内容宽度**（设置全称 + 语言 + 皮肤并排不挤压，按最宽的英文界面算；实测 288px 临界 + 4px 字体余量），不为审美而定——改它之前先量那一行。
+- 左栏：顶部主入口「添加项目」（稀释强调色，`FolderPlus`；与中央空态「选择目录」共用 `src/lib/projects.ts` 的 `pickAndAddProject`）→ 会话搜索框 → 按项目分组的手风琴会话组（旋转 chevron + 左侧 hairline 引导线）+ 未归属组 → 底固定「设置」行（左「设置」，右端依次是 `LanguageToggle` 与 `ThemeToggle`）。**「添加项目」+ 搜索框是固定区**（`sticky top-0` + `bg-sidebar` 不透明底 + `z-10`，`-mx-2 px-2` 让底色铺满）：只有会话列表滚，两块不跟着滚走；用 sticky 而不是拆成两个滚动容器，是为了让搜索框与会话行共用同一条滚动条留白、宽度始终对齐。**左栏只列进行中的会话**：已归档的对话不在左栏出现（V2 M11），统一在「设置 › 已归档对话」里看、恢复与删除。
 - 会话行：单行 `● 标题 … 时间/操作`，右侧 68px 固定槽位（时间与操作按钮同槽互斥：hover 时时间 `visibility` 藏、按钮绝对覆盖淡入），行高锁定 `h-8`，悬浮零跳动；删除二次确认用浮层，不撑布局。**行首不设复选框**：不做多选/批量工具条，行内只保留单会话的「归档」与「删除」；批量操作只挂在分组头。选中态见 §2：`bg-active` 底 + 2px accent 左竖条 + 标题 `font-semibold`（未选中行 `hover:bg-hover`）。
 - 项目分组头：单行（chevron + 弹性标题 + 右侧 76px 固定槽位：数量与三个批量按钮同槽互斥、垂直居中 `items-center`），悬浮零跳动；缺失态在标题旁常驻小角标，hover 操作区三按钮照常可用。分组头三个操作 = **归档全部对话 / 删除全部对话 / 删除工作区**，**三者只作用于进行中的会话**（归档的对话归设置页管，不在这里被顺手删掉）：「归档全部对话」直接执行（可逆，去设置页可恢复）；「删除全部对话」走分组内浮层二次确认，真删这些会话的 jsonl、不可恢复；「删除工作区」同样浮层确认，只解绑目录、不删文件，名下对话全部归档保留（后端 `remove_project` 按 cwd 扫描 + `archived[id]=true`），可在「设置 › 已归档对话」里找回。确认框不撑布局。**会话行不设复选框**，多选/批量工具条一律不做，批量入口只在分组头。当前项目（`activeProjectId`）用与会话行同一套选中视觉（`bg-accent/15` 底 + 3px accent 左竖条 + accent 文件夹图标），文件夹类标题（项目 / 未归属）统一 `font-semibold` + 图标，层级靠字号与深浅而非第二种颜色。
-- 状态收敛：标题框外的独立状态条已下线（`StatusBar` 仅保留读屏播报位）；状态统一进输入框工具行——`OmpStatusPill`（常驻展示，借鉴 Cursor / Codex 底部状态条：就绪显示「就绪」绿点常亮，非就绪用颜色 + 文字双信号强调，避免用户误以为状态丢失）+ `RuntimeStats`（上下文占用 / 本轮 token / 耗时 / TTFT，全部来自 `omp-state` 真值透传，无真值整块不渲染）。
+- 状态收敛：标题框外的独立状态条已下线（`StatusBar` 仅保留读屏播报位）；状态统一进输入框工具行——`OmpStatusPill`（常驻展示，借鉴 Cursor / Codex 底部状态条：就绪显示「就绪」绿点常亮，非就绪用颜色 + 文字双信号强调，避免用户误以为状态丢失）+ `RuntimeStats`（上下文占用 / 本轮 token / 耗时 / TTFT，全部来自 `omp-state` 真值透传，无真值整块不渲染）；工具行**右组**（`ml-auto`）自左向右是 `ContextMeter`（容量环，七期）→ `ModelPicker` → `ThinkingPicker` → 发送 / 停止。
 - 窄窗抽屉入口：桌面侧栏 `hidden md:block`，顶栏左侧常驻「打开侧栏」按钮（`md:hidden`）——否则 <768px 下项目列表与设置完全不可达。打开会话 / 新建会话会自动收起抽屉。
 - 左栏搜索框（Cursor / DSH 式一体搜索框）：图标内置、整块 `rounded-md` + `border-border`；`focus-within:border-accent/70`（焦点**只**由这圈外框表达，输入框自身不画内层焦点环：`no-focus-ring`）；有字时才出现清除按钮（`X`），不占位跳动；有过滤词时分组头上方显示「N 个标题匹配」，无匹配分组自动折叠。输入 ≥2 字时下方另起**内容命中**区（V2 M7b）：行 = 标题 + 归档角标 + 命中次数（11px mono）+ 两行片段（`line-clamp-2`，命中词 `<mark class="bg-accent/25">`），整行可点即打开会话；顶部一行说明「内容命中 N 个会话 / 正在搜索正文…」，被预算截断时补「已到预算上限，结果可能不全」。
-- 左栏扫描窗口提示（V2 M7a）：列表底部固定区只放「设置」；会话文件总数超过本次扫描窗口时，在「设置」上方加一条 11px muted 提示「已扫描最近 N 个会话（共 M 个）」+ 细边按钮「继续扫描更早的 500 个」（达上限显示「已达上限（5000）」并禁用）。**不占会话行、不进分组头**，因为它不属于任何项目。
+- 左栏扫描窗口提示（V2 M7a）：列表底部固定区只放「设置」行（设置 + 语言与皮肤切换）；会话文件总数超过本次扫描窗口时，在「设置」上方加一条 11px muted 提示「已扫描最近 N 个会话（共 M 个）」+ 细边按钮「继续扫描更早的 500 个」（达上限显示「已达上限（5000）」并禁用）。**不占会话行、不进分组头**，因为它不属于任何项目。
 - 左栏项目结构（单层分组，禁止双层）：顶部「添加项目」→ 一体搜索框 → 按项目分组的手风琴会话组（分组头即项目入口：名 + mono 路径尾段 + 右侧 76px 固定槽位；点击分组头切换 `activeProjectId`，新建会话落到它；缺失态在标题旁常驻小角标）→ 未归属组。**禁止在分组上方另起一排项目快捷卡片**（之前红框那排与分组重复，造成“一个项目出现两次”，已删除）。
 - 输入框工具行与上方上下文条下拉互斥：`composerMenu: model | thinking | permission | project | branch | null` 存 Zustand，同时只开一个；点击外部 / Esc 关闭（`useDropdown`）。
-- 输入框上方上下文条（`ContextBar`，在输入框卡片**外**、卡片上方，与卡片内文字左对齐）：左「项目」右「git 分支」，13px muted，与卡片同宽 `max-w-3xl` + 容器 `px-4`；两者都可点开且统一向上弹（只遮消息流，不遮正在打字的输入框）。一个项目都没有时整条不渲染。项目名 / 分支名不截断，窄窗口由整行 `flex-wrap` 换行兜底。分支是**只读**控件：非 git 目录显示「非 Git 目录」，不无声消失。
-- 中央三段：顶栏 44px（标题 13px/600 + 复制会话为 Markdown + 更新入口，1px `border` 分隔）→ 消息流（用户气泡右对齐 `rounded-lg rounded-br-sm` + `border-border`，不用 inset-ring 代替边框）→ 会话输入框（整块 `rounded-xl` 卡：`focus-within:border-accent/70`、等待审批时 `border-warn/60`，发送为 28px 方形箭头按钮）。
+- 输入框上方上下文条（`ContextBar`，在输入框卡片**外**、卡片上方，与卡片内文字左对齐）：左「项目」右「git 分支」，再往右「用量限额」（`UsageLimits`，没有配额数据时自身不渲染），13px muted，与卡片同宽 `max-w-3xl` + 容器 `px-4`；三者都可点开且统一向上弹（只遮消息流，不遮正在打字的输入框）。一个项目都没有时整条不渲染。项目名 / 分支名不截断，窄窗口由整行 `flex-wrap` 换行兜底。分支是**只读**控件：非 git 目录显示「非 Git 目录」，不无声消失。
+- 中央三段：顶栏 44px（标题 13px/600 + 复制会话为 Markdown + 更新入口，1px `border` 分隔）→ 消息流（用户气泡右对齐 `rounded-lg rounded-br-sm` + `border-border`，不用 inset-ring 代替边框；**只有用户气泡、审批卡、UI 请求卡、计划卡是"块"**，助手正文是裸 Markdown、工具调用与思考是一行式痕迹见 §8）→ 会话输入框（整块 `rounded-xl` 卡：`focus-within:border-accent/70`、等待审批时 `border-warn/60`，发送为 28px 方形箭头按钮）。
 - 圆角（`@theme` 覆盖了 Tailwind 默认刻度）：`rounded-sm` 5px（小徽章）/ `rounded-md` 7px（按钮、列表行、搜索框、下拉项、工具卡内块）/ `rounded-lg` 10px（卡片、气泡、下拉面板、对话框）/ `rounded-xl` 12px（输入框卡）/ `rounded-2xl` 14px（备用大容器）。**按钮不再用 `rounded-full`**——只有状态点、选中竖条这类圆点用。
 - 边框：默认 `border-border`；卡内 / 分组内的弱分隔用 `border-border-soft`。禁止再用 `border-border/60`、`/70` 这类透明度档现场手调。
 - 阴影只有两档：`shadow-pop`（下拉、浮层、代码块复制按钮所在层）、`shadow-dialog`（对话框、抽屉）。普通卡片一律不用阴影，靠 `surface` + 边框分层。
@@ -74,7 +82,7 @@
 - 触控目标 ≥ 44px（小图标按钮用 28px 可视 + 44px 热区 padding）。
 - 过渡统一 100ms（`duration-100`，弹层出入可到 150ms），只做 `color / opacity / transform`，禁止布局抖动（hover 不许 scale 位移）。
 - 按钮：async 操作期间禁用 + spinner；审批按钮键盘可达（Tab 顺序 = 视觉顺序，Enter 触发）。
-- 流式：文本打字机追加 + 代码块 skeleton 占位；thinking 默认折叠，流式时显示「思考中…」。- 焦点：所有可交互元素可见 focus ring（`accent` 2px outline）。**例外**：焦点已由容器表达的输入框不画内层环（左栏搜索框，容器 `focus-within:border-accent/70` 即焦点指示）——`src/index.css` 的 `.no-focus-ring` 显式关掉，避免内外双框；该自定义 CSS 不分层，优先级高于 utilities，Tailwind 的 `outline-none` 压不住全局 input 焦点环。
+- 流式：文本打字机追加 + 代码块 skeleton 占位；thinking 默认折叠，流式时显示「思考中…」。- 焦点：所有可交互元素可见 focus ring（`accent` 2px outline）。**例外**：焦点已由容器表达的输入框不画内层环（左栏搜索框、会话输入框，容器 `focus-within:border-accent/70` 即焦点指示）——`src/index.css` 的 `.no-focus-ring` 显式关掉，避免内外双框（输入框无圆角且比卡片窄一圈，内层方环会横跨卡片的圆角，看起来就是"一个圆角的一个方形的"两层框）；该自定义 CSS 不分层，优先级高于 utilities，Tailwind 的 `outline-none` 压不住全局 input 焦点环。
 - 动效：`prefers-reduced-motion` 时关闭打字机/旋转指示，改为静态文案。
 
 ## 6. 文案语气
@@ -95,7 +103,7 @@
 - toolResult 默认截断（前 2000 字符 + 「展开全文」）。
 - 异步内容预留占位，禁止内容跳动（content-jumping）。**滚动条也要占位**：左栏会话列表 `[scrollbar-gutter:stable]`——列表从「不满一屏」长到「有滚动条」时，内容宽度不变、横向不跳一下。
 
-## 8. 组件速查（V1 + 二期 M5 + 三期供应商 / 模型页 + 四期记忆页）
+## 8. 组件速查（V1 + 二期 M5 + 三期供应商 / 模型页 + 四期记忆页 + 五期使用统计页 + 六期用量限额 + 七期上下文容量）
 
 ### 图标（Reicon）
 
@@ -105,18 +113,28 @@
 - **旧名映射**（Reicon 无同名时按下表；未列出的同名直用）：`ArchiveRestore` → `Undo`、`RotateCcw` → `Undo`、`FolderSearch` → `FolderError`、`GitBranch` → `DiagramTree`、`Boxes` → `Layers`、`SlidersHorizontal` → `Sliders`、`ExternalLink` → `ArrowUpRightSquare`、`KeyRound` → `Key`、`Languages` → `Language`、`MessageSquareQuote` → `QuoteDownSquare`、`RefreshCw` → `Refresh`、`Loader2` → `Loader`、`TriangleAlert` / `FileWarning` → `TriangleWarning`。
 - 禁止内联手写 SVG（空态与发送键的自绘图标已并入 Reicon）；禁止 emoji 当图标。
 
-- `ProjectRow` / `SessionRow` / `EmptyState`（空态图标盒：`h-11 w-11` 圆角 `rounded-lg` + `border-border` + `text-muted`，标题 16px semibold，说明 13px muted，按钮 `rounded-md`） / `UserBubble` / `AssistantText` / `ThinkingFold` / `ToolCard` / `ApprovalCard` / `UiRequestCard` / `MentionChips` / `PlanCard` / `SystemDivider` / `Composer`（会话输入框：工具行含 `ModelPicker` / `ThinkingPicker` / `PermissionBadge`，三者只在此出现；另有 `/` 命令补全浮层与 `@` 路径补全浮层，`role="listbox"`，上下键导航/Tab·Enter 选中/Esc 关闭） / `ModelPicker` / `ThinkingPicker` / `PermissionBadge` / `ContextBar` / `ProjectPicker` / `BranchPicker` / `StatusBar` / `ConfirmDialog` / `ProvidersPanel`（含 `LoginPanel` 子组件） / `ModelsPanel`（含 `StarToggle` 子组件） / `ArchivedSessions` / `MemoryPanel`。
+- `ProjectRow` / `SessionRow` / `EmptyState`（空态图标盒：`h-11 w-11` 圆角 `rounded-lg` + `border-border` + `text-muted`，标题 16px semibold，说明 13px muted，按钮 `rounded-md`） / `UserBubble` / `AssistantText` / `ThinkingFold` / `ToolRow` / `ApprovalCard` / `UiRequestCard` / `MentionChips` / `PlanCard` / `SystemDivider` / `Composer`（会话输入框：工具行含 `ModelPicker` / `ThinkingPicker` / `PermissionBadge`，三者只在此出现；另有 `/` 命令补全浮层与 `@` 路径补全浮层，`role="listbox"`，上下键导航/Tab·Enter 选中/Esc 关闭） / `ModelPicker` / `ThinkingPicker` / `PermissionBadge` / `ContextBar` / `ContextMeter`（含文件内私有 `Ring`） / `ProjectPicker` / `BranchPicker` / `UsageLimits`（含文件内私有 `LimitBar`） / `StatusBar` / `ConfirmDialog` / `LanguageToggle` / `ThemeToggle` / `ProvidersPanel`（含 `LoginPanel` 子组件） / `ModelsPanel`（含 `StarToggle` 子组件） / `ArchivedSessions` / `MemoryPanel` / `UsagePanel`（含 `Tile` / `ShareBar` / `DayBar` 文件内私有子组件）。
 - `ApprovalCard` 与 `UiRequestCard` 分工固定，不许互相替代：`ApprovalCard` 只管审批（`extension_ui_request{method:"select", options 含 "Approve"}`，三按钮 = 允许一次 / 总是允许（本会话）/ 拒绝，warn 色边 + 盾牌；回执后进入终态：按钮收起、展示"已允许/已拒绝"结论，不许重复点）；`UiRequestCard` 管其余交互请求（`confirm` 双按钮、`input` 单行、`editor` 多行、非审批 `select` 选项按钮 + `optionDetails` 描述行，accent 色边 + 引号图标），两者出现都滚入视野、等待期间 composer 锁定、取消都回 `{cancelled:true}`。
-- `ContextBar` = 输入框上方一行，由 `ProjectPicker`（项目下拉：切上下文 + 打开该项目最近会话）与 `BranchPicker`（git 分支只读指示器）组成；下拉展开列表里分支项是**静态文本不是按钮**（没有切换动作，只给「刷新」），项目项才是可点按钮。三者只在此出现，左栏分组头不再重复一套。
+- `ContextBar` = 输入框上方一行，由 `ProjectPicker`（项目下拉：切上下文 + 打开该项目最近会话）、`BranchPicker`（git 分支只读指示器）与 `UsageLimits`（用量限额：供应商配额）组成；下拉展开列表里分支项是**静态文本不是按钮**（没有切换动作，只给「刷新」），项目项才是可点按钮。三者只在此出现，左栏分组头不再重复一套。
+- `UsageLimits`（`src/components/composer/UsageLimits.tsx`）= **供应商侧的配额进度条 + 展开明细**（5 小时 / 每周 / 每月——opencode 网站那种限额），数据来自 `omp usage --json`。收起态 = `Gauge` 图标 + 窗口名（5 小时 / 每周 / 每月）+ 细进度条 + 百分比，显示当前会话供应商的**主窗口**（优先 5 小时）；展开态 = 按供应商分段（当前供应商排首位）列出全部窗口，行 = 窗口名 + 进度条 + 百分比 + 「N 后重置」，标题行给「用量限额 · 更新于 N 前」+ 刷新。**一份窗口都拿不到时整块不渲染**（一个供应商都没配就没有入口）；**但「配了供应商、上游却拿不到用量」要显式列出来**——一块「`provider` · 无用量数据 · omp 暂不支持查询这个供应商的用量（模型仍可正常使用）」，最多 4 块、其余折叠成一行（沉默地少一块比一行灰字糟糕得多）。**收起态的可用性 = 「当前模型能不能查」**：有数据 → 进度条 + 可点；没有查询路径（omp 没做这个供应商的探针）或从未查到且失败 → **置灰不可点**（`disabled` + `opacity-40` + `cursor-default`，原因只放悬浮说明，按钮上不写字、不摆假数字）；没有「在用的模型」时仍可点（看全部供应商），有旧数据但刷新失败继续显示旧值。进度条配色走语义色：<80% `accent`、≥80% `warn`、≥100% 或 `exhausted` `danger`（阈值对齐 omp 自己的判定），纯 CSS 百分比宽度、不引图表库，颜色之外还有百分比数字（不作唯一信号）。**它和 `UsagePanel`（设置 › 使用统计 = 本地 jsonl 的 token 聚合）、`ContextMeter`（上下文窗口占用）是三件事**，不许互相替代或合并。
+- `ContextMeter`（`src/components/composer/ContextMeter.tsx`）= **上下文窗口占用**：挂在输入框工具行、`ModelPicker` **左侧**，收起态 = 容量环（纯 CSS `conic-gradient` + 径向遮罩掏空中心的 14px 圆环）+ 11px mono 百分比；占用 ≥80% 转 `warn`（与压缩入口 `CompactButton` 同阈值）。展开态（向上弹）自下而上：标题行（「上下文容量」+ mono 读数 `28.5K/1M（2.9%）`）→ 分段总量条（按窗口占比堆叠，段序与分项行一一对应，颜色只用 accent 的透明度档）→ 分项行（色点 + 名称 + 百分比 + token 数）→ 分隔线 + 「平均缓存命中率」→ 一行 11px `faint` 的估算口径说明。**它只是读数，不是行动点**：上下文满了要压缩走 `CompactButton`，两者不许合并。**没有 `omp-state` 真值时整块不渲染**；分项里「总量 / 窗口 / 消息」是 omp 真值，非消息各档是估算（界面已标注）。**它和 `UsagePanel`（本地 jsonl 的 token 聚合）、`UsageLimits`（供应商配额）是三件事**，不许互相替代或合并。
 - `ModelPicker` **下拉内容 = 常用模型**（设置 ›「模型」挑的星标，按挑选顺序）：常用为空**或**已挑模型在当前目录里全部不可用 → 回退为全部可用模型，此时下拉顶部有一行 11px `text-faint` 说明（「未挑选常用模型时显示全部可用模型 · 可在 设置 › 模型 里挑选」）；**不许出现空下拉**。触发按钮文案只按目录查 `currentModel`，查不到显示「模型」（不许回退目录首项）。行角标只留 context（`1M`/`200K`）与图片（`图`），不显示 thinking 档数；`ThinkingPicker` 只列当前模型支持的档位（`off` 恒在首位），无思考模型在下拉内提示「当前模型不支持思考」。两者触发按钮**按内容自适应宽度、不截断**（`whitespace-nowrap` + `shrink-0`，不设 `max-w-*`），空间不足时由工具行 `flex-wrap` 换行兜底；`ProjectPicker` / `BranchPicker` 触发按钮同规矩。
+- `ToolRow`（`src/components/thread/ToolRow.tsx`，原 `ToolCard`）= **工具调用是一行，不是一个盒子**：`图标 + 动词 + 主片段 + 次要片段 + 行数增量`，13px，无边框无底色，hover / 展开时才铺一层全局 `hover` 底。这是消息流的主纹理（一次会话几百次调用），**禁止再给它加回卡边、卡底或独立卡片容器**——盒子一多，正文就被淹掉。
+  - 取词与切分走纯函数 `src/lib/toolLine.ts`：`read`/`write`/`edit` = 文件基名（正文色）+ 目录（11px `faint` mono，保留结尾斜杠；omp 的 `path:行号:模式` 读法后缀剥掉，行号只出现在展开面板）；`bash` = 整条命令（可截断，`TerminalSquare` 图标）；`grep`/`glob` = 模式 + 路径；未知工具 = omp 的意图（没有才退回原始参数，不许把 `{"i":…}` 糊在行上）。动词进字典（读取 / 写入 / 编辑 / 终端 / 搜索）。
+  - 行数增量（`+N −M`，`ViewMsg.diffStat`）取自 `write.content` / `edit.new_string` / `old_string` 的行数，由后端口径在归一时刻算好；`+N` 用 `ok` 色、`−M` 用 `danger` 色，为 0 的一侧不画。
+  - 状态**只画需要说话的那几种**：成功不画勾（一行流过本身就是回执），失败 = `danger` 色 X + 自动展开，运行中 = `accent` 转圈；状态词始终在 `aria-label` 与 `sr-only` 里（颜色不作唯一信号）。点击整行展开：意图行 + 可点打开的参数摘要 + 输出块（沿用 `bg-code`，截断口径不变）。
+  - 思考块（`ThinkingFold`）同规矩：`Bulb + 思考 · 持续了 N 秒 + chevron` 一行（无卡片外壳），展开才出正文。**连续的执行痕迹行之间用 `mb-1`**（`Thread.tsx` 的 `tight`），正文段落之间仍是 `mb-4`——成串的工具行读成一整段，而不是一摞盒子。
 - 新增组件先查此表，禁止同义重复（如第二种 confirm 框、第二种 tool 卡）。
 - `AssistantText` = 助手正文（Markdown 渲染 + 代码高亮 + 代码块复制 + 流式未闭合围栏 skeleton），实现见 `src/components/thread/AssistantText.tsx`；用户气泡、工具输出不走 Markdown（前者是用户原话，后者是日志）。`RuntimeStats`（用量透传）与 `OmpStatusPill` 同属 `StatusBar.tsx`，只挂输入框工具行。
 - `MentionChips`（`src/components/thread/MentionChips.tsx`）= `@文件` 提及被 omp 读进上下文后的芯片排：11px mono、`rounded-lg` 细边、`FileText` 图标 + 路径 + 「N 行 / NKB」；被跳过的文件（`skippedReason`）换 `FileWarning` + warn 色，tooltip 写「已跳过自动读取（原因）」。输入框里的**草稿芯片**复用同一视觉（在 `Composer` 内联，不另起组件），路径不存在时同样走 warn 色。
 - `ConfirmDialog`（`src/components/ConfirmDialog.tsx`）已落地：受控浮层、Esc/遮罩取消、焦点默认在「取消」、危险操作走 danger 色；批量删除等**跨分组**的危险操作走它，项目分组内的轻量确认仍是分组内联浮层（不撑布局）。`Toast` 仍未落地——新增提示优先用内联错误条，不要临时造第三种提示样式。
-- `SettingsPage`（`src/components/SettingsPage.tsx`）= 设置页外壳，顶部**分页签**（`role="tablist"`，选中页签用 accent 下划线 + 正文色）：`通用`（界面语言 / omp 诊断 / 应用更新）+ `供应商`（omp 登录登出）+ `模型`（常用模型 + 模型角色 + 可用模型目录）+ `记忆`（omp 项目记忆的清单 / 预览 / 删除）+ `已归档对话`。底部「返回」按钮与页签平级，不属于任何页签。
+- `ThemeToggle`（`src/components/ThemeToggle.tsx`）= 皮肤三档分段控件（跟随系统 / 深色 / 浅色），**只挂在左栏底部「设置」行右侧**（全 app 唯一入口，设置页不再重复一份）：`role="radiogroup"` + 三个 `role="radio"`（`aria-checked`），左右方向键组内循环；容器 `rounded-md border-border` + `p-0.5`，档位按钮 26px 见方（`p-1.5` + 14px 图标 `Monitor`/`Moon`/`Sun`），选中项走全局同一套 `bg-active` 底 + `text-foreground`、未选中 `text-muted hover:bg-hover`。它只切 `<html class="dark">`（纯展示层，localStorage `omp.theme.v1`），不写 omp 配置、不写覆盖层。
+- `LanguageToggle`（`src/components/LanguageToggle.tsx`）= 界面语言三档分段控件（**跟随系统 / 简体中文 / English**），**只挂在左栏底部「设置」行、`ThemeToggle` 左侧**（全 app 唯一入口，设置页不再重复一份）：`role="radiogroup"` + 三个 `role="radio"`（`aria-checked`），左右方向键组内循环；容器与选中态样式与 `ThemeToggle` 同款（`rounded-md border-border` + `p-0.5`、`bg-active` 选中底），「跟随系统」档与皮肤同款用 `Monitor` 图标（两处语义都是"听系统的"）、两个语言档显**自称简称**（`中` / `EN`）——窄处放不下全称，全称与「只改本应用展示、不写 omp 配置」那句口径说明进 `title` / `aria-label`；按钮高度对齐主题档位的 26px。语言名是**自称**（`LOCALE_NAMES` / `LOCALE_SHORT` 常量，不随界面语言翻译，所以不进字典）。**`system` 档的实际语言是解析出来的**（`resolveLocale`：`zh*` → 中文，其余 → 英文），系统语言变了界面跟着换；偏好存 localStorage `omp.locale.v1`。
+- `SettingsPage`（`src/components/SettingsPage.tsx`）= 设置页外壳，顶部**分页签**（`role="tablist"`，选中页签用 accent 下划线 + 正文色）：`通用`（omp 诊断 / 应用更新；界面语言不在这里——入口是左栏底部的 `LanguageToggle`）+ `供应商`（omp 登录登出）+ `模型`（常用模型 + 模型角色 + 可用模型目录）+ `记忆`（omp 项目记忆的清单 / 预览 / 删除）+ `使用统计`（本机会话用量的只读聚合）+ `已归档对话`。底部「返回」按钮与页签平级，不属于任何页签。
 - `ProvidersPanel`（`src/components/settings/ProvidersPanel.tsx`）= 「设置 › 供应商」页签内容：omp OAuth 供应商清单（名称 + id + 「已配置 / 未配置」+「登录」；已配置行多一个「登出」），标题行右侧「刷新」（供应商 + 模型目录一起刷，「已配置」标记取自目录）。登录卡（`LoginPanel`，文件内子组件）固定在列表**上方**并自动滚入视野：状态行（等待浏览器授权 / 登录成功 / 登录失败 / 已取消）+ 授权 URL（「打开浏览器」+「复制链接」）+ 上游输出窗口（`<pre>`，尾部 40 行）+ 输入行（回答上游提问）+ 「取消」。登出走 `ConfirmDialog`（danger）。
 - `ModelsPanel`（`src/components/settings/ModelsPanel.tsx`）= 「设置 › 模型」页签内容，三段固定顺序：**常用模型**（本应用偏好，localStorage；说明行 + 空态「还没有常用模型——展开下方『可用模型』，点模型右侧的星标添加」+ 已挑项列表 = 星标（Filled/accent）+ 名称 + mono selector，目录里找不到的项标 warn 色「已不可用」；`StarToggle` 是文件内私有组件，目录行与常用列表共用，`aria-pressed` + 「加入/移出常用模型 {0}」）→ **模型角色**（角色行 = 中文名 + role id + 当前 selector 或「未配置」+「选择 / 清除」，选择器**行内展开**：搜索框 + 按供应商分组的模型列表；`modelRoleStorage=project` 时给 warn 提示）→ **可用模型**（只读，按供应商分组折叠，标题行给「共 N 个模型 · M 个供应商」+「刷新」；标题行下方是**过滤框**，按 `provider/id` 与名称收窄，过滤态下命中组一律展开、组头退化为静态行、标题行改显「匹配 N 个模型 · M 个供应商」、零命中给「无匹配模型」；每个模型行尾是常用星标）。角色的中文名映射（default→默认 / smol→快速 / slow→深思 / vision→视觉 / plan→架构规划 / commit→提交信息 / tiny→微型 / task→子任务 / advisor→顾问）只在本文件里，自定义角色原样显示 id。
 - `ArchivedSessions`（`src/components/ArchivedSessions.tsx`）= 「设置 › 已归档对话」页签内容：标题行（`Archive` 图标 + 「已归档对话」+ mono 计数 + 右侧「刷新」）→ 一行口径说明 → 按项目分组（未归属单独一组；目录缺失时分组头用 warn 色 `FolderSearch`）→ 每组一行行头（组名 + mono 路径 + 计数 + 「恢复全部 / 删除全部」）+ 会话行（标题可点开只读回放 + 日期 + 「恢复 / 删除」）。删除走 `ConfirmDialog`（单个与分组同一个浮层实例）。数据来自 `list_archived_sessions`（不看左栏扫描窗口），恢复/删除经 `src/lib/sessionBatch.ts` 并即时刷新左栏。
+- `UsagePanel`（`src/components/settings/UsagePanel.tsx`）= 「设置 › 使用统计」页签内容：标题行（`ChartBar` + 「使用统计」+ 范围切换 今日 / 近 7 日 / 近 30 日 / 全部 + 「刷新」）→ 口径说明 → 总览 9 卡（`Tile`：11px faint 标签 + mono 数值 + 可选副行，副行**换行不截断**）→ `DayBar` 每日趋势 → 按模型 / 工具分布 / 时段分布 / 按项目（行 = 名称 + mono 副信息 + `ShareBar` + 次数 / token / 费用）。**图表规则（五期新增，全项目通用）**：一律纯 CSS 百分比高度/宽度，**不引图表库**；配色只用 accent 的透明度档（实心 = 主序列、`/50`、`/25`/`/15` 依次减淡），**禁止引入第二强调色**（单强调色约束对图表同样有效）；比例条底槽 `bg-accent/15` + 实心段；柱体宽度设上限（`max-w-[28px]`）并居中，避免天数少时变成色块；悬停用全局 `hover` 底做整列高亮，读数显示在标题行的 mono 小字里（不弹浮层）；每根柱带 `role="img"` + 本地化 `aria-label`。
 - `TopBar`（`src/components/thread/TopBar.tsx`）= 标题备注（点击改名）+ 窄窗抽屉入口 + **复制会话为 Markdown**（`Copy`/`Check` 图标按钮，纯前端剪贴板，导出内容 = 界面上看到的 `ViewMsg`，生成规则见 `src/lib/exportMd.ts`）+ `UpdateBell`。会话为空或未选中时导出按钮禁用。
 - `PlanCard`（`Thread.tsx` 内联）= 任务计划只读卡（`todoPhases` / `todo_reminder`）：阶段名 + 任务清单（✓ 已完成 / ◐ 进行中 / ○ 待办，文字双信号）；`command` 本地输出渲染为灰字代码区（`command_output` 透传）。
 - 流式中追问：输入框 Enter = 排队（`follow_up`，本轮后执行）、⌘/Ctrl+Enter = 转向（`steer`，下一个工具边界生效）、工具行「排队」按钮；排队数徽标（`QueueBadge`）与压缩入口（`CompactButton`，上下文 ≥80% 才出现）挂工具行。

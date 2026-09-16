@@ -12,6 +12,7 @@ import { ThinkingPicker } from "../pickers/ThinkingPicker";
 import { PermissionBadge } from "../pickers/PermissionBadge";
 import { CompactButton, OmpStatusPill, QueueBadge, RuntimeStats } from "../thread/StatusBar";
 import { ContextBar } from "./ContextBar";
+import { ContextMeter } from "./ContextMeter";
 
 /**
  * 会话输入框：随心输入 + 底部工具行（截图布局）。
@@ -476,7 +477,7 @@ export function Composer() {
          ? t.placeholderRunning
          : t.placeholderIdle
      }
-     className="max-h-44 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-sm leading-6 outline-none placeholder:text-faint disabled:opacity-60"
+     className="no-focus-ring max-h-44 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-sm leading-6 outline-none placeholder:text-faint disabled:opacity-60"
     />
     <div className="flex flex-wrap items-center gap-0.5 gap-y-1 px-2 py-1.5">
      <button
@@ -494,6 +495,7 @@ export function Composer() {
      <CompactButton />
      <RuntimeStats />
      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
+      <ContextMeter />
       <ModelPicker compact />
       <ThinkingPicker compact />
       {running ? (

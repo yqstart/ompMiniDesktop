@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp, SIDEBAR_MAX, SIDEBAR_MIN } from "../stores/app";
+import { applyTheme } from "../lib/theme";
 import { useText } from "../lib/useText";
 import { api } from "@shared/api";
 import { Sidebar } from "../components/sidebar/Sidebar";
@@ -10,15 +11,31 @@ import { Composer } from "../components/composer/Composer";
 import { HealthBanner } from "../components/HealthBanner";
 import { SettingsPage } from "../components/SettingsPage";
 
+/** 皮肤落 class（浅色 token 是 `:root` 默认、深色挂在 `.dark`，见 src/index.css）。
+ *  显式选深/浅时不听系统——系统偏好变了也不该动用户手动选的档。 */
 function useTheme() {
+  const theme = useApp((s) => s.theme);
   useEffect(() => {
+    applyTheme(theme);
+    if (theme !== "system") return;
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const apply = () =>
-      document.documentElement.classList.toggle("dark", mq.matches);
-    apply();
+    const apply = () => applyTheme(theme);
     mq.addEventListener("change", apply);
     return () => mq.removeEventListener("change", apply);
-  }, []);
+  }, [theme]);
+}
+
+/** 界面语言：`system` 档跟随系统语言（与皮肤同模式）——WebView 的系统 UI 语言变了就重新解析一次。
+ *  实际语言与 `<html lang>` 的落点在 `stores/app.ts` 的 `setLocaleMode`。 */
+function useLocale() {
+  const localeMode = useApp((s) => s.localeMode);
+  const setLocaleMode = useApp((s) => s.setLocaleMode);
+  useEffect(() => {
+    if (localeMode !== "system") return;
+    const apply = () => setLocaleMode("system");
+    window.addEventListener("languagechange", apply);
+    return () => window.removeEventListener("languagechange", apply);
+  }, [localeMode, setLocaleMode]);
 }
 
 import { useSessionEvents } from "../lib/useSessionEvents";
@@ -121,6 +138,7 @@ export function App() {
   const { settingsOpen, set, sidebarWidth, setSidebarWidth } = useApp();
   const t = useText();
   useTheme();
+  useLocale();
   useSessionEvents();
   useTaskNotifications();
   useEffect(() => {
@@ -130,6 +148,17 @@ export function App() {
   useEffect(() => {
     // 启动静默检查更新（有更新只点亮入口，不打断）
     void autoCheckOnBoot();
+  }, []);
+
+  useEffect(() => {
+    // 启动就把模型目录拉进 store（后台、静默、失败无所谓）：它同时喂给
+    // ModelPicker / 设置页的模型页签，以及「用量限额」里「配了但拿不到用量」的说明行
+    // （后端只读这份缓存，不自己跑 `omp models --json`——那条命令冷启动约 10s）。
+    api
+      .getModels()
+      .then((models) => set({ models }))
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

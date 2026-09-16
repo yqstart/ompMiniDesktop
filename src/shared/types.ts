@@ -124,8 +124,47 @@ export type ModelRef = {
 export type ContextUsage = {
  tokens: number | null;
  contextWindow: number | null;
- /** omp 给的是 0–1 比例；展示时换算成百分比。 */
+ /** omp 给的就是百分比（0–100）；缺失或窗口为 0 时为 null。 */
  percent: number | null;
+};
+
+/** 上下文分项的一档（`parts[].id`，展示名一律走字典）。 */
+export type ContextPartId =
+ | "messages"
+ | "systemPrompt"
+ | "skills"
+ | "tools"
+ | "mcpTools"
+ | "systemContext";
+
+/**
+ * 会话累计缓存用量（会话文件里逐轮 usage 求和，口径与设置页「使用统计」一致）。
+ */
+export type ContextCacheStats = {
+ input: number;
+ cacheRead: number;
+ cacheWrite: number;
+ /** cacheRead / (input + cacheRead)，0–1；分母为 0 时 null。 */
+ hitRate: number | null;
+};
+
+/**
+ * 上下文分项（`get_context_breakdown`）。
+ *
+ * 真值与估算的分界（后端 `context.rs` 的口径，界面必须照此标注）：
+ * 「已用 / 窗口 / 非消息」是 omp 真值，「消息 = 已用 − 非消息」也是真值；
+ * 非消息的其余五档是按字符量估算后**缩放到非消息真值**的结果——各档之和恒等于真值，
+ * 但档与档之间怎么切是估算。
+ */
+export type ContextBreakdown = {
+ usedTokens: number | null;
+ contextWindow: number | null;
+ /** 0–100（与 omp 同式同值）。 */
+ percent: number | null;
+ nonMessageTokens: number | null;
+ /** 各档之和 = `usedTokens`；读不到锚点（非消息真值）时为空数组。 */
+ parts: { id: ContextPartId; tokens: number }[];
+ cache: ContextCacheStats;
 };
 
 /** 最近一轮用量（omp `message_end.message.usage`）。 */
@@ -282,6 +321,139 @@ export type MemoryFileContent = {
   modified: number;
 };
 
+/**
+ * 使用统计（设置 ›「使用统计」）：omp 会话 jsonl 里 assistant 消息 `usage` 的聚合。
+ * 数字与派生指标（命中率 / 连续天数 / 峰值时段 / 最常用模型）一律由后端算好，
+ * 前端只做格式化与可视化——与 `omp-state` 同一条口径（前端不自算）。
+ *
+ * 口径要点（`src-tauri/src/usage.rs` 与本类型的注释必须一致）：
+ * - `total` = omp 的 `totalTokens` 累加（= `input + output + cacheRead + cacheWrite`），
+ *   `input` 是**未缓存**输入；`reasoning` 是 `output` 的子集，不参与 `total`；
+ * - `cost` 是 omp 按模型定价给的美元值（本地模型 / 无定价时为 0）；
+ * - `calls` 是带 usage 的 assistant 消息条数（= 模型请求数）。
+ */
+export type UsageBucket = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  reasoning: number;
+  total: number;
+  cost: number;
+  calls: number;
+};
+
+/** 一天的量（`date` = 本地日期 `YYYY-MM-DD`；范围内没跑的日子也会补零，趋势才连续）。 */
+export type UsageDayRow = UsageBucket & { date: string };
+
+/** 一个模型的量（provider / model 原样来自 jsonl；都为空串时界面显示「未知模型」）。 */
+export type UsageModelRow = UsageBucket & { provider: string; model: string };
+
+/** 一个项目的量（归属规则与左栏一致；未归属时 `projectId` 为 null、`name` 为空串）。 */
+export type UsageProjectRow = {
+  projectId: string | null;
+  path: string | null;
+  name: string;
+  sessions: number;
+  calls: number;
+  total: number;
+  cost: number;
+};
+
+export type UsageToolRow = { name: string; count: number };
+
+/** 一个本地小时的量（0–23；`calls` 与总数一致——没有 usage 的消息不进时段分布）。 */
+export type UsageHourRow = { hour: number; calls: number; tokens: number };
+
+/** 用量最多的模型（`share` = 占全部 token 的比例，0–1）。 */
+export type UsageTopModel = { provider: string; model: string; tokens: number; share: number };
+
+/** 范围总览（派生指标全部后端算好）。 */
+export type UsageTotals = UsageBucket & {
+  /** 有请求的会话数。 */
+  sessions: number;
+  toolCalls: number;
+  /** 模型耗时合计（毫秒）。 */
+  durationMs: number;
+  activeDays: number;
+  /** 连续活跃天数（今天还没跑但昨天跑了不算断签）。 */
+  currentStreak: number;
+  longestStreak: number;
+  /** 缓存命中率 = cacheRead / (input + cacheRead)；无分母时为 null。 */
+  cacheHitRate: number | null;
+  avgDailyTokens: number;
+  peakHour: number | null;
+  peakHourTokens: number;
+  topModel: UsageTopModel | null;
+};
+
+/** 使用统计整体回包（`truncated` = 因扫描预算提前收手，统计可能不全）。 */
+export type UsageStats = {
+  totals: UsageTotals;
+  byDay: UsageDayRow[];
+  byModel: UsageModelRow[];
+  byProject: UsageProjectRow[];
+  byTool: UsageToolRow[];
+  byHour: UsageHourRow[];
+  scannedFiles: number;
+  scannedSessions: number;
+  truncated: boolean;
+  /** 本次范围天数（null = 全部）。 */
+  rangeDays: number | null;
+  /** 每日趋势实际覆盖的天数（后端最多补 120 天）。 */
+  chartDays: number;
+};
+
+/**
+ * 供应商配额（输入框上方的「用量限额」入口）：`omp usage --json` 报的各供应商限额窗口。
+ *
+ * 口径要点（`src-tauri/src/quota.rs` 与本类型的注释必须一致）：
+ * - 数据由 **omp 自己**调各 provider 的上游用量接口（壳侧不直连、不读凭证库，只解析 CLI 输出）；
+ * - 时间戳全是 **epoch 毫秒**：`generatedAt` = 本次渲染时刻，`fetchedAt` = 数据真实抓取时刻
+ *   （两者之差即 omp 报告缓存的年龄，界面据此标「更新于 N 前」）；
+ * - `usedFraction` 是 0–1 小数（超限可能 >1，原样透传），`percent` 是 0–100 刻度；
+ * - `windowId` 是语义归类键（`5h` / `7d` / `monthly`；未知值原样透传，界面回退显示上游 label）；
+ * - `durationMs` 对月窗（`monthly`）恒缺省（月窗锚定订阅周年日，不是固定时长）；
+ * - **空 `reports` 是正常结果**（没有供应商报配额），不是错误。
+ */
+export type UsageLimit = {
+  id: string;
+  /** 上游展示名（`5 Hour limit`）；界面按 `windowId` 走字典，这里只作兜底。 */
+  label: string;
+  windowId: string;
+  windowLabel: string;
+  usedFraction: number;
+  percent: number;
+  /** 上游状态（`ok` / `exhausted`；开放枚举）。 */
+  status: string;
+  resetsAt: number | null;
+  durationMs: number | null;
+};
+
+export type ProviderUsageReport = {
+  provider: string;
+  /** 套餐名（`OpenCode Go`）；上游没给为 null。 */
+  planType: string | null;
+  /** 数据真实抓取时刻（epoch 毫秒；0 = 上游未给）。 */
+  fetchedAt: number;
+  limits: UsageLimit[];
+};
+
+export type ProviderUsage = {
+  generatedAt: number;
+  reports: ProviderUsageReport[];
+  /** 已认证但本次拿不到用量的账号数。 */
+  accountsWithoutUsage: number;
+  /** 被禁用的凭据数。 */
+  disabledCredentials: number;
+  /**
+   * 已配置的供应商 id（取自 omp 模型目录，与设置页「已配置」同一条口径）。
+   * `configuredProviders - reports[].provider` = **配了但上游没给用量**的供应商
+   * （omp 只对有探针的供应商报配额，没探针的连 `accountsWithoutUsage` 都不出现）。
+   */
+  configuredProviders: string[];
+};
+
 /** 思考档全集（docs/v1-schedule.md §4）。 */
 export const THINKING_LEVELS = [
  "off",
@@ -301,6 +473,13 @@ export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
  * `cancel` 是服务端撤回，都不进这张卡。
  */
 export type UiMethod = "select" | "confirm" | "input" | "editor";
+
+/**
+ * 一次写 / 改文件的行数增量（工具行走尾的 `+N −M`）。
+ * 由调用参数（`write.content` / `edit.new_string` 与 `edit.old_string`）在归一时刻算好，
+ * **不保留原文**——只留两个计数，长文件内容不进前端内存。
+ */
+export type DiffStat = { added: number; removed: number };
 
 /** ViewMsg：RPC delta 与 jsonl 文件块的统一渲染模型。 */
 export type ViewMsg =
@@ -327,6 +506,8 @@ export type ViewMsg =
   output: string;
   outputFull?: string;
   streamIndex: number;
+  /** 写 / 改文件的行数增量（只有 write / edit 会有；其余工具缺省）。 */
+  diffStat?: DiffStat;
  }
  | {
   kind: "approval";

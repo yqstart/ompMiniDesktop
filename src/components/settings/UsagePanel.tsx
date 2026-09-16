@@ -1,0 +1,456 @@
+import { useEffect, useState, type ReactNode } from "react";
+import { ChartBar, Loader, Refresh } from "reicon-react";
+import { api } from "@shared/api";
+import { useApp } from "../../stores/app";
+import { fmt } from "../../lib/locale";
+import { useText } from "../../lib/useText";
+import type { UsageDayRow, UsageStats } from "@shared/types";
+
+/** 统计范围：与 ZCode 的「使用统计」同档（今日 / 近 7 日 / 近 30 日 / 全部）。 */
+type RangeKey = "today" | "7d" | "30d" | "all";
+
+const RANGES: { key: RangeKey; days: number | null }[] = [
+  { key: "today", days: 1 },
+  { key: "7d", days: 7 },
+  { key: "30d", days: 30 },
+  { key: "all", days: null },
+];
+
+/** 趋势图最多补多少天——与后端 `usage.rs` 的 `CHART_MAX_DAYS` 对齐。 */
+const CHART_MAX_DAYS = 120;
+
+/** token 数：过万转 K / M / B（密集表格里可读性优先），小数字走千分位。 */
+function fmtTokens(n: number, locale: string): string {
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 10_000) return `${(n / 1000).toFixed(1)}K`;
+  return n.toLocaleString(locale);
+}
+
+/** 费用（美元，omp 定价估算）：满 1 元两位小数，小额给四位，避免显示成 $0.00。 */
+function fmtCost(cost: number): string {
+  if (cost <= 0) return "$0";
+  return cost >= 1 ? `$${cost.toFixed(2)}` : `$${cost.toFixed(4)}`;
+}
+
+/** 比例：≥10% 取整，小比例留一位小数。 */
+function fmtPercent(x: number): string {
+  return x >= 0.1 ? `${Math.round(x * 100)}%` : `${(x * 100).toFixed(1)}%`;
+}
+
+/** 一张总览卡：标签（11px faint）+ 数值（mono）+ 可选副行（过长换行，不截断关键数字）。 */
+function Tile({ label, value, sub }: { label: string; value: string; sub?: ReactNode }) {
+  return (
+    <div className="min-w-0 rounded-md border border-border bg-background px-3 py-2">
+      <div className="truncate text-[11px] text-faint">{label}</div>
+      <div className="mt-0.5 truncate font-mono text-[15px] tabular-nums" title={value}>
+        {value}
+      </div>
+      {sub && <div className="mt-0.5 text-[11px] text-muted">{sub}</div>}
+    </div>
+  );
+}
+
+/** 比例条（模型 / 工具 / 项目行共用）：细底槽 + accent 实心段。 */
+function ShareBar({ ratio }: { ratio: number }) {
+  return (
+    <span className="h-1.5 w-20 shrink-0 overflow-hidden rounded-full bg-accent/15" aria-hidden>
+      <span className="block h-full rounded-full bg-accent" style={{ width: `${Math.max(ratio * 100, 2)}%` }} />
+    </span>
+  );
+}
+
+/**
+ * 一根堆叠柱：自下而上 未缓存输入（accent/25）/ 缓存读·写（accent/50）/ 输出（accent）。
+ * 柱高按「占峰值日的比例」缩放，段高按「占当日总量的比例」铺满柱体。
+ */
+function DayBar({ row, max, label }: { row: UsageDayRow; max: number; label: string }) {
+  const sum = Math.max(row.total, 1);
+  const segs = [
+    { key: "out", value: row.output, cls: "bg-accent" },
+    { key: "cache", value: row.cacheRead + row.cacheWrite, cls: "bg-accent/50" },
+    { key: "in", value: row.input, cls: "bg-accent/25" },
+  ].filter((s) => s.value > 0);
+  return (
+    <div role="img" aria-label={label} title={label} className="flex h-full flex-1 flex-col justify-end">
+      {row.total > 0 && (
+        <div
+          className="mx-auto flex w-full max-w-[28px] flex-col overflow-hidden rounded-sm"
+          style={{ height: `${(row.total / max) * 100}%`, minHeight: 2 }}
+        >
+          {segs.map((s) => (
+            <div key={s.key} className={s.cls} style={{ height: `${(s.value / sum) * 100}%` }} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 设置 ›「使用统计」：把 omp 本地会话记录里的用量聚合成一页只读统计。
+ *
+ * 口径（与 ZCode 的「使用统计」对齐，数据源换成 omp）：
+ * - 数据来自会话 jsonl 里每条 assistant 消息的 `usage`，含已归档会话；
+ * - 全部数字（含命中率 / 连续天数 / 峰值时段 / 最常用模型）由后端算好，前端只做格式化与比例缩放；
+ * - 费用是 omp 按模型定价给的估算值，本地模型 / 无定价时显示 $0；
+ * - 扫描有预算，超出时明说「统计可能不全」（后端 `truncated`），不假装统计完了；
+ * - **只读**：不写 omp 配置、不写覆盖层、不落盘（刷新即重扫）。
+ */
+export function UsagePanel() {
+  const { locale } = useApp();
+  const t = useText();
+  const [range, setRange] = useState<RangeKey>("7d");
+  const [data, setData] = useState<UsageStats | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  /** 已拿到数据的请求键（`range#reloadKey`）：与当前请求键不一致 = 正在拉。 */
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  /** 自增即重拉（挂载 / 点刷新）；切换范围也走 effect。 */
+  const [reloadKey, setReloadKey] = useState(0);
+  /** 趋势图悬停的柱序号：读数行显示那一天，不悬停显示范围合计。 */
+  const [hover, setHover] = useState<number | null>(null);
+
+  const numLocale = locale === "zh-CN" ? "zh-CN" : "en-US";
+  const reqKey = `${range}#${reloadKey}`;
+  // 切范围 / 刷新时保留上一份数据显示（加个 spinner），避免整块闪空导致布局跳动
+  const busy = loadedKey !== reqKey;
+
+  useEffect(() => {
+    const [key, seq] = reqKey.split("#");
+    const days = RANGES.find((r) => r.key === key)?.days ?? null;
+    let alive = true;
+    void api
+      .getUsageStats(days)
+      .then((res) => {
+        if (!alive) return;
+        setData(res);
+        setError(null);
+        setHover(null);
+        setLoadedKey(`${key}#${seq}`);
+      })
+      .catch((e: unknown) => {
+        if (!alive) return;
+        setData(null);
+        setError(e instanceof Error ? e.message : t.usageLoadFailed);
+        setLoadedKey(`${key}#${seq}`);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [reqKey, t]);
+
+  const rangeLabel = (k: RangeKey): string =>
+    k === "today"
+      ? t.usageRangeToday
+      : k === "7d"
+        ? t.usageRange7d
+        : k === "30d"
+          ? t.usageRange30d
+          : t.usageRangeAll;
+
+  const totals = data?.totals;
+  const byDay = data?.byDay ?? [];
+  const maxDay = Math.max(...byDay.map((d) => d.total), 1);
+  const maxModel = Math.max(...(data?.byModel ?? []).map((m) => m.total), 1);
+  const maxTool = Math.max(...(data?.byTool ?? []).map((x) => x.count), 1);
+  const maxHour = Math.max(...(data?.byHour ?? []).map((x) => x.tokens), 1);
+  const maxProject = Math.max(...(data?.byProject ?? []).map((x) => x.total), 1);
+  const hovered = hover !== null ? byDay[hover] : undefined;
+  const readout = hovered
+    ? fmt(t.usageDayTotal, hovered.date, fmtTokens(hovered.total, numLocale), hovered.calls)
+    : totals
+      ? `${fmtTokens(totals.total, numLocale)} tokens · ${fmt(t.usageColCalls, totals.calls)}`
+      : "";
+
+  return (
+    <section aria-label={t.tabUsage} className="rounded-md border border-border bg-surface p-3.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <ChartBar size={14} aria-hidden className="text-muted" />
+        <h2 className="text-sm font-medium">{t.tabUsage}</h2>
+        <div role="radiogroup" aria-label={t.usageRangeAria} className="flex flex-wrap gap-1">
+          {RANGES.map((r) => (
+            <button
+              key={r.key}
+              role="radio"
+              aria-checked={range === r.key}
+              onClick={() => setRange(r.key)}
+              className={`cursor-pointer rounded-md border px-2.5 py-0.5 text-[12px] transition-colors duration-100 ${
+                range === r.key
+                  ? "border-accent/60 bg-accent/10 text-foreground"
+                  : "border-border text-muted hover:bg-hover hover:text-foreground"
+              }`}
+            >
+              {rangeLabel(r.key)}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => setReloadKey((k) => k + 1)}
+          disabled={busy}
+          className="ml-auto flex cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+          aria-label={t.refresh}
+        >
+          {busy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
+          {t.refresh}
+        </button>
+      </div>
+      <p className="mt-1.5 text-[13px] text-faint">{t.usageHint}</p>
+      {error && (
+        <p role="alert" className="mt-1.5 text-[13px] text-danger">
+          {error}
+        </p>
+      )}
+      {data?.truncated && (
+        <p className="mt-1.5 text-[13px] text-warn">{fmt(t.usageTruncated, data.scannedFiles)}</p>
+      )}
+
+      {data === null ? (
+        <p className="mt-3 text-[13px] text-muted">{busy ? t.usageLoading : ""}</p>
+      ) : !totals || totals.calls === 0 ? (
+        <p className="mt-3 rounded-lg border border-dashed border-border px-3 py-3 text-[13px] text-muted">
+          {t.usageEmpty}
+        </p>
+      ) : (
+        <>
+          {/* 总览：token / 费用 / 请求 / 工具 / 命中率 / 活跃度 / 最常用模型 / 峰值时段 / 日均 */}
+          <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3">
+            <Tile
+              label={t.usageTokens}
+              value={fmtTokens(totals.total, numLocale)}
+              sub={
+                <span className="flex flex-wrap gap-x-2">
+                  <span>
+                    {t.usageSeriesIn} {fmtTokens(totals.input, numLocale)}
+                  </span>
+                  <span>
+                    {t.usageSeriesOut} {fmtTokens(totals.output, numLocale)}
+                  </span>
+                  <span>
+                    {t.usageSeriesCache} {fmtTokens(totals.cacheRead + totals.cacheWrite, numLocale)}
+                  </span>
+                </span>
+              }
+            />
+            <Tile
+              label={t.usageCostEst}
+              value={fmtCost(totals.cost)}
+              sub={totals.cost > 0 ? t.usageCostHint : t.usageNoCost}
+            />
+            <Tile
+              label={t.usageRequests}
+              value={totals.calls.toLocaleString(numLocale)}
+              sub={fmt(t.usageSessions, totals.sessions)}
+            />
+            <Tile
+              label={t.usageToolCalls}
+              value={totals.toolCalls.toLocaleString(numLocale)}
+              sub={fmt(t.usageToolKinds, data.byTool.length)}
+            />
+            <Tile
+              label={t.usageCacheHit}
+              value={totals.cacheHitRate === null ? "—" : fmtPercent(totals.cacheHitRate)}
+              sub={fmt(t.usageCacheReadSub, fmtTokens(totals.cacheRead, numLocale))}
+            />
+            <Tile
+              label={t.usageActiveDays}
+              value={String(totals.activeDays)}
+              sub={fmt(t.usageActiveDaysSub, totals.currentStreak, totals.longestStreak)}
+            />
+            <Tile
+              label={t.usageTopModel}
+              value={totals.topModel ? totals.topModel.model || t.usageUnknownModel : "—"}
+              sub={totals.topModel ? fmt(t.usageTopModelShare, fmtPercent(totals.topModel.share)) : undefined}
+            />
+            <Tile
+              label={t.usagePeakHour}
+              value={
+                totals.peakHour === null
+                  ? "—"
+                  : `${String(totals.peakHour).padStart(2, "0")}:00 – ${String((totals.peakHour + 1) % 24).padStart(2, "0")}:00`
+              }
+              sub={
+                totals.peakHour === null
+                  ? undefined
+                  : fmt(t.usagePeakHourSub, fmtTokens(totals.peakHourTokens, numLocale))
+              }
+            />
+            <Tile
+              label={t.usageAvgDaily}
+              value={fmtTokens(totals.avgDailyTokens, numLocale)}
+              sub={t.usageAvgDailySub}
+            />
+          </div>
+
+          {/* 每日趋势：补零天的堆叠柱，悬停读数 */}
+          <div className="mt-4">
+            <div className="flex flex-wrap items-baseline gap-2">
+              <h3 className="text-[13px] font-medium">{t.usageDailyTrend}</h3>
+              <span className="font-mono text-[11px] text-faint">{readout}</span>
+              {data.chartDays >= CHART_MAX_DAYS && (
+                <span className="text-[11px] text-faint">
+                  {fmt(t.usageDailyTrendCapped, data.chartDays)}
+                </span>
+              )}
+            </div>
+            <div className="mt-1.5 flex h-24 items-end gap-px" onMouseLeave={() => setHover(null)}>
+              {byDay.map((d, i) => (
+                <div
+                  key={d.date}
+                  className={`flex h-full flex-1 flex-col justify-end rounded-sm ${hover === i ? "bg-hover/60" : ""}`}
+                  onMouseEnter={() => setHover(i)}
+                >
+                  <DayBar
+                    row={d}
+                    max={maxDay}
+                    label={fmt(t.usageDayTotal, d.date, fmtTokens(d.total, numLocale), d.calls)}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2.5 text-[11px] text-faint">
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-sm bg-accent" aria-hidden />
+                  {t.usageSeriesOut}
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-sm bg-accent/50" aria-hidden />
+                  {t.usageSeriesCache}
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-sm bg-accent/25" aria-hidden />
+                  {t.usageSeriesIn}
+                </span>
+              </div>
+              {byDay.length > 1 && (
+                <span className="ml-auto font-mono text-[11px] text-faint">
+                  {byDay[0].date} → {byDay[byDay.length - 1].date}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* 按模型 */}
+          <div className="mt-4">
+            <h3 className="text-[13px] font-medium">{t.usageByModel}</h3>
+            {data.byModel.length === 0 ? (
+              <p className="mt-1.5 text-[13px] text-faint">{t.usageByModelEmpty}</p>
+            ) : (
+              <div className="mt-1 space-y-px">
+                {data.byModel.map((m, i) => (
+                  <div
+                    key={`${m.provider}/${m.model}/${i}`}
+                    className="flex h-8 min-w-0 items-center gap-2 rounded-md px-2 transition-colors duration-100 hover:bg-hover/60"
+                  >
+                    <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                      <span className="min-w-0 truncate text-[13px]" title={m.model}>
+                        {m.model || t.usageUnknownModel}
+                      </span>
+                      {m.provider && (
+                        <span className="min-w-0 truncate font-mono text-[11px] text-faint">{m.provider}</span>
+                      )}
+                    </span>
+                    <ShareBar ratio={m.total / maxModel} />
+                    <span className="w-16 shrink-0 text-right font-mono text-[11px] text-faint">
+                      {fmt(t.usageColCalls, m.calls)}
+                    </span>
+                    <span className="w-20 shrink-0 text-right font-mono text-[12px] tabular-nums">
+                      {fmtTokens(m.total, numLocale)}
+                    </span>
+                    <span className="w-16 shrink-0 text-right font-mono text-[11px] text-faint">
+                      {fmtCost(m.cost)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 工具调用分布 + 时段分布：宽屏并排，窄屏各自成行 */}
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div>
+              <h3 className="text-[13px] font-medium">{t.usageByTool}</h3>
+              {data.byTool.length === 0 ? (
+                <p className="mt-1.5 text-[13px] text-faint">{t.usageByToolEmpty}</p>
+              ) : (
+                <div className="mt-1 space-y-px">
+                  {data.byTool.map((row) => (
+                    <div
+                      key={row.name}
+                      className="flex h-7 min-w-0 items-center gap-2 rounded-md px-2 transition-colors duration-100 hover:bg-hover/60"
+                    >
+                      <span className="min-w-0 flex-1 truncate font-mono text-[12px]" title={row.name}>
+                        {row.name}
+                      </span>
+                      <ShareBar ratio={row.count / maxTool} />
+                      <span className="w-10 shrink-0 text-right font-mono text-[11px] text-faint">
+                        {row.count}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <h3 className="text-[13px] font-medium">{t.usageByHour}</h3>
+              <div className="mt-1 flex h-24 items-end gap-px" role="img" aria-label={t.usageByHour}>
+                {data.byHour.map((h) => (
+                  <div
+                    key={h.hour}
+                    title={`${String(h.hour).padStart(2, "0")}:00 · ${fmtTokens(h.tokens, numLocale)} tokens · ${fmt(t.usageColCalls, h.calls)}`}
+                    className="flex h-full flex-1 flex-col justify-end rounded-sm hover:bg-hover/60"
+                  >
+                    <span
+                      className={`block w-full rounded-sm ${totals.peakHour === h.hour ? "bg-accent" : "bg-accent/30"}`}
+                      style={{ height: `${(h.tokens / maxHour) * 100}%`, minHeight: h.tokens > 0 ? 2 : 0 }}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="mt-1 flex justify-between font-mono text-[11px] text-faint">
+                <span>00</span>
+                <span>06</span>
+                <span>12</span>
+                <span>18</span>
+                <span>23</span>
+              </div>
+            </div>
+          </div>
+
+          {/* 按项目 */}
+          <div className="mt-4">
+            <h3 className="text-[13px] font-medium">{t.usageByProject}</h3>
+            <div className="mt-1 space-y-px">
+              {data.byProject.map((p, i) => (
+                <div
+                  key={`${p.projectId ?? p.path ?? "orphan"}/${i}`}
+                  className="flex h-8 min-w-0 items-center gap-2 rounded-md px-2 transition-colors duration-100 hover:bg-hover/60"
+                >
+                  <span className="min-w-0 shrink-0 max-w-[40%] truncate text-[13px]" title={p.name}>
+                    {p.name || t.usageUnowned}
+                  </span>
+                  <span
+                    className="min-w-0 flex-1 truncate font-mono text-[11px] text-faint"
+                    title={p.path ?? undefined}
+                  >
+                    {p.path ?? ""}
+                  </span>
+                  <ShareBar ratio={p.total / maxProject} />
+                  <span className="w-24 shrink-0 text-right font-mono text-[11px] text-faint">
+                    {fmt(t.usageColSessions, p.sessions)}
+                  </span>
+                  <span className="w-20 shrink-0 text-right font-mono text-[12px] tabular-nums">
+                    {fmtTokens(p.total, numLocale)}
+                  </span>
+                  <span className="w-16 shrink-0 text-right font-mono text-[11px] text-faint">
+                    {fmtCost(p.cost)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TEXT } from "./locale";
-import { summarizeArgs, viewMsgFromJsonlLine, viewMsgsFromJsonlLines } from "./viewmsg";
+import { diffStatOf, summarizeArgs, viewMsgFromJsonlLine, viewMsgsFromJsonlLines } from "./viewmsg";
 
 /** 归一 / 导出 / 实时管线的文案取字典；测试只锁中文口径。 */
 const zh = TEXT["zh-CN"];
@@ -11,6 +11,24 @@ describe("summarizeArgs", () => {
  });
  it("bash 显示 command", () => {
   expect(summarizeArgs("bash", { command: "echo hi" })).toBe("echo hi");
+ });
+});
+
+describe("diffStatOf（工具行的 +N −M）", () => {
+ it("write 按 content 行数记新增", () => {
+  expect(diffStatOf("write", { path: "a.ts", content: "l1\nl2\nl3" })).toEqual({ added: 3, removed: 0 });
+ });
+ it("edit 记 new_string 增 / old_string 删", () => {
+  expect(diffStatOf("edit", { old_string: "a\nb", new_string: "a\nb\nc\nd" })).toEqual({
+   added: 4,
+   removed: 2,
+  });
+ });
+ it("参数缺失 / 非写改类工具 → null（界面上不画这两个数）", () => {
+  expect(diffStatOf("write", {})).toBeNull();
+  expect(diffStatOf("edit", {})).toBeNull();
+  expect(diffStatOf("bash", { command: "ls" })).toBeNull();
+  expect(diffStatOf("read", { path: "a.ts" })).toBeNull();
  });
 });
 

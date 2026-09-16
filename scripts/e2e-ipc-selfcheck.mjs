@@ -20,6 +20,9 @@ const mainRs = fs.readFileSync(path.join(root, "src-tauri/src/main.rs"), "utf8")
 const modRs = fs.readFileSync(path.join(root, "src-tauri/src/commands/mod.rs"), "utf8");
 const providersRs = fs.readFileSync(path.join(root, "src-tauri/src/providers.rs"), "utf8");
 const memoriesRs = fs.readFileSync(path.join(root, "src-tauri/src/memories.rs"), "utf8");
+const usageRs = fs.readFileSync(path.join(root, "src-tauri/src/usage.rs"), "utf8");
+const quotaRs = fs.readFileSync(path.join(root, "src-tauri/src/quota.rs"), "utf8");
+const contextRs = fs.readFileSync(path.join(root, "src-tauri/src/context.rs"), "utf8");
 
 const COMMANDS = [
  "locate_omp", "get_health", "get_models", "refresh_models", "get_overlay",
@@ -29,20 +32,26 @@ const COMMANDS = [
  "rename_session_note", "get_history",
  "send_message", "steer_message", "follow_up_message", "compact_session", "branch_session", "run_slash",
  "read_image_file", "check_paths", "complete_path", "stop_session", "approve", "respond_ui", "set_model", "set_thinking",
- "get_session_runtime", "get_git_info",
+ "get_session_runtime", "get_context_breakdown", "get_git_info",
  "get_global_approval", "set_global_approval", "set_session_approval",
  "set_omp_path",
  "list_providers", "get_provider_login", "start_provider_login", "provider_login_input",
  "cancel_provider_login", "logout_provider", "get_model_roles", "set_model_role",
  "list_memories", "read_memory_file", "delete_memory_file", "delete_memory_project",
+ "get_usage_stats",
+ "get_provider_usage",
 ];
 for (const c of COMMANDS) {
  if (!mainRs.includes(c)) fail(`main.rs 未注册命令 ${c}`);
- // 命令实现分布在 commands/mod.rs（会话与设置）、providers.rs（供应商）、memories.rs（记忆）三个模块
+ // 命令实现分布在 commands/mod.rs（会话与设置）、providers.rs（供应商）、memories.rs（记忆）、
+ // usage.rs（使用统计）、quota.rs（供应商配额）、context.rs（上下文分项）六个模块
  if (
   !modRs.includes(`pub async fn ${c}`) &&
   !providersRs.includes(`pub async fn ${c}`) &&
-  !memoriesRs.includes(`pub async fn ${c}`)
+  !memoriesRs.includes(`pub async fn ${c}`) &&
+  !usageRs.includes(`pub async fn ${c}`) &&
+  !quotaRs.includes(`pub async fn ${c}`) &&
+  !contextRs.includes(`pub async fn ${c}`)
  ) {
   fail(`后端缺少实现 ${c}`);
  }

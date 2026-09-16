@@ -1,4 +1,4 @@
-import type { MentionFile, ViewMsg } from "@shared/types";
+import type { DiffStat, MentionFile, ViewMsg } from "@shared/types";
 import { imagesFromContent } from "./attachments";
 import { fmt, type Text } from "./locale";
 
@@ -69,6 +69,29 @@ export function summarizeArgs(name: string, args: Record<string, unknown>): stri
    }
   }
  }
+}
+
+/**
+ * 写 / 改文件的行数增量（工具行走尾的 `+N −M`）。
+ *
+ * 口径：`write` 的 `content` 行数记 `added`；`edit` 的 `new_string` 记 `added`、
+ * `old_string` 记 `removed`（整段替换，不做逐行 diff——行级 diff 要留原文，代价不划算）。
+ * 拿不到参数（streaming 占位、未知工具）返回 null，界面上就不画这两个数。
+ */
+export function diffStatOf(name: string, args: Record<string, unknown>): DiffStat | null {
+ const str = (v: unknown) => (typeof v === "string" ? v : "");
+ const lines = (s: string) => (s.length === 0 ? 0 : s.split("\n").length);
+ if (name === "write") {
+  const content = str(args.content ?? args.text);
+  return content ? { added: lines(content), removed: 0 } : null;
+ }
+ if (name === "edit") {
+  const oldText = str(args.old_string ?? args.oldString ?? args.old_text);
+  const newText = str(args.new_string ?? args.newString ?? args.new_text);
+  if (!oldText && !newText) return null;
+  return { added: lines(newText), removed: lines(oldText) };
+ }
+ return null;
 }
 
 /**
@@ -194,6 +217,7 @@ export function viewMsgsFromJsonlLines(lines: unknown[], t: Text): ViewMsg[] {
   const call = calls.get(toolCallId);
   const res = results.get(toolCallId);
   const name = call?.name ?? "tool";
+  const diffStat = call ? diffStatOf(name, call.args) : null;
   out.push({
    kind: "tool",
    id: `tool:${toolCallId}`,
@@ -205,6 +229,7 @@ export function viewMsgsFromJsonlLines(lines: unknown[], t: Text): ViewMsg[] {
    output: res?.text ?? "",
    outputFull: res?.full,
    streamIndex: call?.streamIndex ?? 0,
+   ...(diffStat ? { diffStat } : {}),
   });
  };
 
@@ -353,16 +378,19 @@ export function viewMsgFromJsonlLine(line: unknown, t: Text): ViewMsg[] {
      b.arguments && typeof b.arguments === "object"
       ? (b.arguments as Record<string, unknown>)
       : {};
+    const name = String(b.name ?? "tool");
+    const diffStat = diffStatOf(name, args);
     out.push({
      kind: "tool",
      id: nid("tool"),
      toolCallId: String(b.id ?? ""),
-     name: String(b.name ?? "tool"),
+     name,
      intent: String((b as Record<string, unknown>).intent ?? ""),
-     argsSummary: summarizeArgs(String(b.name ?? "tool"), args),
+     argsSummary: summarizeArgs(name, args),
      state: "running",
      output: "",
      streamIndex: typeof b.streamIndex === "number" ? b.streamIndex : 0,
+     ...(diffStat ? { diffStat } : {}),
     });
    }
   }
@@ -400,17 +428,17 @@ export function viewMsgFromJsonlLine(line: unknown, t: Text): ViewMsg[] {
      .join("\n")
     : "";
    const { out, full } = truncate(text);
+   const name = String(data.toolName ?? "tool");
+   const args = (data.args as Record<string, unknown>) ?? {};
+   const diffStat = diffStatOf(name, args);
    return [
     {
      kind: "tool",
      id: nid("tool"),
      toolCallId: String(data.toolCallId ?? ""),
-     name: String(data.toolName ?? "tool"),
+     name,
      intent: String(data.intent ?? ""),
-     argsSummary: summarizeArgs(
-      String(data.toolName ?? "tool"),
-      (data.args as Record<string, unknown>) ?? {},
-     ),
+     argsSummary: summarizeArgs(name, args),
      state:
       o.customType === "tool_execution_end"
        ? data.isError
@@ -420,6 +448,7 @@ export function viewMsgFromJsonlLine(line: unknown, t: Text): ViewMsg[] {
      output: out,
      outputFull: full,
      streamIndex: 0,
+     ...(diffStat ? { diffStat } : {}),
     },
    ];
   }

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { GitInfo, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, OmpInfo, Overlay, PathCheck, ProjectView, ProviderLoginStatus, ProviderView, SessionPage, SessionRuntime, SessionSearchResult, SessionView, ViewMsg } from "./types";
+import type { ContextBreakdown, GitInfo, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, OmpInfo, Overlay, PathCheck, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, SessionPage, SessionRuntime, SessionSearchResult, SessionView, UsageStats, ViewMsg } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -89,6 +89,11 @@ export const api = {
   call<void>("set_thinking", { id, level }),
  getSessionRuntime: (id: string) =>
   call<SessionRuntime | null>("get_session_runtime", { id }),
+ /**
+  * 上下文分项（输入框工具行的「上下文容量」面板）：已用 / 窗口 / 非消息是 omp 真值，
+  * 非消息各档按字符量估算后缩放到真值。**只读**——不启动进程、不写任何东西。
+  */
+ getContextBreakdown: (id: string) => call<ContextBreakdown>("get_context_breakdown", { id }),
  getGitInfo: (path: string) => call<GitInfo>("get_git_info", { path }),
  getGlobalApproval: () => call<string>("get_global_approval"),
  setGlobalApproval: (mode: string) => call<void>("set_global_approval", { mode }),
@@ -126,4 +131,16 @@ export const api = {
   call<void>("delete_memory_file", { dir, file }),
  /** 清空一个项目的全部记忆（删整个记忆目录；不可撤销，调用方需二次确认）。 */
  deleteMemoryProject: (dir: string) => call<void>("delete_memory_project", { dir }),
+ /**
+  * 使用统计（设置 › 使用统计）：扫会话 jsonl 聚合用量（token / 费用 / 工具 / 时段）。
+  * `days` = 1 / 7 / 30（null = 全部）；后端有文件数 / 字节 / 墙钟三道预算，
+  * 到点即停并把 `truncated` 置 true——**只读**，不写 omp、不写覆盖层。
+  */
+ getUsageStats: (days: number | null) => call<UsageStats>("get_usage_stats", { days }),
+ /**
+  * 供应商配额（输入框上方「用量限额」入口）：omp 能报的各供应商限额窗口（5 小时 / 每周 / 每月）。
+  * 壳侧只跑并解析 `omp usage --json`——**只读**（不调 `invalidate`，那会改 omp 缓存），
+  * 不直连任何配额 API、不读 omp 凭证库；`reports` 为空 = 没有可显示的配额（不是错误）。
+  */
+ getProviderUsage: () => call<ProviderUsage>("get_provider_usage"),
 };

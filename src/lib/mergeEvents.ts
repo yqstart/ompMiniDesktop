@@ -43,6 +43,9 @@ export function mergeToolCard(oldCard: ToolCard, next: ToolCard): ToolCard {
    next.state === "streaming" ? oldCard.argsSummary : next.argsSummary || oldCard.argsSummary,
   output: next.output || oldCard.output,
   outputFull: next.outputFull ?? oldCard.outputFull,
+  // 行数增量只在早期事件（toolcall_end / tool_execution_start 带参数的那帧）算得出，
+  // 终态帧没有参数，必须从旧卡继承，否则 `+N −M` 会在结果到达时消失。
+  diffStat: next.diffStat ?? oldCard.diffStat,
  };
 }
 

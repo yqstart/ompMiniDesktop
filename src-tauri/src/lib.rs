@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod context;
 pub mod git_info;
 pub mod memories;
 pub mod overlay;

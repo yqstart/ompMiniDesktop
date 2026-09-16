@@ -1,7 +1,7 @@
 /**
  * 界面语言：**全界面**文案字典（左栏 / 消息流 / 输入区 / 设置页…），
  * 只作用于本应用的展示层，不改 omp 配置、不写覆盖层。
- * 持久化走 localStorage（与 sidebarWidth 同模式）；未知值回退简体中文。
+ * 持久化走 localStorage（与皮肤同模式，键 `omp.locale.v1`）；未知值回退「跟随系统」。
  *
  * 口径：
  * - 上游数据（会话标题、工具名/意图/输出、omp 的 UI 请求文案、后端错误）原样透传，不进字典；
@@ -14,25 +14,62 @@
 export const LOCALES = ["zh-CN", "en"] as const;
 export type Locale = (typeof LOCALES)[number];
 
-const KEY = "omp.locale.v1";
+/**
+ * 语言偏好三档（与皮肤三档同模式）：跟随系统 / 简体中文 / English。
+ * **偏好**（`LocaleMode`）与实际生效的**语言**（`Locale`）分开——`system` 档下
+ * 系统语言变了，界面语言跟着换（见 `resolveLocale`）。
+ */
+export const LOCALE_MODES = ["system", "zh-CN", "en"] as const;
+export type LocaleMode = (typeof LOCALE_MODES)[number];
 
-export function loadLocale(): Locale {
+/**
+ * 语言名与它在窄处的简称（左栏底部的语言切换用）。
+ * **自称**：不随当前界面语言翻译（中文界面下 `en` 也显示 "English"），
+ * 所以不进 `TEXT` 字典，单独作常量。
+ */
+export const LOCALE_NAMES: Record<Locale, string> = { "zh-CN": "简体中文", en: "English" };
+export const LOCALE_SHORT: Record<Locale, string> = { "zh-CN": "中", en: "EN" };
+
+/**
+ * 系统语言 → 本应用支持的语言：`zh*`（含 `zh-Hans-CN` / `zh-TW` 等变体）一律简体中文，
+ * 其余一律英文。纯函数（`systemLang` 由调用方给），可单测。
+ */
+export function resolveLocale(mode: LocaleMode, systemLang: string): Locale {
+ if (mode !== "system") return mode;
+ return systemLang.trim().toLowerCase().startsWith("zh") ? "zh-CN" : "en";
+}
+
+/** 系统语言（WebView / 浏览器的 UI 语言）；取不到时按简体中文——与「本应用默认中文」一致。 */
+export function systemLang(): string {
  try {
-  if (typeof localStorage === "undefined") return "zh-CN";
-  const raw = localStorage.getItem(KEY);
-  if (raw === "en" || raw === "zh-CN") return raw;
-  return "zh-CN";
+  return navigator.language || navigator.languages?.[0] || "zh-CN";
  } catch {
   return "zh-CN";
  }
 }
 
-export function saveLocale(locale: Locale): void {
- if (locale !== "zh-CN" && locale !== "en") return;
+const KEY = "omp.locale.v1";
+
+/** 坏值一律回退「跟随系统」（未知字符串不是一档偏好，静默忽略而不是报错）。
+ *  老版本存的是 `"zh-CN"` / `"en"`（那时没有 system 档）——它们是合法档位，照旧生效。 */
+export function normalizeLocaleMode(raw: unknown): LocaleMode {
+ return raw === "zh-CN" || raw === "en" ? raw : "system";
+}
+
+export function loadLocaleMode(): LocaleMode {
  try {
-  localStorage.setItem(KEY, locale);
+  if (typeof localStorage === "undefined") return "system";
+  return normalizeLocaleMode(localStorage.getItem(KEY));
  } catch {
-  // 无痕模式等写失败不阻断切换
+  return "system"; // 无痕模式等取不到持久化时跟随系统
+ }
+}
+
+export function saveLocaleMode(mode: LocaleMode): void {
+ try {
+  localStorage.setItem(KEY, normalizeLocaleMode(mode));
+ } catch {
+  // 无痕模式等写失败不阻断本次切换
  }
 }
 
@@ -154,14 +191,19 @@ const ZH = {
  imagesOmitted: "{0} 张图片因体积过大未在回放中展开",
  copyQuestion: "复制这条提问",
  copyReply: "复制这条回复",
- thoughtDone: "已思考 {0} 秒",
+ thoughtDone: "思考 · 持续了 {0} 秒",
  thinking: "思考中…",
  planTitle: "任务计划",
  planDone: "（已完成）",
  planInProgress: "（进行中）",
  planTodo: "（待办）",
 
- // 工具卡
+ // 工具调用行（ToolRow）
+ toolVerbRead: "读取",
+ toolVerbWrite: "写入",
+ toolVerbEdit: "编辑",
+ toolVerbBash: "终端",
+ toolVerbSearch: "搜索",
  toolStateOk: "成功",
  toolStateError: "失败",
  toolStateRunning: "运行中",
@@ -227,6 +269,25 @@ const ZH = {
  usageReasoning: "推理 {0}",
  usageCost: "成本 ${0}",
 
+ // 上下文容量（输入框工具行模型选择器左侧的容量环 + 面板）
+ ctxTitle: "上下文容量",
+ ctxTriggerAria: "上下文容量：已占 {0}",
+ ctxTriggerTitle: "查看上下文构成",
+ ctxRatio: "{0} / {1}",
+ ctxPercentOf: "（{0}）",
+ ctxLoading: "正在读取上下文…",
+ ctxNoParts: "拿不到分项明细（omp 尚未落盘这一轮）",
+ ctxPartMessages: "消息",
+ ctxPartSystemPrompt: "系统提示词",
+ ctxPartSkills: "技能",
+ ctxPartTools: "工具",
+ ctxPartMcpTools: "MCP 工具",
+ ctxPartSystemContext: "系统上下文",
+ ctxCacheHit: "平均缓存命中率",
+ ctxCacheReadTitle: "缓存读 {0} · 未缓存输入 {1} · 缓存写 {2}（本会话累计）",
+ ctxNote: "总量与「消息」是 omp 真值；非消息各档按字符量估算后对齐到真值，用来判断哪一块在吃上下文。",
+ ctxAria: "上下文容量：已用 {0}，窗口 {1}，占 {2}；{3}",
+
  // 输入框
  attachOnlyImages: "只支持 PNG / JPEG / WebP / GIF 图片，其他文件已忽略",
  attachSomeIgnored: "非图片文件已忽略，只添加了图片",
@@ -268,6 +329,25 @@ const ZH = {
  dirtyWarning: "有未提交改动，切分支请回终端",
  noBranches: "暂无本地分支",
  branchFoot: "只读展示 · 切分支请在终端操作",
+
+ // 用量限额（供应商配额：5 小时 / 每周 / 每月；数据来自 omp usage --json）
+ usageLimitsTitle: "用量限额",
+ usageLimitsNeutral: "用量",
+ usageLimitsAria: "用量限额：{0} 已用 {1}",
+ usageLimitsResets: "{0}后重置",
+ usageLimitsLoading: "正在获取用量…",
+ usageLimitsUpdatedAgo: "更新于 {0}",
+ usageLimitsEmpty: "没有可显示的用量限额。omp 只对部分供应商提供用量数据（如 OpenCode Go / Claude / Codex）。",
+ usageLimitsAccountsWithout: "{0} 个账号没有用量数据",
+ usageLimitsWindow5h: "5 小时",
+ usageLimitsWindow7d: "每周",
+ usageLimitsWindowMonthly: "每月",
+ usageLimitsFoot: "数据来自 omp 的用量查询 · 只读",
+ usageLimitsNoData: "无用量数据",
+ usageLimitsNoDataHint: "omp 暂不支持查询这个供应商的用量（模型仍可正常使用）",
+ usageLimitsNoDataMore: "另有 {0} 个供应商无用量数据",
+ usageLimitsProviderNoData: "{0} 没有用量数据（omp 暂不支持该供应商的用量查询）",
+ usageLimitsFailedTitle: "用量不可用：{0}",
 
  // 模型选择器
  modelLabel: "模型",
@@ -389,9 +469,15 @@ const ZH = {
 
  // 设置页
  title: "设置",
- subtitle: "界面语言、omp 诊断、应用更新，以及 omp 的供应商登录与模型配置。",
- languageSection: "界面语言",
- languageHint: "只切换本应用的界面展示，不改 omp 配置。",
+ subtitle: "omp 诊断、应用更新，以及 omp 的供应商登录与模型配置。",
+languageSection: "界面语言",
+languageHint: "只切换本应用的界面展示，不改 omp 配置。",
+localeSystem: "跟随系统",
+ // 皮肤切换（左栏底部设置行右侧）：三档展示偏好，同样只作用于本应用
+ themeSection: "皮肤",
+ themeSystem: "跟随系统",
+ themeDark: "深色",
+ themeLight: "浅色",
  diagSection: "omp 诊断",
  diagOk: "正常",
  diagBad: "不可用",
@@ -469,6 +555,55 @@ const ZH = {
  memoryKindRollout: "会话摘要",
  memoryKindSkill: "技能包",
  memoryKindOther: "其他文件",
+
+ // 设置 › 使用统计（omp 会话 jsonl 里的用量聚合：token / 费用 / 工具 / 时段）
+ tabUsage: "使用统计",
+ usageHint:
+  "统计来自本机 omp 的会话记录（每一条 assistant 消息的 usage 求和，含已归档会话）：token、费用、工具调用与时段分布。本应用只读取，不写 omp，也不做联网上报。",
+ usageRangeToday: "今日",
+ usageRange7d: "近 7 日",
+ usageRange30d: "近 30 日",
+ usageRangeAll: "全部",
+ usageRangeAria: "统计范围",
+ usageLoading: "正在统计…",
+ usageLoadFailed: "统计加载失败",
+ usageEmpty: "还没有可统计的用量。跑过带模型的 omp 会话后，这里会按日 / 模型 / 工具汇总。",
+ usageTruncated: "已到扫描预算（已扫描 {0} 个会话文件），统计可能不全。",
+ usageTokens: "tokens 用量",
+ usageCostEst: "预估费用",
+ usageCostHint: "按 omp 的模型定价估算（美元）",
+ usageNoCost: "该模型没有定价数据",
+ usageRequests: "请求数",
+ usageSessions: "{0} 个会话",
+ usageToolCalls: "工具调用",
+ usageToolKinds: "{0} 种工具",
+ usageCacheHit: "Cache 命中率",
+ usageCacheReadSub: "缓存读 {0} tokens",
+ usageActiveDays: "活跃天数",
+ usageActiveDaysSub: "连续 {0} 天 · 最长 {1} 天",
+ usageAvgDaily: "日均 tokens",
+ usageAvgDailySub: "按活跃天数摊",
+ usageTopModel: "最常用模型",
+ usageTopModelShare: "占比 {0}",
+ usagePeakHour: "峰值时段",
+ usagePeakHourSub: "{0} tokens",
+ usageUnknownModel: "未知模型",
+ usageDailyTrend: "每日 Token 趋势",
+ usageDailyTrendLegend: "自下而上：未缓存输入 / 缓存读·写 / 输出",
+ usageDailyTrendCapped: "最多显示最近 {0} 天",
+ usageSeriesIn: "未缓存输入",
+ usageSeriesCache: "缓存读·写",
+ usageSeriesOut: "输出",
+ usageDayTotal: "{0} · {1} tokens · {2} 次请求",
+ usageByModel: "按模型",
+ usageByModelEmpty: "范围内没有模型用量",
+ usageByTool: "工具调用分布",
+ usageByToolEmpty: "范围内没有工具调用",
+ usageByHour: "时段分布（本地时间）",
+ usageByProject: "按项目",
+ usageUnowned: "未归属",
+ usageColCalls: "{0} 次",
+ usageColSessions: "{0} 个会话",
 
  // 设置 › 供应商（omp 的 login / logout；模型角色与可用模型在「模型」页签）
  providersSection: "供应商",
@@ -637,13 +772,18 @@ const EN: Record<TextKey, string> = {
  imagesOmitted: "{0} image(s) omitted from replay (too large)",
  copyQuestion: "Copy question",
  copyReply: "Copy reply",
- thoughtDone: "Thought for {0}s",
+ thoughtDone: "Thought · {0}s",
  thinking: "Thinking…",
  planTitle: "Task plan",
  planDone: "(done)",
  planInProgress: "(in progress)",
  planTodo: "(to do)",
 
+ toolVerbRead: "Read",
+ toolVerbWrite: "Write",
+ toolVerbEdit: "Edit",
+ toolVerbBash: "Terminal",
+ toolVerbSearch: "Search",
  toolStateOk: "Success",
  toolStateError: "Failed",
  toolStateRunning: "Running",
@@ -705,6 +845,25 @@ const EN: Record<TextKey, string> = {
  usageReasoning: "reasoning {0}",
  usageCost: "cost ${0}",
 
+ // Context capacity (capacity ring + panel left of the model picker)
+ ctxTitle: "Context capacity",
+ ctxTriggerAria: "Context capacity: {0} used",
+ ctxTriggerTitle: "See what fills the context",
+ ctxRatio: "{0} / {1}",
+ ctxPercentOf: "({0})",
+ ctxLoading: "Reading context…",
+ ctxNoParts: "Breakdown unavailable (omp has not written this turn yet)",
+ ctxPartMessages: "Messages",
+ ctxPartSystemPrompt: "System prompt",
+ ctxPartSkills: "Skills",
+ ctxPartTools: "Tools",
+ ctxPartMcpTools: "MCP tools",
+ ctxPartSystemContext: "System context",
+ ctxCacheHit: "Avg cache hit rate",
+ ctxCacheReadTitle: "Cache read {0} · uncached input {1} · cache write {2} (this chat)",
+ ctxNote: "Used tokens and “Messages” come straight from omp; the non-message rows are estimated from character volume and scaled to that true total, to show what fills the context.",
+ ctxAria: "Context capacity: {0} used of {1}, {2}; {3}",
+
  attachOnlyImages: "Only PNG / JPEG / WebP / GIF images are supported; other files were ignored",
  attachSomeIgnored: "Non-image files were ignored; only images were added",
  attachReadFailed: "Failed to read the image",
@@ -743,6 +902,24 @@ const EN: Record<TextKey, string> = {
  dirtyWarning: "Uncommitted changes; switch branches in a terminal",
  noBranches: "No local branches",
  branchFoot: "Read-only · switch branches in a terminal",
+
+ usageLimitsTitle: "Usage limits",
+ usageLimitsNeutral: "Usage",
+ usageLimitsAria: "Usage limits: {0} {1} used",
+ usageLimitsResets: "Resets in {0}",
+ usageLimitsLoading: "Loading usage…",
+ usageLimitsUpdatedAgo: "Updated {0}",
+ usageLimitsEmpty: "No usage limits to show. omp reports limits for supported providers only (e.g. OpenCode Go / Claude / Codex).",
+ usageLimitsAccountsWithout: "{0} account(s) without usage data",
+ usageLimitsWindow5h: "5 hours",
+ usageLimitsWindow7d: "Weekly",
+ usageLimitsWindowMonthly: "Monthly",
+ usageLimitsFoot: "From omp usage query · read-only",
+ usageLimitsNoData: "No usage data",
+ usageLimitsNoDataHint: "omp can't query usage for this provider yet (models still work)",
+ usageLimitsNoDataMore: "{0} more provider(s) without usage data",
+ usageLimitsProviderNoData: "{0} has no usage data (omp doesn't provide usage for this provider yet)",
+ usageLimitsFailedTitle: "Usage unavailable: {0}",
 
  modelLabel: "Model",
  chooseModel: "Choose model",
@@ -852,9 +1029,14 @@ const EN: Record<TextKey, string> = {
  mdUi: "> Waiting for input: {0}",
 
  title: "Settings",
- subtitle: "UI language, omp diagnostics, app updates — plus omp provider sign-in and model configuration.",
- languageSection: "Language",
- languageHint: "Only changes this app's UI text. Does not touch omp config.",
+ subtitle: "omp diagnostics, app updates — plus omp provider sign-in and model configuration.",
+languageSection: "Language",
+languageHint: "Only changes this app's UI text. Does not touch omp config.",
+localeSystem: "Follow system",
+ themeSection: "Theme",
+ themeSystem: "Follow system",
+ themeDark: "Dark",
+ themeLight: "Light",
  diagSection: "omp Diagnostics",
  diagOk: "OK",
  diagBad: "Unavailable",
@@ -931,6 +1113,55 @@ const EN: Record<TextKey, string> = {
  memoryKindRollout: "Rollout summary",
  memoryKindSkill: "Skill",
  memoryKindOther: "Other file",
+
+ // 设置 › 使用统计（omp 会话 jsonl 里的用量聚合：token / 费用 / 工具 / 时段）
+ tabUsage: "Usage",
+ usageHint:
+  "Stats come from local omp session records (summed from each assistant message's usage, archived chats included): tokens, cost, tool calls and hourly distribution. This app only reads — it never writes to omp and never reports usage anywhere.",
+ usageRangeToday: "Today",
+ usageRange7d: "Last 7 days",
+ usageRange30d: "Last 30 days",
+ usageRangeAll: "All time",
+ usageRangeAria: "Usage range",
+ usageLoading: "Crunching numbers…",
+ usageLoadFailed: "Failed to load usage stats",
+ usageEmpty: "No usage to report yet. Once omp sessions run with a model, usage is summarized by day / model / tool here.",
+ usageTruncated: "Hit the scan budget ({0} session files scanned); figures may be incomplete.",
+ usageTokens: "tokens used",
+ usageCostEst: "Est. cost",
+ usageCostHint: "Estimated from omp model pricing (USD)",
+ usageNoCost: "No pricing data for this model",
+ usageRequests: "Requests",
+ usageSessions: "{0} chats",
+ usageToolCalls: "Tool calls",
+ usageToolKinds: "{0} tools",
+ usageCacheHit: "Cache hit rate",
+ usageCacheReadSub: "{0} cached tokens",
+ usageActiveDays: "Active days",
+ usageActiveDaysSub: "{0}-day streak · longest {1}",
+ usageAvgDaily: "Daily average",
+ usageAvgDailySub: "across active days",
+ usageTopModel: "Top model",
+ usageTopModelShare: "{0} share",
+ usagePeakHour: "Peak hour",
+ usagePeakHourSub: "{0} tokens",
+ usageUnknownModel: "Unknown model",
+ usageDailyTrend: "Daily token trend",
+ usageDailyTrendLegend: "bottom-up: uncached input / cache read·write / output",
+ usageDailyTrendCapped: "showing the last {0} days at most",
+ usageSeriesIn: "Uncached input",
+ usageSeriesCache: "Cache read·write",
+ usageSeriesOut: "Output",
+ usageDayTotal: "{0} · {1} tokens · {2} requests",
+ usageByModel: "By model",
+ usageByModelEmpty: "No model usage in this range",
+ usageByTool: "Tool call distribution",
+ usageByToolEmpty: "No tool calls in this range",
+ usageByHour: "Hourly distribution (local time)",
+ usageByProject: "By project",
+ usageUnowned: "Unassigned",
+ usageColCalls: "{0} calls",
+ usageColSessions: "{0} chats",
 
  providersSection: "Providers",
  providersHint:

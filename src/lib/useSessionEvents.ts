@@ -4,7 +4,7 @@ import { IPC } from "@shared/ipc";
 import { api } from "@shared/api";
 import { useApp } from "../stores/app";
 import type { SessionRuntime, SessionStatus, ViewMsg } from "@shared/types";
-import { summarizeArgs, mentionFilesOf } from "./viewmsg";
+import { summarizeArgs, mentionFilesOf, diffStatOf } from "./viewmsg";
 import { fmt, TEXT, type Text } from "./locale";
 import { imagesFromContent } from "./attachments";
 import { resolveThinking } from "./thinking";
@@ -136,6 +136,7 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dic
    };
    // 卡 id 换成 toolCallId 版本（与历史回放 `viewMsgsFromJsonlLines` 的 `tool:<id>` 对齐），
    // 同时把之前按 contentIndex 建的"输入中"占位卡原位替换掉，避免一次调用两张卡。
+   const diffStat = diffStatOf(tc.name ?? "tool", args);
    out.push({
     kind: "tool",
     id: tc.id ? `tool:${tc.id}` : key,
@@ -146,6 +147,7 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dic
     state: "running",
     output: "",
     streamIndex: tc.streamIndex ?? 0,
+    ...(diffStat ? { diffStat } : {}),
     ...(tc.id ? { __replaceId: key } : {}),
    } as IncomingViewMsg);
   }
@@ -185,19 +187,20 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dic
  }
  if (t === "tool_execution_start") {
   const meta = fold.toolMeta[String(frame.toolCallId ?? "")];
+  const name = String(frame.toolName ?? meta?.name ?? "tool");
+  const args = (frame.args as Record<string, unknown>) ?? {};
+  const diffStat = diffStatOf(name, args);
   out.push({
    kind: "tool",
    id: toolCardId(String(frame.toolCallId ?? "")),
    toolCallId: String(frame.toolCallId ?? ""),
-   name: String(frame.toolName ?? meta?.name ?? "tool"),
+   name,
    intent: String(frame.intent ?? meta?.intent ?? ""),
-   argsSummary: summarizeArgs(
-    String(frame.toolName ?? "tool"),
-    (frame.args as Record<string, unknown>) ?? {},
-   ),
+   argsSummary: summarizeArgs(name, args),
    state: "running",
    output: "",
    streamIndex: meta?.streamIndex ?? 0,
+   ...(diffStat ? { diffStat } : {}),
   });
   return out;
  }

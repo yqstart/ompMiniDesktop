@@ -315,7 +315,9 @@ pub fn apply_role_edit(
 
 // ---------- 进程调用 ----------
 
-async fn run_omp(bin: &str, args: &[&str]) -> Result<String, String> {
+/// 跑一次 omp CLI 并回 stdout（非零退出把 stderr 尾部当原因）。
+/// `pub(crate)`：`quota.rs` 的 `omp usage --json` 走同一套超时与错误口径。
+pub(crate) async fn run_omp(bin: &str, args: &[&str]) -> Result<String, String> {
     let fut = tokio::process::Command::new(bin)
         .args(args)
         .stdin(Stdio::null())

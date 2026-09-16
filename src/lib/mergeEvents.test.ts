@@ -75,6 +75,40 @@ describe("实时流合并：工具卡", () => {
   expect(card.output).toBe("hi");
  });
 
+ it("行数增量从调用帧继承到终态（结果帧没有参数，不许把 +N −M 抹掉）", () => {
+  const msgs = replay([
+   {
+    type: "message_update",
+    assistantMessageEvent: {
+     type: "toolcall_end",
+     contentIndex: 0,
+     toolCall: {
+      id: "call_edit",
+      name: "edit",
+      arguments: { path: "a.ts", old_string: "a\nb", new_string: "a\nb\nc" },
+      streamIndex: 0,
+     },
+    },
+   },
+   {
+    type: "tool_execution_start",
+    toolCallId: "call_edit",
+    toolName: "edit",
+    args: { path: "a.ts", old_string: "a\nb", new_string: "a\nb\nc" },
+   },
+   {
+    type: "tool_execution_end",
+    toolCallId: "call_edit",
+    toolName: "edit",
+    isError: false,
+    result: { content: [{ type: "text", text: "ok" }] },
+   },
+  ]);
+  const card = msgs.find((m) => m.kind === "tool") as Extract<ViewMsg, { kind: "tool" }>;
+  expect(card.state).toBe("ok");
+  expect(card.diffStat).toEqual({ added: 3, removed: 2 });
+ });
+
  it("中间阶段只有一张卡：toolcall_end 不会与 delta 占位卡并存", () => {
   const frames = toolFrames().slice(0, 3);
   const msgs = replay(frames);

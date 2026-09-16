@@ -1,10 +1,13 @@
 mod commands;
+mod context;
 mod git_info;
 mod memories;
 mod overlay;
 mod providers;
+mod quota;
 mod runtime;
 mod session_scan;
+mod usage;
 
 use commands::*;
 use tauri::Manager;
@@ -76,7 +79,10 @@ fn main() {
             memories::list_memories,
             memories::read_memory_file,
             memories::delete_memory_file,
-            memories::delete_memory_project
+            memories::delete_memory_project,
+            usage::get_usage_stats,
+            quota::get_provider_usage,
+            context::get_context_breakdown
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

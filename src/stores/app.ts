@@ -1,7 +1,8 @@
 import { create } from "zustand";
-import type { AvailableCommand, HealthInfo, ImageAttachment, ModelCatalog, ProjectView, SessionRuntime, SessionStatus, SessionView, TodoPhase, UpdateState, ViewMsg } from "@shared/types";
-import type { Locale } from "../lib/locale";
-import { loadLocale, saveLocale } from "../lib/locale";
+import type { AvailableCommand, HealthInfo, ImageAttachment, ModelCatalog, ProjectView, ProviderUsage, SessionRuntime, SessionStatus, SessionView, TodoPhase, UpdateState, ViewMsg } from "@shared/types";
+import type { Locale, LocaleMode } from "../lib/locale";
+import { loadLocaleMode, resolveLocale, saveLocaleMode, systemLang } from "../lib/locale";
+import { applyTheme, loadTheme, saveTheme, type ThemeMode } from "../lib/theme";
 import { loadFavorites, saveFavorites } from "../lib/favoriteModels";
 
 type AppState = {
@@ -34,17 +35,28 @@ type AppState = {
  /** 任务计划（`todoPhases` 真值 + `todo_reminder` 事件合并，按会话隔离；只读展示）。 */
  plansBySession: Record<string, TodoPhase[]>;
  sessionApprovals: Record<string, string>;
- /** 输入框工具行与上方上下文条的下拉互斥：同一时刻只开一个（model/thinking/permission/project/branch）。 */
- composerMenu: "model" | "thinking" | "permission" | "project" | "branch" | null;
+ /** 供应商配额快照（`omp usage --json`；输入框上方「用量限额」入口的数据源）。 */
+ providerUsage: ProviderUsage | null;
+ /** 配额读取失败的原因（成功时为 null；浮层里显示这一行）。 */
+ providerUsageError: string | null;
+ /** 配额是否正在拉取（刷新按钮的 loader 与首屏占位都用它）。 */
+ providerUsageLoading: boolean;
+ /** 输入框工具行与上方上下文条的下拉互斥：同一时刻只开一个（model/thinking/permission/project/branch/context/usage）。 */
+ composerMenu: "model" | "thinking" | "permission" | "project" | "branch" | "context" | "usage" | null;
  settingsOpen: boolean;
  sidebarOpen: boolean;
  update: UpdateState;
  updateDismissedVersion: string | null;
  /** 更新弹窗显隐（available 常驻入口，弹窗可单独关闭=稍后）。 */
  updateDialogOpen: boolean;
- /** 设置页界面语言（只作用于本应用展示，localStorage 持久化）。 */
+ /** 界面语言偏好三档（跟随系统 / 简体中文 / English；只作用于本应用展示，localStorage 持久化）。 */
+ localeMode: LocaleMode;
+ /** 实际生效的语言（`localeMode` 解析后的结果；字典与 `<html lang>` 用它）。 */
  locale: Locale;
- setLocale: (locale: Locale) => void;
+ setLocaleMode: (mode: LocaleMode) => void;
+ /** 皮肤（只作用于本应用展示，localStorage 持久化；`system` 跟随系统偏好）。 */
+ theme: ThemeMode;
+ setTheme: (theme: ThemeMode) => void;
  set: (p: Partial<AppState>) => void;
  draftOf: (sid: string | null) => string;
  setDraft: (sid: string | null, text: string) => void;
@@ -64,9 +76,21 @@ type AppState = {
  resetThreadLimit: (sid: string) => void;
 };
 
-export const SIDEBAR_MIN = 220;
+/**
+ * 侧栏宽度下限由左栏底部那一行的**内容**决定：设置按钮（图标 + 全称）+ 语言切换 + 皮肤切换
+ * 并排不挤压所需的最小宽度（最宽文案按英文界面算，`Settings` 比「设置」长）。比这更窄，
+ * 设置按钮的文案就会开始 `truncate`——那不该是「用户可以拖到的状态」。
+ *
+ * 实测（真实渲染）：英文界面下这一行需要 287px，即侧栏 288px 是临界；这里留 4px 给
+ * 字体渲染差异（换平台 / 换字体时 `Settings` 会宽一点点）。
+ */
+export const SIDEBAR_MIN = 292;
 export const SIDEBAR_MAX = 480;
-export const SIDEBAR_DEFAULT = 264;
+/** 默认宽度 = 下限：默认就取「底部行刚好完整」的宽度，内容区拿到最多的横向空间。 */
+export const SIDEBAR_DEFAULT = SIDEBAR_MIN;
+
+/** 启动时的语言偏好（模块加载时读一次，供 store 初始化解析出实际语言）。 */
+const INITIAL_LOCALE_MODE = loadLocaleMode();
 /** 消息流单页条数：首屏只渲染最后 200 条，其余按需向上加载（MASTER §7）。 */
 export const THREAD_PAGE = 200;
 
@@ -107,21 +131,33 @@ export const useApp = create<AppState>((set, get) => ({
  commandsBySession: {},
  plansBySession: {},
  sessionApprovals: {},
+ providerUsage: null,
+ providerUsageError: null,
+ providerUsageLoading: false,
  composerMenu: null,
  settingsOpen: false,
  sidebarOpen: false,
  update: { status: "idle" },
  updateDismissedVersion: null,
  updateDialogOpen: false,
- locale: loadLocale(),
- setLocale: (locale) => {
-  saveLocale(locale);
+ localeMode: INITIAL_LOCALE_MODE,
+ locale: resolveLocale(INITIAL_LOCALE_MODE, systemLang()),
+ setLocaleMode: (mode) => {
+  saveLocaleMode(mode);
+  const locale = resolveLocale(mode, systemLang());
   try {
    document.documentElement.lang = locale;
   } catch {
    // 非 DOM 环境（单测）忽略
   }
-  set({ locale });
+  set({ localeMode: mode, locale });
+ },
+ theme: loadTheme(),
+ setTheme: (theme) => {
+  saveTheme(theme);
+  // 同步落 class：useEffect 在 paint 之后跑，只靠它会让切皮肤先闪一帧旧皮肤
+  applyTheme(theme);
+  set({ theme });
  },
  sidebarWidth: loadSidebarWidth(),
  threadLimitSid: null,
