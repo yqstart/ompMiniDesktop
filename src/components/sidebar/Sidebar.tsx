@@ -321,21 +321,42 @@ export function Sidebar() {
            <span className="ml-1.5 truncate font-mono text-[11px] text-faint">{project.path}</span>
           )}
          </span>
-         {/* 右侧固定槽位：数量与操作按钮同槽互斥，垂直居中，悬浮零跳动。
-                      槽位里的操作 = **归档全部对话**；**没有任何删除入口**
-                      （删除不可逆，只留在设置 ›「已归档对话」里）；缺失态同样保留。 */}
-         <span className="relative flex h-5 w-[28px] shrink-0 items-center justify-end">
-          <span className="font-mono group-hover/proj:invisible">{active.length}</span>
-          <span className="absolute inset-y-0 right-0 hidden items-center gap-0.5 group-hover/proj:flex" onClick={(e) => e.preventDefault()}>
+         {/* 右侧固定槽位：数量与操作图标同槽互斥，垂直居中，悬浮零跳动。
+                      悬浮操作 = **新建会话**（`Plus`）+ **归档全部对话**（`Archive`），
+                      **没有任何删除入口**（删除不可逆，只留在设置 ›「已归档对话」里）。
+                      空分组例外：`＋` 常驻不藏（此时数量位是 0，本来也没信息量）——
+                      一个项目刚加进来时不能没有可见的建会话入口。 */}
+         <span className="relative flex h-5 w-[48px] shrink-0 items-center justify-end">
+          <span className={`font-mono ${active.length === 0 ? "invisible" : "group-hover/proj:invisible"}`}>
+           {active.length}
+          </span>
+          <span
+           className={`absolute inset-y-0 right-0 items-center gap-0.5 ${active.length === 0 ? "flex" : "hidden group-hover/proj:flex"}`}
+           onClick={(e) => e.preventDefault()}
+          >
            <button
-            onClick={() => void runArchiveAll(active.map((s) => s.id))}
-            disabled={busy || active.length === 0}
-            className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-100 hover:bg-active hover:text-foreground disabled:opacity-40"
-            aria-label={fmt(t.archiveAllIn, project.name)}
-            title={t.archiveAllInTitle}
+            onClick={async () => {
+             const res = await createSessionIn(project.id, { projectName: project.name });
+             setError(res.ok ? null : res.message);
+            }}
+            disabled={project.missing || busy}
+            className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-100 hover:bg-active hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label={fmt(t.newSessionIn, project.name)}
+            title={t.newSession}
            >
-            <Archive size={12} />
+            <Plus size={12} />
            </button>
+           {active.length > 0 && (
+            <button
+             onClick={() => void runArchiveAll(active.map((s) => s.id))}
+             disabled={busy}
+             className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-100 hover:bg-active hover:text-foreground disabled:opacity-40"
+             aria-label={fmt(t.archiveAllIn, project.name)}
+             title={t.archiveAllInTitle}
+            >
+             <Archive size={12} />
+            </button>
+           )}
           </span>
          </span>
         </summary>
@@ -354,17 +375,6 @@ export function Sidebar() {
          </div>
         )}
         <div className="mt-0.5 space-y-px border-l border-border-soft pl-1.5">
-         <button
-          onClick={async () => {
-           const res = await createSessionIn(project.id, { projectName: project.name });
-           setError(res.ok ? null : res.message);
-          }}
-          disabled={project.missing || busy}
-          className="flex w-full cursor-pointer items-center gap-1 rounded-md px-2 py-1.5 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-          aria-label={fmt(t.newSessionIn, project.name)}
-         >
-          <Plus size={12} /> {t.newSession}
-         </button>
          {active.length === 0 && (
           <div className="px-2.5 py-1 text-[11px] text-faint">{t.noActiveChats}</div>
          )}
