@@ -7,6 +7,7 @@ import type { SessionRuntime, SessionStatus, ViewMsg } from "@shared/types";
 import { summarizeArgs, mentionFilesOf, diffStatOf } from "./viewmsg";
 import { fmt, TEXT, type Text } from "./locale";
 import { imagesFromContent } from "./attachments";
+import { normalizeCommands } from "./slashCommands";
 import { resolveThinking } from "./thinking";
 import { mergeViewMsgs, type IncomingViewMsg } from "./mergeEvents";
 
@@ -359,13 +360,16 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dic
    useApp.setState((s) => ({
     commandsBySession: {
      ...s.commandsBySession,
-     [sid]: (cmds as { name?: string }[]).filter((c) => typeof c?.name === "string") as never,
+     [sid]: normalizeCommands(cmds),
     },
    }));
   }
   return out;
  }
  if (t === "turn_start" || t === "turn_end" || t === "agent_start" || t === "agent_end") return out;
+ // 单向宿主通知（握手期就会到，现在经回放正常抵达）：没有渲染面，安静忽略，
+ // 不占「未知帧」告警位（那是留给真正的协议漂移的）。
+ if (t === "advisor_cost_changed") return out;
  // 其余未知帧：忽略不崩，但每个类型只告警一次（M4 协议漂移 guard——
  // omp 大版本升级后事件名对不上时，日志里能直接看出来是哪一类帧变了）。
  if (!unknownFrameTypes.has(t)) {

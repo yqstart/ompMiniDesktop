@@ -306,6 +306,8 @@ pub async fn spawn_long_lived(
     let mut reader = reader;
     let mut stdin_opt = Some(stdin);
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    // 握手期间到达的帧先攒着，等 pump 起来后原序回放（见 pump 启动处的说明）
+    let mut leftover: Vec<String> = Vec::new();
     loop {
         let line = tokio::time::timeout_at(deadline, reader.next_line())
             .await
@@ -318,6 +320,7 @@ pub async fn spawn_long_lived(
                 if v.get("type").and_then(|t| t.as_str()) == Some("ready") {
                     break;
                 }
+                leftover.push(l);
             }
             None => return Err(cmd_err("RPC_EOF", "omp 进程意外退出".into(), None)),
         }
@@ -344,30 +347,35 @@ pub async fn spawn_long_lived(
             continue;
         }
         let Ok(v) = serde_json::from_str::<serde_json::Value>(l.trim()) else { continue };
-        if v.get("type").and_then(|t| t.as_str()) == Some("response")
-            && v.get("id").and_then(|i| i.as_str()) == Some("h-state")
+        // 握手包里别的不只是噪声：omp 在 `get_state` 回包**之前**就把
+        // `available_commands_update` 发出来了（实测帧序：ready → setWidget →
+        // advisor_cost_changed → available_commands_update → negotiate 回包 → get_state 回包）。
+        // 早先这里整条丢弃，于是前端永远收不到命令面，`/` 补全一个候选都不弹。
+        // 现在按原序攒下、pump 起来后回放（不进会话流的东西由前端自己忽略）。
+        if !(v.get("type").and_then(|t| t.as_str()) == Some("response")
+            && v.get("id").and_then(|i| i.as_str()) == Some("h-state"))
         {
-            if v.get("success").and_then(|s| s.as_bool()) != Some(true) {
-                return Err(cmd_err(
-                    "RPC_STATE",
-                    format!("获取会话状态失败：{}", v.get("error").and_then(|e| e.as_str()).unwrap_or("")),
-                    None,
-                ));
-            }
-            let d = v.get("data").cloned().unwrap_or_default();
-            let sid = d.get("sessionId").and_then(|s| s.as_str()).map(|s| s.to_string());
-            let sfile = d.get("sessionFile").and_then(|s| s.as_str()).map(|s| s.to_string());
-            match (sid, sfile) {
-                (Some(a), Some(b)) => break (a, b, SessionMeta::from_state(&d)),
-                _ => return Err(cmd_err("RPC_STATE", "未拿到会话身份".into(), None)),
-            }
+            leftover.push(l);
+            continue;
+        }
+        if v.get("success").and_then(|s| s.as_bool()) != Some(true) {
+            return Err(cmd_err(
+                "RPC_STATE",
+                format!("获取会话状态失败：{}", v.get("error").and_then(|e| e.as_str()).unwrap_or("")),
+                None,
+            ));
+        }
+        let d = v.get("data").cloned().unwrap_or_default();
+        let sid = d.get("sessionId").and_then(|s| s.as_str()).map(|s| s.to_string());
+        let sfile = d.get("sessionFile").and_then(|s| s.as_str()).map(|s| s.to_string());
+        match (sid, sfile) {
+            (Some(a), Some(b)) => break (a, b, SessionMeta::from_state(&d)),
+            _ => return Err(cmd_err("RPC_STATE", "未拿到会话身份".into(), None)),
         }
     };
 
-    // 启动后台 pump：stdin 写 + stdout 读分发
-    let stdin = stdin_opt.take().unwrap();
-    start_pump(app.clone(), key.clone(), reader, stdin, rx, sid.clone());
-
+    // 先登记进程再起 pump：回放握手帧时会走 `update_meta`（命令面缓存等），
+    // 快照里还没有这一条的话那些帧就白回了。
     let mut m = map.lock().await;
     // 同名会话的旧进程先杀；stdin 关闭等于进程退出（code 0），open_session 会重建
     if let Some(old) = m.remove(&key) {
@@ -376,7 +384,7 @@ pub async fn spawn_long_lived(
         let _ = c.kill().await;
     }
     m.insert(
-        key,
+        key.clone(),
         RunningChild {
             tx,
             child,
@@ -385,6 +393,11 @@ pub async fn spawn_long_lived(
             created_ms: chrono::Utc::now().timestamp_millis(),
         },
     );
+    drop(m);
+
+    // 启动后台 pump：stdin 写 + stdout 读分发（先把握手期间攒下的帧原序回放）
+    let stdin = stdin_opt.take().unwrap();
+    start_pump(app.clone(), key, reader, stdin, rx, sid.clone(), leftover);
     Ok((sid, sfile, meta))
 }
 
@@ -395,6 +408,7 @@ fn start_pump(
     mut stdin: ChildStdin,
     mut rx: mpsc::UnboundedReceiver<String>,
     worker_sid: String,
+    leftover: Vec<String>,
 ) {
     let evt = format!("omp-event://{key}");
     let status = format!("omp-status://{key}");
@@ -404,6 +418,29 @@ fn start_pump(
         let mut pending: std::collections::VecDeque<String> = Default::default();
         // 状态：idle 起
         let _ = app.emit(&status, serde_json::json!({"state":"idle"}));
+        // 握手期间攒下的帧（命令面 / 单向宿主指令）按原序补发：
+        // 它们到得比订阅早，不补发就等于永久丢失（`/` 补全没有数据源就是这个原因）。
+        {
+            for line in leftover {
+                let line = line.trim().to_string();
+                if line.is_empty() {
+                    continue;
+                }
+                let v: serde_json::Value = match serde_json::from_str(&line) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+                let full = if v.get("type").and_then(|t| t.as_str()) == Some("rpc_chunk") {
+                    match asm.feed(&v) {
+                        Some(full) => full,
+                        None => continue,
+                    }
+                } else {
+                    v
+                };
+                handle_frame(&app, &key, &evt, &status, &full, &mut stdin).await;
+            }
+        }
         loop {
             tokio::select! {
                 w = rx.recv() => {

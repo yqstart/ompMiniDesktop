@@ -6,6 +6,7 @@ import { api } from "@shared/api";
 import { attachmentFromFile, dataUrl } from "../../lib/attachments";
 import { fmt } from "../../lib/locale";
 import { extractMentions } from "../../lib/mentions";
+import { applyCommand, filterCommands, isExactCommand } from "../../lib/slashCommands";
 import { useText } from "../../lib/useText";
 import { ModelPicker } from "../pickers/ModelPicker";
 import { ThinkingPicker } from "../pickers/ThinkingPicker";
@@ -13,6 +14,9 @@ import { PermissionBadge } from "../pickers/PermissionBadge";
 import { CompactButton, OmpStatusPill, QueueBadge, RuntimeStats } from "../thread/StatusBar";
 import { ContextBar } from "./ContextBar";
 import { ContextMeter } from "./ContextMeter";
+
+/** `/` 补全一次最多列几条：omp 内置 + 技能命令共 40 多条，全列会把输入框顶到屏幕外，列表自身可滚。 */
+const SLASH_CANDIDATES = 12;
 
 /**
  * 会话输入框：随心输入 + 底部工具行（截图布局）。
@@ -80,19 +84,19 @@ export function Composer() {
   };
  }, [mentionKey, cwd, mentions]);
 
- // `/` 补全：行首 `/` + 连续非空字符为过滤词；有可用命令面时才参与过滤，
- // 无命令面（未收到 available_commands_update）时不弹框、不误报。
- const slashToken = (() => {
-  const before = draft.slice(0, caret);
-  const m = /(?:^|\n)\/(\S*)$/.exec(before);
-  return m ? m[1] : null;
- })();
- const slashCands =
-  slashToken == null || commands.length === 0
-   ? []
-   : commands
-    .filter((c) => `/${c.name}`.startsWith(`/${slashToken}`) || (c.aliases ?? []).some((a) => `/${a}`.startsWith(`/${slashToken}`)))
-    .slice(0, 8);
+// `/` 补全：行首 `/` + 连续非空字符为过滤词；候选来自 omp 的命令面
+// （`available_commands_update`，经后端握手回放到达）。一条命令面都没有时
+// 不弹框、不误报——只是还没收到，不是"没有命令"。
+const slashToken = (() => {
+ const before = draft.slice(0, caret);
+ const m = /(?:^|\n)\/(\S*)$/.exec(before);
+ return m ? m[1] : null;
+})();
+const slashCands = slashToken == null ? [] : filterCommands(commands, slashToken, SLASH_CANDIDATES);
+// 打全的完整命令：回车直接发，不再替用户补一次全
+const slashExact = isExactCommand(commands, slashToken);
+/** 高亮项：显式 ↑↓/悬浮优先，否则默认落在第一条（除非已经打全）。 */
+const slashActive = slashIdx >= 0 ? slashIdx : slashExact ? -1 : 0;
  // `@` 补全：取光标前 `@` 起的路径前缀，300ms 防抖问后端（只读目录列举）。
  const mentionToken = (() => {
   const before = draft.slice(0, caret);
@@ -323,26 +327,28 @@ export function Composer() {
     <label htmlFor="composer" className="sr-only">
      {t.composerLabel}
     </label>
-    {/* `/` 命令补全：有可用命令面且行首命中时才出现 */}
+    {/* `/` 命令补全：命中命令面时出现（omp 的命令名 + 参数提示 + 说明） */}
     {slashToken !== null && slashCands.length > 0 && (
-     <div className="mx-3 mb-1 overflow-hidden rounded-md border border-border bg-elevated shadow-pop" role="listbox" aria-label={t.slashListAria}>
+     <div
+      className="mx-3 mb-1 max-h-64 overflow-y-auto rounded-md border border-border bg-elevated shadow-pop"
+      role="listbox"
+      aria-label={t.slashListAria}
+     >
       {slashCands.map((c, i) => (
        <button
         key={c.name}
         role="option"
-        aria-selected={i === slashIdx}
+        aria-selected={i === slashActive}
         onClick={() => {
-         const before = draft.slice(0, caret);
-         const after = draft.slice(caret);
-         const replaced = before.replace(/(?:^|\n)\/\S*$/, (m) => m.replace(/\/\S*$/, `/${c.name} `));
-         setDraft(activeSessionId, replaced + after);
+         setDraft(activeSessionId, applyCommand(draft, caret, c.name));
          setSlashIdx(-1);
         }}
         onMouseEnter={() => setSlashIdx(i)}
-        className={`block w-full cursor-pointer px-2.5 py-1.5 text-left text-[13px] ${i === slashIdx ? "bg-hover text-foreground" : "text-muted"}`}
+        className={`flex w-full cursor-pointer items-baseline gap-2 px-2.5 py-1.5 text-left text-[13px] ${i === slashActive ? "bg-hover text-foreground" : "text-muted"}`}
        >
-        <span className="font-mono font-medium">/{c.name}</span>
-        {c.description && <span className="ml-2 text-[13px] text-muted">{c.description}</span>}
+        <span className="shrink-0 font-mono font-medium text-foreground">/{c.name}</span>
+        {c.hint && <span className="shrink-0 font-mono text-[11px] text-faint">{c.hint}</span>}
+        {c.description && <span className="min-w-0 truncate text-[13px] text-muted">{c.description}</span>}
        </button>
       ))}
      </div>
@@ -417,8 +423,7 @@ export function Composer() {
        e.preventDefault();
        if (slashCands.length > 0 && slashCands[Math.max(0, slashIdx)]) {
         const c = slashCands[Math.max(0, slashIdx)];
-        const before = draft.slice(0, caret);
-        setDraft(activeSessionId, before.replace(/(?:^|\n)\/\S*$/, (m) => m.replace(/\/\S*$/, `/${c.name} `)) + draft.slice(caret));
+        setDraft(activeSessionId, applyCommand(draft, caret, c.name));
         setSlashIdx(-1);
        } else if (mentionCands.length > 0 && mentionCands[Math.max(0, mentionIdx)]) {
         const c = mentionCands[Math.max(0, mentionIdx)];
@@ -436,21 +441,23 @@ export function Composer() {
        return;
       }
       if (completing && e.key === "Enter" && !e.shiftKey && !(e.metaKey || e.ctrlKey)) {
-       const hasSel = slashIdx >= 0 || mentionIdx >= 0;
-       if (hasSel) {
+       // 回车语义：补全没打开过 ↑↓ 且命令已经打全 → 放行去发送（`/compact` + Enter 就该运行它）；
+       // 其余情况替用户选中高亮项（`/comp` → `/compact `、单打一个 `/` → 第一条命令）。
+       const slashPick =
+        slashCands.length > 0 && (slashIdx >= 0 || !slashExact) ? slashCands[Math.max(0, slashIdx)] : null;
+       if (slashPick) {
         e.preventDefault();
-        if (slashCands.length > 0 && slashCands[Math.max(0, slashIdx)]) {
-         const c = slashCands[Math.max(0, slashIdx)];
-         const before = draft.slice(0, caret);
-         setDraft(activeSessionId, before.replace(/(?:^|\n)\/\S*$/, (m) => m.replace(/\/\S*$/, `/${c.name} `)) + draft.slice(caret));
-         setSlashIdx(-1);
-        } else if (mentionCands.length > 0 && mentionCands[Math.max(0, mentionIdx)]) {
-         const c = mentionCands[Math.max(0, mentionIdx)];
-         const before = draft.slice(0, caret);
-         setDraft(activeSessionId, before.replace(/@[^\s@]*$/, `@${c.path}${c.isDir ? "/" : " "}`) + draft.slice(caret));
-         setMentionIdx(-1);
-         setMentionCands([]);
-        }
+        setDraft(activeSessionId, applyCommand(draft, caret, slashPick.name));
+        setSlashIdx(-1);
+        return;
+       }
+       if (mentionCands.length > 0 && mentionIdx >= 0) {
+        e.preventDefault();
+        const c = mentionCands[mentionIdx];
+        const before = draft.slice(0, caret);
+        setDraft(activeSessionId, before.replace(/@[^\s@]*$/, `@${c.path}${c.isDir ? "/" : " "}`) + draft.slice(caret));
+        setMentionIdx(-1);
+        setMentionCands([]);
         return;
        }
       }

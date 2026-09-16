@@ -16,6 +16,15 @@ omp --mode rpc --cwd <项目目录> [--resume <sessionId前缀>] [--model <selec
 - 首帧必为 `{"type":"ready","protocolVersion":1,"supportedProtocolVersions":[1,2],"maxFrameBytes":1048576,...}`。
 - 客户端应立即回 `{id,type:negotiate_protocol,protocolVersion:2}`（v2 大帧分片 `rpc_chunk`，TypeScript 有 `RpcFrameDecoder` 可抄；V1 消息小，可先按行解析 + 留好分片接口）。
 - 其后固定跟 `extension_ui_request{method:setWidget}`（可忽略）+ `advisor_cost_changed` + `available_commands_update`。
+- **帧序实测（omp 18.2.1，2026-09-16 复测）：这三帧到在 `negotiate_protocol` / `get_state` 的回包**之前**，即
+  `ready → setWidget → advisor_cost_changed → available_commands_update → response(h-neg) → response(h-state)`。
+  所以握手循环不能把「不是 h-state 回包」的行丢掉——早先正是如此，`available_commands_update` 从未抵达前端，
+  `/` 补全一个候选都不弹、后端命令面缓存也一直是空的。现在握手期攒下的帧按原序回放，且**进程先登记进 runtime map 再回放**
+  （回放要走 `update_meta` 写命令面缓存，快照里没这一条就白回）。
+- `available_commands_update.commands[]` 形状：`{name, aliases?, description, input?:{hint?}, subcommands?:[{name, description, usage?}], source}`。
+  本机实测 48 条（内置 + 技能命令）；`input.hint` 是**参数提示**（`/compact` → `[soft|remote|snapcompact] [focus]`），补全行要带上它才说得清参数怎么给。
+- `/` 命令的**执行**就是普通 `prompt`：`{type:"prompt", message:"/usage"}` → `command_output{text}` + `response{command:"prompt", success:true, data:{agentInvoked:false}}`，
+  **没有 agent turn、不会有 `agent_end`**（壳据此把状态收敛回 idle，见 `is_local_prompt_result`）。
 - `get_state` 返回：`model{provider,id,…} / thinkingLevel / isStreaming / sessionFile / sessionId / messageCount / contextUsage{tokens,contextWindow,percent}`。注意**没有 `sessionName`**（实测 `undefined`）——会话名显示走 jsonl 的 `title`，不要指望 state。
 - 新建会话不传 `--resume` 即新建，`sessionFile` 形如 `~/.omp/agent/sessions/<slug>/<ts>_<uuid>.jsonl`；slug 如 `--private-tmp-omp-spike-test--`，**不要复刻 slug 算法**，列表按 `session.cwd` 前缀匹配归组。
 - stdin 关闭 → 进程退出 code 0（优雅）。后端 kill 后重建即 `open_session`。

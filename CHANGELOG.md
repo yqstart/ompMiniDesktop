@@ -135,6 +135,7 @@
 
 ### 修复
 
+- **输入框里打 `/` 什么都不弹：握手期把 omp 的命令面丢了**。实测 omp 18.2.1 的帧序是 `ready → setWidget → advisor_cost_changed → available_commands_update → negotiate 回包 → get_state 回包`——**命令面到在 `get_state` 回包之前**，而后端握手循环只认 h-state 回包、其余行全部丢弃，于是 `available_commands_update` 从未抵达前端（命令面缓存也一直是空的）。现在握手期攒下的帧在 pump 起来后**按原序回放**，且进程先登记进 runtime map 再回放（回放要走 `update_meta` 写缓存）。顺带把命令面接到底：补全行显示 omp 给的名字 + **参数提示**（`input.hint`，如 `/compact` → `[soft|remote|snapcompact] [focus]`）+ 说明，一次最多列 12 条（上游实测 48 条，全列会把输入框顶出屏幕）；回车语义定为「**打全了就直接发，没打全先补全**」——`/compact` + Enter 运行命令、`/comp` + Enter 补成 `/compact `、单打一个 `/` + Enter 选中第一条；命令词的取词 / 过滤 / 替换收在 `src/lib/slashCommands.ts`（17 项单测）。`advisor_cost_changed` 改为安静忽略的单向通知，不占「未知帧」告警位。协议帧序与命令面形状记入 `docs/rpc-memo.md` §1。
 - 审批拒绝分支在 `message_end{toolResult}` 路径不再显示 omp 原文（英文 `Tool call denied by user: bash`），统一渲染为「被用户拒绝」并置失败态（`isError` 也计入——此前只看文本关键字）。
 - `confirm` 类 UI 请求的回包格式修正：此前复用审批回包 `{value:"Approve"}`，omp 侧期待的是 `{confirmed:true/false}`（实测内嵌源码 `WOt` 解析器），现在按方法组装。
 - 修掉新 lint 配置查出的一批 React 反模式：拖拽态在 render 期读 ref（改 state）、`ContextBar` / `PermissionBadge` 在 effect 里同步 setState（改为派生值 / 直接订阅 store）、`useSessionEvents` 在 render 期写 ref（移到 effect）。
