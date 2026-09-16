@@ -118,6 +118,12 @@ pub struct SessionMeta {
     pub duration_ms: Option<f64>,
     /// 最近一轮首字延迟（毫秒）。
     pub ttft_ms: Option<f64>,
+    /// 排队中的消息数（`get_state.queuedMessageCount`）。
+    pub queued_count: Option<i64>,
+    /// 任务计划（`get_state.todoPhases` 原样透传）。
+    pub todo_phases: Option<serde_json::Value>,
+    /// 可用命令（`available_commands_update` 缓存）。
+    pub commands: Option<serde_json::Value>,
 }
 
 impl SessionMeta {
@@ -133,10 +139,13 @@ impl SessionMeta {
                 context_window: c.get("contextWindow").and_then(|x| x.as_i64()),
                 percent: c.get("percent").and_then(|x| x.as_f64()),
             }),
-            // 用量 / 耗时来自 message_end，回读时保留旧值（见 handle_frame 的 StateSync 分支）
+            queued_count: d.get("queuedMessageCount").and_then(|x| x.as_i64()),
+            todo_phases: d.get("todoPhases").filter(|t| !t.is_null()).cloned(),
+            // 用量 / 耗时 / 命令来自事件流，回读时保留旧值（见 handle_frame 的 StateSync 分支）
             usage: None,
             duration_ms: None,
             ttft_ms: None,
+            commands: None,
         }
     }
 
@@ -505,10 +514,11 @@ async fn handle_frame(
                     let d = v.get("data").cloned().unwrap_or_default();
                     let mut meta = SessionMeta::from_state(&d);
                     update_meta(app, key, |m| {
-                        // 用量 / 耗时来自 message_end 而不是 get_state：回读时不能把它们抹掉
+                        // 用量 / 耗时 / 命令缓存来自事件流而非 get_state：回读时不能抹掉
                         meta.usage = m.usage.clone();
                         meta.duration_ms = m.duration_ms;
                         meta.ttft_ms = m.ttft_ms;
+                        meta.commands = m.commands.clone();
                         *m = meta.clone();
                     });
                     let payload = serde_json::to_value(&meta).unwrap_or(serde_json::Value::Null);
@@ -566,10 +576,10 @@ async fn handle_frame(
             }
         }
     }
-    dispatch(app, evt, status, v);
+    dispatch(app, key, evt, status, v);
 }
 
-fn dispatch(app: &AppHandle, evt: &str, status: &str, v: &serde_json::Value) {
+fn dispatch(app: &AppHandle, key: &str, evt: &str, status: &str, v: &serde_json::Value) {
     let t = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
     match t {
         "agent_start" => {
@@ -580,6 +590,37 @@ fn dispatch(app: &AppHandle, evt: &str, status: &str, v: &serde_json::Value) {
             if terminal {
                 let _ = app.emit(status, serde_json::json!({"state":"idle"}));
             }
+        }
+        // 本地命令完成信号（`prompt` 回包 `data.agentInvoked:false` 或后续
+        // `prompt_result{agentInvoked:false}`）：没有 agent turn、不会有
+        // `agent_end`，此处直接收敛到 idle，否则转圈停不下来。
+        "response" if is_local_prompt_result(v) => {
+            let _ = app.emit(status, serde_json::json!({"state":"idle"}));
+            let _ = app.emit(evt, v);
+        }
+        "prompt_result" if !v.get("agentInvoked").and_then(|b| b.as_bool()).unwrap_or(true) => {
+            let _ = app.emit(status, serde_json::json!({"state":"idle"}));
+            let _ = app.emit(evt, v);
+        }
+        "command_output" | "notice" | "todo_reminder" | "goal_updated" | "irc_message" => {
+            // 本地命令输出 / 单向通知 / 计划提醒：透传给前端渲染，不触碰运行状态。
+            let _ = app.emit(evt, v);
+        }
+        "available_commands_update" => {
+            // 可用命令面：缓存后透传，前端 `/` 补全的数据源。
+            if let Some(cmds) = v.get("commands") {
+                let cmds = cmds.clone();
+                update_meta(app, key, |m| {
+                    m.commands = Some(cmds.clone());
+                });
+            }
+            let _ = app.emit(evt, v);
+        }
+        "auto_compaction_start" | "auto_compaction_end" | "auto_retry_start" | "auto_retry_end"
+        | "retry_fallback_applied" | "retry_fallback_succeeded" | "subagent_lifecycle" | "subagent_progress"
+        | "subagent_event" => {
+            // 压缩 / 重试 / 子代理生命周期：透传给前端渲染成分隔线。
+            let _ = app.emit(evt, v);
         }
         "extension_ui_request" => {
             // 需要用户回包的方法才会进「等待输入」状态（审批 + 通用 UI 请求）；
@@ -593,7 +634,7 @@ fn dispatch(app: &AppHandle, evt: &str, status: &str, v: &serde_json::Value) {
         }
         "response" | "message_start" | "message_update" | "message_end" | "turn_start" | "turn_end"
         | "tool_execution_start" | "tool_execution_update" | "tool_execution_end" | "model_changed"
-        | "thinking_level_changed" | "available_commands_update" => {
+        | "thinking_level_changed" => {
             let _ = app.emit(evt, v);
         }
         _ => {
@@ -601,6 +642,22 @@ fn dispatch(app: &AppHandle, evt: &str, status: &str, v: &serde_json::Value) {
             let _ = app.emit(evt, v);
         }
     }
+}
+
+/// `prompt` 回包是否代表"本地收尾、无 agent turn"：
+/// `command == "prompt" && success && data.agentInvoked == false`。
+/// agent 真正开跑（`agentInvoked:true` / 缺字段）时不收敛，等后续 `agent_end`。
+fn is_local_prompt_result(v: &serde_json::Value) -> bool {
+    if v.get("command").and_then(|c| c.as_str()) != Some("prompt") {
+        return false;
+    }
+    if v.get("success").and_then(|s| s.as_bool()) != Some(true) {
+        return false;
+    }
+    v.get("data")
+        .and_then(|d| d.get("agentInvoked"))
+        .and_then(|b| b.as_bool())
+        == Some(false)
 }
 
 /// base64 小实现（避免新增依赖）：仅用于 rpc_chunk data 段。
@@ -867,6 +924,21 @@ mod tests {
         // prompt 回包不触发回读
         let p = serde_json::json!({"id": "p-1", "type": "response", "command": "prompt", "success": true});
         assert_eq!(classify(&p), FrameAction::Forward(None));
+    }
+
+    #[test]
+    fn local_prompt_result_detected() {
+        // 本地收尾（agentInvoked:false）→ 收敛 idle
+        let local = serde_json::json!({"id": "p-2", "type": "response", "command": "prompt", "success": true, "data": {"agentInvoked": false}});
+        assert!(is_local_prompt_result(&local));
+        // 真正开跑（true / 缺字段）→ 不收敛，等 agent_end
+        let started = serde_json::json!({"id": "p-3", "type": "response", "command": "prompt", "success": true, "data": {"agentInvoked": true}});
+        assert!(!is_local_prompt_result(&started));
+        let legacy = serde_json::json!({"id": "p-4", "type": "response", "command": "prompt", "success": true});
+        assert!(!is_local_prompt_result(&legacy));
+        // 失败回包不收敛
+        let failed = serde_json::json!({"id": "p-5", "type": "response", "command": "prompt", "success": false, "data": {"agentInvoked": false}});
+        assert!(!is_local_prompt_result(&failed));
         // 状态回读回包：自己消化，不回环（get_state 不再触发注入）
         let s = serde_json::json!({"id": STATE_SYNC_ID, "type": "response", "command": "get_state", "success": true});
         assert_eq!(classify(&s), FrameAction::StateSync);

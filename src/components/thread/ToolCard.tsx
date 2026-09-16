@@ -1,8 +1,9 @@
 import { useState } from "react";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { Check, ChevronRight, Loader2, X } from "lucide-react";
 import type { ViewMsg } from "@shared/types";
 
-export function ToolCard({ m }: { m: Extract<ViewMsg, { kind: "tool" }> }) {
+export function ToolCard({ m, cwd }: { m: Extract<ViewMsg, { kind: "tool" }>; cwd?: string }) {
   const [open, setOpen] = useState(m.state === "error");
   const [showFull, setShowFull] = useState(false);
   const stateText = m.state === "ok" ? "成功" : m.state === "error" ? "失败" : m.state === "running" ? "运行中" : "输入中";
@@ -39,9 +40,19 @@ export function ToolCard({ m }: { m: Extract<ViewMsg, { kind: "tool" }> }) {
       {open && (
         <div className="border-t border-border/70 px-3 py-2">
           {m.argsSummary && (
-            <div className="truncate font-mono text-xs text-muted" title={m.argsSummary}>
+            <button
+              className="block w-full cursor-pointer truncate text-left font-mono text-xs text-muted hover:text-foreground"
+              title={`${m.argsSummary}（点击用系统默认应用打开）`}
+              onClick={() => {
+                const mth = m.argsSummary.match(/([~/][^\s:"']+|[A-Za-z]:\\[^\s"']+|[\w\-./]+\.[A-Za-z0-9]{1,5})/);
+                const p = mth?.[1];
+                if (!p) return;
+                const full = p.startsWith("/") || /^[A-Za-z]:/.test(p) ? p : cwd ? `${cwd}/${p}` : p;
+                void openPath(full).catch(() => undefined);
+              }}
+            >
               {m.argsSummary}
-            </div>
+            </button>
           )}
           {m.output && (
             <div className="mt-1.5">

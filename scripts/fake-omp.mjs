@@ -136,9 +136,61 @@ function handle(line) {
       });
       break;
     case "prompt":
+      // 流式中再发必须带 streamingBehavior：steer 转向 / followUp 排队
+      if (cmd.streamingBehavior === "steer" || cmd.streamingBehavior === "followUp") {
+        out({ id, type: "response", command: "prompt", success: true });
+        const tag = cmd.streamingBehavior === "steer" ? "steered" : "queued";
+        out({ type: "turn_end" });
+        out({ type: "turn_start" });
+        out({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "" }] } });
+        out({ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 0 } });
+        out({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: `${tag}=${cmd.message ?? ""}` } });
+        out({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: `${tag}=${cmd.message ?? ""}` }] } });
+        out({ type: "turn_end" });
+        out({ type: "agent_end", isTerminal: true, messages: [] });
+        break;
+      }
+      // `/` 开头的本地命令：无 agent turn，经 command_output + agentInvoked:false 收尾
+      if (typeof cmd.message === "string" && cmd.message.startsWith("/")) {
+        out({ id, type: "response", command: "prompt", success: true });
+        out({ type: "command_output", id, output: `本地命令已执行：${cmd.message}` });
+        out({ id, type: "response", command: "prompt", success: true, data: { agentInvoked: false } });
+        break;
+      }
       out({ id, type: "response", command: "prompt", success: true });
       promptImageCount = Array.isArray(cmd.images) ? cmd.images.length : 0;
       runScenario(cmd.message ?? "");
+      break;
+    case "steer":
+    case "follow_up":
+      out({ id, type: "response", command: cmd.type, success: true });
+      out({ type: "turn_end" });
+      out({ type: "turn_start" });
+      out({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "" }] } });
+      out({ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 0 } });
+      out({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: `${cmd.type}=${cmd.message ?? ""}` } });
+      out({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: `${cmd.type}=${cmd.message ?? ""}` }] } });
+      out({ type: "turn_end" });
+      out({ type: "agent_end", isTerminal: true, messages: [] });
+      break;
+    case "compact":
+      out({ id, type: "response", command: "compact", success: true });
+      out({ type: "auto_compaction_start" });
+      out({ type: "auto_compaction_end" });
+      out({ type: "turn_end" });
+      out({ type: "turn_start" });
+      out({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "" }] } });
+      out({ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 0 } });
+      out({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "已压缩上下文，可继续对话" } });
+      out({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "已压缩上下文，可继续对话" }] } });
+      out({ type: "turn_end" });
+      out({ type: "agent_end", isTerminal: true, messages: [] });
+      break;
+    case "branch":
+      out({ id, type: "response", command: "branch", success: true, data: { sessionId: "branched-session-id", sessionFile: "/tmp/fake-agent/branched.jsonl" } });
+      break;
+    case "get_available_commands":
+      out({ id, type: "response", command: "get_available_commands", success: true, data: { commands: [{ name: "compact", description: "压缩上下文" }, { name: "model", description: "切换模型" }] } });
       break;
     case "abort":
       out({ id, type: "response", command: "abort", success: true });

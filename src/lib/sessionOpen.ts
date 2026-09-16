@@ -78,9 +78,29 @@ export async function openSessionWithHistory(id: string): Promise<void> {
     const history = await api.getHistory(id);
     const cur = useApp.getState();
     // 同一会话重复打开不叠历史：tool 卡按 toolCallId 稳定 id，其余按行 id。
-    const seen = new Set((cur.eventsBySession[id] ?? []).map((m) => m.id));
-    const fresh = viewMsgsFromJsonlLines(history).filter((m) => !seen.has(m.id));
-    if (fresh.length > 0) cur.appendEvents(id, fresh);
+    // 乐观回显的 `u-local-*` 消息：历史里同一文本的 `u:<行id>` 到达时视为同一条，
+    // 用历史版本替换本地版（行 id 稳定），不翻倍。
+    const cur_list = cur.eventsBySession[id] ?? [];
+    const seen = new Set(cur_list.map((m) => m.id));
+    const local_by_text = new Map(
+      cur_list.filter((m) => m.kind === "user" && m.id.startsWith("u-local-")).map((m) => [m.kind === "user" ? m.text : "", m.id]),
+    );
+    const fresh = viewMsgsFromJsonlLines(history).filter((m) => {
+      if (seen.has(m.id)) return false;
+      if (m.kind === "user" && local_by_text.has(m.text)) {
+        const local_id = local_by_text.get(m.text) as string;
+        local_by_text.delete(m.text);
+        cur.set({
+          eventsBySession: {
+            ...cur.eventsBySession,
+            [id]: (cur.eventsBySession[id] ?? []).map((x) => (x.id === local_id ? m : x)),
+          },
+        });
+        return false;
+      }
+      return true;
+    });
+    if (fresh.length > 0) useApp.getState().appendEvents(id, fresh);
     // 历史落位后再读一次底，保证停在最新处
     scrollThreadToBottom();
   } catch {

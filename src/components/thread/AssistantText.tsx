@@ -15,6 +15,7 @@ import { useState } from "react";
  * - 代码块右上角复制按钮：长命令/长 diff 是高频复用内容。
  */
 export function AssistantText({ text, complete }: { text: string; complete: boolean }) {
+  const [pendingUrl, setPendingUrl] = useState<string | null>(null);
   // 未闭合的围栏代码块：流式中会出现，长度用奇偶判断（Markdown 里 ``` 必须成对）
   const openFence = (text.match(/```/g)?.length ?? 0) % 2 === 1;
   return (
@@ -28,7 +29,18 @@ export function AssistantText({ text, complete }: { text: string; complete: bool
             <CodeBlock {...props}>{children}</CodeBlock>
           ),
           a: ({ children, ...props }) => (
-            <a {...props} target="_blank" rel="noreferrer noopener">
+            <a
+              {...props}
+              target="_blank"
+              rel="noreferrer noopener"
+              onClick={(e) => {
+                const href = String(props.href ?? "");
+                if (/^https?:\/\//i.test(href)) {
+                  e.preventDefault();
+                  setPendingUrl(href);
+                }
+              }}
+            >
               {children}
             </a>
           ),
@@ -36,6 +48,24 @@ export function AssistantText({ text, complete }: { text: string; complete: bool
       >
         {text}
       </ReactMarkdown>
+      {pendingUrl && (
+        <span className="mx-1 inline-flex items-center gap-1 rounded border border-border bg-surface px-1.5 py-0.5 text-xs">
+          在浏览器打开 {pendingUrl.length > 40 ? `${pendingUrl.slice(0, 40)}…` : pendingUrl}？
+          <button
+            className="cursor-pointer text-accent hover:opacity-80"
+            onClick={() => {
+              const url = pendingUrl;
+              setPendingUrl(null);
+              void import("@tauri-apps/plugin-opener").then((m) => m.openUrl(url).catch(() => undefined));
+            }}
+          >
+            打开
+          </button>
+          <button className="cursor-pointer text-muted hover:text-foreground" onClick={() => setPendingUrl(null)}>
+            取消
+          </button>
+        </span>
+      )}
       {openFence && (
         <div className="mt-1.5 space-y-1.5 rounded-lg bg-code p-3" aria-label="代码块生成中" role="status">
           <div className="h-3 w-2/3 animate-pulse rounded bg-border/70" />

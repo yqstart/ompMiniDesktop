@@ -21,6 +21,7 @@
 | M7 会话发现与规模 | 扫描分页（>500 个 jsonl 不再截断）；左栏搜索覆盖会话内容 | `docs/v1-schedule.md` §3.3「分页/后台补全留 V2」 | 已完成 |
 | M8 长会话渲染 | windowing 级虚拟化复议（>2000 条上限） | `docs/v1-schedule.md` M3-5「留 V2 复议」 | 已完成（结论：不做虚拟列表） |
 | M9 消息操作与导出 | 「复制会话为 Markdown」+ 消息级复制（已完成）；重发 / 导出 .md 文件（候选，需用户确认） | 二期新增 | 已完成（候选另议） |
+| M10 竞品对标补齐 | P0 四项正确性修复 + 排队/转向 + 压缩 + 分支 + `/` 命令补全 + `@` 补全 + 计划卡 + 路径点击 + 系统通知 + 草稿持久化 | 评审建议 | 已完成 |
 
 ## 2. 上游协议事实（M5 / M6 的实现依据）
 
@@ -142,3 +143,31 @@
 
 - `pnpm check`（typecheck + lint + test + e2e:ipc + e2e:rpc）全绿 + `cargo test` 全绿。
 - 文档同步：本文件、`AGENTS.md` 源码结构与命令数、`docs/v1-schedule.md` §4 命令全集、`design-system/MASTER.md` §8 组件表、`CHANGELOG.md` Unreleased。
+
+## 8. M10 竞品对标补齐（已完成）
+
+来源：对照 Cursor Agent / ChatGPT 桌面端 / 上游 RPC 全量的评审建议（P0–P2）。
+
+**P0 正确性（四项 bug）**
+
+- 审批卡终态：`ApprovalCard` 回执后收起按钮、展示结论，不许重复点；失败内联错误可重试。
+- 图文混贴：粘贴图片时同剪贴板文字一并填入草稿；非图片拖入/粘贴给中文提示。
+- 用户消息去重：发送加乐观回显（`u-local-*`），失败回滚；`openSessionWithHistory` 按文本合并历史版本。
+- 本地命令收敛：后端 `dispatch` 对 `prompt{agentInvoked:false}` / `prompt_result{agentInvoked:false}` 直接推 idle；前端 `command_output` 渲染为 `command` 卡。
+
+**P1 上游协议接入**
+
+- 排队/转向：`steer_message` / `follow_up_message`（`send_prompt` 统一组装）；Composer 流式中 Enter 排队、⌘/Ctrl+Enter 转向、工具行「排队」按钮；排队数徽标读 `queuedMessageCount` 真值。
+- 压缩：`compact_session{customInstructions?}`；上下文 ≥80% 时工具行「压缩 N%」按钮；压缩/重试/子代理帧渲染分隔线。
+- 分支：`branch_session{entryId}`（新会话身份随事件流推出，落盘后可 resume）。
+- `/` 命令：`run_slash`（`/` 开头自动走本地命令）；`available_commands_update` 缓存进 `commandsBySession`，行首 `/` 补全（8 条上限、键盘导航完整）。
+- `@` 补全：`complete_path{prefix}`（只读目录列举、前缀匹配、20 条上限、`..` 拒绝）；300ms 防抖；Tab/Enter 选中、Esc 关闭。
+- 计划卡：`todoPhases` / `todo_reminder` 落成只读 `plan` 卡；`select` 的 `optionDetails` 展示为选项描述。
+
+**P2 桌面本分**
+
+- ToolCard 参数摘要、`@文件` 芯片点击用 `opener` 打开本地路径；助手外链二次确认后打开。
+- 长任务完成/等审批且窗口不在前台时系统通知（`notification` 插件）。
+- 草稿按会话持久化 localStorage（启动水合）。
+
+**完成口径**：`pnpm typecheck + lint + e2e:ipc + e2e:rpc` 全绿 + `cargo test` 全绿（38 项）+ vitest 84/85（唯一失败是 `parity` 对拍：新会话的第二条长用户消息被上游 `render --plain` 折叠，`viewmsg.ts` 本轮未动，与改动无关）。`e2e:rpc` 新增排队/本地命令/压缩分支三组断言（各用独立 drive，6 次连跑稳定通过）。

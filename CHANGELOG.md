@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **正确性修复（P0，四项）**：审批卡回执后进入终态（展示"已允许/已拒绝"结论、按钮收起，不许重复点；失败给内联错误可重试）；图文混贴不再丢字（粘贴图片时同剪贴板的文字一并填入草稿；非图片拖入给中文提示）；发送加乐观回显（先落本地 `u-local-*` 消息，失败回滚不留幽灵；历史回放按文本合并去重，不翻倍）；本地命令（`/`）走 `command_output` 渲染 + `agentInvoked:false` 收敛 idle，不再无限转圈（前后端各 1 个单测）。
+- **流式排队与转向（P1）**：新命令 `steer_message` / `follow_up_message`（后端 `send_prompt` 统一组装图片）；输入框流式中 Enter 排队（本轮后执行）、⌘/Ctrl+Enter 转向（下一个工具边界生效）、工具行「排队」按钮；工具行新增排队数徽标（`queuedMessageCount` 真值）。`pnpm e2e:rpc` 新增排队转向断言。
+- **上下文压缩（P1）**：新命令 `compact_session{customInstructions?}`；上下文占用 ≥80% 时工具行出现「压缩 N%」按钮；压缩/重试/子代理生命周期帧渲染成分隔线。`e2e:rpc` 新增 compact 断言。
+- **分支、`/` 命令、计划、补全（P1）**：新命令 `branch_session{entryId}` / `run_slash` / `complete_path{prefix}`（只读目录列举、前缀匹配、上限 20，`..` 直接拒绝）；`/` 开头自动走本地命令；`available_commands_update` 缓存进 `commandsBySession`，输入框行首 `/` 弹出命令补全（上下键导航、Tab/Enter 选中、Esc 关闭）；`@` 路径前缀 300ms 防抖补全（同套键盘交互）；`todoPhases` / `todo_reminder` 落成只读计划卡（`PlanCard`）；审批外 `select` 的 `optionDetails` 展示为选项描述。前端 5 项、Rust 1 项单测覆盖。
+- **桌面本分（P2）**：ToolCard 参数摘要、`@文件` 芯片点击用系统默认应用打开（`opener` 插件终于被调用）；助手正文外链点击二次确认后打开（`csp: null` 保持不变，先收确认）；长任务完成/等待审批时窗口不在前台则系统通知（`notification` 插件，需首次授权）；草稿按会话持久化到 localStorage（启动水合，发送清空）。
+- **依赖**：新增 `@tauri-apps/plugin-notification`（前后端）并注册 `notification:default` 能力。
+
 ### 变更
 
 - **二期 M8：先量后做，结论是不上虚拟列表，改行级 `memo`**。新增测量夹具 `src/lib/historyScale.test.ts`（`OMP_BENCH=1` 才跑，默认跳过以免 CI 依赖本机数据），在本机 69 个真实会话上测得：最大会话 8.1MB / 1867 行，后端口径（5000 行、2000 条）下 1411 块 → 698 条 ViewMsg **归一只要 2–4ms**，且该会话是工具卡密集（488 张卡 / 201 thinking / 6 文本）而非文本密集——瓶颈不在数据层也不在条数。真正浪费的是渲染：流式每个 delta 都会更新 store，整列跟着重渲染时每次 token 都要重算所有 Markdown / 工具卡。因此把消息行抽成 `memo` 化的 `ThreadRow`（依赖 `mergeViewMsgs` 对未变化消息保持同一对象引用，补 2 条引用稳定性断言防止这条前提被改坏）。复评阈值写进 MASTER §7 与 `docs/v2-schedule.md`：单会话 > 5000 条 / > 30MB / 明显掉帧才回来做 windowing。

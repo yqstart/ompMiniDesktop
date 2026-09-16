@@ -264,6 +264,7 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>): Vi
         ...(typeof frame.placeholder === "string" ? { placeholder: frame.placeholder } : {}),
         ...(typeof frame.prefill === "string" ? { prefill: frame.prefill } : {}),
         ...(options.length > 0 ? { options } : {}),
+        ...(Array.isArray(frame.optionDetails) ? { optionDetails: (frame.optionDetails as unknown[]).map((d) => (typeof d === "string" ? d : null)) } : {}),
       });
     }
     return out;
@@ -284,6 +285,74 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>): Vi
     }
     return out;
   }
+  // 本地命令输出（`/` 命令经 prompt 直发，无 agent turn）：
+  // 后端已把状态收敛到 idle，此处只渲染输出文本。
+  if (t === "command_output") {
+    const text = String((frame as Record<string, unknown>).output ?? "");
+    if (text) out.push({ kind: "command", id: `cmd-${String(frame.id ?? Date.now())}`, output: text });
+    return out;
+  }
+  // 本地命令完成信号（`prompt_result{agentInvoked:false}`）：无输出就不渲染，
+  // 状态机已由后端收敛，此处只消化帧、不告警。
+  if (t === "prompt_result") return out;
+  // 计划提醒（`todo_reminder`）：长任务的阶段清单，只读展示。
+  if (t === "todo_reminder" || t === "todo_auto_clear") {
+    const phases = (frame as Record<string, unknown>).phases;
+    if (Array.isArray(phases) && phases.length > 0) {
+      out.push({ kind: "plan", id: `plan-${String((frame as Record<string, unknown>).id ?? Date.now())}`, phases: phases as never });
+    } else if (t === "todo_auto_clear") {
+      out.push({ kind: "divider", id: `td-${Date.now()}`, divider: "turn", text: "计划已清空" });
+    }
+    return out;
+  }
+  // 单向通知：`notice` 给一行分隔线。
+  if (t === "notice" || t === "irc_message") {
+    const text = String((frame as Record<string, unknown>).message ?? "");
+    if (text) out.push({ kind: "divider", id: `n-${Date.now()}`, divider: "turn", text });
+    return out;
+  }
+  // 压缩 / 重试 / 子代理的生命周期帧：给一行分隔线，不进消息计数。
+  if (
+    t === "auto_compaction_start" ||
+    t === "auto_compaction_end" ||
+    t === "auto_retry_start" ||
+    t === "auto_retry_end" ||
+    t === "retry_fallback_applied" ||
+    t === "retry_fallback_succeeded"
+  ) {
+    const label =
+      t === "auto_compaction_start"
+        ? "正在压缩上下文…"
+        : t === "auto_compaction_end"
+          ? "上下文已压缩"
+          : t === "auto_retry_start"
+            ? "请求重试中…"
+            : t === "auto_retry_end"
+              ? "重试结束"
+              : t === "retry_fallback_applied"
+                ? "已切换备用模型重试"
+                : "备用模型重试成功";
+    out.push({ kind: "divider", id: `${t}-${Date.now()}`, divider: "turn", text: label });
+    return out;
+  }
+  // 子代理帧：分隔线占位（详细转录暂不展开）。
+  if (t === "subagent_lifecycle" || t === "subagent_progress" || t === "subagent_event") {
+    out.push({ kind: "divider", id: `${t}-${Date.now()}`, divider: "turn", text: "子代理事件" });
+    return out;
+  }
+  // 可用命令面（`available_commands_update`）：缓存供 `/` 补全，不渲染消息。
+  if (t === "available_commands_update") {
+    const cmds = (frame as Record<string, unknown>).commands;
+    if (Array.isArray(cmds)) {
+      useApp.setState((s) => ({
+        commandsBySession: {
+          ...s.commandsBySession,
+          [sid]: (cmds as { name?: string }[]).filter((c) => typeof c?.name === "string") as never,
+        },
+      }));
+    }
+    return out;
+  }
   if (t === "turn_start" || t === "turn_end" || t === "agent_start" || t === "agent_end") return out;
   // 其余未知帧：忽略不崩，但每个类型只告警一次（M4 协议漂移 guard——
   // omp 大版本升级后事件名对不上时，日志里能直接看出来是哪一类帧变了）。
@@ -301,12 +370,18 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>): Vi
 function applyRuntime(sid: string, rt: SessionRuntime) {
   const efforts = rt.efforts ?? null;
   const { level, shouldSync } = resolveThinking(efforts, rt.thinkingLevel);
-  useApp.setState({
+  useApp.setState((s) => ({
     currentEfforts: efforts,
     currentRuntime: rt,
     ...(rt.model ? { currentModel: `${rt.model.provider}/${rt.model.id}` } : {}),
     currentThinking: level,
-  });
+    ...(Array.isArray(rt.commands)
+      ? { commandsBySession: { ...s.commandsBySession, [sid]: rt.commands } }
+      : {}),
+    ...(Array.isArray(rt.todoPhases) && rt.todoPhases.length > 0
+      ? { plansBySession: { ...s.plansBySession, [sid]: rt.todoPhases } }
+      : {}),
+  }));
   if (shouldSync && useApp.getState().activeSessionId === sid) {
     void api.setThinking(sid, level).catch(() => undefined);
   }

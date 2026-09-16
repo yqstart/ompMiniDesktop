@@ -993,8 +993,74 @@ pub async fn get_history(state: State<'_, AppState>, id: String) -> Result<Vec<s
 
 #[tauri::command]
 pub async fn send_message(app: AppHandle, state: State<'_, AppState>, id: String, message: String, images: Option<Vec<ImageAttachment>>) -> Result<(), CmdError> {
+    send_prompt(&app, &state, &id, "prompt", message, images, None).await
+}
+
+/// 流式中转向（`steer`）：在下一个工具调用边界生效，不砍掉进行中的工作。
+#[tauri::command]
+pub async fn steer_message(app: AppHandle, state: State<'_, AppState>, id: String, message: String, images: Option<Vec<ImageAttachment>>) -> Result<(), CmdError> {
+    send_prompt(&app, &state, &id, "steer", message, images, None).await
+}
+
+/// 流式中排队（`follow_up`）：本轮结束后按序执行。
+#[tauri::command]
+pub async fn follow_up_message(app: AppHandle, state: State<'_, AppState>, id: String, message: String, images: Option<Vec<ImageAttachment>>) -> Result<(), CmdError> {
+    send_prompt(&app, &state, &id, "follow_up", message, images, None).await
+}
+
+/// `/` 命令：经 prompt 直发（`/` 开头即可，omp 侧按本地命令处理）。
+#[tauri::command]
+pub async fn run_slash(app: AppHandle, state: State<'_, AppState>, id: String, command: String) -> Result<(), CmdError> {
+    send_prompt(&app, &state, &id, "prompt", command, None, None).await
+}
+
+/// 上下文压缩：历史压缩成摘要后继续本会话（满上下文时的接续手段）。
+#[tauri::command]
+pub async fn compact_session(app: AppHandle, state: State<'_, AppState>, id: String, custom_instructions: Option<String>) -> Result<(), CmdError> {
     let map = state.runtime.clone();
     let tx = map.lock().await.get(&id).map(|r| r.tx.clone());
+    let Some(tx) = tx else {
+        return Err(cmd_err("NOT_RUNNING", "会话未启动，请先打开会话".into(), None));
+    };
+    let mut req = serde_json::json!({"id": format!("c-{}", chrono::Utc::now().timestamp_millis()), "type": "compact"});
+    if let Some(ins) = custom_instructions.filter(|s| !s.trim().is_empty()) {
+        req["customInstructions"] = serde_json::Value::String(ins);
+    }
+    tx.send(format!("{}\n", serde_json::to_string(&req).unwrap()))
+        .map_err(|_| cmd_err("RPC_IO", "压缩失败，进程可能已退出".into(), None))?;
+    let _ = app;
+    Ok(())
+}
+
+/// 从某条消息另起分支：下发 `branch{entryId}` 后返回原会话视图，
+/// 新会话身份随后续事件流推出（分支落盘后可 resume）。
+#[tauri::command]
+pub async fn branch_session(app: AppHandle, state: State<'_, AppState>, id: String, entry_id: String) -> Result<SessionView, CmdError> {
+    let tx = {
+        let map = state.runtime.lock().await;
+        let Some(r) = map.get(&id) else {
+            return Err(cmd_err("NOT_RUNNING", "会话未运行，无法分支".into(), None));
+        };
+        r.tx.clone()
+    };
+    let req = serde_json::json!({"id": format!("b-{}", chrono::Utc::now().timestamp_millis()), "type": "branch", "entryId": entry_id});
+    tx.send(format!("{}\n", serde_json::to_string(&req).unwrap()))
+        .map_err(|_| cmd_err("RPC_IO", "分支失败，进程可能已退出".into(), None))?;
+    open_session(app, state, id).await
+}
+
+/// prompt 系列的统一发送：`prompt / steer / follow_up` 共用图片组装。
+async fn send_prompt(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    id: &str,
+    kind: &str,
+    message: String,
+    images: Option<Vec<ImageAttachment>>,
+    streaming_behavior: Option<&str>,
+) -> Result<(), CmdError> {
+    let map = state.runtime.clone();
+    let tx = map.lock().await.get(id).map(|r| r.tx.clone());
     let Some(tx) = tx else {
         return Err(cmd_err("NOT_RUNNING", "会话未启动，请先打开会话".into(), None));
     };
@@ -1006,9 +1072,17 @@ pub async fn send_message(app: AppHandle, state: State<'_, AppState>, id: String
         .filter(|i| !i.data_base64.is_empty() && i.data_base64.len() <= IMAGE_MAX_BYTES * 2)
         .map(|i| serde_json::json!({"type":"image","data":i.data_base64,"mimeType":i.mime_type}))
         .collect();
-    let mut req = serde_json::json!({"id": format!("p-{}", chrono::Utc::now().timestamp_millis()), "type": "prompt", "message": message});
+    let prefix = match kind {
+        "steer" => "s",
+        "follow_up" => "f",
+        _ => "p",
+    };
+    let mut req = serde_json::json!({"id": format!("{prefix}-{}", chrono::Utc::now().timestamp_millis()), "type": kind, "message": message});
     if !imgs.is_empty() {
         req["images"] = serde_json::Value::Array(imgs);
+    }
+    if let Some(sb) = streaming_behavior {
+        req["streamingBehavior"] = serde_json::Value::String(sb.into());
     }
     tx.send(format!("{}\n", serde_json::to_string(&req).unwrap()))
         .map_err(|_| cmd_err("RPC_IO", "发送失败，进程可能已退出".into(), None))?;
@@ -1164,6 +1238,58 @@ pub fn resolve_path(base: &str, p: &str) -> PathBuf {
             other => out.push(other.as_os_str()),
         }
     }
+    out
+}
+
+/// `@` 路径补全的单条候选（只读目录列举，不读文件内容）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathCandidate {
+    pub path: String,
+    pub is_dir: bool,
+}
+
+/// 输入框 `@` 补全：按当前 token 列举 base 下的匹配项（前缀匹配，最多 20 条）。
+/// 只读目录名、不跟符号链接、不递归——补全够用即可，不做文件搜索。
+#[tauri::command]
+pub async fn complete_path(base: String, prefix: String) -> Vec<PathCandidate> {
+    if base.is_empty() || prefix.contains('\0') {
+        return vec![];
+    }
+    // token 含目录分隔符时按最后一段做前缀，搜索目录为前面部分
+    let (dir_rel, file_prefix) = match prefix.rsplit_once('/') {
+        Some((d, f)) => (d.to_string(), f.to_string()),
+        None => (String::new(), prefix.clone()),
+    };
+    if file_prefix.contains("..") || dir_rel.contains("..") {
+        return vec![];
+    }
+    let dir = if dir_rel.is_empty() {
+        PathBuf::from(&base)
+    } else {
+        resolve_path(&base, &dir_rel)
+    };
+    let entries = std::fs::read_dir(&dir)
+        .map(|rd| rd.filter_map(|e| e.ok()).take(200).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let mut out: Vec<PathCandidate> = entries
+        .into_iter()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || !name.starts_with(file_prefix.as_str()) {
+                return None;
+            }
+            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            let path = if dir_rel.is_empty() { name } else { format!("{dir_rel}/{name}") };
+            Some(PathCandidate { path, is_dir })
+        })
+        .collect();
+    out.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.path.cmp(&b.path),
+    });
+    out.truncate(20);
     out
 }
 

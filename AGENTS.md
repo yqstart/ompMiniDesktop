@@ -33,17 +33,17 @@ src/
   components/SettingsPage.tsx  # 设置占位页（omp 诊断区：路径/版本/agentDir + 重新检测 + 指定路径 + 复制）
   components/ConfirmDialog.tsx # 通用二次确认浮层（受控；跨分组危险操作用它，分组内仍是轻量内联浮层）
   components/sidebar/      # Sidebar（分组会话列表 + 缺失态重定位）、EmptyState
-  components/thread/       # TopBar（标题备注 + 窄窗抽屉入口 + 复制会话为 Markdown + UpdateBell）、Thread（首屏 200 条 + 增量加载 + 行级 memo）、AssistantText（Markdown + 代码高亮 + 复制 + 流式骨架）、ToolCard、ApprovalCard（审批 select）、UiRequestCard（confirm/input/editor/非审批 select）、MentionChips（@文件 芯片排）、StatusBar（OmpStatusPill + RuntimeStats 用量透传）
-  components/composer/     # Composer（一体式输入框 + 工具行 + 图片附件：粘贴/拖拽/选文件，发送随 prompt.images）、ContextBar（输入框上方一行：项目 + git 分支）
+  components/thread/       # TopBar（标题备注 + 窄窗抽屉入口 + 复制会话为 Markdown + UpdateBell）、Thread（首屏 200 条 + 增量加载 + 行级 memo + PlanCard 计划卡 + command 本地输出）、AssistantText（Markdown + 代码高亮 + 复制 + 流式骨架 + 外链二次确认）、ToolCard（参数摘要可点打开）、ApprovalCard（审批 select，终态展示结论）、UiRequestCard（confirm/input/editor/非审批 select，选项描述）、MentionChips（@文件 芯片排，可点打开）、StatusBar（OmpStatusPill + QueueBadge 排队数 + CompactButton 压缩入口 + RuntimeStats 用量透传）
+  components/composer/     # Composer（一体式输入框 + 工具行 + 图片附件：粘贴/拖拽/选文件，发送随 prompt.images；流式中 Enter 排队 + ⌘/Ctrl+Enter 转向 + `/` 命令补全 + `@` 路径补全 + 图文混贴保留文字 + 乐观回显 + 草稿持久化）、ContextBar（输入框上方一行：项目 + git 分支）
   components/pickers/      # ModelPicker、ThinkingPicker、PermissionBadge（挂输入框工具行）；ProjectPicker、BranchPicker（挂 ContextBar）
   components/update/       # UpdateBell、UpdateDialog（应用内更新）
-  lib/                     # viewmsg（ViewMsg 归一 + 单测）、attachments（图片附件校验/base64/内容块提取 + 单测）、mentions（@文件 解析，与 omp 同规则 + 单测）、search（搜索片段高亮 + 单测）、exportMd（会话 → Markdown 只读导出 + 单测）、mergeEvents（实时流按 id 合并 + 单测）、thinking（思考档推导 + 单测）、sessions（分组 + 单测）、sessionList（会话列表刷新 + 扫描窗口的唯一入口）、context（上下文条取值 + 单测）、sessionOpen（打开/新建会话的唯一实现）、projects（添加项目 / 切换项目）、ompDiag（omp 自检与手动指定路径）、useSessionEvents（事件归一 + 真值回填）、useDropdown、appUpdate、rpc-types
+  lib/                     # viewmsg（ViewMsg 归一 + 单测）、attachments（图片附件校验/base64/内容块提取 + 单测）、mentions（@文件 解析，与 omp 同规则 + 单测）、search（搜索片段高亮 + 单测）、exportMd（会话 → Markdown 只读导出 + 单测）、mergeEvents（实时流按 id 合并 + 单测）、thinking（思考档推导 + 单测）、sessions（分组 + 单测）、sessionList（会话列表刷新 + 扫描窗口的唯一入口）、context（上下文条取值 + 单测）、sessionOpen（打开/新建会话的唯一实现，含乐观消息合并）、projects（添加项目 / 切换项目）、ompDiag（omp 自检与手动指定路径）、useSessionEvents（事件归一 + 真值回填，含本地命令/计划/压缩重试/子代理/命令面分支）、openPath（路径打开 + 草稿持久化）、useTaskNotifications（后台完成系统通知）、useDropdown、appUpdate、rpc-types
   shared/                  # api（invoke 唯一入口）、ipc（通道常量）、types
   stores/app.ts            # Zustand 全局状态（含 currentModel/currentThinking/currentEfforts/currentRuntime、composerMenu、sidebarWidth、threadLimit、update）
 eslint.config.js           # ESLint flat config（typescript-eslint + react-hooks + react-refresh）
 src-tauri/src/
   main.rs / lib.rs         # 插件注册（dialog/opener/process/updater/store）
-  commands/mod.rs          # 34 个 Tauri commands（与 src/shared/ipc.ts 一一对应，见 e2e:ipc）
+  commands/mod.rs          # 40 个 Tauri commands（与 src/shared/ipc.ts 一一对应，见 e2e:ipc；新增 steer/follow_up/compact/branch/run_slash/complete_path）
   runtime.rs               # per-会话长驻 omp 子进程 + rpc_chunk 重组 + 事件分发 + 真值回读（omp-state）+ 切模型自动最高档
   overlay.rs               # overlay.json 读写与版本归一（含单测）
   session_scan.rs          # agentDir 解析 + jsonl 头解析 + cwd 归组（含单测）

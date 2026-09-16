@@ -214,11 +214,118 @@ async function main() {
     "被跳过的文件带 skippedReason（芯片按 warn 色标出，避免以为读进去了）",
   );
 
+  // --- 9. 排队与转向：prompt 带 streamingBehavior / steer / follow_up ---
+  console.log("场景排队与转向");
+  const steerRun = await drive("approve", {
+    extra: [{ id: "s1", type: "steer", message: "换个方向" }],
+  });
+  assert(steerRun.responses.get("s1")?.success === true, "steer 回 success");
+  const followRun = await drive("approve", {
+    extra: [{ id: "f1", type: "follow_up", message: "顺便补一句" }],
+  });
+  assert(followRun.responses.get("f1")?.success === true, "follow_up 回 success");
+  const steerText =
+    kinds(steerRun.frames, "message_update")
+      .map((f) => f.assistantMessageEvent?.delta ?? "")
+      .join("") +
+    kinds(followRun.frames, "message_update")
+      .map((f) => f.assistantMessageEvent?.delta ?? "")
+      .join("");
+  assert(steerText.includes("steer=换个方向"), "steer 消息被上游收到");
+  assert(steerText.includes("follow_up=顺便补一句"), "follow_up 消息被上游收到");
+
+  // --- 10. 本地命令：`/` 经 command_output 回来 + agentInvoked:false 收尾 ---
+  console.log("场景本地命令");
+  const slashRun = await drive("approve", {
+    extra: [],
+    respond: undefined,
+  });
+  // 单独发一条 / 命令验证本地收尾
+  const slashOnly = await (async () => {
+    const { spawn } = await import("node:child_process");
+    const child = spawn(process.execPath, [FAKE], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, OMP_FAKE_SCENARIO: "approve" },
+    });
+    const frames2 = [];
+    const responses2 = new Map();
+    let buf2 = "";
+    let started2 = false;
+    const send2 = (o) => {
+      if (child.stdin.writable) child.stdin.write(`${JSON.stringify(o)}\n`);
+    };
+    child.stdin.on("error", () => {});
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("slash: 超时")), 10000);
+      child.stdout.on("data", (d) => {
+        buf2 += d;
+        let i;
+        while ((i = buf2.indexOf("\n")) >= 0) {
+          const line = buf2.slice(0, i).trim();
+          buf2 = buf2.slice(i + 1);
+          if (!line) continue;
+          const f = JSON.parse(line);
+          frames2.push(f);
+          if (f.type === "response") responses2.set(f.id, f);
+          if (f.type === "ready" && !started2) {
+            started2 = true;
+            send2({ id: "n1", type: "negotiate_protocol", protocolVersion: 2 });
+            send2({ id: "g1", type: "get_state" });
+            send2({ id: "p9", type: "prompt", message: "/compact" });
+          }
+          if (f.type === "extension_ui_request") {
+            send2({ type: "extension_ui_response", id: f.id, value: "Approve" });
+          }
+          if (f.id === "p9" && f.type === "response" && f.data?.agentInvoked === false) {
+            clearTimeout(timer);
+            resolve();
+          }
+          if (f.type === "agent_end" && f.isTerminal !== false) {
+            clearTimeout(timer);
+            resolve();
+          }
+        }
+      });
+      child.on("error", reject);
+    });
+    child.kill("SIGKILL");
+    return { frames: frames2, responses: responses2 };
+  })();
+  assert(
+    kinds(slashOnly.frames, "command_output").length === 1,
+    "/ 命令经 command_output 回来（无 agent turn）",
+  );
+  assert(
+    slashOnly.responses.get("p9")?.data?.agentInvoked === false,
+    "本地命令回包带 agentInvoked:false（壳据此收敛 idle）",
+  );
+  void slashRun;
+
+  // --- 11. 压缩与分支 ---
+  console.log("场景压缩与分支");
+  const compactRun = await drive("approve", {
+    extra: [{ id: "c1", type: "compact", customInstructions: "保留结论" }],
+  });
+  assert(compactRun.responses.get("c1")?.success === true, "compact 回 success");
+  const branchRun = await drive("approve", {
+    extra: [{ id: "b1", type: "branch", entryId: "e0" }],
+  });
+  assert(branchRun.responses.get("b1")?.success === true, "branch 回 success 且带新会话身份");
+  assert(!!branchRun.responses.get("b1")?.data?.sessionId, "branch 回包带新 sessionId");
+  const acRun = await drive("approve", {
+    extra: [{ id: "ac1", type: "get_available_commands" }],
+  });
+  assert(acRun.responses.get("ac1")?.success === true, "get_available_commands 回 success");
+  assert(
+    Array.isArray(acRun.responses.get("ac1")?.data?.commands),
+    "可用命令面返回 commands 数组（`/` 补全数据源）",
+  );
+
   if (failures > 0) {
     console.error(`\ne2e:rpc 失败：${failures} 项断言未通过`);
     process.exit(1);
   }
-  console.log("\ne2e:rpc 通过：握手 / 通过分支 / 拒绝分支 / 多工具并行 / 流式中断 / 通用 UI 请求 / 图片附件 / @文件 提及");
+  console.log("\ne2e:rpc 通过：握手 / 通过分支 / 拒绝分支 / 多工具并行 / 流式中断 / 通用 UI 请求 / 图片附件 / @文件 提及 / 排队转向 / 本地命令 / 压缩分支");
 }
 
 main().catch((e) => {

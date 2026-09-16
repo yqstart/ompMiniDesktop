@@ -11,8 +11,9 @@ import { AssistantText } from "./AssistantText";
 import { EmptyState } from "../sidebar/EmptyState";
 
 export function Thread() {
-  const { projects, activeSessionId, eventsBySession, threadLimitSid, threadLimit, growThreadLimit } =
+  const { projects, activeSessionId, eventsBySession, threadLimitSid, threadLimit, growThreadLimit, sessions } =
     useApp();
+  const cwd = sessions.find((s) => s.id === activeSessionId)?.cwd ?? "";
   const scroller = useRef<HTMLDivElement>(null);
   const lastCount = useRef(0);
   // 「加载更早」后要保住视口位置：记录加载前距底部的距离，插入后补回去
@@ -87,7 +88,7 @@ export function Thread() {
         </div>
       )}
       {shown.map((m) => (
-        <ThreadRow key={m.id} m={m} sessionId={activeSessionId} />
+        <ThreadRow key={m.id} m={m} sessionId={activeSessionId} cwd={cwd} />
       ))}
     </div>
   );
@@ -101,7 +102,7 @@ export function Thread() {
  * `mergeViewMsgs` 只替换发生变化的那条消息、其余保持**同一对象引用**，
  * 所以浅比较即能让"只有正在流式的那一行"重渲染。
  */
-const ThreadRow = memo(function ThreadRow({ m, sessionId }: { m: ViewMsg; sessionId: string | null }) {
+const ThreadRow = memo(function ThreadRow({ m, sessionId, cwd }: { m: ViewMsg; sessionId: string | null; cwd: string }) {
   return (
     <div className="mb-5 text-sm leading-7">
       {m.kind === "user" && (
@@ -151,11 +152,17 @@ const ThreadRow = memo(function ThreadRow({ m, sessionId }: { m: ViewMsg; sessio
           <div className="mt-1 whitespace-pre-wrap">{m.text}</div>
         </details>
       )}
-      {m.kind === "tool" && <ToolCard m={m} />}
+      {m.kind === "tool" && <ToolCard m={m} cwd={cwd} />}
+      {m.kind === "plan" && <PlanCard m={m} />}
       {m.kind === "approval" && sessionId && <ApprovalCard m={m} sessionId={sessionId} />}
       {m.kind === "ui" && sessionId && <UiRequestCard m={m} sessionId={sessionId} />}
-      {m.kind === "files" && <MentionChips m={m} />}
+      {m.kind === "files" && <MentionChips m={m} cwd={cwd} />}
       {m.kind === "ui-cancel" && null}
+      {m.kind === "command" && (
+        <div className="rounded-lg bg-code px-3 py-2 font-mono text-xs whitespace-pre-wrap text-muted">
+          {m.output}
+        </div>
+      )}
       {m.kind === "divider" && (
         <div className="flex items-center gap-3 py-1">
           <span className="h-px flex-1 bg-border/60" aria-hidden />
@@ -166,6 +173,42 @@ const ThreadRow = memo(function ThreadRow({ m, sessionId }: { m: ViewMsg; sessio
     </div>
   );
 });
+
+/**
+ * 任务计划卡（只读）：`todoPhases` / `todo_reminder` 的阶段清单展示。
+ * 状态文字双信号（进行中/待办/完成），颜色不作唯一信号。
+ */
+function PlanCard({ m }: { m: Extract<ViewMsg, { kind: "plan" }> }) {
+  return (
+    <div
+      className="rounded-xl border border-border/70 bg-surface/60 px-3 py-2"
+      role="group"
+      aria-label="任务计划"
+    >
+      <div className="mb-1 text-xs font-medium text-muted">任务计划</div>
+      <div className="space-y-1.5">
+        {m.phases.map((p) => (
+          <div key={p.id}>
+            <div className="text-[13px] font-medium">{p.name}</div>
+            <ul className="mt-0.5 space-y-0.5">
+              {p.tasks.map((t) => (
+                <li key={t.id} className="flex items-start gap-1.5 text-[13px] text-muted">
+                  <span aria-hidden>{t.status === "completed" ? "✓" : t.status === "in_progress" ? "◐" : "○"}</span>
+                  <span className={t.status === "in_progress" ? "text-foreground" : undefined}>
+                    {t.content}
+                    <span className="sr-only">
+                      {t.status === "completed" ? "（已完成）" : t.status === "in_progress" ? "（进行中）" : "（待办）"}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /**
  * 单条消息的复制按钮（V2 M9）：hover 才出现，纯剪贴板、不碰 store/草稿。

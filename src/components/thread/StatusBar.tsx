@@ -1,4 +1,5 @@
 import { useApp } from "../../stores/app";
+import { api } from "@shared/api";
 
 export type OmpStatusKind = "ready" | "running" | "awaiting-approval" | "error" | "exited";
 
@@ -80,6 +81,48 @@ function compact(n: number): string {
  * 不猜单位（omp 的 duration/ttft 实测就是毫秒，这里只把它显示成秒）。
  * 没有真值时整块不渲染，不占位、不显示"—"。
  */
+export function CompactButton() {
+  const { activeSessionId, currentRuntime, statusBySession } = useApp();
+  const pct = currentRuntime?.contextUsage?.percent;
+  const normalized = pct == null ? null : pct <= 1 ? pct * 100 : pct;
+  // 上下文占用 ≥80% 才露面：平时不占工具行，满了才是行动点。
+  if (normalized == null || normalized < 80 || !activeSessionId) return null;
+  const busy = statusBySession[activeSessionId]?.state === "running";
+  const run = async () => {
+    try {
+      await api.compactSession(activeSessionId);
+    } catch {
+      // 失败走 divider 错误行展示（frameToViewMsgs 的 response 失败分支），此处不弹错
+    }
+  };
+  return (
+    <button
+      onClick={() => void run()}
+      disabled={busy}
+      className="flex shrink-0 cursor-pointer items-center gap-1 rounded-full border border-warn/50 px-2 py-0.5 text-xs text-warn transition-colors duration-150 hover:bg-warn/10 disabled:cursor-default disabled:opacity-40"
+      aria-label={`压缩上下文（当前占用 ${Math.round(normalized)}%）`}
+      title="把历史压缩成摘要后继续本会话"
+    >
+      压缩 {Math.round(normalized)}%
+    </button>
+  );
+}
+
+export function QueueBadge() {
+  const n = useApp((s) => s.currentRuntime?.queuedCount ?? 0);
+  if (!n || n <= 0) return null;
+  return (
+    <span
+      className="flex shrink-0 items-center rounded-full bg-accent/10 px-2 py-0.5 text-xs text-accent"
+      role="status"
+      aria-label={`已排队 ${n} 条`}
+      title="流式中排队的追问，本轮后按序执行"
+    >
+      排队 {n}
+    </span>
+  );
+}
+
 export function RuntimeStats() {
   const rt = useApp((s) => s.currentRuntime);
   if (!rt) return null;

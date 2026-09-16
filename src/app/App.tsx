@@ -21,6 +21,7 @@ function useTheme() {
 }
 
 import { useSessionEvents } from "../lib/useSessionEvents";
+import { useTaskNotifications } from "../lib/useTaskNotifications";
 import { autoCheckOnBoot } from "../lib/appUpdate";
 
 /** 左侧栏外壳：桌面端可左右拖拽调宽（220–480px，持久化）；窄窗（<768px）收起为抽屉。 */
@@ -119,6 +120,10 @@ export function App() {
   const { settingsOpen, set, sidebarWidth, setSidebarWidth } = useApp();
   useTheme();
   useSessionEvents();
+  useTaskNotifications();
+  useEffect(() => {
+    void import("../lib/openPath").then((m) => m.hydrateDrafts());
+  }, []);
 
   useEffect(() => {
     // 启动静默检查更新（有更新只点亮入口，不打断）

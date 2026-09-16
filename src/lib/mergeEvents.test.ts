@@ -317,3 +317,48 @@ describe("实时流：@文件 提及", () => {
     expect(msgs.map((m) => m.kind)).toEqual(["files", "text"]);
   });
 });
+
+/** 本轮新增：本地命令 / 计划 / 压缩重试 / 可用命令帧的归一。 */
+describe("实时流：本地命令与计划事件", () => {
+  it("command_output 落成 command 卡（灰字代码区）", () => {
+    const msgs = replay([
+      { type: "command_output", id: "c-1", output: "本地命令已执行：/compact" },
+    ]);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toMatchObject({ kind: "command", output: "本地命令已执行：/compact" });
+  });
+
+  it("prompt_result（本地收尾）不渲染消息、不告警", () => {
+    const msgs = replay([{ type: "prompt_result", id: "p-1", agentInvoked: false }]);
+    expect(msgs).toHaveLength(0);
+  });
+
+  it("todo_reminder 落成 plan 卡（只读阶段清单）", () => {
+    const msgs = replay([
+      {
+        type: "todo_reminder",
+        phases: [{ id: "ph-1", name: "联调", tasks: [{ id: "t-1", content: "跑 e2e", status: "in_progress" }] }],
+      },
+    ]);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toMatchObject({ kind: "plan" });
+    const plan = msgs[0] as Extract<ViewMsg, { kind: "plan" }>;
+    expect(plan.phases[0].tasks[0]).toMatchObject({ content: "跑 e2e", status: "in_progress" });
+  });
+
+  it("压缩 / 重试帧落成分隔线（不进消息计数）", () => {
+    const msgs = replay([{ type: "auto_compaction_start" }, { type: "auto_compaction_end" }]);
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0]).toMatchObject({ kind: "divider", text: "正在压缩上下文…" });
+    expect(msgs[1]).toMatchObject({ kind: "divider", text: "上下文已压缩" });
+  });
+
+  it("available_commands_update 只缓存、不渲染消息", async () => {
+    const msgs = replay([
+      { type: "available_commands_update", commands: [{ name: "compact", description: "压缩" }] },
+    ]);
+    expect(msgs).toHaveLength(0);
+    const { useApp } = await import("../stores/app");
+    expect(useApp.getState().commandsBySession[SID]).toMatchObject([{ name: "compact" }]);
+  });
+});

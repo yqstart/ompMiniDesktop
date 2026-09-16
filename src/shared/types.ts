@@ -154,6 +154,26 @@ export type SessionRuntime = {
   durationMs?: number | null;
   /** 本轮首字延迟（毫秒）。 */
   ttftMs?: number | null;
+  /** 排队中的消息数（`get_state.queuedMessageCount`，流式排队时展示）。 */
+  queuedCount?: number | null;
+  /** 任务计划（`get_state.todoPhases` 原样透传；只读展示）。 */
+  todoPhases?: TodoPhase[] | null;
+  /** 可用命令（`available_commands_update` 缓存；`/` 补全的数据源）。 */
+  commands?: AvailableCommand[] | null;
+};
+
+/** 任务计划的一条任务（`get_state.todoPhases` 原样透传）。 */
+export type TodoTask = { id: string; content: string; status: string };
+
+/** 任务计划的一个阶段。 */
+export type TodoPhase = { id: string; name: string; tasks: TodoTask[] };
+
+/** 可用命令（`available_commands_update` 透传；`/` 补全的数据源）。 */
+export type AvailableCommand = {
+  name: string;
+  description?: string;
+  aliases?: string[];
+  hint?: string;
 };
 
 /**
@@ -248,6 +268,16 @@ export type ViewMsg =
       text: string;
     }
   /**
+   * 本地命令输出（`/` 命令经 `command_output` 透传）：无 agent turn，
+   * 渲染为灰字代码区，不触碰运行状态（状态机已由后端收敛到 idle）。
+   */
+  | { kind: "command"; id: string; output: string }
+  /**
+   * 任务计划（`get_state.todoPhases` / `todo_reminder`）：长任务的阶段清单，
+   * 只读展示（改计划走 prompt 下指令），与 ToolCard 时间线互补。
+   */
+  | { kind: "plan"; id: string; phases: TodoPhase[] }
+  /**
    * 通用 UI 请求（非审批）：omp 的 `confirm` / `input` / `editor` 与非审批 `select`。
    * 回包语义各不相同（`{confirmed}` / `{value}` / `{cancelled}`），由后端 `respond_ui` 按 `method` 组装。
    */
@@ -265,6 +295,8 @@ export type ViewMsg =
       prefill?: string;
       /** 非审批 `select` 的选项。 */
       options?: string[];
+      /** `select` 选项描述（与 `options` 位置对齐，无描述的位置为 null）。 */
+      optionDetails?: (string | null)[];
     }
   /** 服务端撤回（`method:"cancel"`，请求已 abort/超时）：把对应卡片从流里去掉。 */
   | { kind: "ui-cancel"; id: string; uiId: string }

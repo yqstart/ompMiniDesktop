@@ -125,11 +125,21 @@ export function UiRequestCard({ m, sessionId }: { m: Extract<ViewMsg, { kind: "u
           </>
         )}
         {m.method === "select" &&
-          (m.options ?? []).map((opt) => (
-            <button key={opt} className={ghost} disabled={busy} onClick={() => void reply("value", { value: opt })}>
-              {opt}
-            </button>
-          ))}
+          (m.options ?? []).map((opt, i) => {
+            const detail = m.optionDetails?.[i];
+            return (
+              <button
+                key={opt}
+                className={`${ghost} flex-col items-start gap-0.5`}
+                disabled={busy}
+                onClick={() => void reply("value", { value: opt })}
+                title={detail ?? opt}
+              >
+                <span>{opt}</span>
+                {detail && <span className="text-xs text-muted">{detail}</span>}
+              </button>
+            );
+          })}
         {m.method === "select" && (
           <button className={ghost} disabled={busy} onClick={() => void reply("cancel")}>
             取消

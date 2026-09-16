@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { HealthInfo, ImageAttachment, ModelCatalog, ProjectView, SessionRuntime, SessionStatus, SessionView, UpdateState, ViewMsg } from "@shared/types";
+import type { AvailableCommand, HealthInfo, ImageAttachment, ModelCatalog, ProjectView, SessionRuntime, SessionStatus, SessionView, TodoPhase, UpdateState, ViewMsg } from "@shared/types";
 
 type AppState = {
   health: HealthInfo | null;
@@ -23,6 +23,10 @@ type AppState = {
   currentEfforts: string[] | null;
   /** 当前会话的运行时真值快照（上下文占用 / 本轮用量 / 耗时）：状态条纯透传的数据源。 */
   currentRuntime: SessionRuntime | null;
+  /** 可用命令面（`available_commands_update` 缓存，按会话隔离；`/` 补全的数据源）。 */
+  commandsBySession: Record<string, AvailableCommand[]>;
+  /** 任务计划（`todoPhases` 真值 + `todo_reminder` 事件合并，按会话隔离；只读展示）。 */
+  plansBySession: Record<string, TodoPhase[]>;
   sessionApprovals: Record<string, string>;
   /** 输入框工具行与上方上下文条的下拉互斥：同一时刻只开一个（model/thinking/permission/project/branch）。 */
   composerMenu: "model" | "thinking" | "permission" | "project" | "branch" | null;
@@ -86,6 +90,8 @@ export const useApp = create<AppState>((set, get) => ({
   currentThinking: null,
   currentEfforts: null,
   currentRuntime: null,
+  commandsBySession: {},
+  plansBySession: {},
   sessionApprovals: {},
   composerMenu: null,
   settingsOpen: false,

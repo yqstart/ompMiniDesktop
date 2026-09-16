@@ -12,6 +12,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
@@ -42,8 +43,14 @@ fn main() {
             rename_session_note,
             get_history,
             send_message,
+            steer_message,
+            follow_up_message,
+            compact_session,
+            branch_session,
+            run_slash,
             read_image_file,
             check_paths,
+            complete_path,
             stop_session,
             approve,
             respond_ui,
