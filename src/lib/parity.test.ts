@@ -58,26 +58,56 @@ const hasOmp = (() => {
  }
 })();
 
-const cases = collectSessions().slice(0, 3);
 const norm = (s: string) => s.replace(/\s+/g, "");
+
+/** 会话头 + 前 `HEAD_ENTRIES` 条的定长切片（对拍输入与取样判据共用同一份）。 */
+function sliceOf(file: string): string[] {
+ const all = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
+ // 会话头（`type:"session"`）必带：渲染与归一路径都靠它认 cwd / id / 起始时间
+ const header = all.find((l) => l.includes('"type":"session"'));
+ return header ? [header, ...all.filter((l) => l !== header).slice(0, HEAD_ENTRIES)] : all.slice(0, HEAD_ENTRIES);
+}
+
+function parseSlice(lines: string[]): unknown[] {
+ return lines
+  .map((l) => {
+   try {
+    return JSON.parse(l) as unknown;
+   } catch {
+    return null;
+   }
+  })
+  .filter((v): v is unknown => v !== null);
+}
+
+/** 切片里是否有够长的用户文本（对拍的硬断言以此为前提）。 */
+function hasUserSample(file: string): boolean {
+ const ours = viewMsgsFromJsonlLines(parseSlice(sliceOf(file)), zh);
+ return ours.some((m) => m.kind === "user" && norm((m as { text: string }).text).length >= 12);
+}
+
+/**
+ * 取样：最近 `CANDIDATES` 个会话里挑出「切片内确有用户文本」的最多 3 个。
+ * 跳过刚建好还没说话的会话（新建会话可能只写了头，前 40 条里一条 user 文本都没有）——
+ * 否则「必须有用户样例」的断言会随本机会话目录的状态时红时绿（与切片长度同理）。
+ */
+const CANDIDATES = 20;
+const cases = collectSessions()
+ .slice(0, CANDIDATES)
+ .filter((f) => {
+  try {
+   return hasUserSample(f);
+  } catch {
+   return false;
+  }
+ })
+ .slice(0, 3);
 
 describe.skipIf(!hasOmp || cases.length === 0)("omp render --plain 对拍", () => {
  for (const file of cases) {
   it(`会话 ${path.basename(file).slice(0, 22)}… 文本与 omp 渲染一致`, () => {
-   const all = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
-   // 会话头（`type:"session"`）必带：渲染与归一路径都靠它认 cwd / id / 起始时间
-   const header = all.find((l) => l.includes('"type":"session"'));
-   const lines = header ? [header, ...all.filter((l) => l !== header).slice(0, HEAD_ENTRIES)] : all.slice(0, HEAD_ENTRIES);
-   const raw = lines
-    .map((l) => {
-     try {
-      return JSON.parse(l) as unknown;
-     } catch {
-      return null;
-     }
-    })
-    .filter((v): v is unknown => v !== null);
-   const ours = viewMsgsFromJsonlLines(raw, zh);
+   const lines = sliceOf(file);
+   const ours = viewMsgsFromJsonlLines(parseSlice(lines), zh);
    // 切片写进临时文件再渲染：渲染输出只取决于线程长度，不再取决于调用方终端
    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-parity-"));
    const head = path.join(dir, path.basename(file));

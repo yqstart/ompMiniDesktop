@@ -19,6 +19,7 @@ const types = fs.readFileSync(path.join(root, "src/shared/types.ts"), "utf8");
 const mainRs = fs.readFileSync(path.join(root, "src-tauri/src/main.rs"), "utf8");
 const modRs = fs.readFileSync(path.join(root, "src-tauri/src/commands/mod.rs"), "utf8");
 const providersRs = fs.readFileSync(path.join(root, "src-tauri/src/providers.rs"), "utf8");
+const memoriesRs = fs.readFileSync(path.join(root, "src-tauri/src/memories.rs"), "utf8");
 
 const COMMANDS = [
  "locate_omp", "get_health", "get_models", "refresh_models", "get_overlay",
@@ -33,11 +34,16 @@ const COMMANDS = [
  "set_omp_path",
  "list_providers", "get_provider_login", "start_provider_login", "provider_login_input",
  "cancel_provider_login", "logout_provider", "get_model_roles", "set_model_role",
+ "list_memories", "read_memory_file", "delete_memory_file", "delete_memory_project",
 ];
 for (const c of COMMANDS) {
  if (!mainRs.includes(c)) fail(`main.rs 未注册命令 ${c}`);
- // 命令实现分布在 commands/mod.rs（会话与设置）与 providers.rs（供应商）两个模块
- if (!modRs.includes(`pub async fn ${c}`) && !providersRs.includes(`pub async fn ${c}`)) {
+ // 命令实现分布在 commands/mod.rs（会话与设置）、providers.rs（供应商）、memories.rs（记忆）三个模块
+ if (
+  !modRs.includes(`pub async fn ${c}`) &&
+  !providersRs.includes(`pub async fn ${c}`) &&
+  !memoriesRs.includes(`pub async fn ${c}`)
+ ) {
   fail(`后端缺少实现 ${c}`);
  }
  if (!ipc.includes(c)) fail(`src/shared/ipc.ts 缺少通道 ${c}`);

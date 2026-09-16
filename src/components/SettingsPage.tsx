@@ -6,11 +6,12 @@ import { LOCALES, fmt, type Locale } from "../lib/locale";
 import { useText } from "../lib/useText";
 import { useEffect, useState } from "react";
 import { ArchivedSessions } from "./ArchivedSessions";
+import { MemoryPanel } from "./settings/MemoryPanel";
 import { ModelsPanel } from "./settings/ModelsPanel";
 import { ProvidersPanel } from "./settings/ProvidersPanel";
 
 /** 设置页分页签；顺序即界面顺序。 */
-const TABS = ["general", "providers", "models", "archived"] as const;
+const TABS = ["general", "providers", "models", "memories", "archived"] as const;
 
 export function SettingsPage() {
   const { health, set, update, locale, setLocale } = useApp();
@@ -59,8 +60,9 @@ export function SettingsPage() {
     <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-4 overflow-hidden px-4 pt-6 pb-6">
       <h1 className="shrink-0 text-[17px] font-semibold tracking-tight">{t.title}</h1>
       <p className="shrink-0 text-[13px] text-muted">{t.subtitle}</p>
-      {/* 分页签：设置页四块——通用（本应用诊断 / 更新 / 语言）、供应商（omp 登录登出）、
-          模型（omp 的模型角色与可用模型目录）、已归档对话（归档管理面，归档会话不在左栏出现，这里是它们唯一的入口）。 */}
+      {/* 分页签：设置页五块——通用（本应用诊断 / 更新 / 语言）、供应商（omp 登录登出）、
+          模型（omp 的模型角色与可用模型目录）、记忆（omp 项目记忆的查看 / 删除）、
+          已归档对话（归档管理面，归档会话不在左栏出现，这里是它们唯一的入口）。 */}
       <div role="tablist" aria-label={t.title} className="flex shrink-0 gap-1 border-b border-border">
         {TABS.map((k) => (
           <button
@@ -77,7 +79,9 @@ export function SettingsPage() {
                 ? t.tabProviders
                 : k === "models"
                   ? t.tabModels
-                  : t.tabArchived}
+                  : k === "memories"
+                    ? t.tabMemories
+                    : t.tabArchived}
           </button>
         ))}
       </div>
@@ -89,6 +93,8 @@ export function SettingsPage() {
           <ProvidersPanel />
         ) : tab === "models" ? (
           <ModelsPanel />
+        ) : tab === "memories" ? (
+          <MemoryPanel />
         ) : (
           <>
             <section aria-label={t.languageSection} className="rounded-md border border-border bg-surface p-3.5">

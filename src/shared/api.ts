@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { GitInfo, HealthInfo, ImageAttachment, ModelCatalog, ModelRolesInfo, OmpInfo, Overlay, PathCheck, ProjectView, ProviderLoginStatus, ProviderView, SessionPage, SessionRuntime, SessionSearchResult, SessionView, ViewMsg } from "./types";
+import type { GitInfo, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, OmpInfo, Overlay, PathCheck, ProjectView, ProviderLoginStatus, ProviderView, SessionPage, SessionRuntime, SessionSearchResult, SessionView, ViewMsg } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -113,4 +113,17 @@ export const api = {
  /** 改一个角色；`selector = null` 删除该角色（未配置 = 按 omp 回退规则解析）。 */
  setModelRole: (role: string, selector: string | null) =>
   call<ModelRolesInfo>("set_model_role", { role, selector }),
+ /**
+  * 记忆（设置 › 记忆）：omp 项目记忆（`<agentDir>/memories/` 下按 cwd 一目录一份）。
+  * 上游没有 `omp memory` CLI，记忆由 omp 自己生成——壳侧只列 / 读 / 删，**从不写**。
+  */
+ listMemories: () => call<MemoryProjectView[]>("list_memories"),
+ /** 读单个记忆文件正文（后端上限 1MB，超出截断并标记 `truncated`）。 */
+ readMemoryFile: (dir: string, file: string) =>
+  call<MemoryFileContent>("read_memory_file", { dir, file }),
+ /** 删单个记忆文件（不可撤销；调用方需二次确认）。 */
+ deleteMemoryFile: (dir: string, file: string) =>
+  call<void>("delete_memory_file", { dir, file }),
+ /** 清空一个项目的全部记忆（删整个记忆目录；不可撤销，调用方需二次确认）。 */
+ deleteMemoryProject: (dir: string) => call<void>("delete_memory_project", { dir }),
 };

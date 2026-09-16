@@ -243,6 +243,45 @@ export type ModelRolesInfo = {
  builtin: string[];
 };
 
+/**
+ * 记忆文件分类（后端按相对路径判定）：长期记忆 / 摘要 / 原始记忆 / 教训 /
+ * 会话摘要 / 技能包 / 其他——前端据此显示中文标签。
+ */
+export type MemoryFileKind = "memory" | "summary" | "raw" | "learned" | "rollout" | "skill" | "other";
+
+/** 一个记忆目录里的文件（`path` 恒为相对路径、`/` 分隔）。 */
+export type MemoryFileView = {
+  path: string;
+  size: number;
+  /** 修改时间（毫秒）。 */
+  modified: number;
+  kind: MemoryFileKind;
+};
+
+/**
+ * 一个项目的记忆（= `~/.omp/agent/memories/` 下的一个目录）。
+ * `path` 为 null = 目录名解不回真实路径（原项目已删 / 改名），此时 `name` 是编码名。
+ */
+export type MemoryProjectView = {
+  /** 记忆目录名（编码名；查看 / 删除都回传它）。 */
+  dir: string;
+  path: string | null;
+  name: string;
+  projectId: string | null;
+  files: MemoryFileView[];
+  totalBytes: number;
+  /** 目录内最近一次修改时间（毫秒；0 = 没有可读文件）。 */
+  updatedAt: number;
+};
+
+/** 单个记忆文件的正文（`truncated` = 超过后端上限被截断）。 */
+export type MemoryFileContent = {
+  text: string;
+  bytes: number;
+  truncated: boolean;
+  modified: number;
+};
+
 /** 思考档全集（docs/v1-schedule.md §4）。 */
 export const THINKING_LEVELS = [
  "off",

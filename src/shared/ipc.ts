@@ -52,6 +52,11 @@ export const IPC = {
   logoutProvider: "logout_provider",
   getModelRoles: "get_model_roles",
   setModelRole: "set_model_role",
+  // 记忆（设置 › 记忆）：omp 项目记忆的列表 / 查看 / 删除
+  listMemories: "list_memories",
+  readMemoryFile: "read_memory_file",
+  deleteMemoryFile: "delete_memory_file",
+  deleteMemoryProject: "delete_memory_project",
   // events
   sessionEvent: (id: string) => `omp-event://${id}`,
   sessionStatus: (id: string) => `omp-status://${id}`,

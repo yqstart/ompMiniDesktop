@@ -1,5 +1,6 @@
 mod commands;
 mod git_info;
+mod memories;
 mod overlay;
 mod providers;
 mod runtime;
@@ -71,7 +72,11 @@ fn main() {
             providers::cancel_provider_login,
             providers::logout_provider,
             providers::get_model_roles,
-            providers::set_model_role
+            providers::set_model_role,
+            memories::list_memories,
+            memories::read_memory_file,
+            memories::delete_memory_file,
+            memories::delete_memory_project
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

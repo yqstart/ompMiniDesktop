@@ -21,7 +21,8 @@ oh-my-pi（`omp`）的极简桌面端 —— 把终端里的 agent 会话装进�
 - 切换：模型选择器（搜索 + provider 分组 + context/thinking/images 角标）/ 思考档选择器（按模型可用档过滤）
 - 供应商（设置 ›「供应商」）：OAuth 供应商登录 / 登出（走 `omp auth-broker`，凭证写进 omp）
 - 模型（设置 ›「模型」）：模型角色分配（omp 内置 9 个角色 + 自定义角色 → 模型，写 `modelRoles`）、可用模型目录（只读，按供应商分组）
-- 设置页：界面语言（中英切换）、omp 诊断（路径/版本/agentDir + 手动指定路径）、应用更新、供应商、模型、已归档对话——**除「供应商」与「模型」外一律不写 omp 状态**（语言只切本应用展示，路径只写应用覆盖层）
+- 记忆（设置 ›「记忆」）：omp 项目记忆（`<agentDir>/memories/` 下按项目一份）的清单、Markdown 预览与删除（单文件 / 整目录；只删文件，不写 omp）
+- 设置页：界面语言（中英切换）、omp 诊断（路径/版本/agentDir + 手动指定路径）、应用更新、供应商、模型、记忆、已归档对话——**除「供应商」与「模型」外一律不写 omp 状态**（语言只切本应用展示，路径只写应用覆盖层；记忆页只删文件）
 
 **明确不做（V1）**：自动化/定时任务、插件/Skill/MCP/Hook 管理、主题市场、云同步、多窗口协作、终端 PTY 仿真、diff 合并编辑器、用量统计。
 
@@ -114,6 +115,9 @@ app 覆盖层：$APPDATA/omp-mini/overlay.json（项目列表/归档/备注/会�
   切思考档发 `set_thinking_level{level}`。
 - 供应商页（唯一改 omp 状态的地方）：登录 / 登出走 `omp auth-broker` 子进程（RPC 模式在「一个供应商都没登录」时起不来），
   输出经 `omp-provider://login` 推全量快照；角色分配走 `omp config get/set modelRoles`（record 只能整表写，读-改-写 + 回读）。
+- 记忆页（只列 / 读 / 删，不写 omp）：omp 的项目记忆在 `<agentDir>/memories/` 下按 cwd 编码成目录名（与 sessions 的编码不是一套），
+  目录内是 omp 后台整理写出的 Markdown（`MEMORY.md` / 摘要 / `raw_memories.md` / `rollout_summaries/` / `skills/`）；
+  壳侧没有写入路径——上游没有 `omp memory` 这类 CLI，写记忆是 omp 自己的事。
 
 详见 [`docs/v1-design.md`](docs/v1-design.md)（产品冻结稿）、
 [`docs/rpc-memo.md`](docs/rpc-memo.md)（RPC 实测协议备忘）、
