@@ -42,6 +42,16 @@ export type SettingSpec = {
   /** 数字输入框的范围提示（仅在已知时给）。 */
   min?: number;
   max?: number;
+  /**
+   * 这个键只影响 omp 自己的终端 TUI，对壳侧（`omp --mode rpc`）的会话没有可观测效果。
+   *
+   * 实测依据（2026-09-16，omp 18.2.1）：`plan.enabled` / `goal.enabled` 都只是**功能总闸**——
+   * `plan.defaultOnStartup` 只被 TUI 启动流程消费（RPC 不查），goal 的隐藏工具只在 goal 模式
+   * 激活时挂载（`getGoalModeState()?.enabled === true`），而 RPC 进不去这两个模式（实测
+   * `get_state.dumpTools` 里既没有 plan 相关变化、也没有 `goal`）。界面在这一行标「仅 TUI 生效」，
+   * 免得用户拨了开关以为桌面端会变。
+   */
+  tuiOnly?: boolean;
 };
 
 /** 设置项 label 的字典键：`s_` + key 里的点换成下划线（如 `compaction.enabled` → `s_compaction_enabled`）。 */
@@ -123,8 +133,9 @@ export const SETTING_SPECS: readonly SettingSpec[] = [
   { key: "autolearn.enabled", type: "boolean", group: "memory" },
 
   // —— 任务与子代理
-  { key: "plan.enabled", type: "boolean", group: "tasks" },
-  { key: "goal.enabled", type: "boolean", group: "tasks" },
+  // 前两项是 omp 对自身 TUI 的 plan / goal 功能总闸，对壳侧会话没有可观测效果（见 `tuiOnly`）
+  { key: "plan.enabled", type: "boolean", group: "tasks", tuiOnly: true },
+  { key: "goal.enabled", type: "boolean", group: "tasks", tuiOnly: true },
   { key: "skills.enabled", type: "boolean", group: "tasks" },
   { key: "task.isolation.enabled", type: "boolean", group: "tasks" },
   {

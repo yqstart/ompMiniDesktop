@@ -177,6 +177,7 @@
 - 清理 Rust 死代码：`CmdError::new`、`emit_health`、`RunningChild` 未读字段，`cargo build` 回到零警告。
 - 换图标后 cargo 不重建：`tauri-build` 的 `rerun-if-changed` 不覆盖 `icons/`，改由 `src-tauri/build.rs` 显式声明 `cargo:rerun-if-changed=icons`。
 - 修掉模型/思考档两处「看着生效、实际没生效」的老问题：点选模型只改了前端 store、从未下发 `set_model`（omp 侧模型其实没切）；打开会话从不回填 omp 真值（界面显示的模型与档位可能与 omp 实际不一致）。同时把两个选择器改为响应式取值（此前选完按钮文字不更新）。
+- **「计划 / 目标」的说明改准**（会话能力面板两行 + 设置 › 通用两行）：此前记的「`goal` 连配置项都没有」有误——18.2.1 实测 `omp config list --json` 里有 `goal.enabled` / `goal.statusInFooter` / `goal.continuationModes`（默认 `["interactive"]`），只是都只影响 omp 自己的 TUI；`plan.defaultOnStartup` 同理（**只被 TUI 启动流程消费**：上游只在 `InteractiveMode.init` 里读它，print 模式还专门打印「此模式下忽略，headless 用 `--plan-yolo`」，RPC 根本不查）。因此设置 › 通用的 `plan.enabled` / `goal.enabled` 两行加了「仅 TUI 生效」标注（`SettingSpec.tuiOnly`）——这两个功能总闸对壳侧会话没有可观测效果（goal 的隐藏工具只在 goal 模式激活时挂载，而 RPC 进不去 goal 模式，实测 `get_state.dumpTools` 的 11 个工具里没有 `goal`），面板里也不再建议「改 `plan.defaultOnStartup` 来默认进入计划模式」。顺带查明：`--plan-yolo` 启动参数在 RPC 下**真实有效**（会话进只读 plan 模式、计划由 omp 自动批准后切 `@smol` 角色继续实现），但**没有人工审批环节、只能启动时决定**——本期不采用（2026-09-16 决定：等上游给 RPC 加模式切换命令）；上游 ACP 那条线已有 Plan 模式的现成实现（`session/set_mode` + `setPlanModeState` + `setPlanProposalHandler`），依据与实测过程记入 `docs/rpc-memo.md` §1。
 
 ## [0.1.0] - 2026-09-15
 

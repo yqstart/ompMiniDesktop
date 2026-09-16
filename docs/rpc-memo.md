@@ -22,14 +22,28 @@ omp --mode rpc --cwd <项目目录> [--resume <sessionId前缀>] [--model <selec
   `/` 补全一个候选都不弹、后端命令面缓存也一直是空的。现在握手期攒下的帧按原序回放，且**进程先登记进 runtime map 再回放**
   （回放要走 `update_meta` 写命令面缓存，快照里没这一条就白回）。
 - `available_commands_update.commands[]` 形状：`{name, aliases?, description, input?:{hint?}, subcommands?:[{name, description, usage?}], source}`。
-  本机实测 48 条（内置 + 技能命令）；`input.hint` 是**参数提示**（`/compact` → `[soft|remote|snapcompact] [focus]`），补全行要带上它才说得清参数怎么给。
+  本机实测 48 条（内置 + 技能命令；**随已装技能 / 扩展浮动**，2026-09-16 复测 52 条）；`input.hint` 是**参数提示**（`/compact` → `[soft|remote|snapcompact] [focus]`），补全行要带上它才说得清参数怎么给。
 - **内建斜杠命令分两类，RPC 只能驱动其中一类**（二进制里逐条命令的实现 + 真机逐条发 prompt 验证）：
   每个内建项都带 `handle`（ACP/RPC 用）与 `handleTui`（终端 TUI 用）两个实现，**只有 `handle` 的才能在 RPC 里跑**。
-  - 两类都有（RPC 可驱动）：`fast` / `skillful` / `extended-context` / **`computer`** / **`advisor`** / `model` / `usage` / `stats` / `compact` / `todo` / `session` …（就是 `available_commands_update` 里那 48 条）。
+  - 两类都有（RPC 可驱动）：`fast` / `skillful` / `extended-context` / **`computer`** / **`advisor`** / `model` / `usage` / `stats` / `compact` / `todo` / `session` …（就是 `available_commands_update` 里那批 builtin）。
   - **只有 `handleTui`（RPC 驱动不了）**：`plan` / `plan-review` / `goal` / `guided-goal` / `vibe` / `loop` / `queue` / `setup`。
     把 `/plan` 当普通 prompt 发出去**不会**触发命令，而是真的开一个 agent turn 把这段文字喂给模型（实测：`agent_start` + 工具调用全跑起来了）——所以壳侧**不能**靠发 `/plan` 来切计划模式，只能如实标为「仅 TUI」。
   - 计划 / 目标模式的状态也不在 `get_state` 里（`get_state` 只有 `fastModeEnabled/fastModeActive`、`autoCompactionEnabled`、`steeringMode/followUpMode/interruptMode`、`todoPhases` 等）。
-    `goal` 连配置项都没有（`omp config list --json` 里没有 `goal.*`）；`plan` 有 `plan.enabled` / `plan.defaultOnStartup`，`computer` 有 `computer.enabled`，`advisor` 有 `advisor.enabled`。
+    `plan` 有 `plan.enabled` / `plan.defaultOnStartup`，`goal` 有 `goal.enabled` / `goal.statusInFooter` / `goal.continuationModes`（默认 `["interactive"]`），`computer` 有 `computer.enabled`，`advisor` 有 `advisor.enabled`。
+  - **2026-09-16 复测（18.2.1）**：这些功能总闸对 RPC 会话都没有可观测效果——
+    `plan.defaultOnStartup` **只被 TUI 启动流程消费**（上游只在 `InteractiveMode.init` 里读它；print 模式还专门打印「此模式下忽略，headless 用 `--plan-yolo`」提示），RPC 根本不查；
+    goal 的隐藏工具只在 goal 模式激活时挂载（上游 `createTools` 的条件是 `getGoalModeState()?.enabled === true`），而 RPC 进不去 goal 模式——
+    实测 `get_state.dumpTools` 里 11 个工具没有 `goal`。所以设置 › 通用里的 `plan.enabled` / `goal.enabled` 两行在界面上标了「仅 TUI 生效」。
+  - **计划模式在 RPC 下唯一的真路径是 `--plan-yolo` 启动参数**（2026-09-16 实测）：spawn 时带上它，会话在第一个 prompt 时进入只读 plan 模式
+    （turn 里注入 `customType:"plan-mode-context"` 的自定义消息：`Plan mode active. Working tree/system read-only: NEVER create, edit, delete…`），
+    模型产出计划后由 omp **自动批准**、自动切 `--plan-yolo-into`（默认 `@smol` 角色）继续实现。
+    与 TUI `/plan` 的两个关键差别：**没有人工审批环节**（TUI 弹计划审阅界面，可以改/批/拒），且**只能在启动时决定**、不能会话中途开关。
+    壳侧 2026-09-16 决定不采用（等上游开放 RPC 切换命令），要再评估时按上面的语义如实写界面。
+  - **上游已有现成的 headless 实现**（给 omp 提 feature request 的依据）：ACP 协议那条线已实现 Plan 模式——
+    `session/set_mode` + `availableModes: [Default, Plan]`（`plan.enabled` 为真时才有 Plan），实现就是
+    `session.setPlanModeState({enabled:true, planFilePath, workflow:"parallel", reentry})` + `session.setPlanProposalHandler(...)`，
+    审批走 ACP 的 elicitation（`Approve plan "…" and start implementation?`）。
+    也就是说 plan 模式的会话级切换在 AgentSession 层完全可达，**RPC 只是没暴露对应命令**（`RpcCommand` 全集见上游 `rpc.md`，没有模式类命令）——上游给 RPC 加同等命令的成本极低。
 - `computer` / `advisor` 的**状态只能从它们自己的输出里读**（`get_state` 没有这两个字段）：
   - `/computer status` → `Computer use: enabled · prelude: active · configured: display=all, maxWidth=3840, maxHeight=2400`
   - `/advisor status` → `Advisor is enabled (provider/model). Context: … Spend: …` / `Advisor is disabled.`

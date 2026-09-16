@@ -239,6 +239,7 @@ function SettingRow({
           <div className="truncate font-mono text-[10px] text-faint">
             {spec.key}
             {unavailable && ` · ${t.ompSettingsUnavailable}`}
+            {spec.tuiOnly && ` · ${t.ompSettingsTuiOnly}`}
             {spec.minusOneIsDefault && value === -1 && ` · -1 = ${t.ompSettingsDefault}`}
           </div>
         </div>
