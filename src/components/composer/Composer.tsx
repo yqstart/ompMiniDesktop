@@ -36,7 +36,8 @@ export function Composer() {
       }
     }
   };
-  const commands = useApp((s) => (activeSessionId ? (s.commandsBySession[activeSessionId] ?? []) : []));
+  const commandsBySession = useApp((s) => s.commandsBySession);
+  const commands = activeSessionId ? (commandsBySession[activeSessionId] ?? []) : [];
   const draft = draftOf(activeSessionId);
   const attachments = attachmentsOf(activeSessionId);
   const status = activeSessionId ? statusBySession[activeSessionId]?.state : undefined;

@@ -13,7 +13,9 @@ import { useApp } from "../stores/app";
  */
 export function useTaskNotifications() {
  const lastState = useRef<Record<string, string>>({});
- const { activeSessionId, statusBySession, eventsBySession } = useApp();
+ const activeSessionId = useApp((s) => s.activeSessionId);
+ const statusBySession = useApp((s) => s.statusBySession);
+ const eventsBySession = useApp((s) => s.eventsBySession);
  useEffect(() => {
   if (!activeSessionId) return;
   const cur = statusBySession[activeSessionId]?.state;
