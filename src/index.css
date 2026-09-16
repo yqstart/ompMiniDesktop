@@ -228,6 +228,15 @@ summary::-webkit-details-marker {
  margin: 1rem 0 0.5rem;
  font-weight: 600;
  line-height: 1.35;
+ /* 标题走「accent 调进正文墨色」的中间调：有色彩倾向但不抢正文（单强调色约束不破，
+    用的还是 accent，只是与 foreground 混过一道，深浅两套皮肤各自成立）。 */
+ color: color-mix(in srgb, var(--accent) 50%, var(--foreground));
+}
+
+.md-body h1,
+.md-body h2 {
+ padding-bottom: 0.2rem;
+ border-bottom: 1px solid var(--border-soft);
 }
 
 .md-body h1 {
@@ -260,6 +269,11 @@ summary::-webkit-details-marker {
  list-style: decimal;
 }
 
+/* 列表符号走 accent：条目密集时它是整段正文里唯一的彩色锚点 */
+.md-body li::marker {
+ color: var(--accent);
+}
+
 .md-body li {
  margin: 0.15rem 0;
 }
@@ -271,7 +285,7 @@ summary::-webkit-details-marker {
 
 .md-body blockquote {
  margin: 0.5rem 0;
- border-left: 3px solid var(--border);
+ border-left: 3px solid color-mix(in srgb, var(--accent) 45%, var(--border));
  padding-left: 0.75rem;
  color: var(--muted);
 }
@@ -288,19 +302,22 @@ summary::-webkit-details-marker {
  border-top: 1px solid var(--border);
 }
 
-/* 行内代码与代码块同底色，避免出现"两种灰" */
+/* 行内代码与代码块同底色，避免出现"两种灰"；行内代码的字色再带一点 accent，
+   与代码块里的高亮词（关键字 accent / 字符串 ok / 数字 warn）连成一套。 */
 .md-body code {
  background: var(--code);
  border-radius: 4px;
  padding: 0.1rem 0.3rem;
  font-family: var(--font-mono);
  font-size: 0.8125rem;
+ color: color-mix(in srgb, var(--accent) 65%, var(--foreground));
 }
 
 .md-body pre code {
  background: transparent;
  padding: 0;
  font-size: inherit;
+ color: inherit;
 }
 
 /* 表格：宽度按内容撑开，横滚交给外层容器（375px 不撑破） */
@@ -321,6 +338,7 @@ summary::-webkit-details-marker {
 .md-body th {
  background: var(--code);
  font-weight: 600;
+ color: color-mix(in srgb, var(--accent) 45%, var(--foreground));
 }
 
 /* 代码高亮（highlight.js 类名）：用项目 token 派生，深浅色自动跟随，不引第三方主题 CSS */

@@ -49,6 +49,13 @@
 - 主入口「添加项目」是稀释强调色（`bg-accent/10` + `border-accent/25` + `text-accent`），不是实心色块——侧栏顶部放一块高饱和实心按钮太吵。
 - 对比底线：正文与次要文字均 ≥ 4.5:1，元信息 `faint` 也 ≥ 4.5:1（本表已满足，勿再调浅）。
 
+- **会话流里的色彩分工（八期补：输出不再全是灰白）**：整段对话默认灰阶，彩色只落在四处「锚点」上，且全部取自本表的 token——不引第二套色板、不写死色值：
+  - **用户气泡** = `border-accent/25` + `bg-accent/10`：右侧对齐 + 底色双信号，「这是我说的」不必读文字就知道；助手正文保持裸 Markdown 无底色，两侧一眼分得开。
+  - **工具行**：图标与动词**同色**，按**动作性质**分——读 / 搜 / 跑 = `accent`、写 = `ok`、改 = `warn`、未知工具 = `muted`；`main`（文件基名 / 命令）保持正文色。语义色在这里只表**身份**：成功 / 失败仍走原信号（失败 = `danger` 的 X + danger 主文本、运行中 = spinner），所以「颜色不作唯一信号」不破。
+  - **Markdown 正文**：标题 = accent 与正文色 `color-mix`（50%，h1/h2 另加一条 `border-soft` 下划线）、列表符号 `::marker` = accent、行内代码 = accent 65% 混正文色、引用左条 = accent 45% 混边框色、表头文字 = accent 45% 混正文色；代码块高亮沿用既有 `hljs-*` → token 映射（关键字 accent / 字符串 ok / 数字 warn / 删除 danger）——它们本来就是彩色，别重复上色。
+  - **计划卡与本地命令**：任务状态符号 ✓ `ok` / ◐ `accent` / ○ `faint`（旁边仍有状态词与 `sr-only`）；`/` 命令的 `command_output` 给 accent 左条 + 正文色（它是用户主动要的结果，不是备注，不用 muted）。
+  - **元信息一律保持灰阶**：分隔线、时间戳、路径、计数、工具输出的 `pre` 底——彩色只留给"内容"。
+
 ## 3. 字体
 
 - 界面：系统栈 `-apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", Inter, sans-serif`。中文优先苹方 / 微软雅黑。

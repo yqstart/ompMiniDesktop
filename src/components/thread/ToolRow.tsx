@@ -27,6 +27,23 @@ import { toolLineParts, type ToolLineIcon } from "../../lib/toolLine";
  * 失败给红叉并自动展开，运行中给转圈——颜色不作唯一信号，`sr-only` 里带状态词。
  * 一次调用只有一行由 `mergeViewMsgs` 的 id 合并保证（见 `src/lib/mergeEvents.ts`）。
  */
+/**
+ * 工具身份配色：图标与动词同色，main（文件基名 / 命令）仍走正文色。
+ *
+ * 长会话里工具行占绝大多数，全灰会让整段执行痕迹糊成一片；按**动作性质**给三个色：
+ * 读 / 搜 / 跑 = accent（取信息与执行）、写 = ok（新增）、改 = warn（改动既有内容）。
+ * 语义色只做**身份**，成功 / 失败仍由既有信号表达（失败是 danger 的 X + danger 主文本、
+ * 运行中是 spinner），所以颜色不作唯一信号这条依然成立。
+ */
+const TONES: Record<ToolLineIcon, string> = {
+ read: "text-accent",
+ write: "text-ok",
+ edit: "text-warn",
+ bash: "text-accent",
+ search: "text-accent",
+ other: "text-muted",
+};
+
 export function ToolRow({ m, cwd }: { m: Extract<ViewMsg, { kind: "tool" }>; cwd?: string }) {
  const t = useText();
  const [open, setOpen] = useState(m.state === "error");
@@ -54,7 +71,7 @@ export function ToolRow({ m, cwd }: { m: Extract<ViewMsg, { kind: "tool" }>; cwd
     className={`flex w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-[3px] text-left transition-colors duration-100 hover:bg-hover ${open ? "bg-hover" : ""}`}
    >
     <ToolIcon icon={line.icon} />
-    <span className="shrink-0 text-[13px] text-muted">{line.verb}</span>
+    <span className={`shrink-0 text-[13px] ${failed ? "text-danger" : TONES[line.icon]}`}>{line.verb}</span>
     <span
      className={`text-[13px] ${line.pathLike ? "shrink-0" : "min-w-0 truncate"} ${failed ? "text-danger" : line.main ? "text-foreground" : "text-muted"}`}
     >
@@ -111,7 +128,7 @@ export function ToolRow({ m, cwd }: { m: Extract<ViewMsg, { kind: "tool" }>; cwd
 
 /** 工具身份图标（Reicon，Outline 权重；尺寸随文字 13px）。 */
 function ToolIcon({ icon }: { icon: ToolLineIcon }) {
- const p = { size: 13, className: "shrink-0 text-muted", "aria-hidden": true } as const;
+ const p = { size: 13, className: `shrink-0 ${TONES[icon]}`, "aria-hidden": true } as const;
  if (icon === "read") return <FileText {...p} />;
  if (icon === "write") return <FilePlus {...p} />;
  if (icon === "edit") return <Pen2 {...p} />;

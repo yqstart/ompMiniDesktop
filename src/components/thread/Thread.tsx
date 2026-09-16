@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Bulb, Check, ChevronRight, Copy } from "reicon-react";
+import { Bulb, Check, CheckListSquare, ChevronRight, Copy } from "reicon-react";
 import { THREAD_PAGE, useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
@@ -129,7 +129,9 @@ const ThreadRow = memo(function ThreadRow({
   <div className={`text-sm leading-[1.7] ${tight ? "mb-1" : "mb-4"}`}>
    {m.kind === "user" && (
     <div className="group/user ml-auto w-fit max-w-[85%]">
-     <div className="rounded-lg rounded-br-sm border border-border bg-surface px-3.5 py-2">
+     {/* 用户气泡走 accent 稀释底：一句「这是我说的」靠底色就够，不必读文字才知道
+         （右侧对齐 + 底色双信号；助手正文保持裸 Markdown 无底色，两者一眼分得开） */}
+     <div className="rounded-lg rounded-br-sm border border-accent/25 bg-accent/10 px-3.5 py-2">
       {m.text && <div className="whitespace-pre-wrap">{m.text}</div>}
       {(m.images?.length ?? 0) > 0 && (
        <div className={`flex flex-wrap gap-2 ${m.text ? "mt-2" : ""}`}>
@@ -167,7 +169,12 @@ const ThreadRow = memo(function ThreadRow({
    {m.kind === "thinking" && (
     <details className="group/think">
      <summary className="flex w-fit cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-[3px] text-[13px] text-muted transition-colors duration-100 hover:bg-hover">
-      <Bulb size={13} className="shrink-0" aria-hidden />
+      {/* 思考中：灯泡走 accent 并跟着呼吸；已完成的思考退回静止的 faint（不抢正文） */}
+      <Bulb
+       size={13}
+       className={`shrink-0 ${m.complete ? "text-faint" : "animate-pulse text-accent"}`}
+       aria-hidden
+      />
       {m.complete ? fmt(t.thoughtDone, m.seconds) : t.thinking}
       <ChevronRight
        size={12}
@@ -175,7 +182,7 @@ const ThreadRow = memo(function ThreadRow({
        className="shrink-0 transition-transform duration-150 group-open/think:rotate-90"
       />
      </summary>
-     <div className="mt-0.5 mb-1 ml-6 max-h-80 overflow-auto pr-1 text-[13px] leading-6 whitespace-pre-wrap text-muted">
+     <div className="mt-0.5 mb-1 ml-6 max-h-80 overflow-auto border-l border-border-soft pr-1 pl-3 text-[13px] leading-6 whitespace-pre-wrap text-muted">
       {m.text}
      </div>
     </details>
@@ -187,7 +194,9 @@ const ThreadRow = memo(function ThreadRow({
    {m.kind === "files" && <MentionChips m={m} cwd={cwd} />}
    {m.kind === "ui-cancel" && null}
    {m.kind === "command" && (
-    <div className="rounded-md bg-code px-3 py-2 font-mono text-xs whitespace-pre-wrap text-muted">
+    // 本地命令（`/` 开头）的输出：左侧 accent 竖条 + 正文色——它是用户主动要的结果，
+    // 不是模型的解释，所以不给 muted（那会读起来像备注）
+    <div className="rounded-md border-l-2 border-accent/40 bg-code px-3 py-2 font-mono text-xs whitespace-pre-wrap text-foreground">
      {m.output}
     </div>
    )}
@@ -204,17 +213,23 @@ const ThreadRow = memo(function ThreadRow({
 
 /**
  * 任务计划卡（只读）：`todoPhases` / `todo_reminder` 的阶段清单展示。
- * 状态文字双信号（进行中/待办/完成），颜色不作唯一信号。
+ * 状态「文字 + 颜色 + 符号」三信号（进行中 / 待办 / 完成），颜色不作唯一信号。
  */
 function PlanCard({ m }: { m: Extract<ViewMsg, { kind: "plan" }> }) {
  const t = useText();
+ /** 状态符号的颜色：完成 ok / 进行中 accent / 待办 faint（与状态词、符号形状并行）。 */
+ const tone = (status: string) =>
+  status === "completed" ? "text-ok" : status === "in_progress" ? "text-accent" : "text-faint";
  return (
   <div
    className="rounded-lg border border-border bg-surface px-3 py-2"
    role="group"
    aria-label={t.planTitle}
   >
-   <div className="mb-1 text-[13px] font-medium text-muted">{t.planTitle}</div>
+   <div className="mb-1 flex items-center gap-1.5 text-[13px] font-medium text-muted">
+    <CheckListSquare size={13} className="shrink-0 text-accent" aria-hidden />
+    {t.planTitle}
+   </div>
    <div className="space-y-1.5">
     {m.phases.map((p) => (
      <div key={p.id}>
@@ -222,7 +237,9 @@ function PlanCard({ m }: { m: Extract<ViewMsg, { kind: "plan" }> }) {
       <ul className="mt-0.5 space-y-0.5">
        {p.tasks.map((task) => (
         <li key={task.id} className="flex items-start gap-1.5 text-[13px] text-muted">
-         <span aria-hidden>{task.status === "completed" ? "✓" : task.status === "in_progress" ? "◐" : "○"}</span>
+         <span aria-hidden className={tone(task.status)}>
+          {task.status === "completed" ? "✓" : task.status === "in_progress" ? "◐" : "○"}
+         </span>
          <span className={task.status === "in_progress" ? "text-foreground" : undefined}>
           {task.content}
           <span className="sr-only">
