@@ -104,8 +104,10 @@ export function CapabilityMenu() {
     <Cpu size={14} aria-hidden className="shrink-0" />
     <span className="font-mono text-[11px]">{unknown && onCount === 0 ? "?" : `${onCount}/2`}</span>
    </button>
+   {/* 触发按钮在工具行**左侧**（权限徽标右边）→ 浮层必须 left-0：右对齐会让 320px 的面板往左冲出窗口，
+       行标签（顾问 / 电脑 / 计划 / 目标）整列被裁掉。右对齐只适用于工具行右半边的选择器。 */}
    {open && (
-    <div className="absolute right-0 bottom-8 z-10 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-elevated p-2 shadow-pop">
+    <div className="absolute bottom-8 left-0 z-10 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-elevated p-2 shadow-pop">
      <div className="flex items-center justify-between px-1 pb-1.5">
       <span className="text-[13px] font-medium">{t.capsTitle}</span>
       <span className="font-mono text-[11px] text-faint">{running ? t.capsBusy : t.capsSessionOnly}</span>
@@ -124,7 +126,11 @@ export function CapabilityMenu() {
           )}
          </div>
          <div className="mt-0.5 text-[11px] leading-4 text-muted">
-          {row.toggleable ? (state?.detail ?? t.capsUnknown) : row.id === "plan" ? WHYS.plan(t) : WHYS.goal(t)}
+          {row.toggleable
+           ? (state?.detail ?? (activeSessionId ? t.capsUnknown : t.capsNoSession))
+           : row.id === "plan"
+             ? WHYS.plan(t)
+             : WHYS.goal(t)}
          </div>
         </div>
         {row.toggleable ? (
