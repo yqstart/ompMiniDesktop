@@ -3,23 +3,10 @@ import { useApp } from "../../stores/app";
 import { pickAndAddProject } from "../../lib/projects";
 import { createSessionIn } from "../../lib/sessionOpen";
 
-/** 空态示例问题：点一下即新建会话并把问题填进草稿，省掉"第一句说什么"。 */
-const EXAMPLES = ["这个项目是做什么的？", "帮我找出最近的报错", "跑一遍测试并总结失败原因"];
-
 export function EmptyState({ kind }: { kind: "no-project" | "no-session" | "archived" }) {
-  const { activeProjectId, projects, setDraft } = useApp();
+  const { activeProjectId, projects } = useApp();
   const [error, setError] = useState<string | null>(null);
   const currentProject = projects.find((p) => p.id === activeProjectId) ?? null;
-  /** 新建会话并把示例问题填进草稿。 */
-  const startWith = async (text: string) => {
-    const res = await createSessionIn(activeProjectId, { projectName: currentProject?.name });
-    if (!res.ok) {
-      setError(res.message);
-      return;
-    }
-    setError(null);
-    setDraft(res.id, text);
-  };
   if (kind === "no-project") {
     return (
       <div className="flex min-h-0 w-full flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
@@ -53,7 +40,7 @@ export function EmptyState({ kind }: { kind: "no-project" | "no-session" | "arch
   if (kind === "archived") {
     return (
       <div className="border-b border-border bg-surface px-4 py-2 text-center text-sm text-muted">
-        已归档，只读——取消归档后可继续对话
+        已归档，只读——到「设置 › 已归档对话」恢复后可继续对话
       </div>
     );
   }
@@ -92,17 +79,6 @@ export function EmptyState({ kind }: { kind: "no-project" | "no-session" | "arch
           {error}
         </p>
       )}
-      <div className="mt-2 flex flex-col items-center gap-1.5">
-        {EXAMPLES.map((q) => (
-          <button
-            key={q}
-            onClick={() => void startWith(q)}
-            className="cursor-pointer rounded-full border border-border/60 px-3 py-1 text-xs text-muted transition-colors duration-150 hover:bg-surface hover:text-foreground"
-          >
-            {q}
-          </button>
-        ))}
-      </div>
     </div>
   );
 }

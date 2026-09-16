@@ -24,12 +24,13 @@
 | `fg` | `#1C1917` | `#EDEDED` | 正文 |
 | `muted` | `#57534E` | `#9E9E9E` | 次要文字（浅色对比约 7:1，深色约 5.5:1） |
 | `border` | `#E7E5E4` | `#232323` | 分隔线、卡边 |
-| `accent` | `#4F46E5` | `#818CF8` | 仅发送按钮/运行态/链接 |
+| `accent` | `#4F46E5` | `#818CF8` | 发送按钮/运行态/链接/左栏选中态 |
 | `danger` | `#DC2626` | `#F87171` | 删除、拒绝、失败边 |
 | `warn` | `#D97706` | `#FBBF24` | yolo 警告、审批注意 |
 | `ok` | `#059669` | `#34D399` | 成功态 |
 
 - 强调色只用一个，禁止第二强调色。审批卡的 Approve 用 `accent` 实心按钮，Deny 用描边按钮，删除用 `danger`。
+- 左栏「选中」态 = 「添加项目」主按钮同色（`accent`）**稀释**：`bg-accent/15` 底 + 全色 3px 左竖条（会话行与当前项目分组头**共用同一套**，不设边框 ring），选中行标题 `font-semibold`。禁止再发明第二套选中配色。
 - 代码块背景：浅色 `#F5F5F4`，深色 `#1C1917`。
 - 对比底线：正文 ≥ 4.5:1，次要文字 ≥ 4.5:1（本表已满足，勿再调浅）。
 
@@ -43,12 +44,12 @@
 ## 4. 布局
 
 - V1 两栏：左栏可拖拽（220–480px，默认 264，`sidebarWidth` 存 Zustand + localStorage 持久化；窄窗 <768px 收抽屉）→ 中央流式列居中 `max-w-3xl`。右侧栏 V1 不做。
-- 左栏：顶部主入口「添加项目」（accent 实心，`FolderPlus`；与中央空态「选择目录」共用 `src/lib/projects.ts` 的 `pickAndAddProject`）→ 会话搜索框 → 按项目分组的手风琴会话组（旋转 chevron + 左侧 hairline 引导线）+ 未归属组 → 底固定「设置」。
-- 会话行：单行 `● 标题 … 时间/操作`，右侧 68px 固定槽位（时间与操作按钮同槽互斥：hover 时时间 `visibility` 藏、按钮绝对覆盖淡入），行高锁定 `h-9`，悬浮零跳动；删除二次确认用浮层，不撑布局。**行首不设复选框**：不做多选/批量工具条，行内只保留单会话的归档（已归档时为取消归档）与删除；批量操作只挂在分组头。
-- 项目分组头：单行（chevron + 弹性标题 + 右侧 76px 固定槽位：数量与三个批量按钮同槽互斥、垂直居中 `items-center`），悬浮零跳动；缺失态在标题旁常驻小角标，hover 操作区三按钮照常可用。分组头三个操作 = **归档全部对话 / 删除全部对话 / 删除工作区**：「归档全部对话」直接执行（可逆）；「删除全部对话」走分组内浮层二次确认，真删 jsonl、含已归档、不可恢复；「删除工作区」同样浮层确认，只解绑目录、不删文件，名下对话全部归档保留（后端 `remove_project` 按 cwd 扫描 + `archived[id]=true`），可进「未归属会话」的已归档里找回。确认框不撑布局。**会话行不设复选框**，多选/批量工具条一律不做，批量入口只在分组头。
+- 左栏：顶部主入口「添加项目」（accent 实心，`FolderPlus`；与中央空态「选择目录」共用 `src/lib/projects.ts` 的 `pickAndAddProject`）→ 会话搜索框 → 按项目分组的手风琴会话组（旋转 chevron + 左侧 hairline 引导线）+ 未归属组 → 底固定「设置」。**「添加项目」+ 搜索框是固定区**（`sticky top-0` + `bg-sidebar` 不透明底 + `z-10`，`-mx-2 px-2` 让底色铺满）：只有会话列表滚，两块不跟着滚走；用 sticky 而不是拆成两个滚动容器，是为了让搜索框与会话行共用同一条滚动条留白、宽度始终对齐。**左栏只列进行中的会话**：已归档的对话不在左栏出现（V2 M11），统一在「设置 › 已归档对话」里看、恢复与删除。
+- 会话行：单行 `● 标题 … 时间/操作`，右侧 68px 固定槽位（时间与操作按钮同槽互斥：hover 时时间 `visibility` 藏、按钮绝对覆盖淡入），行高锁定 `h-9`，悬浮零跳动；删除二次确认用浮层，不撑布局。**行首不设复选框**：不做多选/批量工具条，行内只保留单会话的「归档」与「删除」；批量操作只挂在分组头。选中态见 §2：`bg-accent/15` 稀释底 + 3px accent 左竖条 + 标题 `font-semibold`（未选中行才有 `hover:bg-background/60`）。
+- 项目分组头：单行（chevron + 弹性标题 + 右侧 76px 固定槽位：数量与三个批量按钮同槽互斥、垂直居中 `items-center`），悬浮零跳动；缺失态在标题旁常驻小角标，hover 操作区三按钮照常可用。分组头三个操作 = **归档全部对话 / 删除全部对话 / 删除工作区**，**三者只作用于进行中的会话**（归档的对话归设置页管，不在这里被顺手删掉）：「归档全部对话」直接执行（可逆，去设置页可恢复）；「删除全部对话」走分组内浮层二次确认，真删这些会话的 jsonl、不可恢复；「删除工作区」同样浮层确认，只解绑目录、不删文件，名下对话全部归档保留（后端 `remove_project` 按 cwd 扫描 + `archived[id]=true`），可在「设置 › 已归档对话」里找回。确认框不撑布局。**会话行不设复选框**，多选/批量工具条一律不做，批量入口只在分组头。当前项目（`activeProjectId`）用与会话行同一套选中视觉（`bg-accent/15` 底 + 3px accent 左竖条 + accent 文件夹图标），文件夹类标题（项目 / 未归属）统一 `font-semibold` + 图标，层级靠字号与深浅而非第二种颜色。
 - 状态收敛：标题框外的独立状态条已下线（`StatusBar` 仅保留读屏播报位）；状态统一进输入框工具行——`OmpStatusPill`（常驻展示，借鉴 Cursor / Codex 底部状态条：就绪显示「就绪」绿点常亮，非就绪用颜色 + 文字双信号强调，避免用户误以为状态丢失）+ `RuntimeStats`（上下文占用 / 本轮 token / 耗时 / TTFT，全部来自 `omp-state` 真值透传，无真值整块不渲染）。
 - 窄窗抽屉入口：桌面侧栏 `hidden md:block`，顶栏左侧常驻「打开侧栏」按钮（`md:hidden`）——否则 <768px 下项目列表与设置完全不可达。打开会话 / 新建会话会自动收起抽屉。
-- 左栏搜索框（Cursor / DSH 式一体搜索框）：图标内置、整块 `rounded-xl` + `border-border/60`；`focus-within:border-accent/60`；有字时才出现清除按钮（`X`），不占位跳动；有过滤词时分组头上方显示「N 个标题匹配」，无匹配分组自动折叠。输入 ≥2 字时下方另起**内容命中**区（V2 M7b）：行 = 标题 + 归档角标 + 命中次数（11px mono）+ 两行片段（`line-clamp-2`，命中词 `<mark class="bg-accent/25">`），整行可点即打开会话；顶部一行说明「内容命中 N 个会话 / 正在搜索正文…」，被预算截断时补「已到预算上限，结果可能不全」。
+- 左栏搜索框（Cursor / DSH 式一体搜索框）：图标内置、整块 `rounded-xl` + `border-border/60`；`focus-within:border-accent/60`（焦点**只**由这圈外框表达，输入框自身不画内层焦点环：`no-focus-ring`）；有字时才出现清除按钮（`X`），不占位跳动；有过滤词时分组头上方显示「N 个标题匹配」，无匹配分组自动折叠。输入 ≥2 字时下方另起**内容命中**区（V2 M7b）：行 = 标题 + 归档角标 + 命中次数（11px mono）+ 两行片段（`line-clamp-2`，命中词 `<mark class="bg-accent/25">`），整行可点即打开会话；顶部一行说明「内容命中 N 个会话 / 正在搜索正文…」，被预算截断时补「已到预算上限，结果可能不全」。
 - 左栏扫描窗口提示（V2 M7a）：列表底部固定区只放「设置」；会话文件总数超过本次扫描窗口时，在「设置」上方加一条 11px muted 提示「已扫描最近 N 个会话（共 M 个）」+ 细边按钮「继续扫描更早的 500 个」（达上限显示「已达上限（5000）」并禁用）。**不占会话行、不进分组头**，因为它不属于任何项目。
 - 左栏项目结构（单层分组，禁止双层）：顶部「添加项目」→ 一体搜索框 → 按项目分组的手风琴会话组（分组头即项目入口：名 + mono 路径尾段 + 右侧 76px 固定槽位；点击分组头切换 `activeProjectId`，新建会话落到它；缺失态在标题旁常驻小角标）→ 未归属组。**禁止在分组上方另起一排项目快捷卡片**（之前红框那排与分组重复，造成“一个项目出现两次”，已删除）。
 - 输入框工具行与上方上下文条下拉互斥：`composerMenu: model | thinking | permission | project | branch | null` 存 Zustand，同时只开一个；点击外部 / Esc 关闭（`useDropdown`）。
@@ -65,12 +66,12 @@
 - 触控目标 ≥ 44px（小图标按钮用 28px 可视 + 44px 热区 padding）。
 - 过渡 150–300ms，只做 `color / opacity / transform`，禁止布局抖动（hover 不许 scale 位移）。
 - 按钮：async 操作期间禁用 + spinner；审批按钮键盘可达（Tab 顺序 = 视觉顺序，Enter 触发）。
-- 流式：文本打字机追加 + 代码块 skeleton 占位；thinking 默认折叠，流式时显示「思考中…」。- 焦点：所有可交互元素可见 focus ring（`accent` 2px outline）。
+- 流式：文本打字机追加 + 代码块 skeleton 占位；thinking 默认折叠，流式时显示「思考中…」。- 焦点：所有可交互元素可见 focus ring（`accent` 2px outline）。**例外**：焦点已由容器表达的输入框不画内层环（左栏搜索框，容器 `focus-within:border-accent/60` 即焦点指示）——`src/index.css` 的 `.no-focus-ring` 显式关掉，避免内外双框；该自定义 CSS 不分层，优先级高于 utilities，Tailwind 的 `outline-none` 压不住全局 input 焦点环。
 - 动效：`prefers-reduced-motion` 时关闭打字机/旋转指示，改为静态文案。
 
 ## 6. 文案语气
 
-- 中文、主动语态、句式收敛：按钮即动作（「新建会话」「允许一次」「取消归档」），toast 即结果（「已归档」「已删除，不可恢复」）。
+- 中文、主动语态、句式收敛：按钮即动作（「新建会话」「允许一次」「恢复」「归档全部对话」），toast 即结果（「已归档」「已删除，不可恢复」）。
 - 空态是邀请不是叹息：给下一步动作（「选择一个本地目录作为项目」+ 按钮）。
 - 错误说清原因和修复：「目录不存在，只能移除或重定位」「模型目录加载失败，重试或检查网络」。
 
@@ -84,7 +85,7 @@
   复评阈值：单个会话 > 5000 条消息、或文件 > 30MB、或展开后交互明显掉帧，再回来做 windowing。
   测量夹具：`OMP_BENCH=1 pnpm test src/lib/historyScale.test.ts`（默认跳过，避免 CI 依赖本机数据）。
 - toolResult 默认截断（前 2000 字符 + 「展开全文」）。
-- 异步内容预留占位，禁止内容跳动（content-jumping）。
+- 异步内容预留占位，禁止内容跳动（content-jumping）。**滚动条也要占位**：左栏会话列表 `[scrollbar-gutter:stable]`——列表从「不满一屏」长到「有滚动条」时，内容宽度不变、横向不跳一下。
 
 ## 8. 组件速查（V1 + 二期 M5）
 
@@ -96,6 +97,8 @@
 - `AssistantText` = 助手正文（Markdown 渲染 + 代码高亮 + 代码块复制 + 流式未闭合围栏 skeleton），实现见 `src/components/thread/AssistantText.tsx`；用户气泡、工具输出不走 Markdown（前者是用户原话，后者是日志）。`RuntimeStats`（用量透传）与 `OmpStatusPill` 同属 `StatusBar.tsx`，只挂输入框工具行。
 - `MentionChips`（`src/components/thread/MentionChips.tsx`）= `@文件` 提及被 omp 读进上下文后的芯片排：11px mono、`rounded-lg` 细边、`FileText` 图标 + 路径 + 「N 行 / NKB」；被跳过的文件（`skippedReason`）换 `FileWarning` + warn 色，tooltip 写「已跳过自动读取（原因）」。输入框里的**草稿芯片**复用同一视觉（在 `Composer` 内联，不另起组件），路径不存在时同样走 warn 色。
 - `ConfirmDialog`（`src/components/ConfirmDialog.tsx`）已落地：受控浮层、Esc/遮罩取消、焦点默认在「取消」、危险操作走 danger 色；批量删除等**跨分组**的危险操作走它，项目分组内的轻量确认仍是分组内联浮层（不撑布局）。`Toast` 仍未落地——新增提示优先用内联错误条，不要临时造第三种提示样式。
+- `SettingsPage`（`src/components/SettingsPage.tsx`）= 设置页外壳，顶部**分页签**（`role="tablist"`，选中页签用 accent 下划线 + 正文色）：`通用`（界面语言 / omp 诊断 / 应用更新）+ `已归档对话`。底部「返回」按钮与页签平级，不属于任何页签。
+- `ArchivedSessions`（`src/components/ArchivedSessions.tsx`）= 「设置 › 已归档对话」页签内容：标题行（`Archive` 图标 + 「已归档对话」+ mono 计数 + 右侧「刷新」）→ 一行口径说明 → 按项目分组（未归属单独一组；目录缺失时分组头用 warn 色 `FolderSearch`）→ 每组一行行头（组名 + mono 路径 + 计数 + 「恢复全部 / 删除全部」）+ 会话行（标题可点开只读回放 + 日期 + 「恢复 / 删除」）。删除走 `ConfirmDialog`（单个与分组同一个浮层实例）。数据来自 `list_archived_sessions`（不看左栏扫描窗口），恢复/删除经 `src/lib/sessionBatch.ts` 并即时刷新左栏。
 - `TopBar`（`src/components/thread/TopBar.tsx`）= 标题备注（点击改名）+ 窄窗抽屉入口 + **复制会话为 Markdown**（`Copy`/`Check` 图标按钮，纯前端剪贴板，导出内容 = 界面上看到的 `ViewMsg`，生成规则见 `src/lib/exportMd.ts`）+ `UpdateBell`。会话为空或未选中时导出按钮禁用。
 - `PlanCard`（`Thread.tsx` 内联）= 任务计划只读卡（`todoPhases` / `todo_reminder`）：阶段名 + 任务清单（✓ 已完成 / ◐ 进行中 / ○ 待办，文字双信号）；`command` 本地输出渲染为灰字代码区（`command_output` 透传）。
 - 流式中追问：输入框 Enter = 排队（`follow_up`，本轮后执行）、⌘/Ctrl+Enter = 转向（`steer`，下一个工具边界生效）、工具行「排队」按钮；排队数徽标（`QueueBadge`）与压缩入口（`CompactButton`，上下文 ≥80% 才出现）挂工具行。

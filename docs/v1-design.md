@@ -58,6 +58,7 @@
 - **上段·项目**：每行 = 项目名（目录 basename）+ 路径尾段（12px muted）+ 会话数角标。点击切换当前项目。hover 出「…」菜单：打开目录（系统文件管理器）、重定位（目录被删后用）、移除项目。
 - **上段·主入口**：左栏顶部「＋ 添加项目」（accent 实心）——全应用唯一的添加入口，不在别处重复；「新建会话」下放到各项目分组内（分组头下方「＋ 新建会话」）与中央空态。
 - **下段·会话**：分组「进行中 / 已归档」（已归档默认折叠，只显示计数）。会话行 = 标题（取 jsonl `title`/`title_change` 最新值，超长省略）+ 第二行（时间 + 模型短名角标 + 运行中圆点）。hover 出归档 / 取消归档 / 删除图标按钮。右键同菜单。
+  > **V2 M11 变更**：左栏**不再展示已归档会话**（折叠抽屉已删），会话行只留「归档 / 删除」；归档会话统一在「设置 › 已归档对话」里查看、恢复与删除。详见 `docs/v2-schedule.md` §9。
 - **底部固定**：「设置」一项。设置带「V1 未开放」小角标也行，但不要 disable 到点不开——点开给占位页（§8），让用户知道去哪配。
 
 ### 3.3 中央顶栏（48px，极简）
@@ -67,8 +68,9 @@
 ### 3.4 空态
 
 - **无项目**：大标题「先添加一个项目」+ 文案「选择一个本地目录作为项目，会话会绑定到它启动」+ 主按钮「选择目录」。
-- **无会话**：大标题 + 当前项目路径 + 「新建会话」按钮 + 3 个示例问题（点击填入 composer，不直接发送）+ 快捷键提示（Enter 发送 / Shift+Enter 换行 / Esc 停止）。
+- **无会话**：大标题 + 当前项目路径 + 「新建会话」按钮 + 快捷键提示（Enter 发送 / Shift+Enter 换行 / Esc 停止）。以前还挂 3 个示例问题按钮，已去掉——空态不替用户起话头。
 - **归档会话打开态**：顶部横幅「已归档，只读——取消归档后可继续对话」+ 按钮。composer 禁用。
+  > **V2 M11 变更**：打开归档会话的入口从「左栏已归档抽屉」换成「设置 › 已归档对话」，横幅与 composer 锁定的口径不变；该页同时提供行级/分组级的「恢复」（等价于原「取消归档」）。
 
 ---
 
@@ -115,7 +117,7 @@
 
 - 输入框工具行的模型按钮显示短名（如 `Muse Spark 1.3` / `Haiku 4.5`）：**按内容自适应宽度、不截断**（最长实测 `DeepSeek V4 Flash Vision (exp)`），空间不足时工具行换行，而不是省略模型名。
 - 下拉：搜索框（模糊，同 CLI `--model` 语义）+ 按 provider 分组 + 每行右端角标（context 如 `1M`、images 有无）。当前模型高亮。**不再显示 thinking 档数角标**——档位数不是决策信息，档位随模型自动适配。
-- 会话中切换：发 RPC `set_model {provider, modelId}` → 成功收 `model_changed` 事件 → 中央插入系统分隔线「已切换到 Claude Haiku 4.5」→ 更新覆盖层 `lastModel`。失败（`Model not found`）内联错误条 + 保留旧模型，不闪切；无论成败都 `get_state` 回读真值纠正前端乐观态。
+- 会话中切换：发 RPC `set_model {provider, modelId}` → 成功收 `model_changed` 事件 → 中央插入系统分隔线「已切换模型」（与思考档同一口径：会话首条用户消息之前的初始 `model_change` 不渲染）→ 更新覆盖层 `lastModel`。失败（`Model not found`）内联错误条 + 保留旧模型，不闪切；无论成败都 `get_state` 回读真值纠正前端乐观态。
 - 切模型后思考档自动适配：omp **不会**自动修正档位（切到无思考模型直接丢档，实测），由后端 runtime 在 `set_model` 成功回包后自动跟进 `set_thinking_level` = 新模型 `efforts` 最高档（无思考则 `off`），随后回读真值推 `omp-state`。
 - 新建会话：选择器即默认值，直接影响下一次 `create_session`。
 
@@ -125,7 +127,7 @@
 
 档位全集：`off / minimal / low / medium / high / xhigh / max / auto`。可用档 = 当前模型 `thinking.efforts`（`null` = 不支持思考），**`off` 恒可用**（实测不在 efforts 内亦生效）。**下拉只列该模型真正支持的档位**（`off` 恒在首位），不再列全集置灰：档位随模型自动识别，切模型即变。`auto` 不作为可选项暴露——实测 omp 会把它解析成具体档（`auto`→`high`），UI 无法忠实显示。
 
-- 会话中切换：`set_thinking_level {level}` → `thinking_level_changed` 事件 → 系统分隔线「思考等级已设为 high」。
+- 会话中切换：`set_thinking_level {level}` → `thinking_level_changed` 事件 → 系统分隔线「思考等级已设为 high」。**会话首条用户消息之前不渲染**——omp 建会话时就把初始档位落盘（`thinking_level_change`，带 `configured`），那是会话的出生状态而不是切换，渲染出来就是新对话顶部凭空多一行提示；切模型的自动跟进档位同理（历史回放按 `userSeen` 判、实时流按「该会话是否已有用户消息」判，两边口径一致）。
 - 真值来源：`omp-state://<sessionId>` 实时推送 + 打开会话时 `get_session_runtime` 补拉（模型 / `efforts` / 当前档）；真值缺失或非法（切模型后会丢档）→ 归一到该模型最高档并下发纠正。
 - 规则：只提交可用档（下拉里不存在的档点不到），而不是先发再报错——实测非法档 omp 同样回 `success`，报错兜底不可靠。
 
@@ -155,7 +157,7 @@ RPC 流（stdout JSONL）与 jsonl 文件是同一套语义的两面，V1 统一
 | `message_update.toolcall_start/delta/end` + `tool_execution_start/update/end` | `ToolCard` | 见 §8.3；按 `toolCallId` 把 call 与 result 关联，多工具并行按 `streamIndex` 同组堆叠 |
 | `extension_ui_request method=select/confirm` | `ApprovalCard` | 见 §9；内联最高优先级 + composer 锁定 |
 | `toolResult`（`message role=toolResult` / `tool_execution_end.result`） | `ToolCard` 结果区 | 成功截断前 2000 字符 + 「展开全文」；失败（`isError`）红边 + 错误文案；`denied` 明确写「被用户拒绝」 |
-| `model_changed / thinking_level_changed / title_change / session_exit / agent_start/end` | `SystemDivider` | 居中 12px 灰字，不计入消息计数 |
+| `model_changed / thinking_level_changed / title_change / session_exit / agent_start/end` | `SystemDivider` | 居中 12px 灰字，不计入消息计数；模型 / 思考档两条在**会话首条用户消息之前不渲染**（`--model` / `--thinking` 的初始配置不是切换） |
 | `get_state.contextUsage / usage` | `StatusBar` | `token / 上下文% / 耗时 / TTFT`，取 assistant 块 `usage/duration/ttft`，前端不自算 |
 
 ### 8.3 ToolCard 四态（逐字抄 gallery 语义）

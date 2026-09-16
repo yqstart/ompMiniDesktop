@@ -30,20 +30,21 @@ Tauri v2 + React + TS + Tailwind v4 + Zustand，包管理 pnpm。
 src/
   app/App.tsx              # 顶层装配 + SidebarShell（拖拽调宽）+ 主题/自检/updater 启动
   components/HealthBanner.tsx  # omp 不可用横幅（与 OmpStatusPill 的常驻位区分）
-  components/SettingsPage.tsx  # 设置占位页（omp 诊断区：路径/版本/agentDir + 重新检测 + 指定路径 + 复制）
+  components/SettingsPage.tsx  # 设置页外壳（分页签：通用 / 已归档对话；通用 = 界面语言中英切换 + omp 诊断区路径/版本/agentDir + 重新检测 + 指定路径 + 复制 + 应用更新）
+  components/ArchivedSessions.tsx # 设置 ›「已归档对话」tab：按项目分组列全部归档会话（数据来自 list_archived_sessions，不受左栏扫描窗口限制），分组级/行级「恢复 / 删除」，删除走 ConfirmDialog
   components/ConfirmDialog.tsx # 通用二次确认浮层（受控；跨分组危险操作用它，分组内仍是轻量内联浮层）
-  components/sidebar/      # Sidebar（分组会话列表 + 缺失态重定位）、EmptyState
+  components/sidebar/      # Sidebar（分组会话列表，**只列进行中的会话** + 缺失态重定位）、EmptyState
   components/thread/       # TopBar（标题备注 + 窄窗抽屉入口 + 复制会话为 Markdown + UpdateBell）、Thread（首屏 200 条 + 增量加载 + 行级 memo + PlanCard 计划卡 + command 本地输出）、AssistantText（Markdown + 代码高亮 + 复制 + 流式骨架 + 外链二次确认）、ToolCard（参数摘要可点打开）、ApprovalCard（审批 select，终态展示结论）、UiRequestCard（confirm/input/editor/非审批 select，选项描述）、MentionChips（@文件 芯片排，可点打开）、StatusBar（OmpStatusPill + QueueBadge 排队数 + CompactButton 压缩入口 + RuntimeStats 用量透传）
   components/composer/     # Composer（一体式输入框 + 工具行 + 图片附件：粘贴/拖拽/选文件，发送随 prompt.images；流式中 Enter 排队 + ⌘/Ctrl+Enter 转向 + `/` 命令补全 + `@` 路径补全 + 图文混贴保留文字 + 乐观回显 + 草稿持久化）、ContextBar（输入框上方一行：项目 + git 分支）
   components/pickers/      # ModelPicker、ThinkingPicker、PermissionBadge（挂输入框工具行）；ProjectPicker、BranchPicker（挂 ContextBar）
   components/update/       # UpdateBell、UpdateDialog（应用内更新）
-  lib/                     # viewmsg（ViewMsg 归一 + 单测）、attachments（图片附件校验/base64/内容块提取 + 单测）、mentions（@文件 解析，与 omp 同规则 + 单测）、search（搜索片段高亮 + 单测）、exportMd（会话 → Markdown 只读导出 + 单测）、mergeEvents（实时流按 id 合并 + 单测）、thinking（思考档推导 + 单测）、sessions（分组 + 单测）、sessionList（会话列表刷新 + 扫描窗口的唯一入口）、context（上下文条取值 + 单测）、sessionOpen（打开/新建会话的唯一实现，含乐观消息合并）、projects（添加项目 / 切换项目）、ompDiag（omp 自检与手动指定路径）、useSessionEvents（事件归一 + 真值回填，含本地命令/计划/压缩重试/子代理/命令面分支）、openPath（路径打开 + 草稿持久化）、useTaskNotifications（后台完成系统通知）、useDropdown、appUpdate、rpc-types
+  lib/                     # viewmsg（ViewMsg 归一 + 单测）、attachments（图片附件校验/base64/内容块提取 + 单测）、mentions（@文件 解析，与 omp 同规则 + 单测）、search（搜索片段高亮 + 单测）、exportMd（会话 → Markdown 只读导出 + 单测）、mergeEvents（实时流按 id 合并 + 单测）、thinking（思考档推导 + 单测）、sessions（分组 + 单测）、sessionList（会话列表刷新 + 扫描窗口的唯一入口）、sessionBatch（批量归档/恢复/删除的唯一实现：BATCH_LIMIT 分批 + 失败聚合 + 删除后清前端痕迹）、context（上下文条取值 + 单测）、sessionOpen（打开/新建会话的唯一实现，含乐观消息合并）、projects（添加项目 / 切换项目）、ompDiag（omp 自检与手动指定路径）、locale（设置页中英字典 + localStorage 持久化 + 单测）、useSessionEvents（事件归一 + 真值回填，含本地命令/计划/压缩重试/子代理/命令面分支）、openPath（路径打开 + 草稿持久化）、useTaskNotifications（后台完成系统通知）、useDropdown、appUpdate、rpc-types
   shared/                  # api（invoke 唯一入口）、ipc（通道常量）、types
-  stores/app.ts            # Zustand 全局状态（含 currentModel/currentThinking/currentEfforts/currentRuntime、composerMenu、sidebarWidth、threadLimit、update）
+  stores/app.ts            # Zustand 全局状态（含 currentModel/currentThinking/currentEfforts/currentRuntime、composerMenu、sidebarWidth、threadLimit、update、locale/setLocale）
 eslint.config.js           # ESLint flat config（typescript-eslint + react-hooks + react-refresh）
 src-tauri/src/
   main.rs / lib.rs         # 插件注册（dialog/opener/process/updater/store）
-  commands/mod.rs          # 40 个 Tauri commands（与 src/shared/ipc.ts 一一对应，见 e2e:ipc；新增 steer/follow_up/compact/branch/run_slash/complete_path）
+  commands/mod.rs          # 42 个 Tauri commands（与 src/shared/ipc.ts 一一对应，见 e2e:ipc；新增 steer/follow_up/compact/branch/run_slash/complete_path/list_archived_sessions/unarchive_sessions）
   runtime.rs               # per-会话长驻 omp 子进程 + rpc_chunk 重组 + 事件分发 + 真值回读（omp-state）+ 切模型自动最高档
   overlay.rs               # overlay.json 读写与版本归一（含单测）
   session_scan.rs          # agentDir 解析 + jsonl 头解析 + cwd 归组（含单测）
@@ -60,6 +61,7 @@ scripts/                   # fake-omp.mjs（canned RPC 联调：history|approve|
 - 图片附件（V2 M6）：三条入口（粘贴 / 拖拽 / 点回形针选文件）都读成 base64 存内存（`attachmentsBySession`），发送时随 `prompt{message, images:[{type:"image",data,mimeType}]}` 一次性交给 omp——**不落盘、不写覆盖层、不塞草稿**；选文件走后端 `read_image_file`（WebView 拿不到任意本地路径内容）。渲染只认消息内容块里的 `type:"image"`（实时与 jsonl 同构）；单张上限 10MB，历史回放里超过 512KB base64 的块按 `imagesOmitted` 计数省略，不许无上限常驻内存。
 - `@文件` 提及（V2 M6b）：**展开动作是 omp 做的**（prompt 时把命中的文件读成 `role:"fileMention"` 消息），壳侧只做两件事——输入框把草稿里的提及显示成芯片并用后端 `check_paths`（只 stat）标出「路径不存在」，转录区把 `fileMention` 渲染成一排文件芯片（跳过项 `skippedReason` 用 warn 色）。解析规则与 omp 的 `extractFileMentions` 逐条对齐（`src/lib/mentions.ts`：引号形式、行首/空白边界、ASCII 首尾修剪）——**规则漂移会让芯片与真正读进上下文的文件对不上**。
 - 会话列表扫描是**有窗口的**（V2 M7a）：`list_sessions` 返回 `{sessions, totalFiles, scannedFiles}`，默认只解析最近 500 个 jsonl（后端夹在 1..=5000），前端一律经 `src/lib/sessionList.ts` 的 `loadSessions()` 落库（会话数组 + 扫描统计一起更新，别再各处裸调 `api.listSessions`）；`totalFiles > scannedFiles` 时左栏底部给「继续扫描更早的 500 个」入口。窗口外不是"不存在"，是不解析。
+- **归档会话不在左栏**（V2 M11）：左栏项目分组只列进行中的会话，归档的唯一管理面是「设置 › 已归档对话」（`src/components/ArchivedSessions.tsx`）——数据走 `list_archived_sessions`，它**不看扫描窗口**（只按覆盖层 `archived` 标记逐个定位文件，老到 500 个之外的归档也找得到），按项目分组（未归属单独一组）给分组级/行级的「恢复 / 删除」。恢复 = `unarchive_sessions` 摘掉覆盖层标记，会话立刻回到左栏对应项目分组；删除 = `delete_sessions` 真删 jsonl（ConfirmDialog 二次确认）。批量分档与失败聚合的唯一实现在 `src/lib/sessionBatch.ts`（`BATCH_LIMIT` 200），左栏分组头的批量也走它。
 - 会话内容搜索（V2 M7b）：后端 `search_sessions` 只搜 `message` 行里 **user / assistant 的 text 块**（工具输出、thinking、JSON 字段名都不进搜索面——否则搜 "user" 会命中每一行），逐行读取、有文件数/字节/墙钟时间/命中数四道预算，任何一道到点都把 `truncated` 置 true（**宁可说"可能不全"，不许假装搜完了**）；前端输入 ≥2 字才搜（单字命中面太大），300ms 防抖，结果行显示标题 + 命中片段（`highlightParts` 高亮全部命中）+ 命中次数 + 归档角标，点击即打开会话（命中的会话可能落在扫描窗口外，`openSessionWithHistory` 会把它补进列表，避免顶栏显示「未命名」）。
 - V1 最小命令集：`negotiate_protocol、get_state、prompt、abort、set_model、set_thinking_level` 走 stdin 长驻通道（命令名以 `src/lib/rpc-types.ts` 为准）；`get_available_models、switch_session、get_messages_page、bash（诊断）` 仅在该类型声明中保留，Rust 后端当前未发送。历史回放走后端 `get_history`（直读 jsonl，前 5000 行、最多 2000 条 message/custom 系），不是 `get_messages_page`。
 - 切模型发 `set_model{provider, modelId}`（两个字段，非 selector 字符串）；切思考档发 `set_thinking_level{level}`。**omp 切模型后不会修正思考档**（切到无思考模型直接丢档）：后端收到 `set_model` 成功回包即自动跟进 `set_thinking_level`（新模型 `efforts` 最高档，无思考则 `off`），再 `get_state` 回读真值推 `omp-state`；失败也回读以纠正前端乐观态。
@@ -81,10 +83,10 @@ scripts/                   # fake-omp.mjs（canned RPC 联调：history|approve|
 - 消息流首屏增量：默认只渲染最后 `THREAD_PAGE`（200）条（`stores/app.ts` 的 `threadLimit`，按会话重置），向上滚动或点按钮按页展开，加载后保持视口位置；不许一次性 map 全部消息（MASTER §7）。
 - 消息行必须 `memo`（V2 M8 实测结论）：`Thread.tsx` 的 `ThreadRow` 是 `React.memo` 组件，前提是 `mergeViewMsgs` 对**未变化的消息保持同一对象引用**（有单测守着）。真实数据（8.1MB / 1411 块 → 698 条 ViewMsg，归一 2ms）证明瓶颈在渲染不在数据层，所以**不做虚拟列表**；复评阈值见 `docs/v2-schedule.md` M8（>5000 条 / >30MB / 明显掉帧）。测规模用 `OMP_BENCH=1 pnpm test src/lib/historyScale.test.ts`（默认跳过）。
 - 会话行单行 `● 标题 … 时间/操作`：右侧 68px 固定槽位，时间与操作按钮互斥（hover 时时间 `visibility` 藏、按钮绝对覆盖淡入），行高锁定，悬浮零跳动；删除二次确认用浮层，不撑布局。
-- 会话行不设复选框：不做多选、不做「已选 N」批量工具条；批量归档/删除只挂在分组头——项目分组头三个入口 = 归档全部对话 / 删除全部对话 / 删除工作区（后两者各自走分组内浮层二次确认；删除工作区只解绑目录、名下会话全部归档保留），「未归属会话」分组头 = 归档全部 / 删除全部对话。批量走 `archive_sessions`/`delete_sessions`，单次上限 200，前端 `BATCH_LIMIT` 分批。
+- 会话行不设复选框：不做多选、不做「已选 N」批量工具条；批量归档/删除只挂在分组头——项目分组头三个入口 = 归档全部对话 / 删除全部对话 / 删除工作区（后两者各自走分组内浮层二次确认；删除工作区只解绑目录、名下会话全部归档保留），「未归属会话」分组头 = 归档全部 / 删除全部对话。**这些批量只覆盖进行中的会话**（左栏已不列归档），批量走 `src/lib/sessionBatch.ts`（`BATCH_LIMIT` 200 分批 + 失败聚合），归档会话的管理（恢复 / 删除）在设置页。
 - 左侧栏可拖拽调宽 220–480px（默认 264，`sidebarWidth` 持久化 localStorage）；窄窗 <768px 收抽屉。
 - 导出是**只读**动作（V2 M9）：`TopBar` 的「复制会话为 Markdown」把界面上已渲染的 `ViewMsg` 经 `src/lib/exportMd.ts` 拼成 Markdown 写进剪贴板——不读盘、不落盘、不加后端命令；工具输出沿用界面口径截断并在截断处明写「已截断」，图片只写张数（不内联 base64）。消息级复制走行内 `CopyAction`（自带 copied 状态，**不许把状态提到 `ThreadRow` 上**，否则破坏 M8 的行级 memo）。
-- 四个禁止：不轮询文件做伪实时；前端不自算 token（状态与用量一律透传 `omp-state` 真值）；不写回 omp 标题（改名只写覆盖层 `notes`，禁用 `set_session_name`）；设置页不改 omp 配置（诊断区只读 + 「指定 omp 路径」只写应用覆盖层 `ompPath`，更新区除外）。
+- 四个禁止：不轮询文件做伪实时；前端不自算 token（状态与用量一律透传 `omp-state` 真值）；不写回 omp 标题（改名只写覆盖层 `notes`，禁用 `set_session_name`）；设置页不改 omp 配置（语言只切本应用展示、走 localStorage 持久化；诊断区只读 + 「指定 omp 路径」只写应用覆盖层 `ompPath`，更新区除外）。
 
 ## 常用命令
 

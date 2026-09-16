@@ -88,9 +88,8 @@ function SidebarShell({
           onPointerLeave={() => {
             if (!dragging.current) setHot(false);
           }}
-          className={`absolute top-0 -right-0.5 z-10 h-full cursor-col-resize touch-none transition-colors focus-visible:outline-none ${
-            hot || draggingUi ? "w-[7px] bg-accent/30" : "w-[3px] bg-transparent hover:bg-accent/20"
-          }`}
+          className={`absolute top-0 -right-0.5 z-10 h-full cursor-col-resize touch-none transition-colors focus-visible:outline-none ${hot || draggingUi ? "w-[7px] bg-accent/30" : "w-[3px] bg-transparent hover:bg-accent/20"
+            }`}
         />
       </div>
       {/* 窄窗：抽屉由 sidebarOpen 控制（保持既有行为） */}
@@ -128,6 +127,14 @@ export function App() {
   useEffect(() => {
     // 启动静默检查更新（有更新只点亮入口，不打断）
     void autoCheckOnBoot();
+  }, []);
+
+  useEffect(() => {
+    try {
+      document.documentElement.lang = useApp.getState().locale;
+    } catch {
+      // 非 DOM 环境忽略
+    }
   }, []);
 
   useEffect(() => {

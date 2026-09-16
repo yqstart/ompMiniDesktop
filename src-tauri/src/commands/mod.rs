@@ -546,6 +546,81 @@ pub async fn list_sessions(
     Ok(SessionPage { sessions: out, total_files, scanned_files })
 }
 
+/// 已归档对话清单（设置页「已归档对话」tab）。
+///
+/// 与 `list_sessions` 的关键差别：**不受扫描窗口限制**。归档是管理面——归档的意义就是
+/// 把老会话收起来，它们大概率落在窗口之外，被窗口截掉等于「归档即失踪」。所以这里不看
+/// mtime 窗口，只按覆盖层 `archived` 标记逐个定位文件。代价可控：**只读那些文件名里带
+/// 归档 id 前缀的文件**（与 `session_file_for` 同一套约定），不做全量头部解析。
+#[tauri::command]
+pub async fn list_archived_sessions(state: State<'_, AppState>) -> Result<Vec<SessionView>, CmdError> {
+    let ov = state.overlay.lock().await;
+    let archived = ov.archived.clone();
+    let notes = ov.notes.clone();
+    let projects: Vec<(String, String)> = ov.projects.iter().map(|p| (p.id.clone(), p.path.clone())).collect();
+    drop(ov);
+    let agent = state.agent_dir.lock().await.clone();
+    let running = state.running.lock().await.clone();
+    Ok(list_archived_in(&agent.join("sessions"), &archived, &projects, &running, &notes))
+}
+
+/// 归档清单核心（不碰 tauri，可在临时目录上做真实行为测试）。
+/// `archived` 里 value 为 true 的 id 才算归档；覆盖层里残留的失效 id（文件已被删）自然落空。
+pub fn list_archived_in(
+    root: &std::path::Path,
+    archived: &HashMap<String, bool>,
+    projects: &[(String, String)],
+    running: &HashMap<String, bool>,
+    notes: &HashMap<String, String>,
+) -> Vec<SessionView> {
+    let wanted: Vec<&String> = archived.iter().filter(|(_, v)| **v).map(|(id, _)| id).collect();
+    if wanted.is_empty() {
+        return vec![];
+    }
+    let Ok(rd) = std::fs::read_dir(root) else { return vec![] };
+    let paths: Vec<String> = projects.iter().map(|p| p.1.clone()).collect();
+    let prefixes: Vec<String> = wanted.iter().map(|id| id.chars().take(8).collect()).collect();
+    let mut out: Vec<SessionView> = vec![];
+    for entry in rd.flatten() {
+        let Ok(files) = std::fs::read_dir(entry.path()) else { continue };
+        for f in files.flatten() {
+            let path = f.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                continue;
+            }
+            // 文件名前缀里带归档 id（真实布局：`sessions/<slug>/<时间戳>_<id>.jsonl`，
+            // 与 `session_file_for` 同一套约定位），用整条路径比以免漏掉 id 落在目录名上的情况
+            let full = path.to_string_lossy();
+            if !prefixes.iter().any(|p| !p.is_empty() && full.contains(p.as_str())) {
+                continue;
+            }
+            let head = parse_session_head(&path);
+            // 文件名前缀可能撞车，以头里的 id 为准再核一次归档标记
+            if head.corrupt || !archived.get(&head.id).copied().unwrap_or(false) {
+                continue;
+            }
+            let owner = project_of(&head.cwd, &paths);
+            let pid = owner.and_then(|o| {
+                projects.iter().find(|p| normalize_path(&p.1) == normalize_path(&o)).map(|p| p.0.clone())
+            });
+            let note = notes.get(&head.id).cloned();
+            out.push(SessionView {
+                title: display_title(note.as_ref(), &head.title, head.timestamp),
+                project_id: pid,
+                cwd: head.cwd.clone(),
+                timestamp: head.timestamp,
+                archived: true,
+                corrupt: false,
+                note,
+                running: running.get(&head.id).copied().unwrap_or(false),
+                id: head.id.clone(),
+            });
+        }
+    }
+    out.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    out
+}
+
 /// 会话内容搜索的一条命中（V2 M7b）。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -903,6 +978,29 @@ pub async fn archive_sessions(state: State<'_, AppState>, ids: Vec<String>) -> R
     }
     save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
     Ok(serde_json::json!({ "ok": ok, "failed": failed }))
+}
+
+/// 批量取消归档（设置页「恢复」用）：逐个摘掉覆盖层标记，一次落盘；
+/// 返回结构与 `archive_sessions` 对齐（`ok` / `failed`）。
+/// 幂等：对没归档过的 id 也返回成功，不因重复点击报错。
+#[tauri::command]
+pub async fn unarchive_sessions(state: State<'_, AppState>, ids: Vec<String>) -> Result<serde_json::Value, CmdError> {
+    if ids.is_empty() {
+        return Err(cmd_err("BAD_ARG", "未选中任何会话".into(), None));
+    }
+    if ids.len() > 200 {
+        return Err(cmd_err("BAD_ARG", "一次最多恢复 200 个会话".into(), None));
+    }
+    let mut ok = 0usize;
+    {
+        let mut ov = state.overlay.lock().await;
+        for id in &ids {
+            ov.archived.remove(id);
+            ok += 1;
+        }
+    }
+    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+    Ok(serde_json::json!({ "ok": ok, "failed": Vec::<serde_json::Value>::new() }))
 }
 
 /// 批量删除：逐个删文件 + 清覆盖层键，一次落盘；返回成功数与失败明细。
@@ -1436,7 +1534,7 @@ pub fn load_state(app: &AppHandle) -> AppState {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_path, scan_window, search_budget, search_sessions_in};
+    use super::{list_archived_in, resolve_path, scan_window, search_budget, search_sessions_in};
     use std::collections::HashMap;
 
     /// 在临时目录里造一个 sessions/<slug>/*.jsonl 结构，跑真实搜索路径。
@@ -1518,6 +1616,51 @@ mod tests {
         assert_eq!(res.hits.len(), 2, "命中上限生效");
         assert!(res.truncated, "被上限截断必须如实标记，前端才能提示「结果可能不全」");
         assert_eq!(search_budget(Some(2)).0, 2);
+    }
+
+    #[test]
+    fn list_archived_in_lists_only_archived_and_maps_project() {
+        let root = tmp_sessions_root("arch");
+        write_session(&root, "2026-09-15T10-00-00_s-keep.jsonl", "s-keep", "保住的会话", &[]);
+        write_session(&root, "2026-09-15T11-00-00_s-live.jsonl", "s-live", "没归档的会话", &[]);
+        let archived = HashMap::from([
+            ("s-keep".to_string(), true),
+            ("s-live".to_string(), false),
+            // 覆盖层里的失效 id（文件已删）：定位不到就落空，不该冒出一条空壳
+            ("s-gone".to_string(), true),
+        ]);
+        let projects = vec![("p1".to_string(), "/tmp/demo".to_string())];
+        let notes = HashMap::from([("s-keep".to_string(), "备注名".to_string())]);
+        let out = list_archived_in(&root, &archived, &projects, &HashMap::new(), &notes);
+        assert_eq!(out.len(), 1, "只列归档的：没归档与失效 id 都不进");
+        assert_eq!(out[0].id, "s-keep");
+        assert_eq!(out[0].title, "备注名", "备注覆盖标题，与左栏同一口径");
+        assert_eq!(out[0].project_id.as_deref(), Some("p1"), "按 cwd 归属回项目 id");
+        assert!(out[0].archived);
+        assert!(!out[0].corrupt);
+    }
+
+    #[test]
+    fn list_archived_in_sorts_newest_first_and_keeps_orphans() {
+        let root = tmp_sessions_root("arch-sort");
+        let head = |id: &str, title: &str, ts: &str| {
+            format!(
+                "{}\n",
+                serde_json::json!({"type":"session","id":id,"timestamp":ts,"cwd":"/tmp/demo","title":title})
+            )
+        };
+        let dir = root.join("--tmp-demo--");
+        // 文件名按真实布局带会话 id（`<时间戳>_<id>.jsonl`）：覆盖层里的 id 靠文件名里的前缀定位
+        std::fs::write(dir.join("2026-09-14T10-00-00Z_s-old.jsonl"), head("s-old", "旧的", "2026-09-14T10:00:00.000Z")).unwrap();
+        std::fs::write(dir.join("2026-09-16T10-00-00Z_s-new.jsonl"), head("s-new", "新的", "2026-09-16T10:00:00.000Z")).unwrap();
+        let archived = HashMap::from([("s-old".to_string(), true), ("s-new".to_string(), true)]);
+        let out = list_archived_in(&root, &archived, &[], &HashMap::new(), &HashMap::new());
+        assert_eq!(
+            out.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+            vec!["s-new", "s-old"],
+            "最新归档排前面"
+        );
+        assert!(out.iter().all(|s| s.project_id.is_none()), "没有项目时全部算未归属");
     }
 
     #[test]
