@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { AvailableCommand, HealthInfo, ImageAttachment, ModelCatalog, ProjectView, SessionRuntime, SessionStatus, SessionView, TodoPhase, UpdateState, ViewMsg } from "@shared/types";
 import type { Locale } from "../lib/locale";
 import { loadLocale, saveLocale } from "../lib/locale";
+import { loadFavorites, saveFavorites } from "../lib/favoriteModels";
 
 type AppState = {
  health: HealthInfo | null;
@@ -19,6 +20,9 @@ type AppState = {
  /** 待发送图片附件（按会话隔离，只存在内存里，发送成功即清空）。 */
  attachmentsBySession: Record<string, ImageAttachment[]>;
  models: ModelCatalog | null;
+ /** 常用模型（本应用偏好，localStorage 持久化；见 src/lib/favoriteModels.ts）。空数组 = 输入框选择器回退全部可用模型。 */
+ favoriteModels: string[];
+ setFavoriteModels: (list: string[]) => void;
  currentModel: string | null;
  currentThinking: string | null;
  /** 当前模型可用思考档（omp 真值；null = 不支持思考）。驱动思考档下拉只列支持项。 */
@@ -91,6 +95,11 @@ export const useApp = create<AppState>((set, get) => ({
  drafts: {},
  attachmentsBySession: {},
  models: null,
+ favoriteModels: loadFavorites(),
+ setFavoriteModels: (list) => {
+  saveFavorites(list);
+  set({ favoriteModels: list });
+ },
  currentModel: null,
  currentThinking: null,
  currentEfforts: null,

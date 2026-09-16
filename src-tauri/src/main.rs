@@ -1,6 +1,7 @@
 mod commands;
 mod git_info;
 mod overlay;
+mod providers;
 mod runtime;
 mod session_scan;
 
@@ -62,7 +63,15 @@ fn main() {
             get_global_approval,
             set_global_approval,
             set_session_approval,
-            get_git_info
+            get_git_info,
+            providers::list_providers,
+            providers::get_provider_login,
+            providers::start_provider_login,
+            providers::provider_login_input,
+            providers::cancel_provider_login,
+            providers::logout_provider,
+            providers::get_model_roles,
+            providers::set_model_role
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

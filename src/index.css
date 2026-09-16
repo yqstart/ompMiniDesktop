@@ -1,34 +1,48 @@
 @import "tailwindcss";
 
-/* ---- ompMiniDesktop tokens（design-system/MASTER.md §2 冻结） ----
-   深色走 opencode / deepseek-harness 式的分层锌灰：
-   应用底最深 → 侧栏略浅 → 卡片再浅一层，边框只用 1px 低对比线。 */
+/* ---- ompMiniDesktop tokens（design-system/MASTER.md §2） ----
+   稳重的分层灰：应用底 → 侧栏 → 卡片 → 悬浮，四层各差一档亮度，
+   边界优先靠**亮度差**表达，边框只做最后一道描线。
+   中性灰不带暖色偏移（此前浅色偏暖、深色沉底过黑，是与 Cursor / Codex 差距的主因）。
+   唯一的彩色是 `accent`（稀释后同时充当全局悬浮色与选中色）。 */
 :root {
- --background: hsl(60 9% 98%);
- --sidebar: hsl(60 6% 95.5%);
- --foreground: hsl(20 8% 11%);
- --muted: hsl(30 5% 32%);
- --surface: hsl(0 0% 100%);
- --border: hsl(30 8% 90%);
- --accent: hsl(243 75% 59%);
- --danger: hsl(0 72% 51%);
- --warn: hsl(32 95% 44%);
- --ok: hsl(160 84% 32%);
- --code: hsl(60 5% 96%);
+ --background: #fbfbfc;
+ --sidebar: #f4f4f6;
+ --surface: #ffffff;
+ --elevated: #ffffff;
+ --foreground: #17171a;
+ --muted: #5b5b66;
+ --faint: #6e6e79;
+ --border: #e5e5ea;
+ --border-soft: #efeff2;
+ --accent: #4f46e5;
+ --danger: #dc2626;
+ --warn: #b45309;
+ --ok: #047857;
+ --code: #f1f1f4;
+ /* 全局悬浮色 = 会话选中底色的同一配方（accent 稀释 15%）。
+     悬浮与选中同源，选中靠更实的填充 + 左侧细条拉开层次。 */
+ --hover: color-mix(in srgb, var(--accent) 15%, transparent);
+ --active: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .dark {
- --background: hsl(0 0% 4%);
- --sidebar: hsl(0 0% 6.5%);
- --foreground: hsl(0 0% 93%);
- --muted: hsl(0 0% 62%);
- --surface: hsl(0 0% 8.5%);
- --border: hsl(0 0% 13.5%);
- --accent: hsl(234 97% 74%);
- --danger: hsl(0 91% 71%);
- --warn: hsl(43 96% 62%);
- --ok: hsl(160 71% 52%);
- --code: hsl(0 0% 11%);
+ --background: #0b0b0d;
+ --sidebar: #0f0f12;
+ --surface: #16161a;
+ --elevated: #1c1c21;
+ --foreground: #e9e9ec;
+ --muted: #9a9aa4;
+ --faint: #7c7c87;
+ --border: #232329;
+ --border-soft: #1a1a1f;
+ --accent: #818cf8;
+ --danger: #f87171;
+ --warn: #fbbf24;
+ --ok: #34d399;
+ --code: #121216;
+ --hover: color-mix(in srgb, var(--accent) 15%, transparent);
+ --active: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 @theme inline {
@@ -36,15 +50,33 @@
  --color-sidebar: var(--sidebar);
  --color-foreground: var(--foreground);
  --color-muted: var(--muted);
+ --color-faint: var(--faint);
  --color-surface: var(--surface);
+ --color-elevated: var(--elevated);
  --color-border: var(--border);
+ --color-border-soft: var(--border-soft);
  --color-accent: var(--accent);
  --color-danger: var(--danger);
  --color-warn: var(--warn);
  --color-ok: var(--ok);
  --color-code: var(--code);
- --font-sans: -apple-system, "PingFang SC", "Microsoft YaHei", Inter, sans-serif;
+ --color-hover: var(--hover);
+ --color-active: var(--active);
+
+ /* 圆角收敛一档：卡片 10 / 面板 12 / 按钮 7 / 小控件 5。
+     比 Tailwind 默认更紧，去掉"消费级"的圆润感。 */
+ --radius-sm: 5px;
+ --radius-md: 7px;
+ --radius-lg: 10px;
+ --radius-xl: 12px;
+ --radius-2xl: 14px;
+
+ --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", Inter, sans-serif;
  --font-mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
+
+ /* 弹层阴影：深色下阴影几乎不可见，靠 --elevated 的亮度差与边框定型 */
+ --shadow-pop: 0 12px 32px -12px rgb(0 0 0 / 0.45), 0 0 0 1px var(--border);
+ --shadow-dialog: 0 24px 64px -16px rgb(0 0 0 / 0.5), 0 0 0 1px var(--border);
 }
 
 body {
@@ -53,6 +85,7 @@ body {
  color: var(--foreground);
  font-family: var(--font-sans);
  font-size: 14px;
+ line-height: 1.55;
  -webkit-font-smoothing: antialiased;
  text-rendering: optimizeLegibility;
 }
@@ -73,6 +106,11 @@ body {
  background: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
+/* 等宽文本一律等宽数字：时间、token 数、行号对齐不跳动 */
+.font-mono {
+ font-variant-numeric: tabular-nums;
+}
+
 /* 细滚动条：平时几乎看不见，hover 才显形 */
 * {
  scrollbar-width: thin;
@@ -80,8 +118,8 @@ body {
 }
 
 *::-webkit-scrollbar {
- width: 10px;
- height: 10px;
+ width: 9px;
+ height: 9px;
 }
 
 *::-webkit-scrollbar-thumb {
@@ -119,12 +157,12 @@ body {
 
 /* 可见焦点环（MASTER §5）。输入框类由容器接管焦点样式，此处排除避免生硬外框。 */
 :where(button, a, select, [tabindex]):focus-visible {
- outline: 2px solid var(--accent);
- outline-offset: 2px;
+ outline: 2px solid color-mix(in srgb, var(--accent) 75%, transparent);
+ outline-offset: 1px;
 }
 
-:where(input):focus-visible {
- outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+:where(input, textarea):focus-visible {
+ outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
  outline-offset: 0;
 }
 
@@ -133,6 +171,16 @@ body {
    Tailwind 的 `outline-none` 压不住上面那条，只能用这个类显式关掉。 */
 .no-focus-ring:focus-visible {
  outline: none;
+}
+
+/* `<details>` 的原生三角：WKWebView 里 `::-webkit-details-marker` 不总是生效，
+   必须同时关掉 `list-style` 才会消失（思考折叠卡、项目分组都用 summary 当行头）。 */
+summary {
+ list-style: none;
+}
+
+summary::-webkit-details-marker {
+ display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

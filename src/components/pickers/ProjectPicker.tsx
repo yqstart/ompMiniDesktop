@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown } from "reicon-react";
 import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
 import { useDropdown } from "../../lib/useDropdown";
@@ -35,7 +35,7 @@ export function ProjectPicker({ project }: { project: ProjectView | null }) {
      setError(null);
      setOpen(!open);
     }}
-    className="flex shrink-0 cursor-pointer items-center gap-1 rounded-full px-2 py-1 whitespace-nowrap text-muted transition-colors duration-150 hover:bg-surface hover:text-foreground"
+    className="flex shrink-0 cursor-pointer items-center gap-1 rounded-md px-2 py-1 whitespace-nowrap text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
     aria-label={fmt(t.projectAria, label)}
     aria-expanded={open}
     title={project?.path ?? t.notInProject}
@@ -49,7 +49,7 @@ export function ProjectPicker({ project }: { project: ProjectView | null }) {
     </span>
    )}
    {open && (
-    <div className="absolute bottom-full left-0 z-10 mb-1 max-h-72 w-72 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-xl">
+    <div className="absolute bottom-full left-0 z-10 mb-1 max-h-72 w-72 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-border bg-elevated p-1 shadow-pop">
      {projects.map((p) => {
       const current = p.id === project?.id;
       return (
@@ -65,7 +65,7 @@ export function ProjectPicker({ project }: { project: ProjectView | null }) {
          });
         }}
         disabled={p.missing}
-        className={`flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors duration-150 hover:bg-background disabled:cursor-not-allowed disabled:opacity-40 ${current ? "text-foreground" : "text-muted"
+        className={`flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors duration-100 hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40 ${current ? "text-foreground" : "text-muted"
          }`}
         aria-label={fmt(t.switchToProjectAria, p.name)}
        >
@@ -74,13 +74,13 @@ export function ProjectPicker({ project }: { project: ProjectView | null }) {
         {p.missing ? (
          <span className="shrink-0 rounded bg-warn/15 px-1 py-px text-[11px] text-warn">{t.missingFolder}</span>
         ) : (
-         <span className="max-w-28 shrink-0 truncate font-mono text-[11px] text-muted/70">{p.path}</span>
+         <span className="max-w-28 shrink-0 truncate font-mono text-[11px] text-faint">{p.path}</span>
         )}
        </button>
       );
      })}
      {projects.length === 0 && (
-      <div className="px-2 py-1.5 text-sm text-muted">{t.noProjectsSidebar}</div>
+      <div className="px-2 py-1.5 text-[13px] text-muted">{t.noProjectsSidebar}</div>
      )}
     </div>
    )}

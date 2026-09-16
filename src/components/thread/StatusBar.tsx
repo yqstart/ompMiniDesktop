@@ -59,7 +59,7 @@ export function OmpStatusPill() {
       : "bg-muted/50";
  return (
   <span
-   className="flex shrink-0 cursor-default items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-muted"
+   className="flex shrink-0 cursor-default items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] text-muted"
    role="status"
    aria-label={fmt(t.statusAria, text)}
    title={text}
@@ -103,7 +103,7 @@ export function CompactButton() {
   <button
    onClick={() => void run()}
    disabled={busy}
-   className="flex shrink-0 cursor-pointer items-center gap-1 rounded-full border border-warn/50 px-2 py-0.5 text-xs text-warn transition-colors duration-150 hover:bg-warn/10 disabled:cursor-default disabled:opacity-40"
+   className="flex shrink-0 cursor-pointer items-center gap-1 rounded-md border border-warn/50 px-1.5 py-0.5 text-[11px] text-warn transition-colors duration-100 hover:bg-warn/15 disabled:cursor-default disabled:opacity-40"
    aria-label={fmt(t.compactAria, Math.round(normalized))}
    title={t.compactTitle}
   >
@@ -118,7 +118,7 @@ export function QueueBadge() {
  if (!n || n <= 0) return null;
  return (
   <span
-   className="flex shrink-0 items-center rounded-full bg-accent/10 px-2 py-0.5 text-xs text-accent"
+   className="flex shrink-0 items-center rounded-md bg-accent/15 px-1.5 py-0.5 text-[11px] text-accent"
    role="status"
    aria-label={fmt(t.queueAria, n)}
    title={t.queueTitle}
@@ -157,7 +157,7 @@ export function RuntimeStats() {
   .join(" · ");
  return (
   <span
-   className="flex shrink-0 cursor-default items-center px-1.5 text-xs text-muted/80"
+   className="flex shrink-0 cursor-default items-center px-1.5 text-[11px] text-faint"
    role="status"
    aria-label={fmt(t.usageAria, parts.join(t.usageJoin))}
    title={detail || t.usageTitle}

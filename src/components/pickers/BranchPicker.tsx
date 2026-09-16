@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from "react";
-import { Check, ChevronDown, GitBranch, RefreshCw } from "lucide-react";
+import { Check, ChevronDown, DiagramTree, Refresh } from "reicon-react";
 import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
 import { useDropdown } from "../../lib/useDropdown";
@@ -42,12 +42,12 @@ export function BranchPicker({
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className="flex shrink-0 cursor-pointer items-center gap-1 rounded-full px-2 py-1 whitespace-nowrap text-muted transition-colors duration-150 hover:bg-surface hover:text-foreground"
+        className="flex shrink-0 cursor-pointer items-center gap-1 rounded-md px-2 py-1 whitespace-nowrap text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
         aria-label={fmt(t.branchAria, label)}
         aria-expanded={open}
         title={`${label}${git.dirty ? t.dirtySuffix : ""}`}
       >
-        <GitBranch size={13} aria-hidden className="shrink-0 opacity-70" />
+        <DiagramTree size={13} aria-hidden className="shrink-0 opacity-70" />
         <span className="whitespace-nowrap font-mono">{label}</span>
         {git.detached && (
           <span className="shrink-0 rounded bg-warn/15 px-1 text-[10px] text-warn">{t.detachedBadge}</span>
@@ -56,17 +56,17 @@ export function BranchPicker({
         <ChevronDown size={14} aria-hidden className="shrink-0 opacity-60" />
       </button>
       {open && (
-        <div className="absolute bottom-full left-0 z-10 mb-1 max-h-72 w-64 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-border bg-surface p-2 shadow-xl">
+        <div className="absolute bottom-full left-0 z-10 mb-1 max-h-72 w-64 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-border bg-elevated p-2 shadow-pop">
           <div className="flex items-center gap-2 px-1 pb-1.5">
             <span className="flex-1 text-[11px] text-muted">{t.localBranches}</span>
             <button
               onClick={onReload}
               disabled={loading}
-              className="cursor-pointer rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground disabled:opacity-50"
+              className="cursor-pointer rounded p-1 text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-50"
               aria-label={t.refreshGit}
               title={t.refreshGit}
             >
-              <RefreshCw size={12} className={loading ? "animate-spin" : ""} aria-hidden />
+              <Refresh size={12} className={loading ? "animate-spin" : ""} aria-hidden />
             </button>
           </div>
           {git.dirty && (
@@ -79,7 +79,7 @@ export function BranchPicker({
             return (
               <div
                 key={b}
-                className={`flex items-center gap-2 rounded px-2 py-1 ${current ? "text-foreground" : "text-muted"}`}
+                className={`flex items-center gap-2 rounded-md px-2 py-1 ${current ? "text-foreground" : "text-muted"}`}
                 aria-current={current ? "true" : undefined}
               >
                 <Check size={12} aria-hidden className={`shrink-0 ${current ? "opacity-100" : "opacity-0"}`} />
@@ -88,9 +88,9 @@ export function BranchPicker({
             );
           })}
           {git.branches.length === 0 && (
-            <div className="px-2 py-1 text-xs text-muted">{t.noBranches}</div>
+            <div className="px-2 py-1 text-[13px] text-muted">{t.noBranches}</div>
           )}
-          <div className="px-1 pt-1.5 text-[11px] text-muted/70">{t.branchFoot}</div>
+          <div className="px-1 pt-1.5 text-[11px] text-faint">{t.branchFoot}</div>
         </div>
       )}
     </div>

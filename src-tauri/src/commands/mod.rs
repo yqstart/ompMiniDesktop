@@ -30,6 +30,13 @@ pub struct AppState {
     pub models_cache: Mutex<Option<(i64, serde_json::Value)>>,
     pub running: Mutex<HashMap<String, bool>>,
     pub runtime: crate::runtime::RuntimeMap,
+    /// 进行中的供应商登录（同一时刻只允许一个）。
+    pub login: std::sync::Arc<Mutex<Option<crate::providers::LoginSession>>>,
+    /// 最近一次登录的进度快照（切走设置页再回来时用它补齐，见 `providers.rs`）。
+    pub login_status: std::sync::Arc<Mutex<crate::providers::LoginStatus>>,
+    /// 模型角色「读 → 改 → 写」的串行锁：`modelRoles` 是 record，只能整表写回，
+    /// 两次并发编辑不加锁会互相覆盖（丢键）。
+    pub roles_edit: Mutex<()>,
 }
 
 #[derive(Debug, Serialize)]
@@ -224,10 +231,13 @@ pub async fn get_models(state: State<'_, AppState>) -> Result<serde_json::Value,
 
 #[tauri::command]
 pub async fn refresh_models(state: State<'_, AppState>) -> Result<serde_json::Value, CmdError> {
-    let omp = state.omp_path.lock().await.clone();
-    let Some(p) = omp else {
+    // omp 定位走 `discover_omp_path`（唯一入口：覆盖层 → 登录 shell → 常见路径），
+    // 而不是诊断状态里的 `state.omp_path`——那个只在 `locate_omp` 成功后才非空，
+    // 用它会让「诊断还没跑完 / 探测失败」连模型目录一起拖垮（供应商页与 ModelPicker 都会中招）。
+    let Some(p) = discover_omp_path(&state) else {
         return Err(cmd_err("OMP_MISSING", "未找到 omp，无法加载模型目录".into(), Some("请先安装 oh-my-pi".into())));
     };
+    *state.omp_path.lock().await = Some(p.clone());
     let out = run_cmd(&p, &["models", "--json"])
         .map_err(|e| cmd_err("MODELS_FAILED", format!("模型目录加载失败：{e}"), Some("重试或检查网络".into())))?;
     let v: serde_json::Value =
@@ -1616,6 +1626,9 @@ pub fn load_state(app: &AppHandle) -> AppState {
         models_cache: Mutex::new(None),
         running: Mutex::new(HashMap::new()),
         runtime: std::sync::Arc::new(Mutex::new(HashMap::new())),
+        login: std::sync::Arc::new(Mutex::new(None)),
+        login_status: std::sync::Arc::new(Mutex::new(Default::default())),
+        roles_edit: Mutex::new(()),
     }
 }
 

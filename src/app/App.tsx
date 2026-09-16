@@ -37,7 +37,7 @@ function SidebarShell({
 }) {
   const dragging = useRef(false);
   const t = useText();
-  // hover 才加宽热区：平时 3px 细线，悬停/拖拽时 7px 好抓
+  // hover 才加宽热区：平时 3px 隐身细条，悬停/拖拽时 6px 好抓
   const [hot, setHot] = useState(false);
   // 拖拽中的视觉态用 state 表达（render 里不许读 ref），ref 只在事件/effect 里做快速判断
   const [draggingUi, setDraggingUi] = useState(false);
@@ -90,7 +90,7 @@ function SidebarShell({
           onPointerLeave={() => {
             if (!dragging.current) setHot(false);
           }}
-          className={`absolute top-0 -right-0.5 z-10 h-full cursor-col-resize touch-none transition-colors focus-visible:outline-none ${hot || draggingUi ? "w-[7px] bg-accent/30" : "w-[3px] bg-transparent hover:bg-accent/20"
+          className={`absolute top-0 right-0 z-10 h-full cursor-col-resize touch-none transition-colors focus-visible:outline-none ${hot || draggingUi ? "w-1.5 bg-accent/45" : "w-[3px] bg-transparent"
             }`}
         />
       </div>
@@ -110,7 +110,7 @@ function SidebarDrawer({ children }: { children: React.ReactNode }) {
         onClick={() => set({ sidebarOpen: false })}
         aria-hidden
       />
-      <div className="absolute top-0 left-0 h-full w-72 max-w-[85vw] overflow-hidden rounded-r-xl bg-sidebar shadow-xl">
+      <div className="absolute top-0 left-0 h-full w-72 max-w-[85vw] overflow-hidden rounded-r-lg bg-sidebar shadow-dialog">
         {children}
       </div>
     </div>

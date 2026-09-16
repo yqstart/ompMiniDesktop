@@ -23,9 +23,10 @@
 - 仓库：https://github.com/tailwindlabs/tailwindcss
 - 许可证：MIT
 
-### Lucide（lucide-react）
-- 仓库：https://github.com/lucide-icons/lucide
-- 许可证：ISC
+### Reicon（reicon-react）
+- 仓库：https://github.com/dqev/reicon
+- 许可证：MIT
+- 说明：界面图标（Outline 权重，填充路径）。每个图标按需具名导入，构建期 tree-shake；图标映射表见 `design-system/MASTER.md` §8。上一版使用的 Lucide（lucide-react）已在本次重构中移除。
 
 ### Markdown 渲染（react-markdown、remark-gfm、rehype-highlight）
 - 仓库：https://github.com/remarkjs/react-markdown · https://github.com/remarkjs/remark-gfm · https://github.com/rehypejs/rehype-highlight

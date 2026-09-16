@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown } from "reicon-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
@@ -30,8 +30,8 @@ export function ThinkingPicker({ compact = false }: { compact?: boolean }) {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className={`flex shrink-0 cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 whitespace-nowrap transition-colors duration-150 hover:bg-background ${
-          compact ? "text-xs text-muted hover:text-foreground" : "text-sm"
+        className={`flex shrink-0 cursor-pointer items-center gap-1 rounded-md px-2 py-1 whitespace-nowrap transition-colors duration-100 hover:bg-hover ${
+          compact ? "text-[13px] text-muted hover:text-foreground" : "text-[13px]"
         }`}
         aria-label={t.chooseThinkingAria}
         aria-expanded={open}
@@ -41,7 +41,7 @@ export function ThinkingPicker({ compact = false }: { compact?: boolean }) {
         <ChevronDown size={13} aria-hidden className="opacity-60" />
       </button>
       {open && (
-        <div className="absolute right-0 bottom-9 z-10 w-48 max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-surface p-1 shadow-xl">
+        <div className="absolute right-0 bottom-8 z-10 w-48 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-elevated p-1 shadow-pop">
           {levels.map((lv) => (
             <button
               key={lv}
@@ -50,7 +50,7 @@ export function ThinkingPicker({ compact = false }: { compact?: boolean }) {
                 setOpen(false);
                 if (activeSessionId) void api.setThinking(activeSessionId, lv).catch(() => undefined);
               }}
-              className={`block w-full cursor-pointer rounded px-2 py-1.5 text-left text-sm transition-colors duration-200 hover:bg-background ${
+              className={`block w-full cursor-pointer rounded-md px-2 py-1.5 text-left text-[13px] transition-colors duration-100 hover:bg-hover ${
                 lv === value ? "text-foreground" : "text-muted"
               }`}
               aria-label={fmt(t.thinkingLevelAria, lv)}
@@ -58,7 +58,7 @@ export function ThinkingPicker({ compact = false }: { compact?: boolean }) {
               {lv}
             </button>
           ))}
-          {noThinking && <div className="px-2 py-1.5 text-xs text-muted">{t.thinkingUnsupported}</div>}
+          {noThinking && <div className="px-2 py-1.5 text-[13px] text-muted">{t.thinkingUnsupported}</div>}
         </div>
       )}
     </div>

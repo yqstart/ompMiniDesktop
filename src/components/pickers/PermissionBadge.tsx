@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Shield } from "lucide-react";
+import { Shield } from "reicon-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
@@ -53,7 +53,7 @@ export function PermissionBadge({ compact = false, align = "right" }: { compact?
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className={`flex cursor-pointer items-center gap-1.5 rounded-full px-2.5 py-1 transition-colors duration-150 hover:bg-background ${compact ? "text-xs" : "text-sm"} ${danger ? "text-danger" : "text-muted hover:text-foreground"}`}
+        className={`flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 transition-colors duration-100 hover:bg-hover ${compact ? "text-[13px]" : "text-[13px]"} ${danger ? "text-danger" : "text-muted hover:text-foreground"}`}
         aria-label={fmt(t.permAria, LABEL[shown] ?? shown)}
         aria-expanded={open}
       >
@@ -61,25 +61,25 @@ export function PermissionBadge({ compact = false, align = "right" }: { compact?
         <span>{LABEL[shown] ?? shown}</span>
       </button>
       {open && (
-        <div className={`absolute bottom-9 z-10 w-56 rounded-xl border border-border bg-surface p-1 shadow-xl ${align === "left" ? "left-0" : "right-0"}`}>
-          <div className="px-2 py-1 text-xs text-muted">{t.permGlobal}</div>
+        <div className={`absolute bottom-8 z-10 w-56 rounded-lg border border-border bg-elevated p-1 shadow-pop ${align === "left" ? "left-0" : "right-0"}`}>
+          <div className="px-2 py-1 text-[13px] text-muted">{t.permGlobal}</div>
           {Object.keys(LABEL).map((m) => (
             <button
               key={m}
               onClick={() => void pick(m, "global")}
-              className="block w-full cursor-pointer rounded px-2 py-1.5 text-left text-sm transition-colors duration-200 hover:bg-background"
+              className="block w-full cursor-pointer rounded-md px-2 py-1.5 text-left text-[13px] transition-colors duration-100 hover:bg-hover"
             >
               {LABEL[m]}
               {m === "yolo" && <span className="text-danger">{t.permYoloNote}</span>}
             </button>
           ))}
-          <div className="border-t border-border px-2 py-1 text-xs text-muted">{t.permSession}</div>
+          <div className="border-t border-border px-2 py-1 text-[13px] text-muted">{t.permSession}</div>
           {Object.keys(LABEL).map((m) => (
             <button
               key={m}
               onClick={() => void pick(m, "session")}
               disabled={!activeSessionId}
-              className="block w-full cursor-pointer rounded px-2 py-1.5 text-left text-sm transition-colors duration-200 hover:bg-background disabled:opacity-40"
+              className="block w-full cursor-pointer rounded-md px-2 py-1.5 text-left text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-40"
             >
               {LABEL[m]}
             </button>

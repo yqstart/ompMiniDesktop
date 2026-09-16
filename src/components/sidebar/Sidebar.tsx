@@ -3,7 +3,7 @@ import {
  Archive,
  ChevronRight,
  Folder,
- FolderSearch,
+ FolderError,
  FolderMinus,
  FolderPlus,
  Inbox,
@@ -12,7 +12,7 @@ import {
  Settings,
  Trash2,
  X,
-} from "lucide-react";
+} from "reicon-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
@@ -47,10 +47,10 @@ function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void })
   : new Date(s.timestamp).toLocaleString(locale, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
  return (
   <div
-   className={`group relative flex h-9 min-w-0 items-center rounded-lg pr-1.5 pl-2 transition-colors duration-150 ${active ? "bg-accent/15" : "hover:bg-background/60"
+   className={`group relative flex h-8 min-w-0 items-center rounded-md pr-1 pl-2 transition-colors duration-100 ${active ? "bg-active" : "hover:bg-hover"
     }`}
   >
-   {active && <span aria-hidden className="absolute top-1.5 bottom-1.5 left-0.5 w-[3px] rounded-full bg-accent" />}
+   {active && <span aria-hidden className="absolute top-1/2 left-0 h-3.5 w-[2px] -translate-y-1/2 rounded-full bg-accent" />}
    <button
     // 打开逻辑与输入框上方项目下拉共用一份（lib/sessionOpen）
     onClick={() => void openSessionWithHistory(s.id)}
@@ -63,7 +63,7 @@ function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void })
      aria-hidden={!s.running}
     />
     <span className={`min-w-0 flex-1 truncate text-sm ${active ? "font-semibold" : ""}`}>{s.title}</span>
-    <span className="w-[68px] shrink-0 truncate text-right font-mono text-[11px] text-muted/80 group-focus-within:invisible group-hover:invisible">
+    <span className="w-[68px] shrink-0 truncate text-right font-mono text-[11px] text-faint group-focus-within:invisible group-hover:invisible">
      {time}
     </span>
    </button>
@@ -71,7 +71,7 @@ function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void })
     <span className="invisible absolute top-1/2 right-1.5 flex w-[68px] -translate-y-1/2 items-center justify-end gap-0.5 opacity-0 transition-opacity duration-150 group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100">
      <button
       onClick={() => api.archiveSession(s.id).then(onChanged)}
-      className="cursor-pointer rounded-md p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground"
+      className="cursor-pointer rounded-md p-1 text-muted transition-colors duration-100 hover:bg-active hover:text-foreground"
       aria-label={s.running ? t.archiveChatRunning : t.archiveChat}
       title={s.running ? t.archiveChatRunning : t.archiveChat}
      >
@@ -79,7 +79,7 @@ function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void })
      </button>
      <button
       onClick={() => setConfirmDelete(true)}
-      className="cursor-pointer rounded-md p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-danger"
+      className="cursor-pointer rounded-md p-1 text-muted transition-colors duration-100 hover:bg-danger/15 hover:text-danger"
       aria-label={t.deleteChat}
       title={t.deleteChat}
      >
@@ -87,7 +87,7 @@ function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void })
      </button>
     </span>
    ) : (
-    <span className="absolute top-1/2 right-1 z-10 flex -translate-y-1/2 items-center gap-1 rounded-md border border-border bg-surface px-1.5 py-1 text-xs whitespace-nowrap shadow-lg">
+    <span className="absolute top-1/2 right-1 z-10 flex -translate-y-1/2 items-center gap-1 rounded-md border border-border bg-surface px-1.5 py-1 text-[13px] whitespace-nowrap shadow-lg">
      <span className="text-danger">{t.confirmDeleteShort}</span>
      <button
       onClick={() =>
@@ -281,14 +281,14 @@ export function Sidebar() {
        const res = await pickAndAddProject();
        if (res && !res.ok) setError(res.message);
       }}
-      className="mb-2 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-opacity duration-150 hover:opacity-90"
+      className="mb-2 flex h-8 w-full cursor-pointer items-center justify-center gap-1.5 rounded-md border border-accent/25 bg-accent/10 px-3 text-[13px] font-medium text-accent transition-colors duration-100 hover:bg-accent/20"
       aria-label={t.addProject}
      >
       <FolderPlus size={14} aria-hidden /> {t.addProject}
      </button>
      {/* 搜索入口：Cursor / DSH 式一体搜索框——图标内置、整块圆角、
             focus-within 时 accent 描边；清除按钮只在有字时出现，不占位跳动 */}
-     <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-background px-2.5 py-2 text-sm text-muted transition-colors duration-150 focus-within:border-accent/60 focus-within:text-foreground">
+     <div className="flex items-center gap-2 rounded-md border border-border bg-background px-2.5 py-1.5 text-[13px] text-muted transition-colors duration-100 focus-within:border-accent/70 focus-within:text-foreground">
       <Search size={14} aria-hidden className="shrink-0" />
       <label htmlFor="sidebar-search" className="sr-only">
        {t.searchSessions}
@@ -298,12 +298,12 @@ export function Sidebar() {
        value={query}
        onChange={(e) => setQuery(e.target.value)}
        placeholder={t.searchPlaceholder}
-       className="no-focus-ring w-full min-w-0 bg-transparent outline-none placeholder:text-muted/70"
+       className="no-focus-ring w-full min-w-0 bg-transparent outline-none placeholder:text-faint"
       />
       {query && (
        <button
         onClick={() => setQuery("")}
-        className="shrink-0 cursor-pointer rounded-full p-0.5 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground"
+        className="shrink-0 cursor-pointer rounded-full p-0.5 text-muted transition-colors duration-100 hover:bg-active hover:text-foreground"
         aria-label={t.clearSearch}
        >
         <X size={12} aria-hidden />
@@ -337,7 +337,7 @@ export function Sidebar() {
         key={h.id}
         onClick={() => void openSessionWithHistory(h.id)}
         title={fmt(t.hitTooltip, h.title, h.hits)}
-        className="mb-0.5 block w-full cursor-pointer rounded-lg px-2 py-1.5 text-left transition-colors duration-150 hover:bg-background/70"
+        className="mb-0.5 block w-full cursor-pointer rounded-md px-2 py-1.5 text-left transition-colors duration-100 hover:bg-hover"
        >
         <div className="flex items-center gap-1.5">
          <span className="min-w-0 flex-1 truncate text-[13px]">{h.title}</span>
@@ -361,7 +361,7 @@ export function Sidebar() {
     )}
     <div className="mt-2 px-1">
      {error && (
-      <div role="alert" className="mb-1 rounded-md border border-danger/50 px-2 py-1.5 text-xs text-danger">
+      <div role="alert" className="mb-1 rounded-md border border-danger/40 bg-danger/5 px-2 py-1.5 text-[13px] text-danger">
        {error}
        <button onClick={() => setError(null)} className="ml-2 cursor-pointer underline" aria-label={t.dismissError}>
         {t.close}
@@ -380,9 +380,9 @@ export function Sidebar() {
         open={!q || active.length > 0}
        >
         <summary
-         className={`relative flex cursor-pointer items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-[13px] transition-colors duration-150 [&::-webkit-details-marker]:hidden ${project.id === activeProjectId
-          ? "bg-accent/15 text-foreground"
-          : "text-muted hover:bg-background/70"
+         className={`relative flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1.5 text-[13px] transition-colors duration-100 [&::-webkit-details-marker]:hidden ${project.id === activeProjectId
+          ? "bg-active text-foreground"
+          : "text-muted hover:bg-hover"
           }`}
          onClick={(e) => {
           // Cursor 式：点分组头即切换项目上下文（新建会话落到它），
@@ -392,20 +392,20 @@ export function Sidebar() {
          }}
         >
          {project.id === activeProjectId && (
-          <span aria-hidden className="absolute top-1 bottom-1 left-0.5 w-[3px] rounded-full bg-accent" />
+          <span aria-hidden className="absolute top-1/2 left-0 h-3.5 w-[2px] -translate-y-1/2 rounded-full bg-accent" />
          )}
          <ChevronRight
           size={12}
           aria-hidden
           className="shrink-0 transition-transform duration-150 group-open/proj:rotate-90"
          />
-         <Folder size={13} aria-hidden className={`shrink-0 ${project.id === activeProjectId ? "text-accent" : "text-muted/70"}`} />
+         <Folder size={13} aria-hidden className={`shrink-0 ${project.id === activeProjectId ? "text-accent" : "text-faint"}`} />
          <span className="min-w-0 flex-1 truncate">
           <span className="font-semibold text-foreground">{project.name}</span>
           {project.missing ? (
            <span className="ml-1.5 rounded bg-warn/15 px-1 py-px text-[11px] text-warn">{t.missingFolder}</span>
           ) : (
-           <span className="ml-1.5 truncate font-mono text-[11px] text-muted/70">{project.path}</span>
+           <span className="ml-1.5 truncate font-mono text-[11px] text-faint">{project.path}</span>
           )}
          </span>
          {/* 右侧固定槽位：数量与批量按钮同槽互斥，垂直居中，悬浮零跳动。
@@ -417,7 +417,7 @@ export function Sidebar() {
            <button
             onClick={() => void runBatch("archive", active.map((s) => s.id))}
             disabled={busy || active.length === 0}
-            className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground disabled:opacity-40"
+            className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-100 hover:bg-active hover:text-foreground disabled:opacity-40"
             aria-label={fmt(t.archiveAllIn, project.name)}
             title={t.archiveAllInTitle}
            >
@@ -426,7 +426,7 @@ export function Sidebar() {
            <button
             onClick={() => setConfirmProject({ id: project.id, kind: "purge" })}
             disabled={busy || active.length === 0}
-            className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-danger disabled:opacity-40"
+            className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-100 hover:bg-danger/15 hover:text-danger disabled:opacity-40"
             aria-label={fmt(t.deleteAllIn, project.name)}
             title={fmt(t.deleteAllInTitle, active.length)}
            >
@@ -435,7 +435,7 @@ export function Sidebar() {
            <button
             onClick={() => setConfirmProject({ id: project.id, kind: "remove" })}
             disabled={busy}
-            className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-danger disabled:opacity-40"
+            className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-100 hover:bg-danger/15 hover:text-danger disabled:opacity-40"
             aria-label={fmt(t.removeWorkspaceAria, project.name)}
             title={t.removeWorkspaceTitle}
            >
@@ -446,7 +446,7 @@ export function Sidebar() {
         </summary>
         {/* 项目二次确认浮层：purge = 真删全部对话（不可恢复）；remove = 删除工作区（解绑，对话归档保留）。 */}
         {confirmProject?.id === project.id && (
-         <div className="mx-1.5 mt-1 flex flex-col gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-2 text-xs shadow-lg">
+         <div className="mx-1.5 mt-1 flex flex-col gap-1.5 rounded-lg border border-border bg-elevated px-2.5 py-2 text-[13px] shadow-pop">
           {confirmProject.kind === "purge" ? (
            <>
             <div>
@@ -458,7 +458,7 @@ export function Sidebar() {
             <div className="flex flex-wrap justify-end gap-1.5">
              <button
               onClick={() => setConfirmProject(null)}
-              className="cursor-pointer rounded-md border border-border px-2.5 py-1 transition-colors duration-150 hover:bg-background"
+              className="cursor-pointer rounded-md border border-border px-2.5 py-1 transition-colors duration-100 hover:bg-hover"
               aria-label={t.cancel}
              >
               {t.cancel}
@@ -490,7 +490,7 @@ export function Sidebar() {
             <div className="flex flex-wrap justify-end gap-1.5">
              <button
               onClick={() => setConfirmProject(null)}
-              className="cursor-pointer rounded-md border border-border px-2.5 py-1 transition-colors duration-150 hover:bg-background"
+              className="cursor-pointer rounded-md border border-border px-2.5 py-1 transition-colors duration-100 hover:bg-hover"
               aria-label={t.cancel}
              >
               {t.cancel}
@@ -498,7 +498,7 @@ export function Sidebar() {
              <button
               onClick={() => void removeWorkspace(project.id)}
               disabled={busy}
-              className="cursor-pointer rounded-md border border-danger/60 px-2.5 py-1 text-danger transition-colors duration-150 hover:bg-danger/10 disabled:opacity-40"
+              className="cursor-pointer rounded-md border border-danger/60 px-2.5 py-1 text-danger transition-colors duration-100 hover:bg-danger/10 disabled:opacity-40"
               aria-label={fmt(t.removeWorkspaceAria, project.name)}
              >
               {t.removeWorkspace}
@@ -509,12 +509,12 @@ export function Sidebar() {
          </div>
         )}
         {project.missing && (
-         <div className="mx-1.5 mb-1 flex items-center gap-1.5 rounded-lg bg-warn/10 px-2 py-1.5 text-[11px] text-warn">
-          <FolderSearch size={12} aria-hidden className="shrink-0" />
+         <div className="mx-1.5 mb-1 flex items-center gap-1.5 rounded-md bg-warn/10 px-2 py-1.5 text-[11px] text-warn">
+          <FolderError size={12} aria-hidden className="shrink-0" />
           <span className="min-w-0 flex-1 truncate">{t.missingFolderHint}</span>
           <button
            onClick={() => void relocate(project.id, project.name)}
-           className="shrink-0 cursor-pointer rounded border border-warn/40 px-1.5 py-0.5 transition-colors duration-150 hover:bg-warn/15"
+           className="shrink-0 cursor-pointer rounded-sm border border-warn/40 px-1.5 py-0.5 transition-colors duration-100 hover:bg-warn/15"
            aria-label={fmt(t.relocateAria, project.name)}
            title={t.relocateTitle}
           >
@@ -522,20 +522,20 @@ export function Sidebar() {
           </button>
          </div>
         )}
-        <div className="mt-0.5 space-y-px border-l border-border pl-1.5">
+        <div className="mt-0.5 space-y-px border-l border-border-soft pl-1.5">
          <button
           onClick={async () => {
            const res = await createSessionIn(project.id, { projectName: project.name });
            setError(res.ok ? null : res.message);
           }}
           disabled={project.missing || busy}
-          className="flex w-full cursor-pointer items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs text-muted transition-colors duration-150 hover:bg-background/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex w-full cursor-pointer items-center gap-1 rounded-md px-2 py-1.5 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
           aria-label={fmt(t.newSessionIn, project.name)}
          >
           <Plus size={12} /> {t.newSession}
          </button>
          {active.length === 0 && (
-          <div className="px-2.5 py-1 text-xs text-muted/70">{t.noActiveChats}</div>
+          <div className="px-2.5 py-1 text-[11px] text-faint">{t.noActiveChats}</div>
          )}
          {active.map((s) => (
           <SessionRow key={s.id} s={s} onChanged={refreshSessions} />
@@ -546,9 +546,9 @@ export function Sidebar() {
      })}
      {visibleOrphanActive.length > 0 && (
       <details className="group/orphan mt-1">
-       <summary className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1.5 text-xs font-semibold text-foreground/80 transition-colors duration-150 hover:bg-background/70 [&::-webkit-details-marker]:hidden">
+       <summary className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1.5 text-[13px] font-semibold text-muted transition-colors duration-100 hover:bg-hover [&::-webkit-details-marker]:hidden">
         <ChevronRight size={12} aria-hidden className="transition-transform duration-150 group-open/orphan:rotate-90" />
-        <Inbox size={13} aria-hidden className="shrink-0 text-accent/70" />
+        <Inbox size={13} aria-hidden className="shrink-0 text-faint" />
         <span className="min-w-0 flex-1 truncate">{t.orphanChats}</span>
         <span className="relative flex h-5 w-[52px] shrink-0 items-center justify-end">
          <span className="font-mono group-hover/orphan:invisible">{visibleOrphanActive.length}</span>
@@ -556,7 +556,7 @@ export function Sidebar() {
           <button
            onClick={() => void runBatch("archive", visibleOrphanActive.map((s) => s.id))}
            disabled={busy || visibleOrphanActive.length === 0}
-           className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground disabled:opacity-40"
+           className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-100 hover:bg-active hover:text-foreground disabled:opacity-40"
            aria-label={t.archiveOrphanAll}
            title={t.archiveOrphanAll}
           >
@@ -565,7 +565,7 @@ export function Sidebar() {
           <button
            onClick={() => void runBatch("delete", visibleOrphanActive.map((s) => s.id))}
            disabled={busy || visibleOrphanActive.length === 0}
-           className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-danger disabled:opacity-40"
+           className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-100 hover:bg-danger/15 hover:text-danger disabled:opacity-40"
            aria-label={t.deleteOrphanAll}
            title={t.deleteOrphanAllTitle}
           >
@@ -582,20 +582,20 @@ export function Sidebar() {
       </details>
      )}
      {projects.length === 0 && (
-      <div className="px-1.5 py-1 text-xs text-muted">{t.noSessionsAddProject}</div>
+      <div className="px-1.5 py-1 text-[13px] text-muted">{t.noSessionsAddProject}</div>
      )}
     </div>
    </div>
    {/* 扫描窗口提示（V2 M7a）：超出窗口的老会话不是不存在，给一次性入口继续往老里扫 */}
    {sessionScan.totalFiles > sessionScan.scannedFiles && (
-    <div className="shrink-0 border-t border-border/70 px-3 py-2 text-[11px] text-muted">
+    <div className="shrink-0 border-t border-border px-3 py-2 text-[11px] text-muted">
      <div>
       {fmt(t.scanScanned, sessionScan.scannedFiles, sessionScan.totalFiles)}
      </div>
      <button
       onClick={() => void scanMoreSessions()}
       disabled={sessionScanLimit >= SCAN_MAX}
-      className="mt-1 cursor-pointer rounded-lg border border-border px-2 py-0.5 transition-colors duration-150 hover:bg-background hover:text-foreground disabled:cursor-default disabled:opacity-50"
+      className="mt-1 cursor-pointer rounded-md border border-border px-2 py-0.5 transition-colors duration-100 hover:bg-active hover:text-foreground disabled:cursor-default disabled:opacity-50"
      >
       {sessionScanLimit >= SCAN_MAX ? fmt(t.scanLimitReached, SCAN_MAX) : fmt(t.scanMore, SCAN_STEP)}
      </button>
@@ -605,7 +605,7 @@ export function Sidebar() {
     {/* 底部只留设置：「添加项目」已上移到顶部主入口，不在两处重复。 */}
     <button
      onClick={() => set({ settingsOpen: true, sidebarOpen: false })}
-     className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors duration-150 hover:bg-background/70"
+     className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover"
      aria-label={t.settingsOpenAria}
     >
      <Settings size={15} /> {t.settingsOpenAria}

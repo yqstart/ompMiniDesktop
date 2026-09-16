@@ -43,9 +43,20 @@ export const IPC = {
   setGlobalApproval: "set_global_approval",
   setSessionApproval: "set_session_approval",
   setOmpPath: "set_omp_path",
+  // 供应商（设置 › 供应商）：login / logout / modelRoles
+  listProviders: "list_providers",
+  getProviderLogin: "get_provider_login",
+  startProviderLogin: "start_provider_login",
+  providerLoginInput: "provider_login_input",
+  cancelProviderLogin: "cancel_provider_login",
+  logoutProvider: "logout_provider",
+  getModelRoles: "get_model_roles",
+  setModelRole: "set_model_role",
   // events
   sessionEvent: (id: string) => `omp-event://${id}`,
   sessionStatus: (id: string) => `omp-status://${id}`,
   sessionRuntime: (id: string) => `omp-state://${id}`,
   health: "omp-status://health",
+  /** 供应商登录进度（payload = 全量 ProviderLoginStatus 快照）。 */
+  providerLogin: "omp-provider://login",
 } as const;

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MessageSquareQuote } from "lucide-react";
+import { QuoteDownSquare } from "reicon-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
 import { useText } from "../../lib/useText";
@@ -14,143 +14,143 @@ import type { ViewMsg } from "@shared/types";
  * 两者都是「agent 在等你」，出现即滚入视野、等待期间 composer 锁定。
  */
 export function UiRequestCard({ m, sessionId }: { m: Extract<ViewMsg, { kind: "ui" }>; sessionId: string }) {
-  const { statusBySession } = useApp();
-  const t = useText();
-  const [text, setText] = useState(m.prefill ?? "");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
-  // 与审批卡同规矩：请求出现时必须带进视野（长会话里可能落在视口之外）
-  useEffect(() => {
-    ref.current?.scrollIntoView({ block: "nearest" });
-  }, []);
-  const waiting = statusBySession[sessionId]?.state !== "awaiting-approval";
+ const { statusBySession } = useApp();
+ const t = useText();
+ const [text, setText] = useState(m.prefill ?? "");
+ const [busy, setBusy] = useState(false);
+ const [error, setError] = useState<string | null>(null);
+ const ref = useRef<HTMLDivElement>(null);
+ // 与审批卡同规矩：请求出现时必须带进视野（长会话里可能落在视口之外）
+ useEffect(() => {
+  ref.current?.scrollIntoView({ block: "nearest" });
+ }, []);
+ const waiting = statusBySession[sessionId]?.state !== "awaiting-approval";
 
-  const reply = async (
-    kind: "value" | "confirm" | "cancel",
-    opts?: { value?: string; confirmed?: boolean },
-  ) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await api.respondUi(sessionId, m.uiId, kind, opts);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t.uiFailed);
-    } finally {
-      setBusy(false);
-    }
-  };
+ const reply = async (
+  kind: "value" | "confirm" | "cancel",
+  opts?: { value?: string; confirmed?: boolean },
+ ) => {
+  setBusy(true);
+  setError(null);
+  try {
+   await api.respondUi(sessionId, m.uiId, kind, opts);
+  } catch (e) {
+   setError(e instanceof Error ? e.message : t.uiFailed);
+  } finally {
+   setBusy(false);
+  }
+ };
 
-  const submitValue = () => {
-    if (m.method !== "confirm") void reply("value", { value: text });
-  };
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      void reply("cancel");
-      return;
-    }
-    // input：Enter 直接提交；editor：Cmd/Ctrl+Enter 提交，单独 Enter 留给换行
-    const plainEnter = e.key === "Enter" && !e.shiftKey && (m.method === "input" || e.metaKey || e.ctrlKey);
-    if (plainEnter) {
-      e.preventDefault();
-      submitValue();
-    }
-  };
+ const submitValue = () => {
+  if (m.method !== "confirm") void reply("value", { value: text });
+ };
+ const onKeyDown = (e: React.KeyboardEvent) => {
+  if (e.key === "Escape") {
+   e.preventDefault();
+   void reply("cancel");
+   return;
+  }
+  // input：Enter 直接提交；editor：Cmd/Ctrl+Enter 提交，单独 Enter 留给换行
+  const plainEnter = e.key === "Enter" && !e.shiftKey && (m.method === "input" || e.metaKey || e.ctrlKey);
+  if (plainEnter) {
+   e.preventDefault();
+   submitValue();
+  }
+ };
 
-  const btn = "cursor-pointer rounded-lg px-3.5 py-1.5 text-sm transition-colors duration-150 disabled:opacity-50";
-  const primary = `${btn} bg-accent text-white hover:opacity-90`;
-  const ghost = `${btn} border border-border hover:bg-background`;
+ const btn = "cursor-pointer rounded-md px-3.5 py-1.5 text-[13px] transition-colors duration-100 disabled:opacity-50";
+ const primary = `${btn} bg-accent font-medium text-white hover:opacity-90`;
+ const ghost = `${btn} border border-border hover:bg-hover`;
 
-  return (
-    <div
-      ref={ref}
-      role="group"
-      aria-label={m.title || t.uiNeedsInput}
-      className="rounded-xl border border-accent/40 bg-surface p-3.5 shadow-sm"
-    >
-      <div className="flex items-center gap-2">
-        <MessageSquareQuote size={15} className="text-accent" aria-hidden />
-        <span className="text-sm font-medium">{m.title || t.uiNeedsInput}</span>
-      </div>
-      {m.message && (
-        <div className="mt-1.5 rounded-lg bg-code px-2.5 py-2 text-xs whitespace-pre-wrap">{m.message}</div>
-      )}
-      {m.method === "input" && (
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder={m.placeholder ?? ""}
-          aria-label={m.title || t.uiInput}
-          autoFocus
-          disabled={busy}
-          className="mt-2 w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-accent/60"
-        />
-      )}
-      {m.method === "editor" && (
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKeyDown}
-          rows={5}
-          aria-label={m.title || t.uiEdit}
-          autoFocus
-          disabled={busy}
-          className="mt-2 w-full resize-y rounded-lg border border-border bg-background px-2.5 py-1.5 font-mono text-xs leading-5 outline-none focus:border-accent/60"
-        />
-      )}
-      <div className="mt-2.5 flex flex-wrap items-center gap-2">
-        {m.method === "confirm" && (
-          <>
-            <button
-              className={primary}
-              autoFocus
-              disabled={busy}
-              onClick={() => void reply("confirm", { confirmed: true })}
-            >
-              {t.confirm}
-            </button>
-            <button className={ghost} disabled={busy} onClick={() => void reply("confirm", { confirmed: false })}>
-              {t.cancel}
-            </button>
-          </>
-        )}
-        {(m.method === "input" || m.method === "editor") && (
-          <>
-            <button className={primary} disabled={busy} onClick={submitValue}>
-              {busy ? t.uiSending : t.uiSubmit}
-            </button>
-            <button className={ghost} disabled={busy} onClick={() => void reply("cancel")}>
-              {t.uiSkip}
-            </button>
-          </>
-        )}
-        {m.method === "select" &&
-          (m.options ?? []).map((opt, i) => {
-            const detail = m.optionDetails?.[i];
-            return (
-              <button
-                key={opt}
-                className={`${ghost} flex-col items-start gap-0.5`}
-                disabled={busy}
-                onClick={() => void reply("value", { value: opt })}
-                title={detail ?? opt}
-              >
-                <span>{opt}</span>
-                {detail && <span className="text-xs text-muted">{detail}</span>}
-              </button>
-            );
-          })}
-        {m.method === "select" && (
-          <button className={ghost} disabled={busy} onClick={() => void reply("cancel")}>
-            {t.cancel}
-          </button>
-        )}
-        {m.method === "editor" && <span className="text-xs text-muted">{t.uiEditorHint}</span>}
-      </div>
-      {error && <div className="mt-1.5 text-xs text-danger">{error}</div>}
-      {waiting && !error && <div className="mt-1.5 text-xs text-muted">{t.uiWaiting}</div>}
-    </div>
-  );
+ return (
+  <div
+   ref={ref}
+   role="group"
+   aria-label={m.title || t.uiNeedsInput}
+   className="rounded-lg border border-accent/50 bg-surface p-3.5"
+  >
+   <div className="flex items-center gap-2">
+    <QuoteDownSquare size={15} className="text-accent" aria-hidden />
+    <span className="text-sm font-medium">{m.title || t.uiNeedsInput}</span>
+   </div>
+   {m.message && (
+    <div className="mt-1.5 rounded-md bg-code px-2.5 py-2 text-[13px] whitespace-pre-wrap">{m.message}</div>
+   )}
+   {m.method === "input" && (
+    <input
+     value={text}
+     onChange={(e) => setText(e.target.value)}
+     onKeyDown={onKeyDown}
+     placeholder={m.placeholder ?? ""}
+     aria-label={m.title || t.uiInput}
+     autoFocus
+     disabled={busy}
+     className="mt-2 w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-accent/70"
+    />
+   )}
+   {m.method === "editor" && (
+    <textarea
+     value={text}
+     onChange={(e) => setText(e.target.value)}
+     onKeyDown={onKeyDown}
+     rows={5}
+     aria-label={m.title || t.uiEdit}
+     autoFocus
+     disabled={busy}
+     className="mt-2 w-full resize-y rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs leading-5 outline-none focus:border-accent/70"
+    />
+   )}
+   <div className="mt-2.5 flex flex-wrap items-center gap-2">
+    {m.method === "confirm" && (
+     <>
+      <button
+       className={primary}
+       autoFocus
+       disabled={busy}
+       onClick={() => void reply("confirm", { confirmed: true })}
+      >
+       {t.confirm}
+      </button>
+      <button className={ghost} disabled={busy} onClick={() => void reply("confirm", { confirmed: false })}>
+       {t.cancel}
+      </button>
+     </>
+    )}
+    {(m.method === "input" || m.method === "editor") && (
+     <>
+      <button className={primary} disabled={busy} onClick={submitValue}>
+       {busy ? t.uiSending : t.uiSubmit}
+      </button>
+      <button className={ghost} disabled={busy} onClick={() => void reply("cancel")}>
+       {t.uiSkip}
+      </button>
+     </>
+    )}
+    {m.method === "select" &&
+     (m.options ?? []).map((opt, i) => {
+      const detail = m.optionDetails?.[i];
+      return (
+       <button
+        key={opt}
+        className={`${ghost} flex-col items-start gap-0.5`}
+        disabled={busy}
+        onClick={() => void reply("value", { value: opt })}
+        title={detail ?? opt}
+       >
+        <span>{opt}</span>
+        {detail && <span className="text-[13px] text-muted">{detail}</span>}
+       </button>
+      );
+     })}
+    {m.method === "select" && (
+     <button className={ghost} disabled={busy} onClick={() => void reply("cancel")}>
+      {t.cancel}
+     </button>
+    )}
+    {m.method === "editor" && <span className="text-[13px] text-muted">{t.uiEditorHint}</span>}
+   </div>
+   {error && <div className="mt-1.5 text-[13px] text-danger">{error}</div>}
+   {waiting && !error && <div className="mt-1.5 text-[13px] text-muted">{t.uiWaiting}</div>}
+  </div>
+ );
 }

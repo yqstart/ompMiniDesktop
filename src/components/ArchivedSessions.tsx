@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Archive, ArchiveRestore, ChevronRight, FolderSearch, Loader2, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { Archive, ChevronRight, FolderError, Loader, Refresh, Trash2, Undo } from "reicon-react";
 import { api } from "@shared/api";
 import { useApp } from "../stores/app";
 import { groupSessionsByProject } from "../lib/sessions";
@@ -92,7 +92,7 @@ export function ArchivedSessions() {
  ];
 
  return (
-  <section aria-label={t.tabArchived} className="rounded border border-border bg-surface p-3">
+  <section aria-label={t.tabArchived} className="rounded-md border border-border bg-surface p-3.5">
    <div className="flex flex-wrap items-center gap-2">
     <Archive size={14} aria-hidden className="text-muted" />
     <h2 className="text-sm font-medium">{t.tabArchived}</h2>
@@ -100,31 +100,31 @@ export function ArchivedSessions() {
     <button
      onClick={() => setReloadKey((k) => k + 1)}
      disabled={busy}
-     className="ml-auto flex cursor-pointer items-center gap-1 rounded border border-border px-2.5 py-1 text-xs transition-colors duration-150 hover:bg-background disabled:opacity-50"
+     className="ml-auto flex cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
      aria-label={t.archivedRefresh}
     >
-     {busy ? <Loader2 size={12} className="animate-spin" aria-hidden /> : <RefreshCw size={12} aria-hidden />}
+     {busy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
      {t.archivedRefresh}
     </button>
    </div>
-   <p className="mt-1.5 text-xs text-muted/70">{t.archivedHint}</p>
+   <p className="mt-1.5 text-[13px] text-faint">{t.archivedHint}</p>
    {error && (
-    <p role="alert" className="mt-1.5 text-xs text-danger">
+    <p role="alert" className="mt-1.5 text-[13px] text-danger">
      {error}
     </p>
    )}
 
    {rows === null ? (
-    <p className="mt-3 text-xs text-muted">{t.archivedLoading}</p>
+    <p className="mt-3 text-[13px] text-muted">{t.archivedLoading}</p>
    ) : total === 0 ? (
-    <p className="mt-3 rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted">{t.archivedEmpty}</p>
+    <p className="mt-3 rounded-lg border border-dashed border-border px-3 py-3 text-[13px] text-muted">{t.archivedEmpty}</p>
    ) : (
     <div className="mt-2 space-y-3">
      {buckets.map((b) => {
       const folded = collapsed[b.key] === true;
       return (
        <div key={b.key}>
-        <div className="flex items-center gap-1.5 border-b border-border/70 pb-1">
+        <div className="flex items-center gap-1.5 border-b border-border pb-1">
          <button
           onClick={() => setCollapsed((m) => ({ ...m, [b.key]: !m[b.key] }))}
           aria-expanded={!folded}
@@ -134,24 +134,24 @@ export function ArchivedSessions() {
           <ChevronRight
            size={12}
            aria-hidden
-           className={`shrink-0 text-muted transition-transform duration-150 ${folded ? "" : "rotate-90"}`}
+           className={`shrink-0 text-muted transition-transform duration-100 ${folded ? "" : "rotate-90"}`}
           />
           {b.missing ? (
-           <FolderSearch size={12} aria-hidden className="shrink-0 text-warn" />
+           <FolderError size={12} aria-hidden className="shrink-0 text-warn" />
           ) : (
-           <Archive size={12} aria-hidden className="shrink-0 text-muted/70" />
+           <Archive size={12} aria-hidden className="shrink-0 text-faint" />
           )}
-          <span className="min-w-0 truncate text-xs font-semibold">{b.name}</span>
-          {b.path && <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted/60">{b.path}</span>}
+          <span className="min-w-0 truncate text-[13px] font-semibold">{b.name}</span>
+          {b.path && <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-faint">{b.path}</span>}
          </button>
          <span className="shrink-0 font-mono text-[11px] text-muted">{b.rows.length}</span>
          <button
           onClick={() => void act("unarchive", b.rows.map((s) => s.id))}
           disabled={busy}
-          className="flex shrink-0 cursor-pointer items-center gap-1 rounded border border-border px-2 py-0.5 text-[11px] transition-colors duration-150 hover:bg-background disabled:opacity-40"
+          className="flex shrink-0 cursor-pointer items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] transition-colors duration-100 hover:bg-hover disabled:opacity-40"
           aria-label={`${t.archivedRestoreAll} ${b.name}`}
          >
-          <RotateCcw size={11} aria-hidden />
+          <Undo size={11} aria-hidden />
           {t.archivedRestoreAll}
          </button>
          <button
@@ -162,7 +162,7 @@ export function ArchivedSessions() {
            })
           }
           disabled={busy}
-          className="flex shrink-0 cursor-pointer items-center gap-1 rounded border border-border px-2 py-0.5 text-[11px] text-danger transition-colors duration-150 hover:bg-danger/10 disabled:opacity-40"
+          className="flex shrink-0 cursor-pointer items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] text-danger transition-colors duration-100 hover:bg-danger/10 disabled:opacity-40"
           aria-label={`${t.archivedDeleteAll} ${b.name}`}
          >
           <Trash2 size={11} aria-hidden />
@@ -172,7 +172,7 @@ export function ArchivedSessions() {
         {!folded && (
          <div className="mt-0.5 space-y-px">
           {b.rows.map((s) => (
-           <div key={s.id} className="flex h-8 min-w-0 items-center gap-2 rounded-lg px-2 transition-colors duration-150 hover:bg-background/60">
+           <div key={s.id} className="flex h-8 min-w-0 items-center gap-2 rounded-lg px-2 transition-colors duration-100 hover:bg-hover/60">
             <button
              onClick={() => void openSessionWithHistory(s.id)}
              className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
@@ -180,7 +180,7 @@ export function ArchivedSessions() {
              title={t.archivedOpenHint}
             >
              <span className="min-w-0 flex-1 truncate text-[13px]">{s.title}</span>
-             <span className="shrink-0 font-mono text-[11px] text-muted/80">
+             <span className="shrink-0 font-mono text-[11px] text-faint">
               {new Date(s.timestamp).toLocaleString(locale === "zh-CN" ? "zh-CN" : "en-US", {
                year: "numeric",
                month: "numeric",
@@ -191,10 +191,10 @@ export function ArchivedSessions() {
             <button
              onClick={() => void act("unarchive", [s.id])}
              disabled={busy}
-             className="flex shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted transition-colors duration-150 hover:bg-background hover:text-foreground disabled:opacity-40"
+             className="flex shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
              aria-label={`${t.archivedRestore} ${s.title}`}
             >
-             <ArchiveRestore size={12} aria-hidden />
+             <Undo size={12} aria-hidden />
              {t.archivedRestore}
             </button>
             <button
@@ -202,7 +202,7 @@ export function ArchivedSessions() {
               setPending({ ids: [s.id], title: fmt(t.archivedDeleteConfirm, 1) })
              }
              disabled={busy}
-             className="flex shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted transition-colors duration-150 hover:bg-background hover:text-danger disabled:opacity-40"
+             className="flex shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted transition-colors duration-100 hover:bg-hover hover:text-danger disabled:opacity-40"
              aria-label={`${t.archivedDelete} ${s.title}`}
             >
              <Trash2 size={12} aria-hidden />

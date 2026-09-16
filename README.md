@@ -19,7 +19,9 @@ oh-my-pi（`omp`）的极简桌面端 —— 把终端里的 agent 会话装进�
 - 输出渲染：用户气泡 / 流式 Markdown / 思考折叠 / 工具调用卡（四态：输入中·运行中·成功·失败）/ 系统分隔线
 - 权限：全局三档（每次询问 `always-ask` / 写入询问 `write` / 自动通过 `yolo`）+ 会话级覆盖；工具执行前内联审批卡（允许一次 / 总是允许本会话 / 拒绝）
 - 切换：模型选择器（搜索 + provider 分组 + context/thinking/images 角标）/ 思考档选择器（按模型可用档过滤）
-- 设置页为占位：只读展示 `config path`，零写入（Provider Key 与模型目录请用 `omp` CLI 管理）
+- 供应商（设置 ›「供应商」）：OAuth 供应商登录 / 登出（走 `omp auth-broker`，凭证写进 omp）
+- 模型（设置 ›「模型」）：模型角色分配（omp 内置 9 个角色 + 自定义角色 → 模型，写 `modelRoles`）、可用模型目录（只读，按供应商分组）
+- 设置页：界面语言（中英切换）、omp 诊断（路径/版本/agentDir + 手动指定路径）、应用更新、供应商、模型、已归档对话——**除「供应商」与「模型」外一律不写 omp 状态**（语言只切本应用展示，路径只写应用覆盖层）
 
 **明确不做（V1）**：自动化/定时任务、插件/Skill/MCP/Hook 管理、主题市场、云同步、多窗口协作、终端 PTY 仿真、diff 合并编辑器、用量统计。
 
@@ -110,6 +112,8 @@ app 覆盖层：$APPDATA/omp-mini/overlay.json（项目列表/归档/备注/会�
   通过回 `value:"Approve"`，拒绝回 `cancelled:true`（turn 正常结束，不是中断）。
 - 切模型发 `set_model{provider, modelId}`（两个字段，非 selector 字符串）；
   切思考档发 `set_thinking_level{level}`。
+- 供应商页（唯一改 omp 状态的地方）：登录 / 登出走 `omp auth-broker` 子进程（RPC 模式在「一个供应商都没登录」时起不来），
+  输出经 `omp-provider://login` 推全量快照；角色分配走 `omp config get/set modelRoles`（record 只能整表写，读-改-写 + 回读）。
 
 详见 [`docs/v1-design.md`](docs/v1-design.md)（产品冻结稿）、
 [`docs/rpc-memo.md`](docs/rpc-memo.md)（RPC 实测协议备忘）、

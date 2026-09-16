@@ -11,6 +11,7 @@ Tauri v2 + React + TS + Tailwind v4 + Zustand，包管理 pnpm。
 | RPC 实测备忘 | `docs/rpc-memo.md` | `omp --mode rpc` 握手/流式/审批/切换的实测结论 |
 | 功能排期 | `docs/v1-schedule.md` | M0–M4 里程碑与任务明细 |
 | 二期排期 | `docs/v2-schedule.md` | M5–M8 里程碑、上游协议事实、完成口径 |
+| 三期排期 | `docs/v3-schedule.md` | 供应商页（login / logout / model roles 映射）的实测口径与完成口径 |
 | 设计真相 | `design-system/MASTER.md` | token、布局、交互、组件命名（改 UI 先读） |
 | 应用图标 | `design-system/icon/omp-mini-icon.svg` | π 字标矢量唯一源，`pnpm icon` 重新生成 `src-tauri/icons/` |
 | 更新日志 | `CHANGELOG.md` | Keep a Changelog 风格，发版时归入新版本节 |
@@ -30,21 +31,23 @@ Tauri v2 + React + TS + Tailwind v4 + Zustand，包管理 pnpm。
 src/
   app/App.tsx              # 顶层装配 + SidebarShell（拖拽调宽）+ 主题/自检/updater 启动
   components/HealthBanner.tsx  # omp 不可用横幅（与 OmpStatusPill 的常驻位区分）
-  components/SettingsPage.tsx  # 设置页外壳（分页签：通用 / 已归档对话；通用 = 界面语言中英切换 + omp 诊断区路径/版本/agentDir + 重新检测 + 指定路径 + 复制 + 应用更新）
+  components/SettingsPage.tsx  # 设置页外壳（分页签：通用 / 供应商 / 模型 / 已归档对话；通用 = 界面语言中英切换 + omp 诊断区路径/版本/agentDir + 重新检测 + 指定路径 + 复制 + 应用更新）
   components/ArchivedSessions.tsx # 设置 ›「已归档对话」tab：按项目分组列全部归档会话（数据来自 list_archived_sessions，不受左栏扫描窗口限制），分组级/行级「恢复 / 删除」，删除走 ConfirmDialog
   components/ConfirmDialog.tsx # 通用二次确认浮层（受控；跨分组危险操作用它，分组内仍是轻量内联浮层）
   components/sidebar/      # Sidebar（分组会话列表，**只列进行中的会话** + 缺失态重定位）、EmptyState
   components/thread/       # TopBar（标题备注 + 窄窗抽屉入口 + 复制会话为 Markdown + UpdateBell）、Thread（首屏 200 条 + 增量加载 + 行级 memo + PlanCard 计划卡 + command 本地输出）、AssistantText（Markdown + 代码高亮 + 复制 + 流式骨架 + 外链二次确认）、ToolCard（参数摘要可点打开）、ApprovalCard（审批 select，终态展示结论）、UiRequestCard（confirm/input/editor/非审批 select，选项描述）、MentionChips（@文件 芯片排，可点打开）、StatusBar（OmpStatusPill + QueueBadge 排队数 + CompactButton 压缩入口 + RuntimeStats 用量透传）
   components/composer/     # Composer（一体式输入框 + 工具行 + 图片附件：粘贴/拖拽/选文件，发送随 prompt.images；流式中 Enter 排队 + ⌘/Ctrl+Enter 转向 + `/` 命令补全 + `@` 路径补全 + 图文混贴保留文字 + 乐观回显 + 草稿持久化）、ContextBar（输入框上方一行：项目 + git 分支）
   components/pickers/      # ModelPicker、ThinkingPicker、PermissionBadge（挂输入框工具行）；ProjectPicker、BranchPicker（挂 ContextBar）
+  components/settings/     # ProvidersPanel（设置 ›「供应商」：omp 登录 / 登出）、ModelsPanel（设置 ›「模型」：常用模型挑选 + 模型角色分配 + 可用模型目录）
   components/update/       # UpdateBell、UpdateDialog（应用内更新）
-  lib/                     # viewmsg（ViewMsg 归一 + 单测）、attachments（图片附件校验/base64/内容块提取 + 单测）、mentions（@文件 解析，与 omp 同规则 + 单测）、search（搜索片段高亮 + 单测）、exportMd（会话 → Markdown 只读导出 + 单测）、mergeEvents（实时流按 id 合并 + 单测）、thinking（思考档推导 + 单测）、sessions（分组 + 单测）、sessionList（会话列表刷新 + 扫描窗口的唯一入口）、sessionBatch（批量归档/恢复/删除的唯一实现：BATCH_LIMIT 分批 + 失败聚合 + 删除后清前端痕迹）、context（上下文条取值 + 单测）、sessionOpen（打开/新建会话的唯一实现，含乐观消息合并）、projects（添加项目 / 切换项目）、ompDiag（omp 自检与手动指定路径）、locale（**全界面**中英字典 + fmt 占位 + localStorage 持久化 + 单测）、useText（组件取文案的唯一入口）、useSessionEvents（事件归一 + 真值回填，含本地命令/计划/压缩重试/子代理/命令面分支）、openPath（路径打开 + 草稿持久化）、useTaskNotifications（后台完成系统通知）、useDropdown、appUpdate、rpc-types
+  lib/                     # viewmsg（ViewMsg 归一 + 单测）、attachments（图片附件校验/base64/内容块提取 + 单测）、mentions（@文件 解析，与 omp 同规则 + 单测）、search（搜索片段高亮 + 单测）、exportMd（会话 → Markdown 只读导出 + 单测）、mergeEvents（实时流按 id 合并 + 单测）、thinking（思考档推导 + 单测）、sessions（分组 + 单测）、sessionList（会话列表刷新 + 扫描窗口的唯一入口）、sessionBatch（批量归档/恢复/删除的唯一实现：BATCH_LIMIT 分批 + 失败聚合 + 删除后清前端痕迹）、context（上下文条取值 + 单测）、favoriteModels（常用模型偏好：localStorage 归一/读写/星标开关 + 单测）、sessionOpen（打开/新建会话的唯一实现，含乐观消息合并）、projects（添加项目 / 切换项目）、ompDiag（omp 自检与手动指定路径）、locale（**全界面**中英字典 + fmt 占位 + localStorage 持久化 + 单测）、useText（组件取文案的唯一入口）、useSessionEvents（事件归一 + 真值回填，含本地命令/计划/压缩重试/子代理/命令面分支）、openPath（路径打开 + 草稿持久化）、useTaskNotifications（后台完成系统通知）、useDropdown、appUpdate、rpc-types
   shared/                  # api（invoke 唯一入口）、ipc（通道常量）、types
-  stores/app.ts            # Zustand 全局状态（含 currentModel/currentThinking/currentEfforts/currentRuntime、composerMenu、sidebarWidth、threadLimit、update、locale/setLocale）
+  stores/app.ts            # Zustand 全局状态（含 currentModel/currentThinking/currentEfforts/currentRuntime、favoriteModels/setFavoriteModels、composerMenu、sidebarWidth、threadLimit、update、locale/setLocale）
 eslint.config.js           # ESLint flat config（typescript-eslint + react-hooks + react-refresh）
 src-tauri/src/
-  main.rs / lib.rs         # 插件注册（dialog/opener/process/updater/store）
-  commands/mod.rs          # 42 个 Tauri commands（与 src/shared/ipc.ts 一一对应，见 e2e:ipc；新增 steer/follow_up/compact/branch/run_slash/complete_path/list_archived_sessions/unarchive_sessions）
+  main.rs / lib.rs         # 插件注册（dialog/opener/process/updater/store）+ 命令注册
+  commands/mod.rs          # 会话与设置类 Tauri commands（与 src/shared/ipc.ts 一一对应，见 e2e:ipc；含 steer/follow_up/compact/branch/run_slash/complete_path/list_archived_sessions/unarchive_sessions）
+  providers.rs             # 供应商页后端（8 个命令）：OAuth 供应商清单 / login·logout（走 `omp auth-broker` CLI，不走 RPC）/ modelRoles 读写（`omp config set`）
   runtime.rs               # per-会话长驻 omp 子进程 + rpc_chunk 重组 + 事件分发 + 真值回读（omp-state）+ 切模型自动最高档
   overlay.rs               # overlay.json 读写与版本归一（含单测）
   session_scan.rs          # agentDir 解析 + jsonl 头解析 + cwd 归组（含单测）
@@ -69,6 +72,10 @@ scripts/                   # fake-omp.mjs（canned RPC 联调：history|approve|
 - 审批线序：`toolcall_end` → `tool_execution_start` → `extension_ui_request{method:select, options:["Approve","Deny"]}`；通过回 `value:"Approve"`，拒绝回 `cancelled:true`（turn 正常结束，不是中断）。
 - 其余 UI 请求（V2 M5）：`confirm` / `input` / `editor` / 非审批 `select` 走 `UiRequestCard`，回包统一经后端 `respond_ui`——`confirm` 回 `{confirmed:bool}`、`input`/`editor`/`select` 回 `{value}`、取消回 `{cancelled:true}`；`notify` 渲染为分隔线，`setStatus`/`setWidget`/`setTitle`/`set_editor_text` 是单向宿主指令（丢弃不告警），服务端 `cancel{targetId}` 撤回对应卡片。**只有这四类方法进 `awaiting-approval` 状态**（单向方法与服务端撤回不许锁 composer）。
 - git 上下文**只读**：`get_git_info(path)` 走 git CLI 只读查询（`rev-parse --is-inside-work-tree` / `symbolic-ref --short HEAD` / `for-each-ref refs/heads` / `status --porcelain --untracked-files=no`），不写仓库、不切分支；结果只用于输入框上方上下文条展示。
+- **设置 ›「供应商」与「模型」两个页签是全 app 唯一改 omp 状态的地方**（其余页面一律只读 omp：不写配置、不写标题、不写凭证）：
+  - **供应商页签 · login / logout 走 `omp auth-broker` CLI 子进程，不走 RPC `login`**：实测 `omp --mode rpc` 在「一个供应商都没登录」的 agentDir 下**直接退出**（启动时要先解析出可用模型，报 "No models available"）——而那是这个页面最主要的首次使用场景。`auth-broker login|logout` 是纯凭证库操作（`SqliteAuthCredentialStore`），不建会话、不需要模型，任何状态都能跑。解析钉在上游打印顺序（`Open this URL in your browser:` 之后第一行 = 完整授权 URL，其余行原样透传，退出码 0 = 成功）；上游提问行（选端点 / 粘贴 API key）显示给用户并回填 stdin 一行，**输入内容不回显**（可能是 API key）。进度经 `omp-provider://login` 推全量快照，`get_provider_login` 供切走再回来补齐。
+  - 「已配置」= 该供应商出现在 omp **当前模型目录**里（有凭证或免钥），**不直读 omp 的凭证库**；这张表只列 OAuth 可登录的供应商，API key 型供应商只在「模型」页签的可用模型里体现。登出走 `ConfirmDialog` 二次确认（删凭证不可撤销）。
+  - **模型页签 · modelRoles 写全局配置**：`omp config set modelRoles '<JSON>'` 只接受整表（点路径 `modelRoles.smol` 实测报 `Unknown setting`），所以后端是「读 → 改一个键 → 写回」+ 互斥锁串行化 + **写完回读**；`modelRoleStorage=project` 时界面给 warn 提示（本页读写的是全局角色）。「可用模型」只读，与输入框 `ModelPicker` 共用同一份 `models` store。**「常用模型」是本应用偏好、不写 omp**：localStorage `omp.favoriteModels.v1` 存 selector 数组（`src/lib/favoriteModels.ts`），挑选只决定输入框 `ModelPicker` 列什么，不碰 `modelRoles`、不碰 `create_session` 的模型来源。
 - **会话归属只认 cwd，覆盖层不存归属**：`owner_project`（`commands/mod.rs`）是唯一判定入口——真实路径前缀匹配、最长优先、符号链接展开，与左栏 `project_of` 同一条规则；`create_session` / `open_session` / `list_sessions` / 归档清单四处共用。**omp 的 jsonl 是懒写盘的**（首个 turn 才落文件），新建 / 打开的会话读不到文件头 cwd 时，归属退回 spawn 时的 `--cwd`（`owner_cwd` + `RunningChild.cwd`），不许因为「文件还不存在」把刚建好的会话退回「未归属」；`list_sessions` 还要把「runtime 里、磁盘上还没有 jsonl」的活跃会话按 spawn 事实补进列表（`unlanded_views`，否则任何一次刷新都会让刚新建的会话行消失）。
 
 ## 前端约定（血泪规则）
@@ -88,7 +95,9 @@ scripts/                   # fake-omp.mjs（canned RPC 联调：history|approve|
 - 左侧栏可拖拽调宽 220–480px（默认 264，`sidebarWidth` 持久化 localStorage）；窄窗 <768px 收抽屉。
 - 导出是**只读**动作（V2 M9）：`TopBar` 的「复制会话为 Markdown」把界面上已渲染的 `ViewMsg` 经 `src/lib/exportMd.ts` 拼成 Markdown 写进剪贴板——不读盘、不落盘、不加后端命令；工具输出沿用界面口径截断并在截断处明写「已截断」，图片只写张数（不内联 base64）。消息级复制走行内 `CopyAction`（自带 copied 状态，**不许把状态提到 `ThreadRow` 上**，否则破坏 M8 的行级 memo）。
 - 界面文案一律走字典（`src/lib/locale.ts` 的 `TEXT`）：组件内 `useText()`（`src/lib/useText.ts`）、非组件模块 `TEXT[useApp.getState().locale]`；插值用 `fmt(t.key, v1, v2)`（模板占位统一 `{0}`/`{1}`），**禁止硬编码界面文案**（含 `aria-label` / `title` / `placeholder` / 错误提示）。**上游数据不进字典**：会话标题、工具名/意图/输出、omp 的 UI 请求文案、后端错误一律原样透传。数据层生成的展示文本（分隔线标签、工具卡占位、导出 Markdown、附件校验）取**当归一 / 当次调用**时的语言——切语言后已渲染的旧消息要重开会话（重新归一）才会换。切语言只改本应用展示层（`omp.locale.v1` 走 localStorage），不写 omp 配置、不写覆盖层。
-- 四个禁止：不轮询文件做伪实时；前端不自算 token（状态与用量一律透传 `omp-state` 真值）；不写回 omp 标题（改名只写覆盖层 `notes`，禁用 `set_session_name`）；设置页不改 omp 配置（语言只切本应用展示、走 localStorage 持久化；诊断区只读 + 「指定 omp 路径」只写应用覆盖层 `ompPath`，更新区除外）。
+- 四个禁止：不轮询文件做伪实时；前端不自算 token（状态与用量一律透传 `omp-state` 真值）；不写回 omp 标题（改名只写覆盖层 `notes`，禁用 `set_session_name`）；设置页不改 omp 配置（语言只切本应用展示、走 localStorage 持久化；诊断区只读 + 「指定 omp 路径」只写应用覆盖层 `ompPath`，更新区除外）——**唯一例外是设置 ›「供应商」与「模型」两个页签**：用户在那里显式点「登录 / 登出 / 分配角色」，写的就是 omp 的凭证库与 `config.yml`（见「核心数据流」的供应商条目）。
+- 设置页的「供应商」与「模型」两个页签（`src/components/settings/`，共四个页签：通用 / 供应商 / 模型 / 已归档对话）：**供应商**（`ProvidersPanel`：omp OAuth 供应商清单 + 「已配置 / 未配置」+ 登录 / 登出）与**模型**（`ModelsPanel`：常用模型挑选 → 模型角色分配 → 可用模型目录）。登录卡固定在供应商列表**上方**（列表二十多条，放尾部等于「点了没反应」）并自动滚入视野；角色选择器是**行内展开**而非浮层（设置页是可滚动容器，浮层会被裁掉），候选模型与输入框 `ModelPicker` **共用同一份 `models` store**（同一次刷新两处同步）；「可用模型」按供应商分组折叠，只读。登出走 `ConfirmDialog`。**这两个页签是全 app 唯一改 omp 状态的地方**（凭证库 + `config.yml`），其余页面一律只读。
+- **常用模型只决定输入框选择器列什么，不写 omp**：设置 ›「模型」的「常用模型」区块从「可用模型」目录用星标（`Star`，Outline/Filled 表示未选/已选）挑选，`ModelPicker` 下拉**只列挑过的模型**（按挑选顺序、仍按供应商分组）。**空下拉是禁止的**：常用为空**或**已挑模型在当前 omp 模型目录里全部不可用 → 回退为全部可用模型，并在下拉顶部加一行说明（`pickerAllModelsHint`）；设置页对目录里找不到的常用项照列不误并标「已不可用」（给人清理）。「可用模型」标题行下方有**过滤框**（按 `provider/id` + 名称），过滤态下命中组自动全部展开、组头退化为静态行（不许点了没反应）、标题行改显匹配数、零命中给「无匹配模型」——111 个模型不靠人肉展开找。偏好存 localStorage `omp.favoriteModels.v1`，唯一数据层是 `src/lib/favoriteModels.ts`（`loadFavorites`/`saveFavorites`/`toggleFavorite`/`favoriteEntries`，坏数据一律丢弃、去重保序）；**不回写 `modelRoles`、不写覆盖层、不改 `create_session` 的模型来源**。会话内切换行为不变（仍 RPC `set_model` → 后端跟进思考档 → `get_state` 回读）。`ModelPicker` 触发按钮文案**只按目录查 `currentModel`**，查不到显示「模型」——不许回退成目录里的第一个模型（会显示一个并不生效的模型名）。
 
 ## 常用命令
 
@@ -120,6 +129,7 @@ pnpm icon                   # 从 design-system/icon/omp-mini-icon.svg 重生成
 
 自动化/定时任务、插件/Skill/MCP/Hook 管理、主题市场、云同步、多窗口协作、终端 PTY 仿真、diff 合并编辑器、用量统计面板（只透传 omp 给的单轮用量与上下文占用，不做聚合/报表/成本分析）——这些仍在范围外，要做得单独决策。
 二期（V2）已排的是 V1 文档里显式留下的坑 + 上游已给的能力：M5 通用 UI 请求、M6 图片与 `@文件`、M7 扫描分页与内容搜索、M8 长会话渲染复议（结论：不做虚拟列表，改行级 memo）、M9 复制与导出——**全部完成**；M9 的「重发」「导出 .md 文件」两项是需要先定交互/涉及落盘的候选，开工前先问。明细与实测数据见 `docs/v2-schedule.md`。
+三期（V3，已完成）**供应商页与模型页**：设置 ›「供应商」把 omp 的 `login` / `logout` 映射进界面；设置 ›「模型」把 `model roles`（9 个内置角色 + 自定义角色的模型分配）与可用模型目录映射进界面。这两个页签是全 app 唯一改 omp 凭证库与 `config.yml` 的地方，且必须如此——登录 / 登出本质就是写 omp 的凭证、角色分配本质就是写 omp 的配置。明细见 `docs/v3-schedule.md`。
 
 ## 命名与变更约定
 

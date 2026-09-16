@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ArrowDown, Folder } from "reicon-react";
 import { useApp } from "../../stores/app";
 import { pickAndAddProject } from "../../lib/projects";
 import { createSessionIn } from "../../lib/sessionOpen";
@@ -14,25 +15,23 @@ export function EmptyState({ kind }: { kind: "no-project" | "no-session" | "arch
   if (kind === "no-project") {
     return (
       <div className="flex min-h-0 w-full flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-surface shadow-[inset_0_0_0_1px_var(--color-border)]" aria-hidden>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" className="text-muted">
-            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-          </svg>
+        <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-surface text-muted" aria-hidden>
+          <Folder size={20} />
         </div>
-        <h1 className="text-[17px] font-semibold tracking-tight">{t.emptyNoProjectTitle}</h1>
-        <p className="max-w-xs text-sm leading-6 text-muted">{t.emptyNoProjectBody}</p>
+        <h1 className="text-base font-semibold tracking-tight">{t.emptyNoProjectTitle}</h1>
+        <p className="max-w-xs text-[13px] leading-6 text-muted">{t.emptyNoProjectBody}</p>
         {/* 与左上角主入口同一份逻辑（pickAndAddProject），空态即入口，不用回头找按钮。 */}
         <button
           onClick={async () => {
             const res = await pickAndAddProject();
             setError(res && !res.ok ? res.message : null);
           }}
-          className="mt-1 cursor-pointer rounded-full bg-accent px-5 py-2 text-sm font-medium text-white transition-opacity duration-150 hover:opacity-90"
+          className="mt-1 cursor-pointer rounded-md bg-accent px-4 py-1.5 text-[13px] font-medium text-white transition-opacity duration-100 hover:opacity-90"
         >
           {t.emptyPickFolder}
         </button>
         {error && (
-          <p role="alert" className="text-xs text-danger">
+          <p role="alert" className="text-[13px] text-danger">
             {error}
           </p>
         )}
@@ -48,14 +47,12 @@ export function EmptyState({ kind }: { kind: "no-project" | "no-session" | "arch
   }
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-surface shadow-[inset_0_0_0_1px_var(--color-border)]" aria-hidden>
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" className="text-muted">
-          <path d="M12 5v14m0 0-5-5m5 5 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+      <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-surface text-muted" aria-hidden>
+        <ArrowDown size={20} />
       </div>
-      <h1 className="text-[17px] font-semibold tracking-tight">{t.emptyNoSessionTitle}</h1>
+      <h1 className="text-base font-semibold tracking-tight">{t.emptyNoSessionTitle}</h1>
       {/* 空态必须说清"消息会发到哪个目录"：否则用户不知道新会话落在哪 */}
-      <p className="max-w-xs text-sm leading-6 text-muted">
+      <p className="max-w-xs text-[13px] leading-6 text-muted">
         {currentProject ? (
           <>
             {chatInBefore}
@@ -66,18 +63,18 @@ export function EmptyState({ kind }: { kind: "no-project" | "no-session" | "arch
           t.emptyPickProjectFirst
         )}
       </p>
-      <p className="max-w-xs font-mono text-xs leading-6 text-muted/70">{t.emptyShortcuts}</p>
+      <p className="max-w-xs font-mono text-xs leading-6 text-faint">{t.emptyShortcuts}</p>
       <button
         onClick={async () => {
           const res = await createSessionIn(activeProjectId, { projectName: currentProject?.name });
           setError(res.ok ? null : res.message);
         }}
-        className="mt-1 cursor-pointer rounded-full border border-border px-5 py-2 text-sm text-foreground transition-colors duration-150 hover:bg-surface"
+        className="mt-1 cursor-pointer rounded-md border border-border px-4 py-1.5 text-[13px] text-foreground transition-colors duration-100 hover:bg-hover"
       >
         {t.newSession}
       </button>
       {error && (
-        <p role="alert" className="text-xs text-danger">
+        <p role="alert" className="text-[13px] text-danger">
           {error}
         </p>
       )}

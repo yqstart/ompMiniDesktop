@@ -18,6 +18,7 @@ const ipc = fs.readFileSync(path.join(root, "src/shared/ipc.ts"), "utf8");
 const types = fs.readFileSync(path.join(root, "src/shared/types.ts"), "utf8");
 const mainRs = fs.readFileSync(path.join(root, "src-tauri/src/main.rs"), "utf8");
 const modRs = fs.readFileSync(path.join(root, "src-tauri/src/commands/mod.rs"), "utf8");
+const providersRs = fs.readFileSync(path.join(root, "src-tauri/src/providers.rs"), "utf8");
 
 const COMMANDS = [
  "locate_omp", "get_health", "get_models", "refresh_models", "get_overlay",
@@ -30,13 +31,28 @@ const COMMANDS = [
  "get_session_runtime", "get_git_info",
  "get_global_approval", "set_global_approval", "set_session_approval",
  "set_omp_path",
+ "list_providers", "get_provider_login", "start_provider_login", "provider_login_input",
+ "cancel_provider_login", "logout_provider", "get_model_roles", "set_model_role",
 ];
 for (const c of COMMANDS) {
  if (!mainRs.includes(c)) fail(`main.rs 未注册命令 ${c}`);
- if (!modRs.includes(`pub async fn ${c}`)) fail(`commands/mod.rs 缺少实现 ${c}`);
+ // 命令实现分布在 commands/mod.rs（会话与设置）与 providers.rs（供应商）两个模块
+ if (!modRs.includes(`pub async fn ${c}`) && !providersRs.includes(`pub async fn ${c}`)) {
+  fail(`后端缺少实现 ${c}`);
+ }
  if (!ipc.includes(c)) fail(`src/shared/ipc.ts 缺少通道 ${c}`);
 }
 for (const k of ['"user"', '"text"', '"thinking"', '"tool"', '"approval"', '"divider"', '"command"', '"plan"', '"ui"', '"ui-cancel"', '"files"']) {
  if (!types.includes(k)) fail(`ViewMsg 缺少 kind ${k}`);
+}
+// 供应商登录进度事件：常量在 ipc.ts，字面量在后端 providers.rs，两边必须一致
+const LOGIN_EVENT = "omp-provider://login";
+if (!ipc.includes(`providerLogin: "${LOGIN_EVENT}"`)) fail(`ipc.ts 缺少供应商登录事件 ${LOGIN_EVENT}`);
+if (!providersRs.includes(`PROVIDER_LOGIN_EVENT: &str = "${LOGIN_EVENT}"`)) {
+ fail(`providers.rs 的登录事件通道与 ipc.ts 不一致`);
+}
+// 登录 / 登出必须走 auth-broker CLI（RPC 模式在"一个都没登录"的环境里起不来）
+for (const sub of ['"auth-broker", "login"', '"auth-broker", "logout"', '"auth-broker", "list"']) {
+ if (!providersRs.includes(sub)) fail(`providers.rs 未按 auth-broker CLI 调 ${sub}`);
 }
 console.log(`e2e:ipc 通过：${COMMANDS.length} 命令 × 通道 × ViewMsg 十一型一致`);

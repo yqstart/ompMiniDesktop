@@ -51,22 +51,22 @@ export function ConfirmDialog({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="w-full max-w-sm rounded-xl border border-border bg-surface p-4 shadow-xl"
+        className="w-full max-w-sm rounded-lg border border-border bg-elevated p-4 shadow-pop"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="text-sm font-medium">{title}</div>
-        {detail && <div className="mt-1.5 text-xs leading-5 text-muted">{detail}</div>}
+        {detail && <div className="mt-1.5 text-[13px] leading-5 text-muted">{detail}</div>}
         <div className="mt-3.5 flex justify-end gap-2">
           <button
             ref={cancelRef}
             onClick={onCancel}
-            className="cursor-pointer rounded-lg border border-border px-3.5 py-1.5 text-sm transition-colors duration-150 hover:bg-background"
+            className="cursor-pointer rounded-md border border-border px-3.5 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover"
           >
             {cancelLabel ?? t.cancel}
           </button>
           <button
             onClick={onConfirm}
-            className={`cursor-pointer rounded-lg px-3.5 py-1.5 text-sm text-white transition-opacity duration-150 hover:opacity-90 ${
+            className={`cursor-pointer rounded-lg px-3.5 py-1.5 text-[13px] text-white transition-opacity duration-100 hover:opacity-90 ${
               danger ? "bg-danger" : "bg-accent"
             }`}
           >

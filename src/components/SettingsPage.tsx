@@ -1,4 +1,4 @@
-import { Loader2, RefreshCw, FolderSearch, Copy, Check, Languages } from "lucide-react";
+import { Check, Copy, FolderError, Language, Loader, Refresh } from "reicon-react";
 import { useApp } from "../stores/app";
 import { checkForUpdate, getAppVersion, openUpdateDialog } from "../lib/appUpdate";
 import { pickOmpExecutable, refreshOmpHealth } from "../lib/ompDiag";
@@ -6,9 +6,11 @@ import { LOCALES, fmt, type Locale } from "../lib/locale";
 import { useText } from "../lib/useText";
 import { useEffect, useState } from "react";
 import { ArchivedSessions } from "./ArchivedSessions";
+import { ModelsPanel } from "./settings/ModelsPanel";
+import { ProvidersPanel } from "./settings/ProvidersPanel";
 
 /** 设置页分页签；顺序即界面顺序。 */
-const TABS = ["general", "archived"] as const;
+const TABS = ["general", "providers", "models", "archived"] as const;
 
 export function SettingsPage() {
   const { health, set, update, locale, setLocale } = useApp();
@@ -54,11 +56,11 @@ export function SettingsPage() {
               : null;
 
   return (
-    <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-4 overflow-hidden px-4 pt-8 pb-6">
-      <h1 className="shrink-0 text-xl font-semibold">{t.title}</h1>
-      <p className="shrink-0 text-sm text-muted">{t.subtitle}</p>
-      {/* 分页签：设置页从此有两块——通用（本应用的诊断 / 更新 / 语言）与已归档对话（归档管理面）。
-          归档对话不再出现在左栏项目列表里，这块就是它们唯一的入口。 */}
+    <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-4 overflow-hidden px-4 pt-6 pb-6">
+      <h1 className="shrink-0 text-[17px] font-semibold tracking-tight">{t.title}</h1>
+      <p className="shrink-0 text-[13px] text-muted">{t.subtitle}</p>
+      {/* 分页签：设置页四块——通用（本应用诊断 / 更新 / 语言）、供应商（omp 登录登出）、
+          模型（omp 的模型角色与可用模型目录）、已归档对话（归档管理面，归档会话不在左栏出现，这里是它们唯一的入口）。 */}
       <div role="tablist" aria-label={t.title} className="flex shrink-0 gap-1 border-b border-border">
         {TABS.map((k) => (
           <button
@@ -66,10 +68,16 @@ export function SettingsPage() {
             role="tab"
             aria-selected={tab === k}
             onClick={() => setTab(k)}
-            className={`-mb-px cursor-pointer border-b-2 px-3 py-1.5 text-sm transition-colors duration-150 ${tab === k ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground"
+            className={`-mb-px cursor-pointer border-b-2 px-3 py-1.5 text-[13px] transition-colors duration-100 ${tab === k ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground"
               }`}
           >
-            {k === "general" ? t.tabGeneral : t.tabArchived}
+            {k === "general"
+              ? t.tabGeneral
+              : k === "providers"
+                ? t.tabProviders
+                : k === "models"
+                  ? t.tabModels
+                  : t.tabArchived}
           </button>
         ))}
       </div>
@@ -77,11 +85,15 @@ export function SettingsPage() {
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-1">
         {tab === "archived" ? (
           <ArchivedSessions />
+        ) : tab === "providers" ? (
+          <ProvidersPanel />
+        ) : tab === "models" ? (
+          <ModelsPanel />
         ) : (
           <>
-            <section aria-label={t.languageSection} className="rounded border border-border bg-surface p-3">
+            <section aria-label={t.languageSection} className="rounded-md border border-border bg-surface p-3.5">
               <div className="flex items-center gap-2">
-                <Languages size={14} aria-hidden className="text-muted" />
+                <Language size={14} aria-hidden className="text-muted" />
                 <h2 className="text-sm font-medium">{t.languageSection}</h2>
               </div>
               <div className="mt-2 flex gap-2" role="radiogroup" aria-label={t.languageSection}>
@@ -93,9 +105,9 @@ export function SettingsPage() {
                       role="radio"
                       aria-checked={selected}
                       onClick={() => setLocale(l)}
-                      className={`cursor-pointer rounded-lg border px-3 py-1.5 text-sm transition-colors duration-150 ${selected
+                      className={`cursor-pointer rounded-md border px-3 py-1.5 text-[13px] transition-colors duration-100 ${selected
                         ? "border-accent/60 bg-accent/10 text-foreground"
-                        : "border-border text-muted hover:bg-background hover:text-foreground"
+                        : "border-border text-muted hover:bg-hover hover:text-foreground"
                         }`}
                     >
                       {l === "zh-CN" ? "简体中文" : "English"}
@@ -103,9 +115,9 @@ export function SettingsPage() {
                   );
                 })}
               </div>
-              <p className="mt-1.5 text-xs text-muted/70">{t.languageHint}</p>
+              <p className="mt-1.5 text-[13px] text-faint">{t.languageHint}</p>
             </section>
-            <section aria-label={t.diagSection} className="rounded border border-border bg-surface p-3">
+            <section aria-label={t.diagSection} className="rounded-md border border-border bg-surface p-3.5">
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-medium">{t.diagSection}</h2>
                 <span className={`font-mono text-xs ${health?.ok ? "text-ok" : "text-warn"}`}>
@@ -113,23 +125,23 @@ export function SettingsPage() {
                 </span>
                 <button
                   onClick={() => void runDiag(refreshOmpHealth)}
-                  className="ml-auto flex cursor-pointer items-center gap-1 rounded border border-border px-2.5 py-1 text-xs transition-colors duration-150 hover:bg-background"
+                  className="ml-auto flex cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover"
                   aria-label={t.recheck}
                 >
-                  <RefreshCw size={12} aria-hidden />
+                  <Refresh size={12} aria-hidden />
                   {t.recheck}
                 </button>
                 <button
                   onClick={() => void runDiag(pickOmpExecutable)}
-                  className="flex cursor-pointer items-center gap-1 rounded border border-border px-2.5 py-1 text-xs transition-colors duration-150 hover:bg-background"
+                  className="flex cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover"
                   aria-label={t.pickPath}
                   title={t.pickPathTitle}
                 >
-                  <FolderSearch size={12} aria-hidden />
+                  <FolderError size={12} aria-hidden />
                   {t.pickPath}
                 </button>
               </div>
-              <dl className="mt-2 space-y-1 text-xs">
+              <dl className="mt-2 space-y-1 text-[13px]">
                 <div className="flex gap-2">
                   <dt className="w-20 shrink-0 text-muted">{t.ompPath}</dt>
                   <dd className="min-w-0 flex-1 font-mono break-all">{health?.omp.ompPath ?? t.notFound}</dd>
@@ -144,7 +156,7 @@ export function SettingsPage() {
                     <span className="min-w-0 flex-1 font-mono break-all">{health?.omp.agentDir ?? t.unknown}</span>
                     <button
                       onClick={() => void copyAgentDir()}
-                      className="shrink-0 cursor-pointer rounded border border-border p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground"
+                      className="shrink-0 cursor-pointer rounded-md border border-border p-1 text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
                       aria-label={t.copyAgentDir}
                       title={t.copyPath}
                     >
@@ -154,22 +166,22 @@ export function SettingsPage() {
                 </div>
               </dl>
               {(health?.omp.errors.length ?? 0) > 0 && (
-                <ul className="mt-2 space-y-0.5 text-xs text-warn">
+                <ul className="mt-2 space-y-0.5 text-[13px] text-warn">
                   {health?.omp.errors.map((e) => (
                     <li key={e}>{e}</li>
                   ))}
                 </ul>
               )}
-              {health?.modelsError && <p className="mt-1 text-xs text-warn">{health.modelsError}</p>}
+              {health?.modelsError && <p className="mt-1 text-[13px] text-warn">{health.modelsError}</p>}
               {diagError && (
-                <p role="alert" className="mt-1 text-xs text-danger">
+                <p role="alert" className="mt-1 text-[13px] text-danger">
                   {diagError}
                 </p>
               )}
-              <p className="mt-1.5 text-xs text-muted/70">{t.diagFoot}</p>
+              <p className="mt-1.5 text-[13px] text-faint">{t.diagFoot}</p>
             </section>
 
-            <section aria-label={t.updateSection} className="rounded border border-border bg-surface p-3">
+            <section aria-label={t.updateSection} className="rounded-md border border-border bg-surface p-3.5">
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-medium">{t.updateSection}</h2>
                 <span className="font-mono text-xs text-muted">
@@ -182,10 +194,10 @@ export function SettingsPage() {
                     })
                   }
                   disabled={checking}
-                  className="ml-auto flex cursor-pointer items-center gap-1 rounded border border-border px-3 py-1.5 text-sm transition-colors duration-200 hover:bg-background disabled:opacity-50"
+                  className="ml-auto flex cursor-pointer items-center gap-1 rounded-md border border-border px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
                   aria-label={t.checkUpdate}
                 >
-                  {checking ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <RefreshCw size={14} aria-hidden />}
+                  {checking ? <Loader size={14} className="animate-spin" aria-hidden /> : <Refresh size={14} aria-hidden />}
                   {t.checkUpdate}
                 </button>
               </div>
@@ -199,7 +211,7 @@ export function SettingsPage() {
                   )}
                 </div>
               )}
-              <p className="mt-1 text-xs text-muted">{t.updateFoot}</p>
+              <p className="mt-1 text-[13px] text-muted">{t.updateFoot}</p>
             </section>
           </>
         )}
@@ -208,7 +220,7 @@ export function SettingsPage() {
       <div className="shrink-0">
         <button
           onClick={() => set({ settingsOpen: false })}
-          className="cursor-pointer rounded border border-border px-4 py-2 text-sm transition-colors duration-200 hover:bg-background"
+          className="cursor-pointer rounded-md border border-border px-4 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover"
         >
           {t.back}
         </button>

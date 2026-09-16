@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Copy, Menu } from "lucide-react";
+import { Check, Copy, Menu } from "reicon-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
@@ -34,12 +34,12 @@ export function TopBar() {
     // Overlay 标题栏：左侧留 72px 给 macOS 红绿灯，标题缺省取当前任务标题
     <header
       data-tauri-drag-region
-      className="flex h-11 shrink-0 items-center gap-1 border-b border-border/70 bg-background pr-3 pl-[72px]"
+      className="flex h-11 shrink-0 items-center gap-1 border-b border-border bg-background pr-2 pl-[72px]"
     >
       {/* 窄窗（<768px）左栏收起为抽屉：这里必须有打开入口，否则项目列表与设置不可达 */}
       <button
         onClick={() => set({ sidebarOpen: true })}
-        className="mr-0.5 flex cursor-pointer items-center justify-center rounded p-1.5 text-muted transition-colors duration-150 hover:bg-surface hover:text-foreground md:hidden"
+        className="mr-0.5 flex cursor-pointer items-center justify-center rounded-md p-1.5 text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground md:hidden"
         aria-label={t.openSidebar}
         title={t.openSidebar}
       >
@@ -62,7 +62,7 @@ export function TopBar() {
             if (e.key === "Escape") setEditing(false);
           }}
           aria-label={t.renameNoteAria}
-          className="w-44 rounded border border-border bg-background px-2 py-1 text-sm outline-none"
+          className="w-44 rounded-md border border-border bg-background px-2 py-1 text-[13px] outline-none focus:border-accent/70"
         />
       ) : (
         <button
@@ -71,7 +71,7 @@ export function TopBar() {
             setEditing(true);
           }}
           disabled={!cur}
-          className="max-w-44 cursor-pointer truncate rounded px-1 text-[15px] font-semibold transition-colors duration-200 hover:bg-background disabled:cursor-default"
+          className="max-w-44 cursor-pointer truncate rounded-md px-1.5 py-0.5 text-[13px] font-semibold transition-colors duration-100 hover:bg-hover disabled:cursor-default"
           aria-label={cur ? fmt(t.chatTitleAria, title) : t.unnamedChat}
           title={cur ? t.chatTitleTitle : ""}
         >
@@ -83,7 +83,7 @@ export function TopBar() {
         <button
           onClick={() => void copyMarkdown()}
           disabled={!activeSessionId || (eventsBySession[activeSessionId]?.length ?? 0) === 0}
-          className="mr-1 cursor-pointer rounded p-1.5 text-muted transition-colors duration-150 hover:bg-surface hover:text-foreground disabled:cursor-default disabled:opacity-40"
+          className="mr-0.5 cursor-pointer rounded-md p-1.5 text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-40"
           aria-label={t.copyChatMd}
           title={t.copyChatMdTitle}
         >

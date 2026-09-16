@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { Check, ChevronRight, Loader2, X } from "lucide-react";
+import { Check, ChevronRight, Loader, X } from "reicon-react";
 import type { ViewMsg } from "@shared/types";
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
@@ -23,13 +23,13 @@ export function ToolCard({ m, cwd }: { m: Extract<ViewMsg, { kind: "tool" }>; cw
     m.state === "ok" ? "bg-ok" : m.state === "error" ? "bg-danger" : "bg-accent animate-pulse";
   return (
     <div
-      className={`rounded-xl border bg-surface/70 transition-colors duration-150 ${m.state === "error" ? "border-danger/60" : "border-border/70"}`}
+      className={`rounded-lg border bg-surface transition-colors duration-100 ${m.state === "error" ? "border-danger/60" : "border-border"}`}
       role="group"
       aria-label={fmt(t.toolAria, m.name, stateText)}
     >
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors duration-150 hover:bg-background/50"
+        className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors duration-100 hover:bg-hover"
         aria-expanded={open}
       >
         {m.state === "ok" ? (
@@ -37,20 +37,20 @@ export function ToolCard({ m, cwd }: { m: Extract<ViewMsg, { kind: "tool" }>; cw
         ) : m.state === "error" ? (
           <X size={14} className="shrink-0 text-danger" aria-hidden />
         ) : (
-          <Loader2 size={14} className="shrink-0 animate-spin text-accent" aria-hidden />
+          <Loader size={14} className="shrink-0 animate-spin text-accent" aria-hidden />
         )}
         <span className="font-mono text-sm font-medium">{m.name}</span>
         {m.intent && <span className="truncate text-sm text-muted">· {m.intent}</span>}
         <ChevronRight
           size={14}
           aria-hidden
-          className={`ml-auto shrink-0 text-muted transition-transform duration-200 ${open ? "rotate-90" : ""}`}
+          className={`ml-auto shrink-0 text-muted transition-transform duration-150 ${open ? "rotate-90" : ""}`}
         />
         <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} title={stateText} aria-hidden />
         <span className="sr-only">{stateText}</span>
       </button>
       {open && (
-        <div className="border-t border-border/70 px-3 py-2">
+        <div className="border-t border-border-soft px-3 py-2">
           <button
             className="block w-full cursor-pointer truncate text-left font-mono text-xs text-muted hover:text-foreground"
             title={fmt(t.toolOpenTitle, summary)}
@@ -66,13 +66,13 @@ export function ToolCard({ m, cwd }: { m: Extract<ViewMsg, { kind: "tool" }>; cw
           </button>
           {m.output && (
             <div className="mt-1.5">
-              <pre className="max-h-60 overflow-auto rounded-lg bg-code p-2.5 font-mono text-xs leading-5 whitespace-pre-wrap">
+              <pre className="max-h-60 overflow-auto rounded-md bg-code p-2.5 font-mono text-xs leading-5 whitespace-pre-wrap">
                 {showFull && m.outputFull ? m.outputFull : m.output}
               </pre>
               {m.outputFull && (
                 <button
                   onClick={() => setShowFull((v) => !v)}
-                  className="mt-1 cursor-pointer text-xs text-accent transition-opacity duration-150 hover:opacity-80"
+                  className="mt-1 cursor-pointer text-[13px] text-accent transition-opacity duration-150 hover:opacity-80"
                 >
                   {showFull ? t.collapse : t.expand}
                 </button>

@@ -1,4 +1,4 @@
-import { ShieldAlert, ShieldCheck, ShieldX } from "lucide-react";
+import { ShieldAlert, ShieldCheck, ShieldX } from "reicon-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
@@ -47,7 +47,7 @@ export function ApprovalCard({ m, sessionId }: { m: Extract<ViewMsg, { kind: "ap
       ref={ref}
       role="alertdialog"
       aria-label={decidedText ?? t.approvalTitle}
-      className={`rounded-xl border p-3.5 shadow-sm ${finished ? "border-border/60 bg-surface/60" : "border-warn/50 bg-surface"}`}
+      className={`rounded-lg border p-3.5 ${finished ? "border-border bg-surface" : "border-warn/60 bg-surface"}`}
     >
       <div className="flex items-center gap-2">
         {finished ? (
@@ -61,39 +61,39 @@ export function ApprovalCard({ m, sessionId }: { m: Extract<ViewMsg, { kind: "ap
         )}
         <span className="text-sm font-medium">{decidedText ?? t.approvalTitle}</span>
       </div>
-      <div className="mt-1.5 rounded-lg bg-code px-2.5 py-2 font-mono text-xs whitespace-pre-wrap">{m.title}</div>
+      <div className="mt-1.5 rounded-md bg-code px-2.5 py-2 font-mono text-xs whitespace-pre-wrap">{m.title}</div>
       {!finished && (
         <div className="mt-2.5 flex flex-wrap gap-2">
           <button
             onClick={() => void decide("once")}
             disabled={busy !== null}
             autoFocus
-            className="cursor-pointer rounded-lg bg-accent px-3.5 py-1.5 text-sm text-white transition-opacity duration-150 hover:opacity-90 disabled:opacity-50"
+            className="cursor-pointer rounded-md bg-accent px-3.5 py-1.5 text-[13px] font-medium text-white transition-opacity duration-150 hover:opacity-90 disabled:opacity-50"
           >
             {busy === "once" ? t.approvalBusy : t.approvalAllowOnce}
           </button>
           <button
             onClick={() => void decide("always")}
             disabled={busy !== null}
-            className="cursor-pointer rounded-lg border border-border px-3.5 py-1.5 text-sm transition-colors duration-150 hover:bg-background disabled:opacity-50"
+            className="cursor-pointer rounded-md border border-border px-3.5 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
           >
             {busy === "always" ? t.approvalBusy : t.approvalAllowAlways}
           </button>
           <button
             onClick={() => void decide("deny")}
             disabled={busy !== null}
-            className="cursor-pointer rounded-lg border border-danger/50 px-3.5 py-1.5 text-sm text-danger transition-colors duration-150 hover:bg-danger hover:text-white disabled:opacity-50"
+            className="cursor-pointer rounded-md border border-danger/50 px-3.5 py-1.5 text-[13px] text-danger transition-colors duration-100 hover:bg-danger/15 disabled:opacity-50"
           >
             {busy === "deny" ? t.approvalBusy : t.approvalDeny}
           </button>
         </div>
       )}
       {error && (
-        <div role="alert" className="mt-1.5 text-xs text-danger">
+        <div role="alert" className="mt-1.5 text-[13px] text-danger">
           {error}
         </div>
       )}
-      {!finished && locked && !error && <div className="mt-1.5 text-xs text-muted">{t.approvalWaiting}</div>}
+      {!finished && locked && !error && <div className="mt-1.5 text-[13px] text-muted">{t.approvalWaiting}</div>}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { GitInfo, HealthInfo, ImageAttachment, ModelCatalog, OmpInfo, Overlay, PathCheck, ProjectView, SessionPage, SessionRuntime, SessionSearchResult, SessionView, ViewMsg } from "./types";
+import type { GitInfo, HealthInfo, ImageAttachment, ModelCatalog, ModelRolesInfo, OmpInfo, Overlay, PathCheck, ProjectView, ProviderLoginStatus, ProviderView, SessionPage, SessionRuntime, SessionSearchResult, SessionView, ViewMsg } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -95,4 +95,22 @@ export const api = {
  setSessionApproval: (id: string, mode: string | null) =>
   call<void>("set_session_approval", { id, mode }),
  setOmpPath: (path: string | null) => call<OmpInfo>("set_omp_path", { path }),
+ /**
+  * 供应商（设置 › 供应商）：omp 的 login / logout / modelRoles 映射。
+  * 登录走 `omp auth-broker login` 子进程（不经 RPC——RPC 模式在「一个都没登录」的
+  * 环境里起不来），进度经 `omp-provider://login` 全量推送。
+  */
+ listProviders: () => call<ProviderView[]>("list_providers"),
+ getProviderLogin: () => call<ProviderLoginStatus>("get_provider_login"),
+ startProviderLogin: (providerId: string) =>
+  call<void>("start_provider_login", { providerId }),
+ /** 回答上游提问（选端点 / 粘贴 API key…）：一行文本写进登录子进程 stdin。 */
+ providerLoginInput: (text: string) => call<void>("provider_login_input", { text }),
+ cancelProviderLogin: () => call<void>("cancel_provider_login"),
+ /** 登出 = 删除该供应商在 omp 凭证库里的全部凭证（不可撤销，调用方需二次确认）。 */
+ logoutProvider: (providerId: string) => call<void>("logout_provider", { providerId }),
+ getModelRoles: () => call<ModelRolesInfo>("get_model_roles"),
+ /** 改一个角色；`selector = null` 删除该角色（未配置 = 按 omp 回退规则解析）。 */
+ setModelRole: (role: string, selector: string | null) =>
+  call<ModelRolesInfo>("set_model_role", { role, selector }),
 };
