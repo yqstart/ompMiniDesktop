@@ -120,6 +120,7 @@
 
 ### 变更
 
+- **左栏去掉全部删除入口，只留归档**（会话行与项目分组头都是）：删除不可逆，而会话文件是唯一真相，密集列表里误点代价太大。会话行的删除按钮与行内二次确认浮层、项目分组头的「删除全部对话」「删除工作区」一并从左栏移除；恢复 / 删除归档对话继续走「设置 › 已归档对话」（带 `ConfirmDialog` 二次确认）。分组头的批量只剩「归档全部对话」，`src/lib/sessionBatch.ts` 仍是批量分档与失败聚合的唯一实现（设置页共用）。随之清掉一批只服务于这些入口的字典键与前端状态（`ConfirmDialog` 在左栏的实例、分组级确认浮层、`pruneDeletedSessions` 调用）。**注**：项目解绑（后端 `remove_project`）自此没有界面入口——命令保留，需要时再定入口。
 - 实时流的工具卡改为**一次调用只出一张卡**：统一用 `tool:<toolCallId>` 作卡 id，新增纯函数 `mergeViewMsgs`（`src/lib/mergeEvents.ts`）按 id 原位合并、保留早期事件里的参数摘要与意图。此前 `toolcall_delta` / `toolcall_end` / `tool_execution_start` / `tool_execution_end` / `toolResult` 各自追加，一次调用渲染 2–3 张卡且「输入中」那张永远转圈（历史回放路径早已合并，直播路径漏了），并伴随 React 重复 key 警告。
 - 新建会话统一走 `createSessionIn`（`src/lib/sessionOpen.ts`）：左栏项目分组与中央空态共用一份实现，都会刷新列表、选中新会话、起 RPC 并拉历史。
 - 会话级权限覆盖改为**直接订阅 store**（启动时经 `get_overlay` 水合），不再用本地 state 拷贝——此前重启后徽标只显示全局档，与真实会话覆盖不一致。

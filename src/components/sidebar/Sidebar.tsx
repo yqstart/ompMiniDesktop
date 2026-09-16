@@ -4,13 +4,11 @@ import {
  ChevronRight,
  Folder,
  FolderError,
- FolderMinus,
  FolderPlus,
  Inbox,
  Plus,
  Search,
  Settings,
- Trash2,
  X,
 } from "reicon-react";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -21,28 +19,27 @@ import { pickAndAddProject, switchProject } from "../../lib/projects";
 import { groupSessionsByProject } from "../../lib/sessions";
 import { createSessionIn, openSessionWithHistory } from "../../lib/sessionOpen";
 import { SCAN_MAX, SCAN_STEP, loadSessions, scanMoreSessions } from "../../lib/sessionList";
-import { pruneDeletedSessions, runSessionBatch } from "../../lib/sessionBatch";
+import { runSessionBatch } from "../../lib/sessionBatch";
 import { highlightParts } from "../../lib/search";
 import { useText } from "../../lib/useText";
-import { ConfirmDialog } from "../ConfirmDialog";
 import { LanguageToggle } from "../LanguageToggle";
 import { ThemeToggle } from "../ThemeToggle";
 import type { SessionHit, SessionView } from "@shared/types";
 
 /**
- * 会话行：单行结构 `● 标题 … 时间/操作`，对齐截图。
+ * 会话行：单行结构 `● 标题 … 时间/归档`，对齐截图。
  * - 标题单行省略；右侧固定 68px 槽位：平时显示 mono 时间，hover / focus-within 时
- *   时间 visibility 隐藏（占位保留），操作按钮绝对覆盖同一槽位淡入——两者互斥、
+ *   时间 visibility 隐藏（占位保留），归档按钮绝对覆盖同一槽位淡入——两者互斥、
  *   外层布局零变化，悬浮不跳动。
- * - 归档、删除都在行内展示，不另起第二行；删除二次确认以浮层覆盖，不撑布局。
- * - 行首无复选框：批量归档/删除收归项目分组头（见 Sidebar），行内只做单个会话操作。
- * - 选中态底色 = 顶部「添加项目」主按钮同色（`accent`）的稀释填充 `bg-accent/15`，
- *   左侧全色 3px 竖条；项目分组头（当前项目）用同一套，全项目只有这一种选中视觉。
+ * - **行内只保留「归档」**：删除不可逆，左栏不做（会话文件是唯一真相，误点代价太大）。
+ *   已归档对话在「设置 › 已归档对话」里恢复或删除。
+ * - 行首无复选框：不做多选、不做「已选 N」批量工具条。
+ * - 选中态底色 = 顶部「添加项目」主按钮同色（`accent`）的稀释填充 `bg-active`，
+ *   左侧全色 2px 竖条；项目分组头（当前项目）用同一套，全项目只有这一种选中视觉。
  */
 function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void }) {
  const { activeSessionId, locale } = useApp();
  const t = useText();
- const [confirmDelete, setConfirmDelete] = useState(false);
  const active = s.id === activeSessionId;
  const time = s.corrupt
   ? t.corrupt
@@ -69,49 +66,16 @@ function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void })
      {time}
     </span>
    </button>
-   {!confirmDelete ? (
-    <span className="invisible absolute top-1/2 right-1.5 flex w-[68px] -translate-y-1/2 items-center justify-end gap-0.5 opacity-0 transition-opacity duration-150 group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100">
-     <button
-      onClick={() => api.archiveSession(s.id).then(onChanged)}
-      className="cursor-pointer rounded-md p-1 text-muted transition-colors duration-100 hover:bg-active hover:text-foreground"
-      aria-label={s.running ? t.archiveChatRunning : t.archiveChat}
-      title={s.running ? t.archiveChatRunning : t.archiveChat}
-     >
-      <Archive size={13} />
-     </button>
-     <button
-      onClick={() => setConfirmDelete(true)}
-      className="cursor-pointer rounded-md p-1 text-muted transition-colors duration-100 hover:bg-danger/15 hover:text-danger"
-      aria-label={t.deleteChat}
-      title={t.deleteChat}
-     >
-      <Trash2 size={13} />
-     </button>
-    </span>
-   ) : (
-    <span className="absolute top-1/2 right-1 z-10 flex -translate-y-1/2 items-center gap-1 rounded-md border border-border bg-surface px-1.5 py-1 text-[13px] whitespace-nowrap shadow-lg">
-     <span className="text-danger">{t.confirmDeleteShort}</span>
-     <button
-      onClick={() =>
-       api.deleteSession(s.id).then(() => {
-        onChanged();
-        setConfirmDelete(false);
-       })
-      }
-      className="cursor-pointer rounded-md bg-danger px-1.5 py-0.5 text-white"
-      aria-label={t.confirmDeleteAria}
-     >
-      {t.delete}
-     </button>
-     <button
-      onClick={() => setConfirmDelete(false)}
-      className="cursor-pointer rounded-md border border-border px-1.5 py-0.5"
-      aria-label={t.cancelDeleteAria}
-     >
-      {t.cancel}
-     </button>
-    </span>
-   )}
+   <span className="invisible absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center justify-end opacity-0 transition-opacity duration-150 group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100">
+    <button
+     onClick={() => api.archiveSession(s.id).then(onChanged)}
+     className="cursor-pointer rounded-md p-1 text-muted transition-colors duration-100 hover:bg-active hover:text-foreground"
+     aria-label={s.running ? t.archiveChatRunning : t.archiveChat}
+     title={s.running ? t.archiveChatRunning : t.archiveChat}
+    >
+     <Archive size={13} />
+    </button>
+   </span>
   </div>
  );
 }
@@ -122,11 +86,6 @@ export function Sidebar() {
  const [query, setQuery] = useState("");
  const [busy, setBusy] = useState(false);
  const [error, setError] = useState<string | null>(null);
- // 正在二次确认的项目操作（浮层确认，不撑布局；一次只确认一个）：
- // purge = 删除该工作区全部对话（真删 jsonl）；remove = 删除工作区（解绑 + 名下对话全部归档）
- const [confirmProject, setConfirmProject] = useState<{ id: string; kind: "purge" | "remove" } | null>(null);
- /** 批量删除的通用二次确认（ConfirmDialog）；项目内联浮层仍走 confirmProject。 */
- const [confirmBatch, setConfirmBatch] = useState<{ ids: string[]; title: string; detail: string } | null>(null);
 
  useEffect(() => {
   // 会话一次全量拉取，前端按项目分组（修复：之前按 activeProjectId 传参，
@@ -165,67 +124,23 @@ export function Sidebar() {
   }
  };
 
- /** 项目 / 分组级批量操作：分批与失败聚合收在 `lib/sessionBatch`（设置页归档管理共用同一份）。
-  *  delete 先弹通用 ConfirmDialog（MASTER §8）；项目内浮层已二次确认时传 confirmed 跳过。
-  *  左栏只列进行中的会话——已归档的对话在设置 ›「已归档对话」里管理，不在这里出现。 */
- const runBatch = async (
-  kind: "archive" | "delete",
-  ids: string[],
-  opts: { confirmed?: boolean } = {},
- ) => {
+ /** 分组级批量**归档**（`lib/sessionBatch`：分批 + 失败聚合）。
+  *  左栏只列进行中的会话，已归档的对话在设置 ›「已归档对话」里管理。
+  *  **左栏不提供删除**：删除不可逆，只出现在设置页的归档管理里（同样走二次确认）。 */
+ const runArchiveAll = async (ids: string[]) => {
   if (ids.length === 0) return;
-  if (kind === "delete" && !opts.confirmed) {
-   // 统一走 ConfirmDialog：此前这里用 window.confirm，成了第二种确认样式
-   setConfirmBatch({
-    ids,
-    title: fmt(t.batchDeleteTitle, ids.length),
-    detail: t.batchDeleteDetail,
-   });
-   return;
-  }
   setBusy(true);
   setError(null);
   try {
-   const res = await runSessionBatch(kind, ids);
-   // 只清真正删掉的：失败的那些还在列表里，保留缓存供继续阅读
-   if (kind === "delete") {
-    pruneDeletedSessions(ids.filter((id) => !res.failed.some((f) => f.id === id)));
-   }
+   const res = await runSessionBatch("archive", ids);
    await refreshSessions();
    if (res.failed.length > 0) {
-    setError(
-     fmt(
-      kind === "archive" ? t.batchArchivePartial : t.batchDeletePartial,
-      res.failed.map((f) => f.message || f.id).join("；"),
-     ),
-    );
+    setError(fmt(t.batchArchivePartial, res.failed.map((f) => f.message || f.id).join("；")));
    }
   } catch (e) {
-   setError(e instanceof Error ? e.message : kind === "archive" ? t.batchArchiveFailed : t.batchDeleteFailed);
+   setError(e instanceof Error ? e.message : t.batchArchiveFailed);
   } finally {
    setBusy(false);
-  }
- };
-
- /** 删除工作区（解绑）：只摘掉项目条目，不删任何会话文件；
-  *  名下全部对话由后端按 cwd 扫描后标记归档保留（含进行中与已归档）。 */
- const removeWorkspace = async (projectId: string) => {
-  try {
-   await api.removeProject(projectId);
-   setConfirmProject(null);
-   const st = useApp.getState();
-   const nextProjects = st.projects.filter((p) => p.id !== projectId);
-   // 被删工作区若是当前上下文，切到首个剩余项目；正看的会话若归属它，不断开阅读。
-   set({
-    projects: nextProjects,
-    activeProjectId:
-     st.activeProjectId === projectId
-      ? (nextProjects.find((p) => !p.missing)?.id ?? nextProjects[0]?.id ?? null)
-      : st.activeProjectId,
-   });
-   await refreshAll();
-  } catch (e) {
-   setError(e instanceof Error ? e.message : t.removeWorkspaceFailed);
   }
  };
 
@@ -371,10 +286,6 @@ export function Sidebar() {
       </div>
      )}
      {visibleGroups.map(({ project, active }) => {
-      // 模板里 `{0}` 是项目名（渲染时加粗）：按它切开再各自填充其余占位，
-      // EN 语序不同（名字在后）也对得上。
-      const purgeTitle = t.purgeConfirmTitle.split("{0}");
-      const removeTitle = t.removeConfirmTitle.split("{0}");
       return (
        <details
         key={project.id}
@@ -410,14 +321,14 @@ export function Sidebar() {
            <span className="ml-1.5 truncate font-mono text-[11px] text-faint">{project.path}</span>
           )}
          </span>
-         {/* 右侧固定槽位：数量与批量按钮同槽互斥，垂直居中，悬浮零跳动。
-                      三个批量入口常驻 hover 操作区——归档全部对话 / 删除全部对话 /
-                      删除工作区（解绑 + 名下对话归档）；缺失态同样保留，保证可清理。 */}
-         <span className="relative flex h-5 w-[76px] shrink-0 items-center justify-end">
+         {/* 右侧固定槽位：数量与操作按钮同槽互斥，垂直居中，悬浮零跳动。
+                      槽位里的操作 = **归档全部对话**；**没有任何删除入口**
+                      （删除不可逆，只留在设置 ›「已归档对话」里）；缺失态同样保留。 */}
+         <span className="relative flex h-5 w-[28px] shrink-0 items-center justify-end">
           <span className="font-mono group-hover/proj:invisible">{active.length}</span>
           <span className="absolute inset-y-0 right-0 hidden items-center gap-0.5 group-hover/proj:flex" onClick={(e) => e.preventDefault()}>
            <button
-            onClick={() => void runBatch("archive", active.map((s) => s.id))}
+            onClick={() => void runArchiveAll(active.map((s) => s.id))}
             disabled={busy || active.length === 0}
             className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-100 hover:bg-active hover:text-foreground disabled:opacity-40"
             aria-label={fmt(t.archiveAllIn, project.name)}
@@ -425,91 +336,9 @@ export function Sidebar() {
            >
             <Archive size={12} />
            </button>
-           <button
-            onClick={() => setConfirmProject({ id: project.id, kind: "purge" })}
-            disabled={busy || active.length === 0}
-            className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-100 hover:bg-danger/15 hover:text-danger disabled:opacity-40"
-            aria-label={fmt(t.deleteAllIn, project.name)}
-            title={fmt(t.deleteAllInTitle, active.length)}
-           >
-            <Trash2 size={12} />
-           </button>
-           <button
-            onClick={() => setConfirmProject({ id: project.id, kind: "remove" })}
-            disabled={busy}
-            className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-100 hover:bg-danger/15 hover:text-danger disabled:opacity-40"
-            aria-label={fmt(t.removeWorkspaceAria, project.name)}
-            title={t.removeWorkspaceTitle}
-           >
-            <FolderMinus size={12} />
-           </button>
           </span>
          </span>
         </summary>
-        {/* 项目二次确认浮层：purge = 真删全部对话（不可恢复）；remove = 删除工作区（解绑，对话归档保留）。 */}
-        {confirmProject?.id === project.id && (
-         <div className="mx-1.5 mt-1 flex flex-col gap-1.5 rounded-lg border border-border bg-elevated px-2.5 py-2 text-[13px] shadow-pop">
-          {confirmProject.kind === "purge" ? (
-           <>
-            <div>
-             {fmt(purgeTitle[0], project.name, active.length)}
-             <span className="font-medium text-foreground">{project.name}</span>
-             {fmt(purgeTitle[1] ?? "", project.name, active.length)}
-            </div>
-            <div className="leading-5 text-muted">{fmt(t.purgeConfirmBody, active.length)}</div>
-            <div className="flex flex-wrap justify-end gap-1.5">
-             <button
-              onClick={() => setConfirmProject(null)}
-              className="cursor-pointer rounded-md border border-border px-2.5 py-1 transition-colors duration-100 hover:bg-hover"
-              aria-label={t.cancel}
-             >
-              {t.cancel}
-             </button>
-             <button
-              onClick={() =>
-               void runBatch("delete", active.map((s) => s.id), { confirmed: true }).then(() =>
-                setConfirmProject(null),
-               )
-              }
-              disabled={busy}
-              className="cursor-pointer rounded-md bg-danger px-2.5 py-1 text-white transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
-              aria-label={fmt(t.deleteAllIn, project.name)}
-             >
-              {fmt(t.purgeConfirmButton, active.length)}
-             </button>
-            </div>
-           </>
-          ) : (
-           <>
-            <div>
-             {fmt(removeTitle[0], project.name)}
-             <span className="font-medium text-foreground">{project.name}</span>
-             {fmt(removeTitle[1] ?? "", project.name)}
-            </div>
-            <div className="leading-5 text-muted">
-             {active.length > 0 ? fmt(t.removeConfirmBodyChats, active.length) : t.removeConfirmBodyEmpty}
-            </div>
-            <div className="flex flex-wrap justify-end gap-1.5">
-             <button
-              onClick={() => setConfirmProject(null)}
-              className="cursor-pointer rounded-md border border-border px-2.5 py-1 transition-colors duration-100 hover:bg-hover"
-              aria-label={t.cancel}
-             >
-              {t.cancel}
-             </button>
-             <button
-              onClick={() => void removeWorkspace(project.id)}
-              disabled={busy}
-              className="cursor-pointer rounded-md border border-danger/60 px-2.5 py-1 text-danger transition-colors duration-100 hover:bg-danger/10 disabled:opacity-40"
-              aria-label={fmt(t.removeWorkspaceAria, project.name)}
-             >
-              {t.removeWorkspace}
-             </button>
-            </div>
-           </>
-          )}
-         </div>
-        )}
         {project.missing && (
          <div className="mx-1.5 mb-1 flex items-center gap-1.5 rounded-md bg-warn/10 px-2 py-1.5 text-[11px] text-warn">
           <FolderError size={12} aria-hidden className="shrink-0" />
@@ -552,26 +381,17 @@ export function Sidebar() {
         <ChevronRight size={12} aria-hidden className="transition-transform duration-150 group-open/orphan:rotate-90" />
         <Inbox size={13} aria-hidden className="shrink-0 text-faint" />
         <span className="min-w-0 flex-1 truncate">{t.orphanChats}</span>
-        <span className="relative flex h-5 w-[52px] shrink-0 items-center justify-end">
+        <span className="relative flex h-5 w-[28px] shrink-0 items-center justify-end">
          <span className="font-mono group-hover/orphan:invisible">{visibleOrphanActive.length}</span>
          <span className="absolute inset-y-0 right-0 hidden items-center gap-0.5 group-hover/orphan:flex" onClick={(e) => e.preventDefault()}>
           <button
-           onClick={() => void runBatch("archive", visibleOrphanActive.map((s) => s.id))}
+           onClick={() => void runArchiveAll(visibleOrphanActive.map((s) => s.id))}
            disabled={busy || visibleOrphanActive.length === 0}
            className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-100 hover:bg-active hover:text-foreground disabled:opacity-40"
            aria-label={t.archiveOrphanAll}
            title={t.archiveOrphanAll}
           >
            <Archive size={12} />
-          </button>
-          <button
-           onClick={() => void runBatch("delete", visibleOrphanActive.map((s) => s.id))}
-           disabled={busy || visibleOrphanActive.length === 0}
-           className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-100 hover:bg-danger/15 hover:text-danger disabled:opacity-40"
-           aria-label={t.deleteOrphanAll}
-           title={t.deleteOrphanAllTitle}
-          >
-           <Trash2 size={12} />
           </button>
          </span>
         </span>
@@ -619,19 +439,6 @@ export function Sidebar() {
     <LanguageToggle />
     <ThemeToggle />
    </div>
-   <ConfirmDialog
-    open={confirmBatch !== null}
-    title={confirmBatch?.title ?? ""}
-    detail={confirmBatch?.detail}
-    confirmLabel={t.delete}
-    danger
-    onCancel={() => setConfirmBatch(null)}
-    onConfirm={() => {
-     const batch = confirmBatch;
-     setConfirmBatch(null);
-     if (batch) void runBatch("delete", batch.ids, { confirmed: true });
-    }}
-   />
   </aside>
  );
 }
