@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import type { HealthInfo, ImageAttachment, ModelCatalog, ProjectView, ProviderUsage, SessionRuntime, SessionStatus, SessionView, TodoPhase, UpdateState, ViewMsg } from "@shared/types";
-import type { SessionCapabilities } from "../lib/capabilities";
 import type { Locale, LocaleMode } from "../lib/locale";
 import { loadLocaleMode, resolveLocale, saveLocaleMode, systemLang } from "../lib/locale";
 import { applyTheme, loadTheme, saveTheme, type ThemeMode } from "../lib/theme";
@@ -31,9 +30,6 @@ type AppState = {
  currentEfforts: string[] | null;
  /** 当前会话的运行时真值快照（上下文占用 / 本轮用量 / 耗时）：状态条纯透传的数据源。 */
  currentRuntime: SessionRuntime | null;
- /** omp 会话级能力开关的已知状态（`advisor` / `computer`，按会话隔离）。
-  *  数据只来自 omp 自己的 `<cmd> status` 输出（见 `src/lib/capabilities.ts`）——拿不到就是空，不猜。 */
- capabilitiesBySession: Record<string, SessionCapabilities>;
  /** 任务计划（`todoPhases` 真值 + `todo_reminder` 事件合并，按会话隔离；只读展示）。 */
  plansBySession: Record<string, TodoPhase[]>;
  sessionApprovals: Record<string, string>;
@@ -44,7 +40,7 @@ type AppState = {
  /** 配额是否正在拉取（刷新按钮的 loader 与首屏占位都用它）。 */
  providerUsageLoading: boolean;
  /** 输入框工具行与上方上下文条的下拉互斥：同一时刻只开一个（model/thinking/permission/project/branch/context/usage）。 */
- composerMenu: "model" | "thinking" | "permission" | "project" | "branch" | "context" | "usage" | "caps" | null;
+ composerMenu: "model" | "thinking" | "permission" | "project" | "branch" | "context" | "usage" | null;
  settingsOpen: boolean;
  sidebarOpen: boolean;
  update: UpdateState;
@@ -130,7 +126,6 @@ export const useApp = create<AppState>((set, get) => ({
  currentThinking: null,
  currentEfforts: null,
  currentRuntime: null,
- capabilitiesBySession: {},
  plansBySession: {},
  sessionApprovals: {},
  providerUsage: null,

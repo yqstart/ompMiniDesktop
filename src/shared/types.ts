@@ -207,12 +207,26 @@ export type TodoTask = { id: string; content: string; status: string };
 /** 任务计划的一个阶段。 */
 export type TodoPhase = { id: string; name: string; tasks: TodoTask[] };
 
-/** 可用命令（`available_commands_update` 透传；`/` 补全的数据源）。 */
+/** 可用命令的一条子命令（omp `subcommands[]` 原样透传；本期只作行内说明，不做二级补全）。 */
+export type AvailableSubcommand = { name: string; description?: string; usage?: string };
+
+/**
+ * 可用命令（`available_commands_update` 透传；`/` 补全的数据源）。
+ *
+ * `source` 实测取值：`builtin` / `skill` / `extension` / `custom` / `file`。
+ * **技能就是命令面里 `skill:<名>` 的那批**（omp 的 `skills.enableSkillCommands`），不是另一套
+ * 数据——所以补全列表不另扫技能目录，扫了只会与命令面重复，还要复刻 omp 的加载优先级。
+ * `hint` 线上形状是 `input.hint`，由 `lib/slashCommands.ts` 归一时折平（类型保留扁平写法）。
+ */
 export type AvailableCommand = {
  name: string;
  description?: string;
  aliases?: string[];
+ /** 参数提示（omp `input.hint`，如 `/compact` → `[soft|remote|snapcompact] [focus]`）。 */
  hint?: string;
+ /** 来源；`skill` 归入补全列表的「技能」组。 */
+ source?: string;
+ subcommands?: AvailableSubcommand[];
 };
 
 /**

@@ -7,7 +7,7 @@ import type { SessionRuntime, SessionStatus, ViewMsg } from "@shared/types";
 import { summarizeArgs, mentionFilesOf, diffStatOf } from "./viewmsg";
 import { fmt, TEXT, type Text } from "./locale";
 import { imagesFromContent } from "./attachments";
-import { parseCapabilityProbe } from "./capabilities";
+import { normalizeCommands } from "./slashCommands";
 import { resolveThinking } from "./thinking";
 import { mergeViewMsgs, type IncomingViewMsg } from "./mergeEvents";
 
@@ -299,26 +299,13 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dic
   return out;
  }
  // 本地命令输出（`/` 命令经 prompt 直发，无 agent turn）：
- // 后端已把状态收敛到 idle，此处渲染输出文本，并顺带认一下 omp 的能力状态行
- // （`/advisor status` / `/computer status`）落进 store——「能力」面板的状态来源。
+ // 后端已把状态收敛到 idle，此处渲染输出文本。
  // 字段名以真机为准：omp 18.2.1 发的是 `text`（`output` 是早期 canned 脚本的形状，一并兼容）。
  if (t === "command_output") {
   const text = String(
    (frame as Record<string, unknown>).text ?? (frame as Record<string, unknown>).output ?? "",
   );
   if (text) out.push({ kind: "command", id: `cmd-${String(frame.id ?? Date.now())}`, output: text });
-  const probe = parseCapabilityProbe(text);
-  if (probe) {
-   useApp.setState((s) => ({
-    capabilitiesBySession: {
-     ...s.capabilitiesBySession,
-     [sid]: {
-      ...(s.capabilitiesBySession[sid] ?? {}),
-      [probe.id]: { value: probe.value, detail: probe.detail, at: Date.now() },
-     },
-    },
-   }));
-  }
   return out;
  }
  // 本地命令完成信号（`prompt_result{agentInvoked:false}`）：无输出就不渲染，
@@ -372,7 +359,8 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dic
  if (t === "turn_start" || t === "turn_end" || t === "agent_start" || t === "agent_end") return out;
  // 单向宿主通知（握手期就会到，现在经回放正常抵达）：没有渲染面，安静忽略，
  // 不占「未知帧」告警位（那是留给真正的协议漂移的）。
- if (t === "advisor_cost_changed") return out;
+ // 命令面同理：它有专门的消费者（见 `useSessionEvents` 里的事件监听），落到这里只保证不告警。
+ if (t === "advisor_cost_changed" || t === "available_commands_update") return out;
  // 其余未知帧：忽略不崩，但每个类型只告警一次（M4 协议漂移 guard——
  // omp 大版本升级后事件名对不上时，日志里能直接看出来是哪一类帧变了）。
  if (!unknownFrameTypes.has(t)) {
@@ -404,6 +392,18 @@ function applyRuntime(sid: string, rt: SessionRuntime) {
 }
 
 /**
+ * 命令面刷新：只替换 `currentRuntime.commands`，别的字段原样留着
+ * （`applyRuntime` 是整块覆盖，拿它更新命令面会顺手抹掉刚推来的模型 / 档位 / 用量）。
+ * 运行时真值还没到位时直接丢弃——那种情况下 `syncSessionRuntime` 的补拉会带上命令面
+ * （后端 `SessionMeta.commands` 早已缓存），不必在这里另存一份。
+ */
+function applyCommands(sid: string, raw: unknown) {
+ const st = useApp.getState();
+ if (st.activeSessionId !== sid || !st.currentRuntime) return;
+ useApp.setState({ currentRuntime: { ...st.currentRuntime, commands: normalizeCommands(raw) } });
+}
+
+/**
  * 补拉一次运行时真值（模型 / 思考档 / 上下文占用 / 命令面）。
  *
  * 两个调用点，缺一不可：订阅建立时（消除「推送早于订阅」的竞态）与 `open_session`
@@ -432,6 +432,13 @@ export function useSessionEvents() {
   set({ currentModel: null, currentThinking: null, currentEfforts: null, currentRuntime: null });
   (async () => {
    off1 = await listen<Record<string, unknown>>(IPC.sessionEvent(sid), (e) => {
+    // 命令面变化（装/卸技能与扩展时 omp 会重发）：只更新运行时真值，不进消息流。
+    // 握手期那一发通常早于本订阅，所以 `syncSessionRuntime` 的补拉才是第一次到位的路径，
+    // 这里管的是"会话开着时命令面又变了"。
+    if (e.payload?.type === "available_commands_update") {
+     applyCommands(sid, e.payload.commands);
+     return;
+    }
     // 语言按帧到达时刻取：切语言后新帧立刻用新语言，已渲染的旧分隔线要重开会话才换
     const msgs = frameToViewMsgs(sid, e.payload, TEXT[useApp.getState().locale]) as IncomingViewMsg[];
     if (msgs.length > 0) {

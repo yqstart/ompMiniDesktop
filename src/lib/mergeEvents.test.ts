@@ -392,22 +392,11 @@ describe("实时流：本地命令与计划事件", () => {
   expect(msgs[1]).toMatchObject({ kind: "divider", text: "上下文已压缩" });
  });
 
- it("command_output 既渲染成 command 块，又把能力状态写进 store", () => {
+ it("command_output 渲染成 command 块（原文透传，不解析内容）", () => {
   const msgs = replay([
    { type: "command_output", text: "Advisor is enabled (openai/gpt-5.6). Context: 0 / 100 tokens (0%)." },
   ]);
   expect(msgs).toMatchObject([{ kind: "command", output: "Advisor is enabled (openai/gpt-5.6). Context: 0 / 100 tokens (0%)." }]);
-  expect(useApp.getState().capabilitiesBySession[SID]?.advisor).toMatchObject({
-   value: "on",
-   detail: "openai/gpt-5.6",
-  });
- });
-
- it("普通命令输出只渲染、不污染能力状态", () => {
-  useApp.setState({ capabilitiesBySession: {} });
-  const msgs = replay([{ type: "command_output", text: "Usage (3m ago)" }]);
-  expect(msgs).toMatchObject([{ kind: "command" }]);
-  expect(useApp.getState().capabilitiesBySession[SID]).toBeUndefined();
  });
 });
 

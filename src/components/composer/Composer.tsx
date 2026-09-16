@@ -6,14 +6,16 @@ import { api } from "@shared/api";
 import { attachmentFromFile, dataUrl } from "../../lib/attachments";
 import { fmt } from "../../lib/locale";
 import { extractMentions } from "../../lib/mentions";
+import { commandInsert, filterCommands, isCompleteCommand, normalizeCommands, type SlashCandidate } from "../../lib/slashCommands";
 import { useText } from "../../lib/useText";
 import { ModelPicker } from "../pickers/ModelPicker";
 import { ThinkingPicker } from "../pickers/ThinkingPicker";
 import { PermissionBadge } from "../pickers/PermissionBadge";
 import { CompactButton, OmpStatusPill, QueueBadge, RuntimeStats } from "../thread/StatusBar";
 import { ContextBar } from "./ContextBar";
-import { CapabilityMenu } from "./CapabilityMenu";
 import { ContextMeter } from "./ContextMeter";
+import { MentionList } from "./MentionList";
+import { SlashMenu } from "./SlashMenu";
 
 /**
  * 会话输入框：随心输入 + 底部工具行（截图布局）。
@@ -25,7 +27,7 @@ import { ContextMeter } from "./ContextMeter";
  */
 export function Composer() {
  const t = useText();
- const { activeSessionId, draftOf, setDraft, statusBySession, sessions, attachmentsOf, addAttachments, removeAttachment, clearAttachments, currentModel, models } =
+ const { activeSessionId, draftOf, setDraft, statusBySession, sessions, attachmentsOf, addAttachments, removeAttachment, clearAttachments, currentModel, currentRuntime, models } =
   useApp();
  const persistDraft = (sid: string | null, text: string) => {
   setDraft(sid, text);
@@ -77,15 +79,39 @@ export function Composer() {
   };
  }, [mentionKey, cwd, mentions]);
 
-// `/` 开头的文本仍是本地命令（`send()` 里直发 `run_slash`），但**不再弹命令列表**：
-// 常用的几个 omp 能力已经做成交互控件（工具行的 `CapabilityMenu`），其余命令直接打字发。
+// 补全浮层有两套：`/` 命令面（数据是 omp 自己的 `available_commands_update`）与 `@` 路径。
+ // 两者互斥——草稿以 `/` 开头时整条就是一条命令，不该再冒出路径候选。
+ const commands = useMemo(() => normalizeCommands(currentRuntime?.commands), [currentRuntime?.commands]);
+ // `/` 补全只在草稿是单条命令、光标还在首个 token 内时开。**流式中不开**：那时 Enter 走 follow_up
+ // 排队，`/xxx` 是当文本发出去的，弹出补全等于暗示它能当命令跑。
+ const slashToken = (() => {
+  if (running || !activeSessionId) return null;
+  const m = /^\/(\S*)$/.exec(draft.slice(0, caret));
+  return m ? m[1] : null;
+ })();
+ // Esc 关掉后记住当时的 token：token 一变（继续打字）就重新打开，不用手动清标记
+ const [slashDismissed, setSlashDismissed] = useState<string | null>(null);
+ const slashOpen = slashToken !== null && slashToken !== slashDismissed && commands.length > 0;
+ const slashCands = useMemo(
+  () => (slashOpen ? filterCommands(commands, slashToken ?? "") : []),
+  [slashOpen, commands, slashToken],
+ );
+ // 高亮跟着输入走：slashKey 一变（继续打字 / 命令面刷新）就当回到第一条。
+ // 不用 effect 重置——effect 里同步 setState 会多打一轮渲染，react-hooks 规则也不让。
+ const slashKey = `${slashToken ?? ""}\u0000${commands.length}`;
+ const [slashNav, setSlashNav] = useState<{ key: string; idx: number }>({ key: "", idx: 0 });
+ const slashIdx = slashNav.key === slashKey ? slashNav.idx : 0;
+ const hoverSlash = (idx: number) => setSlashNav({ key: slashKey, idx });
+ const moveSlash = (step: number) =>
+  setSlashNav({ key: slashKey, idx: (slashIdx + step + slashCands.length) % (slashCands.length || 1) });
+
  // `@` 补全：取光标前 `@` 起的路径前缀，300ms 防抖问后端（只读目录列举）。
  const mentionToken = (() => {
   const before = draft.slice(0, caret);
   const m = /@([^\s@]*)$/.exec(before);
   return m ? m[1] : null;
  })();
- const mentionEmpty = mentionToken == null || !cwd || !activeSessionId;
+ const mentionEmpty = mentionToken == null || !cwd || !activeSessionId || slashToken !== null;
  useEffect(() => {
   if (mentionEmpty) return;
   let alive = true;
@@ -105,6 +131,24 @@ export function Composer() {
    clearTimeout(timer);
   };
  }, [mentionToken, cwd, activeSessionId, mentionEmpty]);
+
+ // 选中一条候选：把光标前的 `@前缀` 换成完整路径（目录补 `/` 接着往里打，文件补空格收尾）。
+ // 点击、Tab、Enter 三个入口共用它，免得三处各写一遍替换规则。
+ const pickMention = (c: { path: string; isDir: boolean }) => {
+  const before = draft.slice(0, caret);
+  setDraft(activeSessionId, before.replace(/@[^\s@]*$/, `@${c.path}${c.isDir ? "/" : " "}`) + draft.slice(caret));
+  setMentionIdx(-1);
+  setMentionCands([]);
+ };
+
+ // 选中一条命令：整条草稿就是这条命令（`/` 开头的语法如此），所以直接换成完整名 + 一个空格；
+ // 若首个 token 之后还有内容（在 token 中间补全），接到命令后面而不是丢掉。
+ const pickCommand = (c: SlashCandidate) => {
+  const sp = draft.search(/\s/);
+  const tail = sp >= 0 ? draft.slice(sp).trimStart() : "";
+  setDraft(activeSessionId, commandInsert(c) + tail);
+  setSlashDismissed(slashToken);
+ };
 
  // 模型是否支持图片（模型目录里 `input` 含 image）；目录没加载出来时不做判断，不误报
  const model = models?.models.find((m) => `${m.provider}/${m.id}` === currentModel);
@@ -311,27 +355,11 @@ export function Composer() {
     </label>
     {/* `@` 路径补全：前缀匹配的目录列举，Tab/Enter 选中 */}
     {mentionToken !== null && !mentionEmpty && mentionCands.length > 0 && (
-     <div className="mx-3 mb-1 overflow-hidden rounded-md border border-border bg-elevated shadow-pop" role="listbox" aria-label={t.mentionListAria}>
-      {mentionCands.map((c, i) => (
-       <button
-        key={c.path}
-        role="option"
-        aria-selected={i === mentionIdx}
-        onClick={() => {
-         const before = draft.slice(0, caret);
-         const after = draft.slice(caret);
-         const replaced = before.replace(/@[^\s@]*$/, `@${c.path}${c.isDir ? "/" : " "}`);
-         setDraft(activeSessionId, replaced + after);
-         setMentionIdx(-1);
-         setMentionCands([]);
-        }}
-        onMouseEnter={() => setMentionIdx(i)}
-        className={`block w-full cursor-pointer px-2.5 py-1.5 text-left font-mono text-[13px] ${i === mentionIdx ? "bg-hover text-foreground" : "text-muted"}`}
-       >
-        {c.isDir ? `${c.path}/` : c.path}
-       </button>
-      ))}
-     </div>
+     <MentionList cands={mentionCands} active={mentionIdx} onPick={pickMention} onHover={setMentionIdx} />
+    )}
+    {/* `/` 命令补全：omp 命令面（含技能），限高内部滚动，不挤压输入框 */}
+    {slashOpen && (
+     <SlashMenu cands={slashCands} active={slashIdx} query={slashToken ?? ""} onPick={pickCommand} onHover={hoverSlash} />
     )}
     <textarea
      id="composer"
@@ -364,7 +392,38 @@ export function Composer() {
       void addFiles(files);
      }}
      onKeyDown={(e) => {
-      // 补全打开时：上下键导航、Tab/Enter 选中、Esc 关闭（优先于发送）
+      // `/` 命令补全打开时先接管键盘（它和 `@` 补全互斥，开着就说明草稿是条命令）。
+      // Esc 用 slashOpen 判定：零命中时面板也在，也该关得掉。
+      if (slashOpen && e.key === "Escape") {
+       setSlashDismissed(slashToken);
+       return;
+      }
+      const slashActive = slashOpen && slashCands.length > 0;
+      if (slashActive && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+       e.preventDefault();
+       moveSlash(e.key === "ArrowDown" ? 1 : -1);
+       return;
+      }
+      if (slashActive && e.key === "Tab") {
+       e.preventDefault();
+       // 没有高亮（slashIdx = -1）时补第一项：Tab 在补全里不该"什么都不做"
+       const c = slashCands[Math.max(0, slashIdx)];
+       if (c) pickCommand(c);
+       return;
+      }
+      if (slashActive && e.key === "Enter" && !e.shiftKey && !(e.metaKey || e.ctrlKey)) {
+       // **打全即发**：首 token 已是完整命令名（含别名）时不拦，交给下面的发送逻辑；
+       // 否则补全——不然打 `/comp` 回车会被当成把半截命令发出去。
+       if (!isCompleteCommand(commands, slashToken ?? "")) {
+        const c = slashIdx >= 0 ? slashCands[slashIdx] : undefined;
+        if (c) {
+         e.preventDefault();
+         pickCommand(c);
+         return;
+        }
+       }
+      }
+      // `@` 补全打开时：上下键导航、Tab/Enter 选中、Esc 关闭（优先于发送）
       const completing = mentionCands.length > 0;
       if (completing && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
        e.preventDefault();
@@ -373,13 +432,9 @@ export function Composer() {
       }
       if (completing && e.key === "Tab") {
        e.preventDefault();
-       if (mentionCands.length > 0 && mentionCands[Math.max(0, mentionIdx)]) {
-        const c = mentionCands[Math.max(0, mentionIdx)];
-        const before = draft.slice(0, caret);
-        setDraft(activeSessionId, before.replace(/@[^\s@]*$/, `@${c.path}${c.isDir ? "/" : " "}`) + draft.slice(caret));
-        setMentionIdx(-1);
-        setMentionCands([]);
-       }
+       // 没有高亮（mentionIdx = -1）时补第一项：Tab 在补全里不该"什么都不做"
+       const c = mentionCands[Math.max(0, mentionIdx)];
+       if (c) pickMention(c);
        return;
       }
       if (completing && e.key === "Escape") {
@@ -388,13 +443,10 @@ export function Composer() {
        return;
       }
       if (completing && e.key === "Enter" && !e.shiftKey && !(e.metaKey || e.ctrlKey)) {
-       if (mentionCands.length > 0 && mentionIdx >= 0) {
+       const c = mentionIdx >= 0 ? mentionCands[mentionIdx] : undefined;
+       if (c) {
         e.preventDefault();
-        const c = mentionCands[mentionIdx];
-        const before = draft.slice(0, caret);
-        setDraft(activeSessionId, before.replace(/@[^\s@]*$/, `@${c.path}${c.isDir ? "/" : " "}`) + draft.slice(caret));
-        setMentionIdx(-1);
-        setMentionCands([]);
+        pickMention(c);
         return;
        }
       }
@@ -434,7 +486,6 @@ export function Composer() {
       <ImagePlus size={16} aria-hidden />
      </button>
      <PermissionBadge compact align="left" />
-     <CapabilityMenu />
      <OmpStatusPill />
      <QueueBadge />
      <CompactButton />
