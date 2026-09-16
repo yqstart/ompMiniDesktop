@@ -40,7 +40,7 @@ src/
   components/ConfirmDialog.tsx # 通用二次确认浮层（受控；跨分组危险操作用它，分组内仍是轻量内联浮层）
   components/LanguageToggle.tsx # 界面语言三档分段控件（跟随系统 / 中 / EN），只挂左栏底部「设置」行（皮肤切换左侧）
   components/ThemeToggle.tsx   # 皮肤三档分段控件（跟随系统 / 深色 / 浅色），只挂左栏底部「设置」行右侧
-  components/sidebar/      # Sidebar（分组会话列表，**只列进行中的会话** + 缺失态重定位；**新建会话与归档全部分别是项目分组头悬浮槽位里的两个图标**，分组为空时 `＋` 常驻）、EmptyState
+  components/sidebar/      # Sidebar（分组会话列表，**只列进行中的会话** + 缺失态重定位；**新建会话与归档全部分别是项目分组头悬浮槽位里的两个图标**，分组为空时 `＋` 常驻）、EmptyState（无会话态用应用图标 `design-system/icon/omp-mini-icon.svg` 直接引入，只做说明、不放新建按钮）
   components/thread/       # TopBar（标题备注 + 窄窗抽屉入口 + 复制会话为 Markdown + UpdateBell）、Thread（首屏 200 条 + 增量加载 + 行级 memo + PlanCard 计划卡 + command 本地输出）、AssistantText（Markdown + 代码高亮 + 复制 + 流式骨架 + 外链二次确认）、ToolRow（工具调用**一行**：图标 + 动词 + 文件基名 + 目录 + `+N −M`，点击展开意图/参数/输出）、ApprovalCard（审批 select，终态展示结论）、UiRequestCard（confirm/input/editor/非审批 select，选项描述）、MentionChips（@文件 芯片排，可点打开）、StatusBar（OmpStatusPill + QueueBadge 排队数 + CompactButton 压缩入口 + RuntimeStats 用量透传）
   components/composer/     # Composer（一体式输入框 + 工具行 + 图片附件：粘贴/拖拽/选文件，发送随 prompt.images；流式中 Enter 排队 + ⌘/Ctrl+Enter 转向 + `/` 命令补全 + `@` 路径补全 + 图文混贴保留文字 + 乐观回显 + 草稿持久化）、ContextBar（输入框上方一行：项目 + git 分支 + 用量限额）、ContextMeter（上下文容量：模型选择器左侧的容量环 + 点开的分项面板，数据来自 `get_context_breakdown`）、UsageLimits（用量限额入口：当前会话供应商的配额进度条 + 展开的窗口明细，数据来自 `omp usage --json`；一份配额都拿不到时自身不渲染）
   components/pickers/      # ModelPicker、ThinkingPicker、PermissionBadge（挂输入框工具行）；ProjectPicker、BranchPicker（挂 ContextBar）

@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { ArrowDown, Folder } from "reicon-react";
+import { Folder } from "reicon-react";
 import { useApp } from "../../stores/app";
 import { pickAndAddProject } from "../../lib/projects";
-import { createSessionIn } from "../../lib/sessionOpen";
 import { useText } from "../../lib/useText";
+// 空态用**应用自己的图标**（π 字标）：直接引矢量源，不复制第二份——
+// `design-system/icon/omp-mini-icon.svg` 是唯一真相，`pnpm icon` 由它生成各平台图标。
+import appIcon from "../../../design-system/icon/omp-mini-icon.svg";
 
 export function EmptyState({ kind }: { kind: "no-project" | "no-session" | "archived" }) {
   const { activeProjectId, projects } = useApp();
@@ -47,9 +49,8 @@ export function EmptyState({ kind }: { kind: "no-project" | "no-session" | "arch
   }
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
-      <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-surface text-muted" aria-hidden>
-        <ArrowDown size={20} />
-      </div>
+      {/* 应用图标（π 字标）自带石墨底与圆角，不再包图标盒 */}
+      <img src={appIcon} alt="" aria-hidden className="h-11 w-11 rounded-lg" />
       <h1 className="text-base font-semibold tracking-tight">{t.emptyNoSessionTitle}</h1>
       {/* 空态必须说清"消息会发到哪个目录"：否则用户不知道新会话落在哪 */}
       <p className="max-w-xs text-[13px] leading-6 text-muted">
@@ -64,20 +65,6 @@ export function EmptyState({ kind }: { kind: "no-project" | "no-session" | "arch
         )}
       </p>
       <p className="max-w-xs font-mono text-xs leading-6 text-faint">{t.emptyShortcuts}</p>
-      <button
-        onClick={async () => {
-          const res = await createSessionIn(activeProjectId, { projectName: currentProject?.name });
-          setError(res.ok ? null : res.message);
-        }}
-        className="mt-1 cursor-pointer rounded-md border border-border px-4 py-1.5 text-[13px] text-foreground transition-colors duration-100 hover:bg-hover"
-      >
-        {t.newSession}
-      </button>
-      {error && (
-        <p role="alert" className="text-[13px] text-danger">
-          {error}
-        </p>
-      )}
     </div>
   );
 }
