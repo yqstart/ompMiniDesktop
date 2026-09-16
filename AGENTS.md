@@ -24,7 +24,7 @@ Tauri v2 + React + TS + Tailwind v4 + Zustand，包管理 pnpm。
 
 ## 技术基线
 
-- 桌面壳：Tauri v2（`src-tauri/`，identifier `com.omnidesktop.mini`）
+- 桌面壳：Tauri v2（`src-tauri/`，identifier `com.omnidesktop.mini`；窗口 `titleBarStyle: Overlay` + `hiddenTitle`，标题栏是自绘的——顶栏 `TopBar` 与左栏红绿灯占位都挂 `data-tauri-drag-region`，拖动走 `core:window` 的 `start_dragging`。**该权限不在 `core:default` 里**：v2 的 window 默认集只含 `allow-internal-toggle-maximize` 这类只读项，所以必须在 `src-tauri/capabilities/default.json` 显式加 `core:window:allow-start-dragging`——否则标题栏点着不动、双击最大化却正常）
 - 前端：React 19 + TS + Vite + Tailwind v4 + Zustand（`src/`）
 - 后端：Rust + tokio（子进程管理）+ serde/serde_json + tauri-plugin（dialog/opener/store/updater/process，`main.rs` 实注册；`tauri-plugin-shell` 仅在 Cargo 依赖残留，代码未引用）
 - 工具链：Node 22 + pnpm 11；Rust stable（已验证 1.97）+ 本地 `@tauri-apps/cli`（`pnpm tauri:*` 走项目本地 CLI，不依赖全局 `cargo-tauri`）
