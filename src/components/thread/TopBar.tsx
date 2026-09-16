@@ -2,22 +2,25 @@ import { useState } from "react";
 import { Check, Copy, Menu } from "lucide-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
+import { fmt } from "../../lib/locale";
+import { useText } from "../../lib/useText";
 import { loadSessions } from "../../lib/sessionList";
 import { sessionToMarkdown } from "../../lib/exportMd";
 import { UpdateBell } from "../update/UpdateDialog";
 
 export function TopBar() {
   const { activeSessionId, sessions, eventsBySession, set } = useApp();
+  const t = useText();
   const cur = sessions.find((s) => s.id === activeSessionId);
   const [editing, setEditing] = useState(false);
   const [note, setNote] = useState(cur?.note ?? "");
   const [copyState, setCopyState] = useState<"idle" | "ok" | "error">("idle");
-  const title = cur?.title?.trim() || "未命名会话";
+  const title = cur?.title?.trim() || t.unnamedChat;
 
   /** 复制本会话为 Markdown：复用界面上已渲染的 ViewMsg，不额外读盘、不落盘。 */
   const copyMarkdown = async () => {
     if (!activeSessionId) return;
-    const md = sessionToMarkdown(cur?.note?.trim() || title, eventsBySession[activeSessionId] ?? []);
+    const md = sessionToMarkdown(cur?.note?.trim() || title, eventsBySession[activeSessionId] ?? [], t);
     try {
       await navigator.clipboard.writeText(md);
       setCopyState("ok");
@@ -37,8 +40,8 @@ export function TopBar() {
       <button
         onClick={() => set({ sidebarOpen: true })}
         className="mr-0.5 flex cursor-pointer items-center justify-center rounded p-1.5 text-muted transition-colors duration-150 hover:bg-surface hover:text-foreground md:hidden"
-        aria-label="打开侧栏"
-        title="打开侧栏"
+        aria-label={t.openSidebar}
+        title={t.openSidebar}
       >
         <Menu size={16} aria-hidden />
       </button>
@@ -58,7 +61,7 @@ export function TopBar() {
             }
             if (e.key === "Escape") setEditing(false);
           }}
-          aria-label="重命名会话备注"
+          aria-label={t.renameNoteAria}
           className="w-44 rounded border border-border bg-background px-2 py-1 text-sm outline-none"
         />
       ) : (
@@ -69,8 +72,8 @@ export function TopBar() {
           }}
           disabled={!cur}
           className="max-w-44 cursor-pointer truncate rounded px-1 text-[15px] font-semibold transition-colors duration-200 hover:bg-background disabled:cursor-default"
-          aria-label={cur ? `会话标题 ${title}，点击改备注名` : "未命名会话"}
-          title={cur ? "点击改备注名（不改 omp 原标题）" : ""}
+          aria-label={cur ? fmt(t.chatTitleAria, title) : t.unnamedChat}
+          title={cur ? t.chatTitleTitle : ""}
         >
           {title}
         </button>
@@ -81,8 +84,8 @@ export function TopBar() {
           onClick={() => void copyMarkdown()}
           disabled={!activeSessionId || (eventsBySession[activeSessionId]?.length ?? 0) === 0}
           className="mr-1 cursor-pointer rounded p-1.5 text-muted transition-colors duration-150 hover:bg-surface hover:text-foreground disabled:cursor-default disabled:opacity-40"
-          aria-label="复制会话为 Markdown"
-          title="复制本会话为 Markdown"
+          aria-label={t.copyChatMd}
+          title={t.copyChatMdTitle}
         >
           {copyState === "ok" ? <Check size={15} aria-hidden /> : <Copy size={15} aria-hidden />}
         </button>

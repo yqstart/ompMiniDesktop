@@ -1,4 +1,6 @@
 import { FileText, FileWarning } from "lucide-react";
+import { fmt } from "../../lib/locale";
+import { useText } from "../../lib/useText";
 import type { ViewMsg } from "@shared/types";
 
 /**
@@ -8,13 +10,14 @@ import type { ViewMsg } from "@shared/types";
  * 跳过的文件（`skippedReason`：binary / tooLarge）用 warn 色标出来，避免"以为读进去了"。
  */
 export function MentionChips({ m, cwd }: { m: Extract<ViewMsg, { kind: "files" }>; cwd?: string }) {
+  const t = useText();
   return (
-    <div className="flex flex-wrap items-center gap-1.5" aria-label="读入上下文的文件">
+    <div className="flex flex-wrap items-center gap-1.5" aria-label={t.filesAria}>
       {m.files.map((f) => {
         const skipped = !!f.skippedReason;
         const meta = skipped
-          ? `已跳过自动读取（${f.skippedReason}）`
-          : [f.lineCount != null ? `${f.lineCount} 行` : null, f.byteSize != null ? `${Math.max(1, Math.round(f.byteSize / 1024))}KB` : null]
+          ? fmt(t.fileSkipped, f.skippedReason ?? "")
+          : [f.lineCount != null ? fmt(t.fileLines, f.lineCount) : null, f.byteSize != null ? `${Math.max(1, Math.round(f.byteSize / 1024))}KB` : null]
               .filter(Boolean)
               .join(" · ");
         return (

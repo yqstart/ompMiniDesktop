@@ -38,7 +38,7 @@ src/
   components/composer/     # Composer（一体式输入框 + 工具行 + 图片附件：粘贴/拖拽/选文件，发送随 prompt.images；流式中 Enter 排队 + ⌘/Ctrl+Enter 转向 + `/` 命令补全 + `@` 路径补全 + 图文混贴保留文字 + 乐观回显 + 草稿持久化）、ContextBar（输入框上方一行：项目 + git 分支）
   components/pickers/      # ModelPicker、ThinkingPicker、PermissionBadge（挂输入框工具行）；ProjectPicker、BranchPicker（挂 ContextBar）
   components/update/       # UpdateBell、UpdateDialog（应用内更新）
-  lib/                     # viewmsg（ViewMsg 归一 + 单测）、attachments（图片附件校验/base64/内容块提取 + 单测）、mentions（@文件 解析，与 omp 同规则 + 单测）、search（搜索片段高亮 + 单测）、exportMd（会话 → Markdown 只读导出 + 单测）、mergeEvents（实时流按 id 合并 + 单测）、thinking（思考档推导 + 单测）、sessions（分组 + 单测）、sessionList（会话列表刷新 + 扫描窗口的唯一入口）、sessionBatch（批量归档/恢复/删除的唯一实现：BATCH_LIMIT 分批 + 失败聚合 + 删除后清前端痕迹）、context（上下文条取值 + 单测）、sessionOpen（打开/新建会话的唯一实现，含乐观消息合并）、projects（添加项目 / 切换项目）、ompDiag（omp 自检与手动指定路径）、locale（设置页中英字典 + localStorage 持久化 + 单测）、useSessionEvents（事件归一 + 真值回填，含本地命令/计划/压缩重试/子代理/命令面分支）、openPath（路径打开 + 草稿持久化）、useTaskNotifications（后台完成系统通知）、useDropdown、appUpdate、rpc-types
+  lib/                     # viewmsg（ViewMsg 归一 + 单测）、attachments（图片附件校验/base64/内容块提取 + 单测）、mentions（@文件 解析，与 omp 同规则 + 单测）、search（搜索片段高亮 + 单测）、exportMd（会话 → Markdown 只读导出 + 单测）、mergeEvents（实时流按 id 合并 + 单测）、thinking（思考档推导 + 单测）、sessions（分组 + 单测）、sessionList（会话列表刷新 + 扫描窗口的唯一入口）、sessionBatch（批量归档/恢复/删除的唯一实现：BATCH_LIMIT 分批 + 失败聚合 + 删除后清前端痕迹）、context（上下文条取值 + 单测）、sessionOpen（打开/新建会话的唯一实现，含乐观消息合并）、projects（添加项目 / 切换项目）、ompDiag（omp 自检与手动指定路径）、locale（**全界面**中英字典 + fmt 占位 + localStorage 持久化 + 单测）、useText（组件取文案的唯一入口）、useSessionEvents（事件归一 + 真值回填，含本地命令/计划/压缩重试/子代理/命令面分支）、openPath（路径打开 + 草稿持久化）、useTaskNotifications（后台完成系统通知）、useDropdown、appUpdate、rpc-types
   shared/                  # api（invoke 唯一入口）、ipc（通道常量）、types
   stores/app.ts            # Zustand 全局状态（含 currentModel/currentThinking/currentEfforts/currentRuntime、composerMenu、sidebarWidth、threadLimit、update、locale/setLocale）
 eslint.config.js           # ESLint flat config（typescript-eslint + react-hooks + react-refresh）
@@ -69,6 +69,7 @@ scripts/                   # fake-omp.mjs（canned RPC 联调：history|approve|
 - 审批线序：`toolcall_end` → `tool_execution_start` → `extension_ui_request{method:select, options:["Approve","Deny"]}`；通过回 `value:"Approve"`，拒绝回 `cancelled:true`（turn 正常结束，不是中断）。
 - 其余 UI 请求（V2 M5）：`confirm` / `input` / `editor` / 非审批 `select` 走 `UiRequestCard`，回包统一经后端 `respond_ui`——`confirm` 回 `{confirmed:bool}`、`input`/`editor`/`select` 回 `{value}`、取消回 `{cancelled:true}`；`notify` 渲染为分隔线，`setStatus`/`setWidget`/`setTitle`/`set_editor_text` 是单向宿主指令（丢弃不告警），服务端 `cancel{targetId}` 撤回对应卡片。**只有这四类方法进 `awaiting-approval` 状态**（单向方法与服务端撤回不许锁 composer）。
 - git 上下文**只读**：`get_git_info(path)` 走 git CLI 只读查询（`rev-parse --is-inside-work-tree` / `symbolic-ref --short HEAD` / `for-each-ref refs/heads` / `status --porcelain --untracked-files=no`），不写仓库、不切分支；结果只用于输入框上方上下文条展示。
+- **会话归属只认 cwd，覆盖层不存归属**：`owner_project`（`commands/mod.rs`）是唯一判定入口——真实路径前缀匹配、最长优先、符号链接展开，与左栏 `project_of` 同一条规则；`create_session` / `open_session` / `list_sessions` / 归档清单四处共用。**omp 的 jsonl 是懒写盘的**（首个 turn 才落文件），新建 / 打开的会话读不到文件头 cwd 时，归属退回 spawn 时的 `--cwd`（`owner_cwd` + `RunningChild.cwd`），不许因为「文件还不存在」把刚建好的会话退回「未归属」；`list_sessions` 还要把「runtime 里、磁盘上还没有 jsonl」的活跃会话按 spawn 事实补进列表（`unlanded_views`，否则任何一次刷新都会让刚新建的会话行消失）。
 
 ## 前端约定（血泪规则）
 
@@ -77,7 +78,7 @@ scripts/                   # fake-omp.mjs（canned RPC 联调：history|approve|
 - 组件命名以 `design-system/MASTER.md` §8 速查表为准，禁止同义重复组件；`ModelPicker/ThinkingPicker/PermissionBadge` 只挂输入框工具行，顶栏不再重复。
 - 工具行 `ModelPicker`/`ThinkingPicker` 触发按钮按内容自适应宽度、**不截断**（`whitespace-nowrap` + `shrink-0`，不设 `max-w-*`）：模型名再长也完整显示，空间不足由工具行 `flex-wrap` 换行兜底。
 - 输入框工具行与上方上下文条下拉互斥：`composerMenu: model | thinking | permission | project | branch | null` 存 Zustand，同时只开一个；点击外部 / Esc 关闭（`useDropdown`）；下拉统一向上弹。
-- 输入框上方上下文条（`ContextBar` = `ProjectPicker` + `BranchPicker`，在输入框卡片**外**上方、与卡片内文字左对齐）：项目名认**会话归属**，`projectId` 为 null 就显示「未归属」，禁止回退 `activeProjectId`（否则会显示成消息在 A 项目里、实际发进未归属目录的会话）；切项目走 `switchProject(id, { openRecent: true })`（切上下文 + 刷新列表 + 打开该项目最近会话，没有则回空态），保证「显示的项目 = 消息真正发去的项目」。分支是**只读**控件（只列本地分支 + 刷新，禁止 checkout 或任何 git 写操作），非 git 目录显示「非 Git 目录」而不是无声消失。git 查询走后端 `get_git_info`，找不到 git / 非仓库 / 超时一律降级为 `isRepo:false`——git 出任何问题都不许影响输入与发送。项目名 / 分支名不截断（与工具行选择器同规矩，窄窗口整行 `flex-wrap` 兜底）。
+- 输入框上方上下文条（`ContextBar` = `ProjectPicker` + `BranchPicker`，在输入框卡片**外**上方、与卡片内文字左对齐）：项目名认**会话归属**，`projectId` 为 null 就显示「未归属」，禁止回退 `activeProjectId`（否则会显示成消息在 A 项目里、实际发进未归属目录的会话）；切项目走 `switchProject(id, { newSession: true })`（**在该项目下新建一个对话**并切过去：切换是「换到那个项目干活」，不继承上一个对话的上下文；点当前项目只收下拉、不重复新建），保证「显示的项目 = 消息真正发去的项目」。分支是**只读**控件（只列本地分支 + 刷新，禁止 checkout 或任何 git 写操作），非 git 目录显示「非 Git 目录」而不是无声消失。git 查询走后端 `get_git_info`，找不到 git / 非仓库 / 超时一律降级为 `isRepo:false`——git 出任何问题都不许影响输入与发送。项目名 / 分支名不截断（与工具行选择器同规矩，窄窗口整行 `flex-wrap` 兜底）。
 - 状态收敛：标题框外无独立状态条（`StatusBar` 仅保留读屏播报位）；状态统一进输入框工具行——`OmpStatusPill`（常驻，就绪也占位显示「就绪」）+ `RuntimeStats`（上下文占用 / 本轮 token / 耗时 / TTFT，全部来自 `omp-state` 真值，**无真值整块不渲染**，前端只做格式化不自算）。
 - 助手正文渲染走 `AssistantText`（`react-markdown` + `remark-gfm` + `rehype-highlight`）：**不许 `dangerouslySetInnerHTML`**（正文按不可信输入处理）；代码高亮配色只写在 `src/index.css`（项目 token 派生，深浅色自动跟随），不引第三方主题 CSS；代码块横滚不撑破布局，流式中未闭合围栏给 skeleton。
 - 消息流首屏增量：默认只渲染最后 `THREAD_PAGE`（200）条（`stores/app.ts` 的 `threadLimit`，按会话重置），向上滚动或点按钮按页展开，加载后保持视口位置；不许一次性 map 全部消息（MASTER §7）。
@@ -86,6 +87,7 @@ scripts/                   # fake-omp.mjs（canned RPC 联调：history|approve|
 - 会话行不设复选框：不做多选、不做「已选 N」批量工具条；批量归档/删除只挂在分组头——项目分组头三个入口 = 归档全部对话 / 删除全部对话 / 删除工作区（后两者各自走分组内浮层二次确认；删除工作区只解绑目录、名下会话全部归档保留），「未归属会话」分组头 = 归档全部 / 删除全部对话。**这些批量只覆盖进行中的会话**（左栏已不列归档），批量走 `src/lib/sessionBatch.ts`（`BATCH_LIMIT` 200 分批 + 失败聚合），归档会话的管理（恢复 / 删除）在设置页。
 - 左侧栏可拖拽调宽 220–480px（默认 264，`sidebarWidth` 持久化 localStorage）；窄窗 <768px 收抽屉。
 - 导出是**只读**动作（V2 M9）：`TopBar` 的「复制会话为 Markdown」把界面上已渲染的 `ViewMsg` 经 `src/lib/exportMd.ts` 拼成 Markdown 写进剪贴板——不读盘、不落盘、不加后端命令；工具输出沿用界面口径截断并在截断处明写「已截断」，图片只写张数（不内联 base64）。消息级复制走行内 `CopyAction`（自带 copied 状态，**不许把状态提到 `ThreadRow` 上**，否则破坏 M8 的行级 memo）。
+- 界面文案一律走字典（`src/lib/locale.ts` 的 `TEXT`）：组件内 `useText()`（`src/lib/useText.ts`）、非组件模块 `TEXT[useApp.getState().locale]`；插值用 `fmt(t.key, v1, v2)`（模板占位统一 `{0}`/`{1}`），**禁止硬编码界面文案**（含 `aria-label` / `title` / `placeholder` / 错误提示）。**上游数据不进字典**：会话标题、工具名/意图/输出、omp 的 UI 请求文案、后端错误一律原样透传。数据层生成的展示文本（分隔线标签、工具卡占位、导出 Markdown、附件校验）取**当归一 / 当次调用**时的语言——切语言后已渲染的旧消息要重开会话（重新归一）才会换。切语言只改本应用展示层（`omp.locale.v1` 走 localStorage），不写 omp 配置、不写覆盖层。
 - 四个禁止：不轮询文件做伪实时；前端不自算 token（状态与用量一律透传 `omp-state` 真值）；不写回 omp 标题（改名只写覆盖层 `notes`，禁用 `set_session_name`）；设置页不改 omp 配置（语言只切本应用展示、走 localStorage 持久化；诊断区只读 + 「指定 omp 路径」只写应用覆盖层 `ompPath`，更新区除外）。
 
 ## 常用命令

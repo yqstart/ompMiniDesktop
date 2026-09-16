@@ -5,6 +5,7 @@ import {
  sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { useApp } from "../stores/app";
+import { useText } from "./useText";
 
 /**
  * 长任务完成通知：agent 从 running 切回 idle / awaiting-approval 时，
@@ -12,6 +13,7 @@ import { useApp } from "../stores/app";
  * 权限首次需要时再申请，不打扰启动。
  */
 export function useTaskNotifications() {
+ const t = useText();
  const lastState = useRef<Record<string, string>>({});
  const activeSessionId = useApp((s) => s.activeSessionId);
  const statusBySession = useApp((s) => s.statusBySession);
@@ -29,10 +31,10 @@ export function useTaskNotifications() {
    | undefined;
   const body =
    cur === "awaiting-approval"
-    ? "Agent 等待你的审批"
+    ? t.notifyApproval
     : lastText
      ? lastText.text.slice(0, 120)
-     : "Agent 已完成本轮";
+     : t.notifyDone;
   void (async () => {
    try {
     if (!(await isPermissionGranted())) await requestPermission();

@@ -5,6 +5,7 @@ import { api } from "@shared/api";
 import { useApp } from "../stores/app";
 import type { SessionRuntime, SessionStatus, ViewMsg } from "@shared/types";
 import { summarizeArgs, mentionFilesOf } from "./viewmsg";
+import { fmt, TEXT, type Text } from "./locale";
 import { imagesFromContent } from "./attachments";
 import { resolveThinking } from "./thinking";
 import { mergeViewMsgs, type IncomingViewMsg } from "./mergeEvents";
@@ -51,7 +52,7 @@ const getFold = (sid: string): Fold => {
 };
 
 /** 导出供单测回放真实事件序列（不涉及 tauri 副作用）。 */
-export function frameToViewMsgs(sid: string, frame: Record<string, unknown>): ViewMsg[] {
+export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dict: Text): ViewMsg[] {
  const t = frame.type as string;
  const fold = getFold(sid);
  const out: ViewMsg[] = [];
@@ -120,7 +121,7 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>): Vi
     toolCallId: "",
     name: "tool",
     intent: "",
-    argsSummary: "输入中…",
+    argsSummary: "",
     state: "streaming",
     output: "",
     streamIndex: e.contentIndex ?? 0,
@@ -173,9 +174,9 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>): Vi
     name: (frame.message as { toolName?: string }).toolName ?? "tool",
     intent: "",
     argsSummary: "",
-    // 拒绝分支统一渲染成「被用户拒绝」（omp 回的是英文 "Tool call denied by user: xxx"）
+    // 拒绝分支统一渲染成 dict.toolDenied（omp 回的是英文 "Tool call denied by user: xxx"）
     state: isDenied || isError ? "error" : "ok",
-    output: isDenied ? "被用户拒绝" : text.length > 2000 ? text.slice(0, 2000) : text,
+    output: isDenied ? dict.toolDenied : text.length > 2000 ? text.slice(0, 2000) : text,
     outputFull: !isDenied && text.length > 2000 ? text : undefined,
     streamIndex: 0,
    });
@@ -212,7 +213,7 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>): Vi
    intent: "",
    argsSummary: "",
    state: frame.isError || denied ? "error" : "ok",
-   output: denied ? "被用户拒绝" : text.length > 2000 ? text.slice(0, 2000) : text,
+   output: denied ? dict.toolDenied : text.length > 2000 ? text.slice(0, 2000) : text,
    outputFull: !denied && text.length > 2000 ? text : undefined,
    streamIndex: 0,
   });
@@ -247,7 +248,7 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>): Vi
     toolName: "",
     command: "",
     cwd: "",
-    title: String(frame.title ?? "需要你的确认"),
+    title: String(frame.title ?? dict.approvalTitle),
    });
    return out;
   }
@@ -278,7 +279,10 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>): Vi
     kind: "divider",
     id: `d-${Date.now()}`,
     divider: t === "model_changed" ? "model" : "thinking",
-    text: t === "model_changed" ? "已切换模型" : `思考等级已设为 ${String(frame.thinkingLevel ?? "")}`,
+    text:
+     t === "model_changed"
+      ? dict.dividerModel
+      : fmt(dict.dividerThinking, String(frame.thinkingLevel ?? "")),
    });
   }
   return out;
@@ -286,7 +290,7 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>): Vi
  if (t === "response") {
   const cmd = frame.command as string;
   if (frame.success === false) {
-   out.push({ kind: "divider", id: `e-${Date.now()}`, divider: "exit", text: `操作失败（${cmd}）：${String(frame.error ?? "")}` });
+   out.push({ kind: "divider", id: `e-${Date.now()}`, divider: "exit", text: fmt(dict.opFailedDetail, cmd, String(frame.error ?? "")) });
   }
   return out;
  }
@@ -306,7 +310,7 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>): Vi
   if (Array.isArray(phases) && phases.length > 0) {
    out.push({ kind: "plan", id: `plan-${String((frame as Record<string, unknown>).id ?? Date.now())}`, phases: phases as never });
   } else if (t === "todo_auto_clear") {
-   out.push({ kind: "divider", id: `td-${Date.now()}`, divider: "turn", text: "计划已清空" });
+   out.push({ kind: "divider", id: `td-${Date.now()}`, divider: "turn", text: dict.dividerPlanCleared });
   }
   return out;
  }
@@ -327,22 +331,22 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>): Vi
  ) {
   const label =
    t === "auto_compaction_start"
-    ? "正在压缩上下文…"
+    ? dict.dividerCompacting
     : t === "auto_compaction_end"
-     ? "上下文已压缩"
+     ? dict.dividerCompacted
      : t === "auto_retry_start"
-      ? "请求重试中…"
+      ? dict.dividerRetrying
       : t === "auto_retry_end"
-       ? "重试结束"
+       ? dict.dividerRetryEnd
        : t === "retry_fallback_applied"
-        ? "已切换备用模型重试"
-        : "备用模型重试成功";
+        ? dict.dividerFallbackRetry
+        : dict.dividerFallbackOk;
   out.push({ kind: "divider", id: `${t}-${Date.now()}`, divider: "turn", text: label });
   return out;
  }
  // 子代理帧：分隔线占位（详细转录暂不展开）。
  if (t === "subagent_lifecycle" || t === "subagent_progress" || t === "subagent_event") {
-  out.push({ kind: "divider", id: `${t}-${Date.now()}`, divider: "turn", text: "子代理事件" });
+  out.push({ kind: "divider", id: `${t}-${Date.now()}`, divider: "turn", text: dict.dividerSubagent });
   return out;
  }
  // 可用命令面（`available_commands_update`）：缓存供 `/` 补全，不渲染消息。
@@ -408,7 +412,8 @@ export function useSessionEvents() {
   set({ currentModel: null, currentThinking: null, currentEfforts: null, currentRuntime: null });
   (async () => {
    off1 = await listen<Record<string, unknown>>(IPC.sessionEvent(sid), (e) => {
-    const msgs = frameToViewMsgs(sid, e.payload) as IncomingViewMsg[];
+    // 语言按帧到达时刻取：切语言后新帧立刻用新语言，已渲染的旧分隔线要重开会话才换
+    const msgs = frameToViewMsgs(sid, e.payload, TEXT[useApp.getState().locale]) as IncomingViewMsg[];
     if (msgs.length > 0) {
      // 统一走 mergeViewMsgs：text 流式同 id 覆盖、工具卡同 id 原位合并，
      // 避免一次工具调用渲染成多张卡（"已完成工具仍转圈"的直播版）。

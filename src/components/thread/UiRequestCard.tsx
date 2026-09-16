@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { MessageSquareQuote } from "lucide-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
+import { useText } from "../../lib/useText";
 import type { ViewMsg } from "@shared/types";
 
 /**
@@ -14,6 +15,7 @@ import type { ViewMsg } from "@shared/types";
  */
 export function UiRequestCard({ m, sessionId }: { m: Extract<ViewMsg, { kind: "ui" }>; sessionId: string }) {
   const { statusBySession } = useApp();
+  const t = useText();
   const [text, setText] = useState(m.prefill ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +35,7 @@ export function UiRequestCard({ m, sessionId }: { m: Extract<ViewMsg, { kind: "u
     try {
       await api.respondUi(sessionId, m.uiId, kind, opts);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "回包失败，请重试");
+      setError(e instanceof Error ? e.message : t.uiFailed);
     } finally {
       setBusy(false);
     }
@@ -64,12 +66,12 @@ export function UiRequestCard({ m, sessionId }: { m: Extract<ViewMsg, { kind: "u
     <div
       ref={ref}
       role="group"
-      aria-label={m.title || "需要你的输入"}
+      aria-label={m.title || t.uiNeedsInput}
       className="rounded-xl border border-accent/40 bg-surface p-3.5 shadow-sm"
     >
       <div className="flex items-center gap-2">
         <MessageSquareQuote size={15} className="text-accent" aria-hidden />
-        <span className="text-sm font-medium">{m.title || "需要你的输入"}</span>
+        <span className="text-sm font-medium">{m.title || t.uiNeedsInput}</span>
       </div>
       {m.message && (
         <div className="mt-1.5 rounded-lg bg-code px-2.5 py-2 text-xs whitespace-pre-wrap">{m.message}</div>
@@ -80,7 +82,7 @@ export function UiRequestCard({ m, sessionId }: { m: Extract<ViewMsg, { kind: "u
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           placeholder={m.placeholder ?? ""}
-          aria-label={m.title || "输入"}
+          aria-label={m.title || t.uiInput}
           autoFocus
           disabled={busy}
           className="mt-2 w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm outline-none focus:border-accent/60"
@@ -92,7 +94,7 @@ export function UiRequestCard({ m, sessionId }: { m: Extract<ViewMsg, { kind: "u
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           rows={5}
-          aria-label={m.title || "编辑"}
+          aria-label={m.title || t.uiEdit}
           autoFocus
           disabled={busy}
           className="mt-2 w-full resize-y rounded-lg border border-border bg-background px-2.5 py-1.5 font-mono text-xs leading-5 outline-none focus:border-accent/60"
@@ -107,20 +109,20 @@ export function UiRequestCard({ m, sessionId }: { m: Extract<ViewMsg, { kind: "u
               disabled={busy}
               onClick={() => void reply("confirm", { confirmed: true })}
             >
-              确认
+              {t.confirm}
             </button>
             <button className={ghost} disabled={busy} onClick={() => void reply("confirm", { confirmed: false })}>
-              取消
+              {t.cancel}
             </button>
           </>
         )}
         {(m.method === "input" || m.method === "editor") && (
           <>
             <button className={primary} disabled={busy} onClick={submitValue}>
-              {busy ? "发送中…" : "提交"}
+              {busy ? t.uiSending : t.uiSubmit}
             </button>
             <button className={ghost} disabled={busy} onClick={() => void reply("cancel")}>
-              跳过
+              {t.uiSkip}
             </button>
           </>
         )}
@@ -142,13 +144,13 @@ export function UiRequestCard({ m, sessionId }: { m: Extract<ViewMsg, { kind: "u
           })}
         {m.method === "select" && (
           <button className={ghost} disabled={busy} onClick={() => void reply("cancel")}>
-            取消
+            {t.cancel}
           </button>
         )}
-        {m.method === "editor" && <span className="text-xs text-muted">⌘/Ctrl + Enter 提交</span>}
+        {m.method === "editor" && <span className="text-xs text-muted">{t.uiEditorHint}</span>}
       </div>
       {error && <div className="mt-1.5 text-xs text-danger">{error}</div>}
-      {waiting && !error && <div className="mt-1.5 text-xs text-muted">等待你的输入…</div>}
+      {waiting && !error && <div className="mt-1.5 text-xs text-muted">{t.uiWaiting}</div>}
     </div>
   );
 }

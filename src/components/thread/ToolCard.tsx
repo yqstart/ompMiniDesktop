@@ -2,18 +2,30 @@ import { useState } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { Check, ChevronRight, Loader2, X } from "lucide-react";
 import type { ViewMsg } from "@shared/types";
+import { fmt } from "../../lib/locale";
+import { useText } from "../../lib/useText";
 
 export function ToolCard({ m, cwd }: { m: Extract<ViewMsg, { kind: "tool" }>; cwd?: string }) {
+  const t = useText();
   const [open, setOpen] = useState(m.state === "error");
   const [showFull, setShowFull] = useState(false);
-  const stateText = m.state === "ok" ? "成功" : m.state === "error" ? "失败" : m.state === "running" ? "运行中" : "输入中";
+  const stateText =
+    m.state === "ok"
+      ? t.toolStateOk
+      : m.state === "error"
+        ? t.toolStateError
+        : m.state === "running"
+          ? t.toolStateRunning
+          : t.toolStateStreaming;
+  // 数据层不再内嵌占位文案：`argsSummary` 可能为空，展示时按状态兜底
+  const summary = m.argsSummary || (m.state === "streaming" ? t.toolStreaming : t.toolNoArgs);
   const dot =
     m.state === "ok" ? "bg-ok" : m.state === "error" ? "bg-danger" : "bg-accent animate-pulse";
   return (
     <div
       className={`rounded-xl border bg-surface/70 transition-colors duration-150 ${m.state === "error" ? "border-danger/60" : "border-border/70"}`}
       role="group"
-      aria-label={`工具 ${m.name} ${stateText}`}
+      aria-label={fmt(t.toolAria, m.name, stateText)}
     >
       <button
         onClick={() => setOpen((v) => !v)}
@@ -39,21 +51,19 @@ export function ToolCard({ m, cwd }: { m: Extract<ViewMsg, { kind: "tool" }>; cw
       </button>
       {open && (
         <div className="border-t border-border/70 px-3 py-2">
-          {m.argsSummary && (
-            <button
-              className="block w-full cursor-pointer truncate text-left font-mono text-xs text-muted hover:text-foreground"
-              title={`${m.argsSummary}（点击用系统默认应用打开）`}
-              onClick={() => {
-                const mth = m.argsSummary.match(/([~/][^\s:"']+|[A-Za-z]:\\[^\s"']+|[\w\-./]+\.[A-Za-z0-9]{1,5})/);
-                const p = mth?.[1];
-                if (!p) return;
-                const full = p.startsWith("/") || /^[A-Za-z]:/.test(p) ? p : cwd ? `${cwd}/${p}` : p;
-                void openPath(full).catch(() => undefined);
-              }}
-            >
-              {m.argsSummary}
-            </button>
-          )}
+          <button
+            className="block w-full cursor-pointer truncate text-left font-mono text-xs text-muted hover:text-foreground"
+            title={fmt(t.toolOpenTitle, summary)}
+            onClick={() => {
+              const mth = m.argsSummary.match(/([~/][^\s:"']+|[A-Za-z]:\\[^\s"']+|[\w\-./]+\.[A-Za-z0-9]{1,5})/);
+              const p = mth?.[1];
+              if (!p) return;
+              const full = p.startsWith("/") || /^[A-Za-z]:/.test(p) ? p : cwd ? `${cwd}/${p}` : p;
+              void openPath(full).catch(() => undefined);
+            }}
+          >
+            {summary}
+          </button>
           {m.output && (
             <div className="mt-1.5">
               <pre className="max-h-60 overflow-auto rounded-lg bg-code p-2.5 font-mono text-xs leading-5 whitespace-pre-wrap">
@@ -64,7 +74,7 @@ export function ToolCard({ m, cwd }: { m: Extract<ViewMsg, { kind: "tool" }>; cw
                   onClick={() => setShowFull((v) => !v)}
                   className="mt-1 cursor-pointer text-xs text-accent transition-opacity duration-150 hover:opacity-80"
                 >
-                  {showFull ? "收起" : "展开全文"}
+                  {showFull ? t.collapse : t.expand}
                 </button>
               )}
             </div>

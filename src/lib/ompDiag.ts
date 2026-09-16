@@ -1,6 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "@shared/api";
 import { useApp } from "../stores/app";
+import { TEXT } from "./locale";
 
 /**
  * omp 自检与手动指定路径（设置页诊断区 + 顶部引导横幅共用一份实现）。
@@ -14,22 +15,23 @@ import { useApp } from "../stores/app";
 export type DiagResult = { ok: true } | { ok: false; message: string };
 
 export async function refreshOmpHealth(): Promise<DiagResult> {
-  try {
-    useApp.getState().set({ health: await api.getHealth() });
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : "自检失败" };
-  }
+ try {
+  useApp.getState().set({ health: await api.getHealth() });
+  return { ok: true };
+ } catch (e) {
+  return { ok: false, message: e instanceof Error ? e.message : TEXT[useApp.getState().locale].diagFailed };
+ }
 }
 
 /** `null` = 用户取消选择。 */
 export async function pickOmpExecutable(): Promise<DiagResult | null> {
-  const picked = await open({ multiple: false, directory: false, title: "选择 omp 可执行文件" });
-  if (typeof picked !== "string" || !picked) return null;
-  try {
-    await api.setOmpPath(picked);
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : "指定 omp 路径失败" };
-  }
-  return refreshOmpHealth();
+ const t = TEXT[useApp.getState().locale];
+ const picked = await open({ multiple: false, directory: false, title: t.pickOmpTitle });
+ if (typeof picked !== "string" || !picked) return null;
+ try {
+  await api.setOmpPath(picked);
+ } catch (e) {
+  return { ok: false, message: e instanceof Error ? e.message : t.setOmpPathFailed };
+ }
+ return refreshOmpHealth();
 }

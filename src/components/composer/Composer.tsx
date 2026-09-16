@@ -4,7 +4,9 @@ import { FileText, FileWarning, ImagePlus, X } from "lucide-react";
 import { useApp } from "../../stores/app";
 import { api } from "@shared/api";
 import { attachmentFromFile, dataUrl } from "../../lib/attachments";
+import { fmt } from "../../lib/locale";
 import { extractMentions } from "../../lib/mentions";
+import { useText } from "../../lib/useText";
 import { ModelPicker } from "../pickers/ModelPicker";
 import { ThinkingPicker } from "../pickers/ThinkingPicker";
 import { PermissionBadge } from "../pickers/PermissionBadge";
@@ -20,6 +22,7 @@ import { ContextBar } from "./ContextBar";
  * 发送时随 `prompt.images` 一次性交给 omp——应用不落盘、不写覆盖层。
  */
 export function Composer() {
+  const t = useText();
   const { activeSessionId, draftOf, setDraft, statusBySession, sessions, attachmentsOf, addAttachments, removeAttachment, clearAttachments, currentModel, models } =
     useApp();
   const persistDraft = (sid: string | null, text: string) => {
@@ -124,16 +127,16 @@ export function Composer() {
     const skipped = files.filter((f) => !f.type.startsWith("image/"));
     const images = files.filter((f) => f.type.startsWith("image/"));
     if (images.length === 0) {
-      if (skipped.length > 0) setAttachError("只支持 PNG / JPEG / WebP / GIF 图片，其他文件已忽略");
+      if (skipped.length > 0) setAttachError(t.attachOnlyImages);
       return;
     }
-    setAttachError(skipped.length > 0 ? "非图片文件已忽略，只添加了图片" : null);
+    setAttachError(skipped.length > 0 ? t.attachSomeIgnored : null);
     const added = [];
     for (const f of images) {
       try {
-        added.push(await attachmentFromFile(f));
+        added.push(await attachmentFromFile(f, t));
       } catch (e) {
-        setAttachError(e instanceof Error ? e.message : "图片读取失败");
+        setAttachError(e instanceof Error ? e.message : t.attachReadFailed);
       }
     }
     if (added.length > 0) addAttachments(activeSessionId, added);
@@ -143,7 +146,7 @@ export function Composer() {
     try {
       const picked = await open({
         multiple: true,
-        filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }],
+        filters: [{ name: t.attachImages, extensions: ["png", "jpg", "jpeg", "webp", "gif"] }],
       });
       if (!picked) return;
       const paths = Array.isArray(picked) ? picked : [picked];
@@ -153,12 +156,12 @@ export function Composer() {
         try {
           added.push(await api.readImageFile(p));
         } catch (e) {
-          setAttachError(e instanceof Error ? e.message : "图片读取失败");
+          setAttachError(e instanceof Error ? e.message : t.attachReadFailed);
         }
       }
       if (added.length > 0) addAttachments(activeSessionId, added);
     } catch (e) {
-      setAttachError(e instanceof Error ? e.message : "打开文件选择器失败");
+      setAttachError(e instanceof Error ? e.message : t.attachPickFailed);
     }
   };
 
@@ -243,7 +246,7 @@ export function Composer() {
     return (
       <div className="shrink-0 px-4 pb-4">
         <div className="mx-auto max-w-3xl rounded-2xl border border-border/70 bg-surface px-4 py-3 text-center text-sm text-muted">
-          已归档，只读——取消归档后可继续对话
+          {t.archivedComposerHint}
         </div>
       </div>
     );
@@ -270,7 +273,7 @@ export function Composer() {
           dragging ? "border-accent bg-accent/5" : awaiting ? "border-warn/50" : "border-border/80 focus-within:border-accent/60"
         }`}
       >
-        {awaiting && <div className="px-4 pt-2.5 text-xs text-warn">先处理上面的审批</div>}
+        {awaiting && <div className="px-4 pt-2.5 text-xs text-warn">{t.resolveApprovalFirst}</div>}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 px-3 pt-3">
             {attachments.map((a, i) => (
@@ -283,7 +286,7 @@ export function Composer() {
                 />
                 <button
                   onClick={() => removeAttachment(activeSessionId, i)}
-                  aria-label={`移除 ${a.name}`}
+                  aria-label={fmt(t.attachRemoveAria, a.name)}
                   className="absolute -top-1.5 -right-1.5 cursor-pointer rounded-full border border-border bg-surface p-0.5 text-muted opacity-0 transition-opacity duration-150 group-hover:opacity-100 hover:text-danger focus:opacity-100"
                 >
                   <X size={12} aria-hidden />
@@ -294,36 +297,36 @@ export function Composer() {
         )}
         {attachError && <div className="px-4 pt-2 text-xs text-danger">{attachError}</div>}
         {mentions.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2" aria-label="@提及的文件">
+          <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2" aria-label={t.mentionsAria}>
             {mentions.map((p) => {
               const exists = checks.key === mentionKey ? checks.exists[p] : undefined;
               const missing = exists === false;
               return (
                 <span
                   key={p}
-                  title={missing ? "这个路径在会话目录下不存在，omp 会跳过" : p}
+                  title={missing ? t.mentionMissingTitle : p}
                   className={`inline-flex max-w-full items-center gap-1.5 rounded-lg border px-2 py-0.5 font-mono text-xs ${
                     missing ? "border-warn/50 text-warn" : "border-border/70 text-muted"
                   }`}
                 >
                   {missing ? <FileWarning size={12} aria-hidden /> : <FileText size={12} aria-hidden />}
                   <span className="truncate">{p}</span>
-                  <span className="sr-only">{missing ? "路径不存在" : "路径存在"}</span>
+                  <span className="sr-only">{missing ? t.pathMissing : t.pathExists}</span>
                 </span>
               );
             })}
-            <span className="text-xs text-muted">发送时由 omp 读进上下文</span>
+            <span className="text-xs text-muted">{t.mentionSendHint}</span>
           </div>
         )}
         {imageUnsupported && (
-          <div className="px-4 pt-2 text-xs text-warn">当前模型可能不支持图片，发送前请确认模型是否带视觉能力</div>
+          <div className="px-4 pt-2 text-xs text-warn">{t.imageUnsupported}</div>
         )}
         <label htmlFor="composer" className="sr-only">
-          输入消息
+          {t.composerLabel}
         </label>
         {/* `/` 命令补全：有可用命令面且行首命中时才出现 */}
         {slashToken !== null && slashCands.length > 0 && (
-          <div className="mx-3 mb-1 overflow-hidden rounded-lg border border-border/70 bg-background" role="listbox" aria-label="可用命令">
+          <div className="mx-3 mb-1 overflow-hidden rounded-lg border border-border/70 bg-background" role="listbox" aria-label={t.slashListAria}>
             {slashCands.map((c, i) => (
               <button
                 key={c.name}
@@ -347,7 +350,7 @@ export function Composer() {
         )}
         {/* `@` 路径补全：前缀匹配的目录列举，Tab/Enter 选中 */}
         {mentionToken !== null && !mentionEmpty && mentionCands.length > 0 && (
-          <div className="mx-3 mb-1 overflow-hidden rounded-lg border border-border/70 bg-background" role="listbox" aria-label="路径补全">
+          <div className="mx-3 mb-1 overflow-hidden rounded-lg border border-border/70 bg-background" role="listbox" aria-label={t.mentionListAria}>
             {mentionCands.map((c, i) => (
               <button
                 key={c.path}
@@ -386,7 +389,7 @@ export function Composer() {
             // 纯文本粘贴（files 为空）直接放行，不碰剪贴板。
             const images = files.filter((f) => f.type.startsWith("image/"));
             if (images.length === 0) {
-              if (files.length > 0) setAttachError("只支持 PNG / JPEG / WebP / GIF 图片，其他文件已忽略");
+              if (files.length > 0) setAttachError(t.attachOnlyImages);
               return;
             }
             e.preventDefault();
@@ -468,12 +471,12 @@ export function Composer() {
           disabled={awaiting}
           placeholder={
             awaiting
-              ? "先处理上面的审批"
+              ? t.resolveApprovalFirst
               : dragging
-                ? "松手即可添加图片"
+                ? t.placeholderDragging
                 : running
-                  ? "输入追问，Enter 排队本轮后执行，⌘/Ctrl+Enter 立即转向"
-                  : "随心输入（@ 引用文件，/ 查看命令）"
+                  ? t.placeholderRunning
+                  : t.placeholderIdle
           }
           className="max-h-44 w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-sm leading-6 outline-none placeholder:text-muted/70 disabled:opacity-60"
         />
@@ -482,8 +485,8 @@ export function Composer() {
             onClick={() => void pickImages()}
             disabled={awaiting}
             className="cursor-pointer rounded-full p-2 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground disabled:cursor-default disabled:opacity-40"
-            aria-label="添加图片"
-            title="添加图片（也可直接粘贴 / 拖入）"
+            aria-label={t.attachAddAria}
+            title={t.attachAddTitle}
           >
             <ImagePlus size={16} aria-hidden />
           </button>
@@ -501,18 +504,18 @@ export function Composer() {
                   onClick={() => void sendQueued("follow_up")}
                   disabled={!draft.trim() && attachments.length === 0}
                   className="ml-1 cursor-pointer rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors duration-150 hover:bg-background hover:text-foreground disabled:cursor-default disabled:opacity-40"
-                  aria-label="排队追问（本轮后执行）"
-                  title="排队追问（本轮后执行）"
+                  aria-label={t.queueActionAria}
+                  title={t.queueActionAria}
                 >
-                  排队
+                  {t.queueAction}
                 </button>
                 <button
                   onClick={() => activeSessionId && api.stop(activeSessionId).catch(() => undefined)}
                   className="ml-1 flex cursor-pointer items-center gap-1.5 rounded-full bg-accent px-3.5 py-1.5 text-sm text-white transition-opacity duration-150 hover:opacity-90"
-                  aria-label="停止"
+                  aria-label={t.stop}
                 >
                   <span className="h-2 w-2 rounded-sm bg-white" aria-hidden />
-                  停止
+                  {t.stop}
                 </button>
               </>
             ) : (
@@ -520,7 +523,7 @@ export function Composer() {
                 onClick={() => void send()}
                 disabled={(!draft.trim() && attachments.length === 0) || awaiting}
                 className="ml-1 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-accent text-white transition-all duration-150 hover:opacity-90 disabled:cursor-default disabled:opacity-30"
-                aria-label="发送"
+                aria-label={t.sendAria}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
                   <path d="M12 19V5m0 0-6 6m6-6 6 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />

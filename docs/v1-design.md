@@ -182,7 +182,7 @@ RPC 流（stdout JSONL）与 jsonl 文件是同一套语义的两面，V1 统一
 
 **输入框上方一行 = 上下文条**（`ContextBar`）：左「项目」、右「git 分支」，两者都可点开，并与输入框工具行共用同一个互斥下拉槽（`composerMenu: model | thinking | permission | project | branch | null`，同一时刻只开一个，统一向上弹）。一个项目都没有时整条不渲染（空态的「选择目录」是唯一主入口，不重复）。
 
-- **项目**（`ProjectPicker`）：显示这条消息落到哪个项目——认会话归属，会话 `projectId` 为 null 就显示「未归属」，**不回退左栏 `activeProjectId`**（否则会显示成消息在 A 项目里、实际发进未归属目录的会话）。点开列全部项目（名称 + mono 路径尾段 + 缺失角标），选中即 `switchProject(id, { openRecent: true })`：切上下文 → 刷新项目与会话列表 → 打开该项目最近一个会话（没有则回空态）。左栏分组头走同一个 `switchProject` 但只切上下文、不抢着开会话。
+- **项目**（`ProjectPicker`）：显示这条消息落到哪个项目——认会话归属，会话 `projectId` 为 null 就显示「未归属」，**不回退左栏 `activeProjectId`**（否则会显示成消息在 A 项目里、实际发进未归属目录的会话）。点开列全部项目（名称 + mono 路径尾段 + 缺失角标），选中即 `switchProject(id, { newSession: true })`：**在该项目下新建一个对话**并切过去（切换是「换到那个项目干活」，不继承上一个对话的上下文；点当前项目只收起下拉，不重复新建）。左栏分组头走同一个 `switchProject`，只切上下文，既不新建也不打开会话。
 - **git 分支**（`BranchPicker`）：**只读**。收起态显示分支名（detached HEAD 显示短 sha + 「游离」角标；有未提交改动带 warn 圆点，切分支前一眼可见）；展开态列本地分支（当前分支置顶打勾）+ 手动刷新 + 一行「只读展示 · 切分支请在终端操作」。**不做 checkout**：切分支会带着脏工作区走，不该由聊天窗口代劳。非 git 目录显示「非 Git 目录」而不是无声消失。数据走后端 `get_git_info`（git CLI 只读查询，见 §11.2）；找不到 git / 不是仓库 / 命令超时一律降级为 `isRepo:false`，**git 的任何问题都不影响输入与发送**。
 
 ---

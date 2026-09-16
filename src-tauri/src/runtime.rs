@@ -52,6 +52,12 @@ pub struct RunningChild {
     pub child: Child,
     /// 运行时真值快照（模型 / 可用思考档 / 当前档 / 用量），供打开会话时回填。
     pub meta: SessionMeta,
+    /// spawn 时的 `--cwd`。omp 的 jsonl 是**懒写盘**的（首个 turn 才落文件），
+    /// 刚建好的会话读不到文件头，会话归属只能靠这份事实，不许退回「未归属」。
+    pub cwd: String,
+    /// spawn 时刻（毫秒）。同理：没落盘就没有会话时间可用，列表补行时用这份事实，
+    /// 而不是每次刷新都拿「现在」，免得那一行的时间随刷新跳动。
+    pub created_ms: i64,
 }
 
 pub type RuntimeMap = Arc<Mutex<HashMap<String, RunningChild>>>;
@@ -362,7 +368,16 @@ pub async fn spawn_long_lived(
         let mut c = old.child;
         let _ = c.kill().await;
     }
-    m.insert(key, RunningChild { tx, child, meta: meta.clone() });
+    m.insert(
+        key,
+        RunningChild {
+            tx,
+            child,
+            meta: meta.clone(),
+            cwd: opts.cwd.clone(),
+            created_ms: chrono::Utc::now().timestamp_millis(),
+        },
+    );
     Ok((sid, sfile, meta))
 }
 

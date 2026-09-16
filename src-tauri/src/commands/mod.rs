@@ -464,7 +464,8 @@ pub async fn list_sessions(
     let agent = state.agent_dir.lock().await.clone();
     let running = state.running.lock().await.clone();
     let paths: Vec<(String, String)> = ov.projects.iter().map(|p| (p.id.clone(), p.path.clone())).collect();
-    let only: Option<String> = project_id.and_then(|pid| ov.projects.iter().find(|p| p.id == pid).map(|p| p.path.clone()));
+    // 只列某个项目的会话：按 id 过滤（归属已算成 id，不必再拿路径比一遍）
+    let only: Option<String> = project_id.filter(|pid| ov.projects.iter().any(|p| p.id == *pid));
     drop(ov);
     let mut out: Vec<SessionView> = vec![];
     // 损坏文件也列出（M1-1 要求可删）：按文件兜底一行
@@ -518,20 +519,17 @@ pub async fn list_sessions(
                 });
                 continue;
             }
-            let all_paths: Vec<String> = paths.iter().map(|x| x.1.clone()).collect();
-            let owner = project_of(&head.cwd, &all_paths);
-            if let Some(ref want) = only {
-                let hit = owner.as_ref().map(|o| normalize_path(o) == normalize_path(want)).unwrap_or(false);
-                if !hit {
+            let owner = owner_project(&paths, &head.cwd);
+            if let Some(want) = &only {
+                if owner.as_deref() != Some(want.as_str()) {
                     continue;
                 }
             }
-            let pid = owner.and_then(|o| paths.iter().find(|x| normalize_path(&x.1) == normalize_path(&o)).map(|x| x.0.clone()));
             let archived = ov.archived.get(&head.id).copied().unwrap_or(false);
             let note = ov.notes.get(&head.id).cloned();
             out.push(SessionView {
                 title: display_title(note.as_ref(), &head.title, head.timestamp),
-                project_id: pid,
+                project_id: owner,
                 cwd: head.cwd.clone(),
                 timestamp: head.timestamp,
                 archived,
@@ -540,6 +538,28 @@ pub async fn list_sessions(
                 running: running.get(&head.id).copied().unwrap_or(false),
                 id: head.id.clone(),
             });
+        }
+    }
+    // runtime 里可能有「刚建好、尚未落盘」的会话（omp 懒写盘）：扫磁盘当然扫不到，但列表
+    // 不能因此把刚新建的会话抹掉（切换项目等任何一次刷新都会丢行）——按 spawn 事实补一行。
+    {
+        let candidates: Vec<(String, String, i64)> = {
+            let rt = state.runtime.lock().await;
+            rt.iter().map(|(sid, c)| (sid.clone(), c.cwd.clone(), c.created_ms)).collect()
+        };
+        if !candidates.is_empty() {
+            let ov = state.overlay.lock().await;
+            for v in unlanded_views(&agent, &candidates, &paths, &ov.notes) {
+                if out.iter().any(|s| s.id == v.id) {
+                    continue;
+                }
+                if let Some(want) = &only {
+                    if v.project_id.as_deref() != Some(want.as_str()) {
+                        continue;
+                    }
+                }
+                out.push(v);
+            }
         }
     }
     out.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
@@ -578,7 +598,6 @@ pub fn list_archived_in(
         return vec![];
     }
     let Ok(rd) = std::fs::read_dir(root) else { return vec![] };
-    let paths: Vec<String> = projects.iter().map(|p| p.1.clone()).collect();
     let prefixes: Vec<String> = wanted.iter().map(|id| id.chars().take(8).collect()).collect();
     let mut out: Vec<SessionView> = vec![];
     for entry in rd.flatten() {
@@ -599,10 +618,7 @@ pub fn list_archived_in(
             if head.corrupt || !archived.get(&head.id).copied().unwrap_or(false) {
                 continue;
             }
-            let owner = project_of(&head.cwd, &paths);
-            let pid = owner.and_then(|o| {
-                projects.iter().find(|p| normalize_path(&p.1) == normalize_path(&o)).map(|p| p.0.clone())
-            });
+            let pid = owner_project(projects, &head.cwd);
             let note = notes.get(&head.id).cloned();
             out.push(SessionView {
                 title: display_title(note.as_ref(), &head.title, head.timestamp),
@@ -797,6 +813,66 @@ pub(crate) async fn remember_project_pref(
     }
 }
 
+/// 会话归属判定的**唯一入口**（新建 / 打开 / 归档清单共用）：
+/// 按 `project_of` 的真实路径前缀匹配（最长优先、符号链接展开），与 `list_sessions`
+/// 同一条规则。此前这三处各写一遍「路径精确相等」，规则一旦分叉，左栏按前缀归组、
+/// 命令回包却给 null，刚建好的会话就会掉进「未归属」。
+///
+/// `projects` = `(项目 id, 项目路径)` 列表；`project_of` 回传的是原始路径串，按串取 id。
+pub fn owner_project(projects: &[(String, String)], cwd: &str) -> Option<String> {
+    let paths: Vec<String> = projects.iter().map(|p| p.1.clone()).collect();
+    let owner = project_of(cwd, &paths)?;
+    projects.iter().find(|p| p.1 == owner).map(|p| p.0.clone())
+}
+
+/// 归属用的 cwd：会话文件头读得到就以文件为准（真相），读不到（omp 的 jsonl 懒写盘，
+/// 刚建好的会话要等首个 turn 才落文件）退回 spawn 时的 `--cwd`——
+/// 不许因为「文件还不存在」就把刚新建的会话退回「未归属」。
+pub fn owner_cwd(head_cwd: &str, spawn_cwd: &str) -> String {
+    if head_cwd.is_empty() {
+        spawn_cwd.to_string()
+    } else {
+        head_cwd.to_string()
+    }
+}
+
+/// 「刚建好、尚未落盘」的会话补行（纯函数，可在临时目录上做真实行为测试）。
+///
+/// `candidates` = 当前 runtime 里的会话 `(sid, spawn 时的 --cwd, spawn 时刻毫秒)`。
+/// 磁盘上已有 jsonl 的候选不算（走正常解析），只补真正还没落盘的——omp 懒写盘期间，
+/// 任何一次列表刷新（切换项目 / 新建会话 / 打开搜索命中）都不许把刚新建的会话抹掉。
+/// cwd / 时间 / 归属全是 spawn 的事实，只有标题还没有来源，用「未命名会话」。
+pub fn unlanded_views(
+    agent: &std::path::Path,
+    candidates: &[(String, String, i64)],
+    projects: &[(String, String)],
+    notes: &HashMap<String, String>,
+) -> Vec<SessionView> {
+    candidates
+        .iter()
+        .filter(|(sid, _, _)| {
+            let prefix: String = sid.chars().take(8).collect();
+            session_file_for(agent, &prefix).is_none()
+        })
+        .map(|(sid, cwd, created_ms)| {
+            let note = notes.get(sid).cloned();
+            SessionView {
+                // 标题留空交给 `display_title` 的「未命名会话 MM-DD」分支——与落盘后
+                // 走正常解析得到的标题同口径，会话落盘时标题不会跳变
+                title: display_title(note.as_ref(), "", *created_ms),
+                project_id: owner_project(projects, cwd),
+                cwd: cwd.clone(),
+                timestamp: *created_ms,
+                archived: false,
+                corrupt: false,
+                note,
+                running: true,
+                id: sid.clone(),
+            }
+        })
+        .collect()
+}
+
 #[tauri::command]
 pub async fn create_session(
     app: AppHandle,
@@ -837,15 +913,20 @@ pub async fn create_session(
         run.insert(sid.clone(), true);
     }
     let head = parse_session_head(std::path::Path::new(&sfile));
+    // 刚建好的会话还没有 jsonl（omp 懒写盘）：归属退回 spawn 的 --cwd、时间用建会话这一刻
+    // ——文件头此时全空，直接透传 timestamp=0 会让左栏那一行显示成 1970 的「01-01」。
+    let session_cwd = owner_cwd(&head.cwd, &cwd);
+    let session_ts = if head.timestamp == 0 { chrono::Utc::now().timestamp_millis() } else { head.timestamp };
     let ov = state.overlay.lock().await;
-    let pid = ov.projects.iter().find(|p| normalize_path(&p.path) == normalize_path(&head.cwd)).map(|p| p.id.clone());
+    let projects: Vec<(String, String)> = ov.projects.iter().map(|p| (p.id.clone(), p.path.clone())).collect();
+    let pid = owner_project(&projects, &session_cwd);
     let note = ov.notes.get(&sid).cloned();
     let title = if head.title.is_empty() { "未命名会话".into() } else { head.title.clone() };
     Ok(SessionView {
-        title: display_title(note.as_ref(), &title, head.timestamp),
+        title: display_title(note.as_ref(), &title, session_ts),
         project_id: pid,
-        cwd: head.cwd.clone(),
-        timestamp: head.timestamp,
+        cwd: session_cwd,
+        timestamp: session_ts,
         archived: false,
         corrupt: false,
         note,
@@ -856,22 +937,27 @@ pub async fn create_session(
 
 #[tauri::command]
 pub async fn open_session(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<SessionView, CmdError> {
-    // 已有长驻进程直接聚焦
-    if state.runtime.lock().await.contains_key(&id) {
+    // 已有长驻进程直接聚焦（含刚建好、尚未落盘的新会话）
+    let rt = state.runtime.lock().await.get(&id).map(|r| (r.cwd.clone(), r.created_ms));
+    if let Some((rt_cwd, rt_created)) = rt {
         let ov = state.overlay.lock().await;
         let agent = state.agent_dir.lock().await.clone();
         let prefix = id.chars().take(8).collect::<String>();
         let head = session_file_for(&agent, &prefix)
             .map(|p| parse_session_head(&p))
             .unwrap_or(SessionHead { id: id.clone(), cwd: String::new(), timestamp: 0, title: String::new(), file: String::new(), corrupt: false });
-        let pid = ov.projects.iter().find(|p| normalize_path(&p.path) == normalize_path(&head.cwd)).map(|p| p.id.clone());
+        let session_cwd = owner_cwd(&head.cwd, &rt_cwd);
+        // 文件还没落盘时头里什么都没有：时间退回 spawn 时刻（见 create_session 同样的道理）
+        let session_ts = if head.timestamp == 0 { rt_created } else { head.timestamp };
+        let projects: Vec<(String, String)> = ov.projects.iter().map(|p| (p.id.clone(), p.path.clone())).collect();
+        let pid = owner_project(&projects, &session_cwd);
         let archived = ov.archived.get(&id).copied().unwrap_or(false);
         let note = ov.notes.get(&id).cloned();
         return Ok(SessionView {
-            title: display_title(note.as_ref(), &head.title, head.timestamp),
+            title: display_title(note.as_ref(), &head.title, session_ts),
             project_id: pid,
-            cwd: head.cwd.clone(),
-            timestamp: head.timestamp,
+            cwd: session_cwd,
+            timestamp: session_ts,
             archived,
             corrupt: false,
             note,
@@ -893,13 +979,13 @@ pub async fn open_session(app: AppHandle, state: State<'_, AppState>, id: String
     let Some(bin) = bin else {
         return Err(cmd_err("OMP_MISSING", "未找到 omp".into(), None));
     };
-    let cwd = if head.cwd.is_empty() { "/tmp".into() } else { head.cwd.clone() };
+    let spawn_cwd = if head.cwd.is_empty() { "/tmp".into() } else { head.cwd.clone() };
     let approval = state.overlay.lock().await.session_approval.get(&id).cloned();
     let (sid, _, _meta) = crate::runtime::spawn_long_lived(
         &app,
         state.runtime.clone(),
         id.clone(),
-        crate::runtime::SpawnOpts { bin, cwd, resume: Some(prefix), model: None, thinking: None, approval },
+        crate::runtime::SpawnOpts { bin, cwd: spawn_cwd, resume: Some(prefix), model: None, thinking: None, approval },
     )
     .await?;
     if let Ok(mut run) = state.running.try_lock() {
@@ -907,7 +993,8 @@ pub async fn open_session(app: AppHandle, state: State<'_, AppState>, id: String
     }
     // 历史回放：switch_session + get_messages_page 由前端 get_history 补（M2-3 经事件 pump 增量）
     let ov = state.overlay.lock().await;
-    let pid = ov.projects.iter().find(|p| normalize_path(&p.path) == normalize_path(&head.cwd)).map(|p| p.id.clone());
+    let projects: Vec<(String, String)> = ov.projects.iter().map(|p| (p.id.clone(), p.path.clone())).collect();
+    let pid = owner_project(&projects, &head.cwd);
     let archived = ov.archived.get(&head.id).copied().unwrap_or(false);
     let note = ov.notes.get(&head.id).cloned();
     Ok(SessionView {
@@ -1534,8 +1621,62 @@ pub fn load_state(app: &AppHandle) -> AppState {
 
 #[cfg(test)]
 mod tests {
-    use super::{list_archived_in, resolve_path, scan_window, search_budget, search_sessions_in};
+    use super::{list_archived_in, owner_cwd, owner_project, resolve_path, scan_window, search_budget, search_sessions_in, unlanded_views};
     use std::collections::HashMap;
+
+    /// 会话归属：与 `list_sessions` 同一条规则（真实路径前缀匹配、最长优先）。
+    #[test]
+    fn owner_project_matches_by_real_prefix() {
+        let projects = vec![
+            ("p1".to_string(), "/tmp".to_string()),
+            ("p2".to_string(), "/tmp/demo".to_string()),
+        ];
+        // 子目录归最长的那个项目，父目录归父项目
+        assert_eq!(owner_project(&projects, "/tmp/demo/sub").as_deref(), Some("p2"));
+        assert_eq!(owner_project(&projects, "/tmp/other").as_deref(), Some("p1"));
+        // /tmp 在 macOS 是 /private/tmp 的符号链接，两种写法必须归同一个项目
+        assert_eq!(owner_project(&projects, "/private/tmp/demo").as_deref(), Some("p2"));
+        // 读不到 cwd（新会话懒写盘）不归属，由调用方决定兜底
+        assert_eq!(owner_project(&projects, ""), None);
+        assert_eq!(owner_project(&[], "/tmp/demo"), None);
+    }
+
+    /// 刚建好的会话读不到 jsonl（omp 懒写盘）：归属退回 spawn 时的 `--cwd`，
+    /// 而不是因为「文件还不存在」把会话丢进「未归属」。
+    #[test]
+    fn owner_cwd_falls_back_to_spawn_cwd() {
+        assert_eq!(owner_cwd("", "/tmp/demo"), "/tmp/demo");
+        assert_eq!(owner_cwd("/tmp/demo", "/elsewhere"), "/tmp/demo", "文件头读得到就以文件为准");
+    }
+
+    /// 还没落盘的会话在列表里必须补出来（否则切换项目等任意一次刷新就丢行）：
+    /// 数据全部来自 spawn 事实，已落盘的候选不重复补。
+    #[test]
+    fn unlanded_sessions_are_listed_with_spawn_facts() {
+        let agent = std::env::temp_dir().join(format!("omp-unlanded-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&agent);
+        std::fs::create_dir_all(agent.join("sessions").join("--tmp-demo--")).unwrap();
+        std::fs::write(
+            agent.join("sessions/--tmp-demo--/2026-09-15T00-00-00-000Z_aaaaaaaa-1111.jsonl"),
+            "{\"type\":\"session\",\"id\":\"aaaaaaaa-1111\",\"timestamp\":\"2026-09-15T10:00:00.000Z\",\"cwd\":\"/tmp/demo\",\"title\":\"已落盘\"}\n",
+        )
+        .unwrap();
+        let projects = vec![("p-demo".to_string(), "/tmp/demo".to_string())];
+        let notes = HashMap::from([("bbbbbbbb-3333-4444".to_string(), "备注名".to_string())]);
+        let candidates = vec![
+            ("aaaaaaaa-1111-2222".to_string(), "/tmp/demo".to_string(), 1_000),
+            ("bbbbbbbb-3333-4444".to_string(), "/tmp/demo/sub".to_string(), 2_000),
+        ];
+        let rows = unlanded_views(&agent, &candidates, &projects, &notes);
+        assert_eq!(rows.len(), 1, "已落盘的候选走正常解析，不重复补行");
+        let row = &rows[0];
+        assert_eq!(row.id, "bbbbbbbb-3333-4444");
+        assert_eq!(row.project_id.as_deref(), Some("p-demo"), "按 spawn 的 cwd 归组（子目录算同一项目）");
+        assert_eq!(row.timestamp, 2_000, "时间用 spawn 时刻，刷新不跳动");
+        assert_eq!(row.title, "备注名", "覆盖层备注优先于「未命名会话」");
+        assert!(row.running && !row.archived);
+        let _ = std::fs::remove_dir_all(&agent);
+    }
 
     /// 在临时目录里造一个 sessions/<slug>/*.jsonl 结构，跑真实搜索路径。
     fn tmp_sessions_root(tag: &str) -> std::path::PathBuf {

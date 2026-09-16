@@ -1,6 +1,8 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { THREAD_PAGE, useApp } from "../../stores/app";
+import { fmt } from "../../lib/locale";
+import { useText } from "../../lib/useText";
 import { api } from "@shared/api";
 import type { ViewMsg } from "@shared/types";
 import { ToolCard } from "./ToolCard";
@@ -13,6 +15,7 @@ import { EmptyState } from "../sidebar/EmptyState";
 export function Thread() {
   const { projects, activeSessionId, eventsBySession, threadLimitSid, threadLimit, growThreadLimit, sessions } =
     useApp();
+  const t = useText();
   const cwd = sessions.find((s) => s.id === activeSessionId)?.cwd ?? "";
   const scroller = useRef<HTMLDivElement>(null);
   const lastCount = useRef(0);
@@ -74,16 +77,16 @@ export function Thread() {
       }}
       className="thread-scroll mx-auto w-full max-w-3xl min-h-0 flex-1 px-5 py-5"
       role="log"
-      aria-label="会话消息"
+      aria-label={t.threadAria}
     >
       {hidden > 0 && (
         <div className="mb-4 flex justify-center">
           <button
             onClick={loadEarlier}
             className="cursor-pointer rounded-full border border-border/70 px-3 py-1 text-xs text-muted transition-colors duration-150 hover:bg-surface hover:text-foreground"
-            aria-label={`加载更早的 ${Math.min(hidden, THREAD_PAGE)} 条消息`}
+            aria-label={fmt(t.loadEarlierAria, Math.min(hidden, THREAD_PAGE))}
           >
-            加载更早的 {Math.min(hidden, THREAD_PAGE)} 条（还有 {hidden} 条）
+            {fmt(t.loadEarlier, Math.min(hidden, THREAD_PAGE), hidden)}
           </button>
         </div>
       )}
@@ -103,6 +106,7 @@ export function Thread() {
  * 所以浅比较即能让"只有正在流式的那一行"重渲染。
  */
 const ThreadRow = memo(function ThreadRow({ m, sessionId, cwd }: { m: ViewMsg; sessionId: string | null; cwd: string }) {
+  const t = useText();
   return (
     <div className="mb-5 text-sm leading-7">
       {m.kind === "user" && (
@@ -115,21 +119,19 @@ const ThreadRow = memo(function ThreadRow({ m, sessionId, cwd }: { m: ViewMsg; s
                   <img
                     key={i}
                     src={`data:${img.mimeType};base64,${img.data}`}
-                    alt={`图片 ${i + 1}`}
+                    alt={fmt(t.imageAlt, i + 1)}
                     className="max-h-64 max-w-[240px] rounded-lg border border-border/70 object-contain"
                   />
                 ))}
               </div>
             )}
             {(m.imagesOmitted ?? 0) > 0 && (
-              <div className="mt-1.5 text-xs text-muted">
-                {m.imagesOmitted} 张图片因体积过大未在回放中展开
-              </div>
+              <div className="mt-1.5 text-xs text-muted">{fmt(t.imagesOmitted, m.imagesOmitted ?? 0)}</div>
             )}
           </div>
           {m.text.trim() && (
             <div className="mt-0.5 flex justify-end opacity-0 transition-opacity duration-150 group-hover/user:opacity-100 focus-within:opacity-100">
-              <CopyAction text={m.text} label="复制这条提问" />
+              <CopyAction text={m.text} label={t.copyQuestion} />
             </div>
           )}
         </div>
@@ -139,7 +141,7 @@ const ThreadRow = memo(function ThreadRow({ m, sessionId, cwd }: { m: ViewMsg; s
           <AssistantText text={m.text} complete={m.complete} />
           {m.complete && m.text.trim() && (
             <div className="mt-0.5 flex opacity-0 transition-opacity duration-150 group-hover/msg:opacity-100 focus-within:opacity-100">
-              <CopyAction text={m.text} label="复制这条回复" />
+              <CopyAction text={m.text} label={t.copyReply} />
             </div>
           )}
         </div>
@@ -147,7 +149,7 @@ const ThreadRow = memo(function ThreadRow({ m, sessionId, cwd }: { m: ViewMsg; s
       {m.kind === "thinking" && (
         <details className="rounded-xl border border-border/70 bg-surface/60 px-3 py-2 text-sm text-muted">
           <summary className="cursor-pointer transition-colors duration-150 hover:text-foreground [&::-webkit-details-marker]:hidden">
-            {m.complete ? `已思考 ${m.seconds} 秒` : "思考中…"}
+            {m.complete ? fmt(t.thoughtDone, m.seconds) : t.thinking}
           </summary>
           <div className="mt-1 whitespace-pre-wrap">{m.text}</div>
         </details>
@@ -179,25 +181,30 @@ const ThreadRow = memo(function ThreadRow({ m, sessionId, cwd }: { m: ViewMsg; s
  * 状态文字双信号（进行中/待办/完成），颜色不作唯一信号。
  */
 function PlanCard({ m }: { m: Extract<ViewMsg, { kind: "plan" }> }) {
+  const t = useText();
   return (
     <div
       className="rounded-xl border border-border/70 bg-surface/60 px-3 py-2"
       role="group"
-      aria-label="任务计划"
+      aria-label={t.planTitle}
     >
-      <div className="mb-1 text-xs font-medium text-muted">任务计划</div>
+      <div className="mb-1 text-xs font-medium text-muted">{t.planTitle}</div>
       <div className="space-y-1.5">
         {m.phases.map((p) => (
           <div key={p.id}>
             <div className="text-[13px] font-medium">{p.name}</div>
             <ul className="mt-0.5 space-y-0.5">
-              {p.tasks.map((t) => (
-                <li key={t.id} className="flex items-start gap-1.5 text-[13px] text-muted">
-                  <span aria-hidden>{t.status === "completed" ? "✓" : t.status === "in_progress" ? "◐" : "○"}</span>
-                  <span className={t.status === "in_progress" ? "text-foreground" : undefined}>
-                    {t.content}
+              {p.tasks.map((task) => (
+                <li key={task.id} className="flex items-start gap-1.5 text-[13px] text-muted">
+                  <span aria-hidden>{task.status === "completed" ? "✓" : task.status === "in_progress" ? "◐" : "○"}</span>
+                  <span className={task.status === "in_progress" ? "text-foreground" : undefined}>
+                    {task.content}
                     <span className="sr-only">
-                      {t.status === "completed" ? "（已完成）" : t.status === "in_progress" ? "（进行中）" : "（待办）"}
+                      {task.status === "completed"
+                        ? t.planDone
+                        : task.status === "in_progress"
+                          ? t.planInProgress
+                          : t.planTodo}
                     </span>
                   </span>
                 </li>
@@ -215,6 +222,7 @@ function PlanCard({ m }: { m: Extract<ViewMsg, { kind: "plan" }> }) {
  * 独立组件 + 自带 copied 状态，避免把状态提到 `ThreadRow` 里破坏行级 memo。
  */
 function CopyAction({ text, label }: { text: string; label: string }) {
+  const t = useText();
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -234,20 +242,22 @@ function CopyAction({ text, label }: { text: string; label: string }) {
       title={label}
     >
       {copied ? <Check size={11} aria-hidden /> : <Copy size={11} aria-hidden />}
-      {copied ? "已复制" : "复制"}
+      {copied ? t.copied : t.copy}
     </button>
   );
 }
 
-export function SessionActions() {  const { activeSessionId } = useApp();
+export function SessionActions() {
+  const { activeSessionId } = useApp();
+  const t = useText();
   if (!activeSessionId) return null;
   return (
     <button
       onClick={() => activeSessionId && api.stop(activeSessionId).catch(() => undefined)}
       className="cursor-pointer text-xs text-muted hover:text-foreground"
-      aria-label="停止"
+      aria-label={t.stop}
     >
-      停止
+      {t.stop}
     </button>
   );
 }

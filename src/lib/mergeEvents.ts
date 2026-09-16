@@ -18,10 +18,10 @@ import type { ViewMsg } from "@shared/types";
 
 /** 内部标记：只在实时管线中使用，落 store 前会被剥掉，不属于 ViewMsg。 */
 export type InternalFlags = {
-  /** text 流式追加：同 id 覆盖而非新增。 */
-  __append?: boolean;
-  /** 工具卡换 id：先用 contentIndex 占位、`toolcall_end` 后换成 toolCallId 卡。 */
-  __replaceId?: string;
+ /** text 流式追加：同 id 覆盖而非新增。 */
+ __append?: boolean;
+ /** 工具卡换 id：先用 contentIndex 占位、`toolcall_end` 后换成 toolCallId 卡。 */
+ __replaceId?: string;
 };
 
 export type IncomingViewMsg = ViewMsg & InternalFlags;
@@ -30,94 +30,96 @@ type ToolCard = Extract<ViewMsg, { kind: "tool" }>;
 
 /** 工具卡字段合并：终态覆盖状态/输出，早期事件里的元数据不许丢。 */
 export function mergeToolCard(oldCard: ToolCard, next: ToolCard): ToolCard {
-  return {
-    ...oldCard,
-    ...next,
-    id: next.id || oldCard.id,
-    toolCallId: next.toolCallId || oldCard.toolCallId,
-    name: next.name && next.name !== "tool" ? next.name : oldCard.name,
-    intent: next.intent || oldCard.intent,
-    argsSummary:
-      next.argsSummary && next.argsSummary !== "输入中…" ? next.argsSummary : oldCard.argsSummary,
-    output: next.output || oldCard.output,
-    outputFull: next.outputFull ?? oldCard.outputFull,
-  };
+ return {
+  ...oldCard,
+  ...next,
+  id: next.id || oldCard.id,
+  toolCallId: next.toolCallId || oldCard.toolCallId,
+  name: next.name && next.name !== "tool" ? next.name : oldCard.name,
+  intent: next.intent || oldCard.intent,
+  // 参数摘要：流式占位卡（streaming，摘要恒为空）不许覆盖已到手的真实摘要；
+  // 终态卡摘要为空时沿用旧卡（占位文案由渲染层按当前语言给，数据层不存文案）
+  argsSummary:
+   next.state === "streaming" ? oldCard.argsSummary : next.argsSummary || oldCard.argsSummary,
+  output: next.output || oldCard.output,
+  outputFull: next.outputFull ?? oldCard.outputFull,
+ };
 }
 
 /** 剥掉内部标记，保证 store 里只留干净 ViewMsg（e2e:ipc 的 ViewMsg 契约不受影响）。 */
 export function stripInternal(m: IncomingViewMsg): ViewMsg {
-  if (m.__append === undefined && m.__replaceId === undefined) return m;
-  const { __append, __replaceId, ...rest } = m;
-  void __append;
-  void __replaceId;
-  return rest as ViewMsg;
+ if (m.__append === undefined && m.__replaceId === undefined) return m;
+ const { __append, __replaceId, ...rest } = m;
+ void __append;
+ void __replaceId;
+ return rest as ViewMsg;
 }
 
 export function mergeViewMsgs(cur: ViewMsg[], incoming: IncomingViewMsg[]): ViewMsg[] {
-  const out = cur.slice();
-  for (const raw of incoming) {
-    const next = stripInternal(raw);
-    // 换 id：流式占位卡被正式卡取代，原位替换成合并后的卡（保持消息顺序）
-    if (raw.__replaceId) {
-      const ri = out.findIndex((x) => x.id === raw.__replaceId);
-      if (ri >= 0) {
-        const oldCard = out[ri];
-        out.splice(ri, 1);
-        if (oldCard.kind === "tool" && next.kind === "tool") {
-          const dup = out.findIndex((x) => x.kind === "tool" && x.id === next.id);
-          if (dup >= 0) {
-            out[dup] = mergeToolCard(oldCard, out[dup] as ToolCard);
-          } else {
-            out.splice(ri, 0, mergeToolCard(oldCard, next));
-          }
-          continue;
-        }
-      }
+ const out = cur.slice();
+ for (const raw of incoming) {
+  const next = stripInternal(raw);
+  // 换 id：流式占位卡被正式卡取代，原位替换成合并后的卡（保持消息顺序）
+  if (raw.__replaceId) {
+   const ri = out.findIndex((x) => x.id === raw.__replaceId);
+   if (ri >= 0) {
+    const oldCard = out[ri];
+    out.splice(ri, 1);
+    if (oldCard.kind === "tool" && next.kind === "tool") {
+     const dup = out.findIndex((x) => x.kind === "tool" && x.id === next.id);
+     if (dup >= 0) {
+      out[dup] = mergeToolCard(oldCard, out[dup] as ToolCard);
+     } else {
+      out.splice(ri, 0, mergeToolCard(oldCard, next));
+     }
+     continue;
     }
-    if (raw.__append && next.kind === "text") {
-      const idx = out.findIndex((x) => x.kind === "text" && x.id === next.id && !x.complete);
-      if (idx >= 0) out[idx] = next;
-      else out.push(next);
-      continue;
-    }
-    if (next.kind === "tool") {
-      const idx = out.findIndex((x) => x.kind === "tool" && x.id === next.id);
-      if (idx >= 0) {
-        out[idx] = mergeToolCard(out[idx] as ToolCard, next);
-        continue;
-      }
-    }
-    // 同一个审批请求重复推送（重连 / 重放）只保留一张卡
-    if (next.kind === "approval") {
-      const idx = out.findIndex((x) => x.kind === "approval" && x.id === next.id);
-      if (idx >= 0) {
-        out[idx] = next;
-        continue;
-      }
-    }
-    // 通用 UI 请求同理按 uiId 去重（同一条 request 重放不会出两张卡）
-    if (next.kind === "ui") {
-      const idx = out.findIndex((x) => x.kind === "ui" && x.uiId === next.uiId);
-      if (idx >= 0) {
-        out[idx] = next;
-        continue;
-      }
-    }
-    // @文件 芯片排：同一批文件重复推送只留一排（message_start/end 各推一次的情况）
-    if (next.kind === "files") {
-      const idx = out.findIndex((x) => x.kind === "files" && x.id === next.id);
-      if (idx >= 0) {
-        out[idx] = next;
-        continue;
-      }
-    }
-    // 服务端撤回：连同对应卡片一起从流里移除（用户已无法回包，留着就是死卡）
-    if (next.kind === "ui-cancel") {
-      const idx = out.findIndex((x) => x.kind === "ui" && x.uiId === next.uiId);
-      if (idx >= 0) out.splice(idx, 1);
-      continue;
-    }
-    out.push(next);
+   }
   }
-  return out;
+  if (raw.__append && next.kind === "text") {
+   const idx = out.findIndex((x) => x.kind === "text" && x.id === next.id && !x.complete);
+   if (idx >= 0) out[idx] = next;
+   else out.push(next);
+   continue;
+  }
+  if (next.kind === "tool") {
+   const idx = out.findIndex((x) => x.kind === "tool" && x.id === next.id);
+   if (idx >= 0) {
+    out[idx] = mergeToolCard(out[idx] as ToolCard, next);
+    continue;
+   }
+  }
+  // 同一个审批请求重复推送（重连 / 重放）只保留一张卡
+  if (next.kind === "approval") {
+   const idx = out.findIndex((x) => x.kind === "approval" && x.id === next.id);
+   if (idx >= 0) {
+    out[idx] = next;
+    continue;
+   }
+  }
+  // 通用 UI 请求同理按 uiId 去重（同一条 request 重放不会出两张卡）
+  if (next.kind === "ui") {
+   const idx = out.findIndex((x) => x.kind === "ui" && x.uiId === next.uiId);
+   if (idx >= 0) {
+    out[idx] = next;
+    continue;
+   }
+  }
+  // @文件 芯片排：同一批文件重复推送只留一排（message_start/end 各推一次的情况）
+  if (next.kind === "files") {
+   const idx = out.findIndex((x) => x.kind === "files" && x.id === next.id);
+   if (idx >= 0) {
+    out[idx] = next;
+    continue;
+   }
+  }
+  // 服务端撤回：连同对应卡片一起从流里移除（用户已无法回包，留着就是死卡）
+  if (next.kind === "ui-cancel") {
+   const idx = out.findIndex((x) => x.kind === "ui" && x.uiId === next.uiId);
+   if (idx >= 0) out.splice(idx, 1);
+   continue;
+  }
+  out.push(next);
+ }
+ return out;
 }

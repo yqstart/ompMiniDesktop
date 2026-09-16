@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { TEXT } from "./locale";
 import { summarizeArgs, viewMsgFromJsonlLine, viewMsgsFromJsonlLines } from "./viewmsg";
+
+/** 归一 / 导出 / 实时管线的文案取字典；测试只锁中文口径。 */
+const zh = TEXT["zh-CN"];
 
 describe("summarizeArgs", () => {
  it("read 显示 path+行号", () => {
@@ -15,7 +19,7 @@ describe("viewMsgFromJsonlLine", () => {
   const msgs = viewMsgFromJsonlLine({
    type: "message",
    message: { role: "user", content: [{ type: "text", text: "hi" }] },
-  });
+  }, zh);
   expect(msgs[0]).toMatchObject({ kind: "user", text: "hi" });
  });
  it("toolResult 错误态", () => {
@@ -28,15 +32,15 @@ describe("viewMsgFromJsonlLine", () => {
     isError: true,
     content: [{ type: "text", text: "denied" }],
    },
-  });
+  }, zh);
   expect(msgs[0]).toMatchObject({ kind: "tool", state: "error" });
  });
  it("model_change 走分隔线", () => {
-  const msgs = viewMsgFromJsonlLine({ type: "model_change" });
+  const msgs = viewMsgFromJsonlLine({ type: "model_change" }, zh);
   expect(msgs[0]).toMatchObject({ kind: "divider", divider: "model" });
  });
  it("未知 type 不崩", () => {
-  expect(viewMsgFromJsonlLine({ type: "something_new" })).toEqual([]);
+  expect(viewMsgFromJsonlLine({ type: "something_new" }, zh)).toEqual([]);
  });
 
  // V2 M6：带图片的用户消息，图片并进同一条 user 气泡（不是新增一条空消息）
@@ -50,7 +54,7 @@ describe("viewMsgFromJsonlLine", () => {
      { type: "image", data: "AAA", mimeType: "image/png" },
     ],
    },
-  });
+  }, zh);
   expect(msgs).toHaveLength(1);
   expect(msgs[0]).toMatchObject({ kind: "user", text: "看看这张图", images: [{ mimeType: "image/png", data: "AAA" }] });
  });
@@ -59,7 +63,7 @@ describe("viewMsgFromJsonlLine", () => {
   const msgs = viewMsgFromJsonlLine({
    type: "message",
    message: { role: "user", content: [{ type: "image", data: "BBB", mimeType: "image/jpeg" }] },
-  });
+  }, zh);
   expect(msgs).toHaveLength(1);
   expect(msgs[0]).toMatchObject({ kind: "user", text: "", images: [{ mimeType: "image/jpeg", data: "BBB" }] });
  });
@@ -75,7 +79,7 @@ describe("viewMsgFromJsonlLine", () => {
      { path: "a.bin", content: "(skipped)", byteSize: 12582912, skippedReason: "tooLarge" },
     ],
    },
-  });
+  }, zh);
   expect(msgs).toHaveLength(1);
   expect(msgs[0]).toMatchObject({
    kind: "files",
@@ -89,8 +93,8 @@ describe("viewMsgFromJsonlLine", () => {
  });
 
  it("fileMention 没有 files 时不出空芯片排", () => {
-  expect(viewMsgFromJsonlLine({ type: "message", message: { role: "fileMention", files: [] } })).toEqual([]);
-  expect(viewMsgFromJsonlLine({ type: "message", message: { role: "fileMention" } })).toEqual([]);
+  expect(viewMsgFromJsonlLine({ type: "message", message: { role: "fileMention", files: [] } }, zh)).toEqual([]);
+  expect(viewMsgFromJsonlLine({ type: "message", message: { role: "fileMention" } }, zh)).toEqual([]);
  });
 });
 
@@ -131,7 +135,7 @@ describe("viewMsgsFromJsonlLines（历史批量归一）", () => {
  };
 
  it("已完成工具只出一卡且终态 ok（含意图与参数）", () => {
-  const msgs = viewMsgsFromJsonlLines([callLine, startLine, resultLine]);
+  const msgs = viewMsgsFromJsonlLines([callLine, startLine, resultLine], zh);
   const tools = msgs.filter((m) => m.kind === "tool");
   expect(tools).toHaveLength(1);
   expect(tools[0]).toMatchObject({
@@ -146,7 +150,7 @@ describe("viewMsgsFromJsonlLines（历史批量归一）", () => {
  });
 
  it("未完成工具才 running（无结果行）", () => {
-  const msgs = viewMsgsFromJsonlLines([callLine, startLine]);
+  const msgs = viewMsgsFromJsonlLines([callLine, startLine], zh);
   const tools = msgs.filter((m) => m.kind === "tool");
   expect(tools).toHaveLength(1);
   expect(tools[0]).toMatchObject({ state: "running", output: "" });
@@ -167,7 +171,7 @@ describe("viewMsgsFromJsonlLines（历史批量归一）", () => {
      content: [{ type: "text", text: "Tool call denied by user: bash" }],
     },
    },
-  ]);
+  ], zh);
   const tools = msgs.filter((m) => m.kind === "tool");
   expect(tools).toHaveLength(1);
   expect(tools[0]).toMatchObject({ state: "error" });
@@ -196,15 +200,15 @@ describe("viewMsgsFromJsonlLines（历史批量归一）", () => {
     id: "r-b",
     message: { role: "toolResult", toolCallId: "c-b", toolName: "bash", isError: false, content: [{ type: "text", text: "ok" }] },
    },
-  ]);
+  ], zh);
   const tools = msgs.filter((m) => m.kind === "tool");
   expect(tools.map((t) => (t.kind === "tool" ? t.toolCallId : ""))).toEqual(["c-a", "c-b"]);
   expect(tools.every((t) => t.kind === "tool" && t.state === "ok")).toBe(true);
  });
 
  it("id 稳定：重复归一可去重", () => {
-  const a = viewMsgsFromJsonlLines([callLine, startLine, resultLine]);
-  const b = viewMsgsFromJsonlLines([callLine, startLine, resultLine]);
+  const a = viewMsgsFromJsonlLines([callLine, startLine, resultLine], zh);
+  const b = viewMsgsFromJsonlLines([callLine, startLine, resultLine], zh);
   expect(a.map((m) => m.id)).toEqual(b.map((m) => m.id));
  });
 });
@@ -227,7 +231,7 @@ describe("viewMsgsFromJsonlLines：会话初始配置不渲染分隔线", () => 
  };
 
  it("首条用户消息之前的初始档位 / 模型不出分隔线", () => {
-  expect(viewMsgsFromJsonlLines([...head, userLine]).map((m) => m.kind)).toEqual(["user"]);
+  expect(viewMsgsFromJsonlLines([...head, userLine], zh).map((m) => m.kind)).toEqual(["user"]);
  });
 
  it("用户消息之后的切换照旧渲染（会话中切换仍有回执）", () => {
@@ -236,7 +240,7 @@ describe("viewMsgsFromJsonlLines：会话初始配置不渲染分隔线", () => 
    userLine,
    { type: "thinking_level_change", id: "sw-1", thinkingLevel: "high" },
    { type: "model_change", id: "sw-2", model: "commandcode/claude-haiku-4-5" },
-  ]);
+  ], zh);
   const dividers = msgs
    .filter((m) => m.kind === "divider")
    .map((m) => (m.kind === "divider" ? m.text : ""));

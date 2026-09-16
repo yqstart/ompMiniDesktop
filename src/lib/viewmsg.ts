@@ -1,5 +1,6 @@
 import type { MentionFile, ViewMsg } from "@shared/types";
 import { imagesFromContent } from "./attachments";
+import { fmt, type Text } from "./locale";
 
 let seq = 0;
 const nid = (p: string) => `${p}-${Date.now().toString(36)}-${seq++}`;
@@ -33,7 +34,10 @@ export function mentionFilesOf(message: Record<string, unknown>): MentionFile[] 
  return out;
 }
 
-/** 按工具名定制参数摘要行（docs/v1-design.md §8.3）。 */
+/**
+ * 按工具名定制参数摘要行（docs/v1-design.md §8.3）。
+ * 无参数时返回空串：占位文案（「无参数」）由渲染层按当前界面语言给，数据层不掺文案。
+ */
 export function summarizeArgs(name: string, args: Record<string, unknown>): string {
  const s = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
  switch (name) {
@@ -47,10 +51,10 @@ export function summarizeArgs(name: string, args: Record<string, unknown>): stri
      : typeof args.lines === "string"
       ? `:${args.lines}`
       : "";
-   return `${path}${range}`.trim() || "(无参数)";
+   return `${path}${range}`.trim();
   }
   case "bash":
-   return s(args.command ?? args.cmd ?? "").trim() || "(无命令)";
+   return s(args.command ?? args.cmd ?? "").trim();
   case "grep":
   case "glob":
    return [s(args.pattern ?? args.query ?? ""), s(args.path ?? args.dir ?? "")]
@@ -61,7 +65,7 @@ export function summarizeArgs(name: string, args: Record<string, unknown>): stri
     const line = JSON.stringify(args);
     return line.length > 120 ? `${line.slice(0, 120)}…` : line;
    } catch {
-    return "(无参数)";
+    return "";
    }
   }
  }
@@ -82,7 +86,7 @@ export function summarizeArgs(name: string, args: Record<string, unknown>): stri
  * 所有 id 均由 jsonl 行 id / toolCallId 稳定派生（不再随机），
  * 重复打开同一会话可按 id 去重，不会叠历史。
  */
-export function viewMsgsFromJsonlLines(lines: unknown[]): ViewMsg[] {
+export function viewMsgsFromJsonlLines(lines: unknown[], t: Text): ViewMsg[] {
  const arr = Array.isArray(lines) ? lines : [];
  type CallMeta = { name: string; args: Record<string, unknown>; intent: string; streamIndex: number };
  type ResultMeta = { text: string; full?: string; isError: boolean };
@@ -284,10 +288,10 @@ export function viewMsgsFromJsonlLines(lines: unknown[]): ViewMsg[] {
    if (!userSeen && o.type !== "title_change") return;
    const label =
     o.type === "model_change"
-     ? `已切换模型`
+     ? t.dividerModel
      : o.type === "thinking_level_change"
-      ? `思考等级已设为 ${String((o as Record<string, unknown>).thinkingLevel ?? "")}`
-      : `标题：${String((o as Record<string, unknown>).title ?? "")}`;
+      ? fmt(t.dividerThinking, String((o as Record<string, unknown>).thinkingLevel ?? ""))
+      : fmt(t.dividerTitle, String((o as Record<string, unknown>).title ?? ""));
    out.push({
     kind: "divider",
     id: `d:${lid}`,
@@ -299,7 +303,7 @@ export function viewMsgsFromJsonlLines(lines: unknown[]): ViewMsg[] {
  });
  return out;
 }
-export function viewMsgFromJsonlLine(line: unknown): ViewMsg[] {
+export function viewMsgFromJsonlLine(line: unknown, t: Text): ViewMsg[] {
  if (!line || typeof line !== "object") return [];
  const o = line as Record<string, unknown>;
  const type = o.type as string | undefined;
@@ -424,10 +428,10 @@ export function viewMsgFromJsonlLine(line: unknown): ViewMsg[] {
  if (type === "title_change" || type === "model_change" || type === "thinking_level_change") {
   const label =
    type === "model_change"
-    ? `已切换模型`
+    ? t.dividerModel
     : type === "thinking_level_change"
-     ? `思考等级已设为 ${String((o as Record<string, unknown>).thinkingLevel ?? "")}`
-     : `标题：${String((o as Record<string, unknown>).title ?? "")}`;
+     ? fmt(t.dividerThinking, String((o as Record<string, unknown>).thinkingLevel ?? ""))
+     : fmt(t.dividerTitle, String((o as Record<string, unknown>).title ?? ""));
   return [
    {
     kind: "divider",

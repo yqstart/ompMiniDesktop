@@ -2,11 +2,15 @@ import { useState } from "react";
 import { useApp } from "../../stores/app";
 import { pickAndAddProject } from "../../lib/projects";
 import { createSessionIn } from "../../lib/sessionOpen";
+import { useText } from "../../lib/useText";
 
 export function EmptyState({ kind }: { kind: "no-project" | "no-session" | "archived" }) {
   const { activeProjectId, projects } = useApp();
+  const t = useText();
   const [error, setError] = useState<string | null>(null);
   const currentProject = projects.find((p) => p.id === activeProjectId) ?? null;
+  // 模板里 `{0}` 是项目名（渲染时用 mono 强调）：按它切开再各自填充。
+  const [chatInBefore, chatInAfter] = t.emptyNewChatIn.split("{0}");
   if (kind === "no-project") {
     return (
       <div className="flex min-h-0 w-full flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
@@ -15,10 +19,8 @@ export function EmptyState({ kind }: { kind: "no-project" | "no-session" | "arch
             <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
           </svg>
         </div>
-        <h1 className="text-[17px] font-semibold tracking-tight">先添加一个项目</h1>
-        <p className="max-w-xs text-sm leading-6 text-muted">
-          选择一个本地目录作为项目，会话会绑定到它启动
-        </p>
+        <h1 className="text-[17px] font-semibold tracking-tight">{t.emptyNoProjectTitle}</h1>
+        <p className="max-w-xs text-sm leading-6 text-muted">{t.emptyNoProjectBody}</p>
         {/* 与左上角主入口同一份逻辑（pickAndAddProject），空态即入口，不用回头找按钮。 */}
         <button
           onClick={async () => {
@@ -27,7 +29,7 @@ export function EmptyState({ kind }: { kind: "no-project" | "no-session" | "arch
           }}
           className="mt-1 cursor-pointer rounded-full bg-accent px-5 py-2 text-sm font-medium text-white transition-opacity duration-150 hover:opacity-90"
         >
-          选择目录
+          {t.emptyPickFolder}
         </button>
         {error && (
           <p role="alert" className="text-xs text-danger">
@@ -40,7 +42,7 @@ export function EmptyState({ kind }: { kind: "no-project" | "no-session" | "arch
   if (kind === "archived") {
     return (
       <div className="border-b border-border bg-surface px-4 py-2 text-center text-sm text-muted">
-        已归档，只读——到「设置 › 已归档对话」恢复后可继续对话
+        {t.emptyArchivedBanner}
       </div>
     );
   }
@@ -51,20 +53,20 @@ export function EmptyState({ kind }: { kind: "no-project" | "no-session" | "arch
           <path d="M12 5v14m0 0-5-5m5 5 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </div>
-      <h1 className="text-[17px] font-semibold tracking-tight">开始一个新会话</h1>
+      <h1 className="text-[17px] font-semibold tracking-tight">{t.emptyNoSessionTitle}</h1>
       {/* 空态必须说清"消息会发到哪个目录"：否则用户不知道新会话落在哪 */}
       <p className="max-w-xs text-sm leading-6 text-muted">
         {currentProject ? (
           <>
-            会话会在 <span className="font-mono text-foreground">{currentProject.name}</span> 下新建
+            {chatInBefore}
+            <span className="font-mono text-foreground">{currentProject.name}</span>
+            {chatInAfter ?? ""}
           </>
         ) : (
-          "先在左栏选择一个项目"
+          t.emptyPickProjectFirst
         )}
       </p>
-      <p className="max-w-xs font-mono text-xs leading-6 text-muted/70">
-        Enter 发送 · Shift+Enter 换行 · Esc 停止
-      </p>
+      <p className="max-w-xs font-mono text-xs leading-6 text-muted/70">{t.emptyShortcuts}</p>
       <button
         onClick={async () => {
           const res = await createSessionIn(activeProjectId, { projectName: currentProject?.name });
@@ -72,7 +74,7 @@ export function EmptyState({ kind }: { kind: "no-project" | "no-session" | "arch
         }}
         className="mt-1 cursor-pointer rounded-full border border-border px-5 py-2 text-sm text-foreground transition-colors duration-150 hover:bg-surface"
       >
-        新建会话
+        {t.newSession}
       </button>
       {error && (
         <p role="alert" className="text-xs text-danger">

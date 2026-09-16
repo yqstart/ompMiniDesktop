@@ -3,7 +3,10 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { TEXT } from "./locale";
 import { viewMsgsFromJsonlLines } from "./viewmsg";
+
+const zh = TEXT["zh-CN"];
 
 /**
  * DoD §13「`omp render --plain` 对拍：同一会话文本一致」。
@@ -74,7 +77,7 @@ describe.skipIf(!hasOmp || cases.length === 0)("omp render --plain 对拍", () =
      }
     })
     .filter((v): v is unknown => v !== null);
-   const ours = viewMsgsFromJsonlLines(raw);
+   const ours = viewMsgsFromJsonlLines(raw, zh);
    // 切片写进临时文件再渲染：渲染输出只取决于线程长度，不再取决于调用方终端
    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-parity-"));
    const head = path.join(dir, path.basename(file));

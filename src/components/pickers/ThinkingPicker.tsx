@@ -2,14 +2,17 @@ import { useCallback } from "react";
 import { ChevronDown } from "lucide-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
+import { fmt } from "../../lib/locale";
 import { useDropdown } from "../../lib/useDropdown";
 import { thinkingLevelsOf } from "../../lib/thinking";
+import { useText } from "../../lib/useText";
 
 /**
  * 思考档选择器：**只列当前模型真正支持的档位**（off 恒可用）。
  * 可用集优先取 omp 真值 `currentEfforts`（切模型/外部改档都会回读），模型目录兜底。
  */
 export function ThinkingPicker({ compact = false }: { compact?: boolean }) {
+  const t = useText();
   const { models, activeSessionId, composerMenu, currentModel, currentThinking, currentEfforts } = useApp();
   const open = composerMenu === "thinking";
   const setOpen = useCallback(
@@ -30,9 +33,9 @@ export function ThinkingPicker({ compact = false }: { compact?: boolean }) {
         className={`flex shrink-0 cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 whitespace-nowrap transition-colors duration-150 hover:bg-background ${
           compact ? "text-xs text-muted hover:text-foreground" : "text-sm"
         }`}
-        aria-label="选择思考等级"
+        aria-label={t.chooseThinkingAria}
         aria-expanded={open}
-        title={noThinking ? "当前模型不支持思考等级" : `可用档位：${levels.join(" / ")}`}
+        title={noThinking ? t.thinkingUnavailableTitle : fmt(t.thinkingLevelsTitle, levels.join(" / "))}
       >
         <span>{value}</span>
         <ChevronDown size={13} aria-hidden className="opacity-60" />
@@ -50,12 +53,12 @@ export function ThinkingPicker({ compact = false }: { compact?: boolean }) {
               className={`block w-full cursor-pointer rounded px-2 py-1.5 text-left text-sm transition-colors duration-200 hover:bg-background ${
                 lv === value ? "text-foreground" : "text-muted"
               }`}
-              aria-label={`思考等级 ${lv}`}
+              aria-label={fmt(t.thinkingLevelAria, lv)}
             >
               {lv}
             </button>
           ))}
-          {noThinking && <div className="px-2 py-1.5 text-xs text-muted">当前模型不支持思考</div>}
+          {noThinking && <div className="px-2 py-1.5 text-xs text-muted">{t.thinkingUnsupported}</div>}
         </div>
       )}
     </div>

@@ -2,8 +2,10 @@ import { useCallback, useState } from "react";
 import { ChevronDown, RefreshCw } from "lucide-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
+import { fmt } from "../../lib/locale";
 import { useDropdown } from "../../lib/useDropdown";
 import { highestThinking } from "../../lib/thinking";
+import { useText } from "../../lib/useText";
 import type { ModelInfo } from "@shared/types";
 
 function shortName(m: ModelInfo): string {
@@ -17,6 +19,7 @@ function fmtCtx(n: number | null): string {
 }
 
 export function ModelPicker({ compact = false }: { compact?: boolean }) {
+  const t = useText();
   const { models, set, composerMenu, activeSessionId, currentModel } = useApp();
   const open = composerMenu === "model";
   const setOpen = useCallback(
@@ -85,28 +88,28 @@ export function ModelPicker({ compact = false }: { compact?: boolean }) {
         className={`flex shrink-0 cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 whitespace-nowrap transition-colors duration-150 hover:bg-background ${
           compact ? "text-xs text-muted hover:text-foreground" : "text-sm"
         }`}
-        aria-label="选择模型"
+        aria-label={t.chooseModel}
         aria-expanded={open}
       >
-        <span className="whitespace-nowrap">{current ? shortName(current) : "模型"}</span>
+        <span className="whitespace-nowrap">{current ? shortName(current) : t.modelLabel}</span>
         <ChevronDown size={13} aria-hidden className="shrink-0 opacity-60" />
       </button>
       {open && (
         <div className="absolute right-0 bottom-9 z-10 max-h-80 w-80 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-border bg-surface p-2 shadow-xl">
           <div className="flex items-center gap-2">
-            <label htmlFor="model-search" className="sr-only">搜索模型</label>
+            <label htmlFor="model-search" className="sr-only">{t.searchModelLabel}</label>
             <input
               id="model-search"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="搜索模型…"
+              placeholder={t.searchModelPlaceholder}
               className="flex-1 rounded border border-border bg-background px-2 py-1 text-sm outline-none"
             />
             <button
               onClick={() => void load(true)}
               disabled={loading}
               className="cursor-pointer rounded p-1.5 transition-colors duration-200 hover:bg-background disabled:opacity-50"
-              aria-label="刷新模型列表"
+              aria-label={t.refreshModels}
             >
               <RefreshCw size={14} className={loading ? "animate-spin" : ""} aria-hidden />
             </button>
@@ -119,18 +122,18 @@ export function ModelPicker({ compact = false }: { compact?: boolean }) {
                   key={m.selector}
                   onClick={() => void pick(m)}
                   className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors duration-200 hover:bg-background"
-                  aria-label={`使用模型 ${m.name}`}
+                  aria-label={fmt(t.useModelAria, m.name)}
                 >
                   <span className="truncate">{m.name}</span>
                   <span className="ml-auto flex shrink-0 gap-1 font-mono text-xs text-muted">
                     {m.contextWindow ? <span>{fmtCtx(m.contextWindow)}</span> : null}
-                    {m.input?.includes("image") ? <span>图</span> : null}
+                    {m.input?.includes("image") ? <span>{t.imageCap}</span> : null}
                   </span>
                 </button>
               ))}
             </div>
           ))}
-          {list.length === 0 && <div className="p-2 text-sm text-muted">无匹配模型</div>}
+          {list.length === 0 && <div className="p-2 text-sm text-muted">{t.noModelMatch}</div>}
         </div>
       )}
     </div>

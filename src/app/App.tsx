@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp, SIDEBAR_MAX, SIDEBAR_MIN } from "../stores/app";
+import { useText } from "../lib/useText";
 import { api } from "@shared/api";
 import { Sidebar } from "../components/sidebar/Sidebar";
 import { TopBar } from "../components/thread/TopBar";
@@ -35,6 +36,7 @@ function SidebarShell({
   children: React.ReactNode;
 }) {
   const dragging = useRef(false);
+  const t = useText();
   // hover 才加宽热区：平时 3px 细线，悬停/拖拽时 7px 好抓
   const [hot, setHot] = useState(false);
   // 拖拽中的视觉态用 state 表达（render 里不许读 ref），ref 只在事件/effect 里做快速判断
@@ -68,7 +70,7 @@ function SidebarShell({
         <div
           role="separator"
           aria-orientation="vertical"
-          aria-label="调整侧栏宽度"
+          aria-label={t.resizeSidebar}
           aria-valuemin={SIDEBAR_MIN}
           aria-valuemax={SIDEBAR_MAX}
           aria-valuenow={Math.round(width)}
@@ -117,6 +119,7 @@ function SidebarDrawer({ children }: { children: React.ReactNode }) {
 
 export function App() {
   const { settingsOpen, set, sidebarWidth, setSidebarWidth } = useApp();
+  const t = useText();
   useTheme();
   useSessionEvents();
   useTaskNotifications();
@@ -144,8 +147,8 @@ export function App() {
       .catch(() =>
         set({
           health: {
-            omp: { ompPath: null, ompVersion: null, agentDir: "", errors: ["健康检查失败"] },
-            modelsError: "健康检查失败",
+            omp: { ompPath: null, ompVersion: null, agentDir: "", errors: [t.healthCheckFailed] },
+            modelsError: t.healthCheckFailed,
             ok: false,
           },
         }),

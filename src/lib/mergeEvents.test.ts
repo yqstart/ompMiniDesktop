@@ -3,6 +3,9 @@ import type { ViewMsg } from "@shared/types";
 import { mergeViewMsgs, type IncomingViewMsg } from "./mergeEvents";
 import { __resetFolds, frameToViewMsgs } from "./useSessionEvents";
 import { useApp } from "../stores/app";
+import { TEXT } from "./locale";
+
+const zh = TEXT["zh-CN"];
 
 /**
  * 回归测试：一次工具调用在 RPC 流里分多个阶段到达，必须始终合并成**一张**卡。
@@ -16,7 +19,7 @@ const SID = "sess-1";
 function replay(frames: Record<string, unknown>[]): ViewMsg[] {
  let msgs: ViewMsg[] = [];
  for (const f of frames) {
-  msgs = mergeViewMsgs(msgs, frameToViewMsgs(SID, f) as IncomingViewMsg[]);
+  msgs = mergeViewMsgs(msgs, frameToViewMsgs(SID, f, zh) as IncomingViewMsg[]);
  }
  return msgs;
 }

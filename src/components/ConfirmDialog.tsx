@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useText } from "../lib/useText";
 
 /**
  * 通用二次确认浮层（MASTER §8 的 `ConfirmDialog`）。
@@ -12,8 +13,8 @@ export function ConfirmDialog({
   open,
   title,
   detail,
-  confirmLabel = "确认",
-  cancelLabel = "取消",
+  confirmLabel,
+  cancelLabel,
   danger = false,
   onConfirm,
   onCancel,
@@ -28,6 +29,7 @@ export function ConfirmDialog({
   onCancel: () => void;
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const t = useText();
 
   useEffect(() => {
     if (!open) return;
@@ -60,7 +62,7 @@ export function ConfirmDialog({
             onClick={onCancel}
             className="cursor-pointer rounded-lg border border-border px-3.5 py-1.5 text-sm transition-colors duration-150 hover:bg-background"
           >
-            {cancelLabel}
+            {cancelLabel ?? t.cancel}
           </button>
           <button
             onClick={onConfirm}
@@ -68,7 +70,7 @@ export function ConfirmDialog({
               danger ? "bg-danger" : "bg-accent"
             }`}
           >
-            {confirmLabel}
+            {confirmLabel ?? t.confirm}
           </button>
         </div>
       </div>

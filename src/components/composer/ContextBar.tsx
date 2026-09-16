@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
 import { resolveContext } from "../../lib/context";
+import { useText } from "../../lib/useText";
 import { ProjectPicker } from "../pickers/ProjectPicker";
 import { BranchPicker } from "../pickers/BranchPicker";
 import type { GitInfo } from "@shared/types";
@@ -16,6 +17,7 @@ import type { GitInfo } from "@shared/types";
  * - 查不到就什么都不显示（不闪「非 Git 目录」）；确实不是仓库时才给那行灰字说明。
  */
 export function ContextBar() {
+  const t = useText();
   const { projects, sessions, activeSessionId, activeProjectId } = useApp();
   const { project, cwd } = resolveContext(projects, sessions, activeSessionId, activeProjectId);
   // git 结果连 cwd 一起存：目录一变旧结果立刻不认，避免短暂显示上一个目录的分支名
@@ -51,7 +53,7 @@ export function ContextBar() {
         <BranchPicker git={git} loading={loading} onReload={reload} />
       ) : git && cwd ? (
         <span className="px-2 py-1 text-muted/60" title={git.error ?? undefined}>
-          非 Git 目录
+          {t.notGitRepo}
         </span>
       ) : null}
     </div>

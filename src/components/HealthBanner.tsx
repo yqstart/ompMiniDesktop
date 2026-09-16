@@ -1,9 +1,11 @@
 import { FolderSearch, RefreshCw, TriangleAlert } from "lucide-react";
 import { useApp } from "../stores/app";
+import { useText } from "../lib/useText";
 import { pickOmpExecutable, refreshOmpHealth } from "../lib/ompDiag";
 
 export function HealthBanner() {
   const { health } = useApp();
+  const t = useText();
   if (!health || health.ok) return null;
   // 标题按真实原因分：omp 找到了但模型目录拉不到，不该说"未找到可用的 omp"
   const missingOmp = !health.omp.ompPath;
@@ -14,9 +16,9 @@ export function HealthBanner() {
     >
       <TriangleAlert size={15} className="mt-0.5 shrink-0 text-warn" aria-hidden />
       <div className="min-w-0 flex-1">
-        <div className="font-medium">{missingOmp ? "未找到可用的 omp" : "omp 模型目录加载失败"}</div>
+        <div className="font-medium">{missingOmp ? t.healthNoOmp : t.healthModelsFailed}</div>
         <div className="text-muted">
-          {(health.omp.errors[0] ?? "请安装 oh-my-pi 后重试，或检查 PATH。") +
+          {(health.omp.errors[0] ?? t.healthInstallHint) +
             (health.modelsError ? `（${health.modelsError}）` : "")}
         </div>
       </div>
@@ -25,18 +27,18 @@ export function HealthBanner() {
         <button
           onClick={() => void refreshOmpHealth()}
           className="flex cursor-pointer items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs transition-colors duration-150 hover:bg-background"
-          aria-label="重新检测 omp"
+          aria-label={t.healthRecheckAria}
         >
           <RefreshCw size={12} aria-hidden />
-          重新检测
+          {t.recheck}
         </button>
         <button
           onClick={() => void pickOmpExecutable()}
           className="flex cursor-pointer items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs transition-colors duration-150 hover:bg-background"
-          aria-label="手动指定 omp 路径"
+          aria-label={t.healthPickPathAria}
         >
           <FolderSearch size={12} aria-hidden />
-          指定路径
+          {t.pickPath}
         </button>
       </div>
     </div>

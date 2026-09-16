@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
-import { Archive, ArchiveRestore, FolderSearch, Loader2, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, ChevronRight, FolderSearch, Loader2, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { api } from "@shared/api";
 import { useApp } from "../stores/app";
 import { groupSessionsByProject } from "../lib/sessions";
 import { pruneDeletedSessions, runSessionBatch } from "../lib/sessionBatch";
 import { loadSessions } from "../lib/sessionList";
 import { openSessionWithHistory } from "../lib/sessionOpen";
-import { SETTINGS_TEXT } from "../lib/locale";
+import { fmt } from "../lib/locale";
+import { useText } from "../lib/useText";
 import { ConfirmDialog } from "./ConfirmDialog";
 import type { SessionView } from "@shared/types";
 
@@ -24,13 +25,15 @@ type PendingDelete = { ids: string[]; title: string };
  */
 export function ArchivedSessions() {
  const { projects, locale } = useApp();
- const t = SETTINGS_TEXT[locale];
+ const t = useText();
  const [rows, setRows] = useState<SessionView[] | null>(null);
  const [busy, setBusy] = useState(false);
  const [error, setError] = useState<string | null>(null);
  const [pending, setPending] = useState<PendingDelete | null>(null);
  /** 自增即重拉：挂载、点「刷新」、以及每次恢复/删除之后都走它。 */
  const [reloadKey, setReloadKey] = useState(0);
+ /** 项目分组折叠态：key 缺席 = 展开，只有用户点过折叠的才收起。 */
+ const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
  useEffect(() => {
   let alive = true;
@@ -67,7 +70,7 @@ export function ArchivedSessions() {
    if (res.failed.length > 0) {
     const detail = res.failed.map((f) => f.message || f.id).join("；");
     const tpl = kind === "delete" ? t.archivedPartialDelete : t.archivedPartialRestore;
-    setError(tpl.replace("{v}", detail));
+    setError(fmt(tpl, detail));
    }
   } catch (e) {
    setError(e instanceof Error ? e.message : kind === "delete" ? t.archivedDelete : t.archivedRestore);
@@ -117,84 +120,101 @@ export function ArchivedSessions() {
     <p className="mt-3 rounded-lg border border-dashed border-border px-3 py-3 text-xs text-muted">{t.archivedEmpty}</p>
    ) : (
     <div className="mt-2 space-y-3">
-     {buckets.map((b) => (
-      <div key={b.key}>
-       <div className="flex items-center gap-2 border-b border-border/70 pb-1">
-        {b.missing ? (
-         <FolderSearch size={12} aria-hidden className="shrink-0 text-warn" />
-        ) : (
-         <Archive size={12} aria-hidden className="shrink-0 text-muted/70" />
-        )}
-        <span className="min-w-0 truncate text-xs font-semibold">{b.name}</span>
-        {b.path && <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted/60">{b.path}</span>}
-        <span className="ml-auto shrink-0 font-mono text-[11px] text-muted">{b.rows.length}</span>
-        <button
-         onClick={() => void act("unarchive", b.rows.map((s) => s.id))}
-         disabled={busy}
-         className="flex shrink-0 cursor-pointer items-center gap-1 rounded border border-border px-2 py-0.5 text-[11px] transition-colors duration-150 hover:bg-background disabled:opacity-40"
-         aria-label={`${t.archivedRestoreAll} ${b.name}`}
-        >
-         <RotateCcw size={11} aria-hidden />
-         {t.archivedRestoreAll}
-        </button>
-        <button
-         onClick={() =>
-          setPending({
-           ids: b.rows.map((s) => s.id),
-           title: t.archivedDeleteConfirm.replace("{v}", String(b.rows.length)),
-          })
-         }
-         disabled={busy}
-         className="flex shrink-0 cursor-pointer items-center gap-1 rounded border border-border px-2 py-0.5 text-[11px] text-danger transition-colors duration-150 hover:bg-danger/10 disabled:opacity-40"
-         aria-label={`${t.archivedDeleteAll} ${b.name}`}
-        >
-         <Trash2 size={11} aria-hidden />
-         {t.archivedDeleteAll}
-        </button>
-       </div>
-       <div className="mt-0.5 space-y-px">
-        {b.rows.map((s) => (
-         <div key={s.id} className="flex h-8 min-w-0 items-center gap-2 rounded-lg px-2 transition-colors duration-150 hover:bg-background/60">
-          <button
-           onClick={() => void openSessionWithHistory(s.id)}
-           className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
-           aria-label={s.title}
-           title={t.archivedOpenHint}
-          >
-           <span className="min-w-0 flex-1 truncate text-[13px]">{s.title}</span>
-           <span className="shrink-0 font-mono text-[11px] text-muted/80">
-            {new Date(s.timestamp).toLocaleString(locale === "zh-CN" ? "zh-CN" : "en-US", {
-             year: "numeric",
-             month: "numeric",
-             day: "numeric",
-            })}
-           </span>
-          </button>
-          <button
-           onClick={() => void act("unarchive", [s.id])}
-           disabled={busy}
-           className="flex shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted transition-colors duration-150 hover:bg-background hover:text-foreground disabled:opacity-40"
-           aria-label={`${t.archivedRestore} ${s.title}`}
-          >
-           <ArchiveRestore size={12} aria-hidden />
-           {t.archivedRestore}
-          </button>
-          <button
-           onClick={() =>
-            setPending({ ids: [s.id], title: t.archivedDeleteConfirm.replace("{v}", "1") })
-           }
-           disabled={busy}
-           className="flex shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted transition-colors duration-150 hover:bg-background hover:text-danger disabled:opacity-40"
-           aria-label={`${t.archivedDelete} ${s.title}`}
-          >
-           <Trash2 size={12} aria-hidden />
-           {t.archivedDelete}
-          </button>
+     {buckets.map((b) => {
+      const folded = collapsed[b.key] === true;
+      return (
+       <div key={b.key}>
+        <div className="flex items-center gap-1.5 border-b border-border/70 pb-1">
+         <button
+          onClick={() => setCollapsed((m) => ({ ...m, [b.key]: !m[b.key] }))}
+          aria-expanded={!folded}
+          aria-label={`${b.name}`}
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded text-left"
+         >
+          <ChevronRight
+           size={12}
+           aria-hidden
+           className={`shrink-0 text-muted transition-transform duration-150 ${folded ? "" : "rotate-90"}`}
+          />
+          {b.missing ? (
+           <FolderSearch size={12} aria-hidden className="shrink-0 text-warn" />
+          ) : (
+           <Archive size={12} aria-hidden className="shrink-0 text-muted/70" />
+          )}
+          <span className="min-w-0 truncate text-xs font-semibold">{b.name}</span>
+          {b.path && <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted/60">{b.path}</span>}
+         </button>
+         <span className="shrink-0 font-mono text-[11px] text-muted">{b.rows.length}</span>
+         <button
+          onClick={() => void act("unarchive", b.rows.map((s) => s.id))}
+          disabled={busy}
+          className="flex shrink-0 cursor-pointer items-center gap-1 rounded border border-border px-2 py-0.5 text-[11px] transition-colors duration-150 hover:bg-background disabled:opacity-40"
+          aria-label={`${t.archivedRestoreAll} ${b.name}`}
+         >
+          <RotateCcw size={11} aria-hidden />
+          {t.archivedRestoreAll}
+         </button>
+         <button
+          onClick={() =>
+           setPending({
+            ids: b.rows.map((s) => s.id),
+            title: fmt(t.archivedDeleteConfirm, b.rows.length),
+           })
+          }
+          disabled={busy}
+          className="flex shrink-0 cursor-pointer items-center gap-1 rounded border border-border px-2 py-0.5 text-[11px] text-danger transition-colors duration-150 hover:bg-danger/10 disabled:opacity-40"
+          aria-label={`${t.archivedDeleteAll} ${b.name}`}
+         >
+          <Trash2 size={11} aria-hidden />
+          {t.archivedDeleteAll}
+         </button>
+        </div>
+        {!folded && (
+         <div className="mt-0.5 space-y-px">
+          {b.rows.map((s) => (
+           <div key={s.id} className="flex h-8 min-w-0 items-center gap-2 rounded-lg px-2 transition-colors duration-150 hover:bg-background/60">
+            <button
+             onClick={() => void openSessionWithHistory(s.id)}
+             className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+             aria-label={s.title}
+             title={t.archivedOpenHint}
+            >
+             <span className="min-w-0 flex-1 truncate text-[13px]">{s.title}</span>
+             <span className="shrink-0 font-mono text-[11px] text-muted/80">
+              {new Date(s.timestamp).toLocaleString(locale === "zh-CN" ? "zh-CN" : "en-US", {
+               year: "numeric",
+               month: "numeric",
+               day: "numeric",
+              })}
+             </span>
+            </button>
+            <button
+             onClick={() => void act("unarchive", [s.id])}
+             disabled={busy}
+             className="flex shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted transition-colors duration-150 hover:bg-background hover:text-foreground disabled:opacity-40"
+             aria-label={`${t.archivedRestore} ${s.title}`}
+            >
+             <ArchiveRestore size={12} aria-hidden />
+             {t.archivedRestore}
+            </button>
+            <button
+             onClick={() =>
+              setPending({ ids: [s.id], title: fmt(t.archivedDeleteConfirm, 1) })
+             }
+             disabled={busy}
+             className="flex shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted transition-colors duration-150 hover:bg-background hover:text-danger disabled:opacity-40"
+             aria-label={`${t.archivedDelete} ${s.title}`}
+            >
+             <Trash2 size={12} aria-hidden />
+             {t.archivedDelete}
+            </button>
+           </div>
+          ))}
          </div>
-        ))}
+        )}
        </div>
-      </div>
-     ))}
+      );
+     })}
     </div>
    )}
 

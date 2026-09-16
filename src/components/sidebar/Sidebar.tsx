@@ -16,12 +16,14 @@ import {
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
+import { fmt } from "../../lib/locale";
 import { pickAndAddProject, switchProject } from "../../lib/projects";
 import { groupSessionsByProject } from "../../lib/sessions";
 import { createSessionIn, openSessionWithHistory } from "../../lib/sessionOpen";
 import { SCAN_MAX, SCAN_STEP, loadSessions, scanMoreSessions } from "../../lib/sessionList";
 import { pruneDeletedSessions, runSessionBatch } from "../../lib/sessionBatch";
 import { highlightParts } from "../../lib/search";
+import { useText } from "../../lib/useText";
 import { ConfirmDialog } from "../ConfirmDialog";
 import type { SessionHit, SessionView } from "@shared/types";
 
@@ -36,12 +38,13 @@ import type { SessionHit, SessionView } from "@shared/types";
  *   左侧全色 3px 竖条；项目分组头（当前项目）用同一套，全项目只有这一种选中视觉。
  */
 function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void }) {
- const { activeSessionId } = useApp();
+ const { activeSessionId, locale } = useApp();
+ const t = useText();
  const [confirmDelete, setConfirmDelete] = useState(false);
  const active = s.id === activeSessionId;
  const time = s.corrupt
-  ? "已损坏"
-  : new Date(s.timestamp).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  ? t.corrupt
+  : new Date(s.timestamp).toLocaleString(locale, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
  return (
   <div
    className={`group relative flex h-9 min-w-0 items-center rounded-lg pr-1.5 pl-2 transition-colors duration-150 ${active ? "bg-accent/15" : "hover:bg-background/60"
@@ -52,11 +55,11 @@ function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void })
     // 打开逻辑与输入框上方项目下拉共用一份（lib/sessionOpen）
     onClick={() => void openSessionWithHistory(s.id)}
     className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
-    aria-label={`会话 ${s.title}`}
+    aria-label={fmt(t.chatAria, s.title)}
    >
     <span
      className={`h-1.5 w-1.5 shrink-0 rounded-full ${s.running ? "bg-ok" : "bg-transparent"}`}
-     aria-label={s.running ? "运行中" : undefined}
+     aria-label={s.running ? t.statusRunning : undefined}
      aria-hidden={!s.running}
     />
     <span className={`min-w-0 flex-1 truncate text-sm ${active ? "font-semibold" : ""}`}>{s.title}</span>
@@ -69,23 +72,23 @@ function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void })
      <button
       onClick={() => api.archiveSession(s.id).then(onChanged)}
       className="cursor-pointer rounded-md p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground"
-      aria-label={s.running ? "先停止再归档" : "归档会话"}
-      title={s.running ? "先停止再归档" : "归档会话"}
+      aria-label={s.running ? t.archiveChatRunning : t.archiveChat}
+      title={s.running ? t.archiveChatRunning : t.archiveChat}
      >
       <Archive size={13} />
      </button>
      <button
       onClick={() => setConfirmDelete(true)}
       className="cursor-pointer rounded-md p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-danger"
-      aria-label="删除会话"
-      title="删除会话"
+      aria-label={t.deleteChat}
+      title={t.deleteChat}
      >
       <Trash2 size={13} />
      </button>
     </span>
    ) : (
     <span className="absolute top-1/2 right-1 z-10 flex -translate-y-1/2 items-center gap-1 rounded-md border border-border bg-surface px-1.5 py-1 text-xs whitespace-nowrap shadow-lg">
-     <span className="text-danger">确认删？</span>
+     <span className="text-danger">{t.confirmDeleteShort}</span>
      <button
       onClick={() =>
        api.deleteSession(s.id).then(() => {
@@ -94,16 +97,16 @@ function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void })
        })
       }
       className="cursor-pointer rounded-md bg-danger px-1.5 py-0.5 text-white"
-      aria-label="确认删除"
+      aria-label={t.confirmDeleteAria}
      >
-      删除
+      {t.delete}
      </button>
      <button
       onClick={() => setConfirmDelete(false)}
       className="cursor-pointer rounded-md border border-border px-1.5 py-0.5"
-      aria-label="取消删除"
+      aria-label={t.cancelDeleteAria}
      >
-      取消
+      {t.cancel}
      </button>
     </span>
    )}
@@ -113,6 +116,7 @@ function SessionRow({ s, onChanged }: { s: SessionView; onChanged: () => void })
 
 export function Sidebar() {
  const { projects, sessions, activeProjectId, set, sessionScan, sessionScanLimit } = useApp();
+ const t = useText();
  const [query, setQuery] = useState("");
  const [busy, setBusy] = useState(false);
  const [error, setError] = useState<string | null>(null);
@@ -137,8 +141,8 @@ export function Sidebar() {
  const refreshSessions = () => loadSessions();
 
  // 打开/切换项目时刷新项目与会话：终端里新建的会话（同 cwd）会实时归属进来，
- // 而不是等下次启动才出现在项目下。左栏分组头只切上下文，不抢着打开会话；
- // 「切完顺手打开最近会话」只由输入框上方的项目下拉触发（openRecent）。
+ // 而不是等下次启动才出现在项目下。左栏分组头只切上下文，既不新建也不打开会话；
+ // 「切过去并在该项目下新建对话」只由输入框上方的项目下拉触发（`newSession`）。
  const openProject = (id: string) => {
   void switchProject(id);
  };
@@ -148,14 +152,14 @@ export function Sidebar() {
   * 改完立刻刷新——原先按 cwd 归不到组的会话会重新回到该项目下。
   */
  const relocate = async (id: string, name: string) => {
-  const picked = await open({ directory: true, multiple: false, title: `为「${name}」重新选择目录` });
+  const picked = await open({ directory: true, multiple: false, title: fmt(t.relocateDialogTitle, name) });
   if (typeof picked !== "string" || !picked) return;
   setError(null);
   try {
    await api.relocateProject(id, picked);
    await refreshAll();
   } catch (e) {
-   setError(e instanceof Error ? e.message : "重定位失败");
+   setError(e instanceof Error ? e.message : t.relocateFailed);
   }
  };
 
@@ -172,8 +176,8 @@ export function Sidebar() {
    // 统一走 ConfirmDialog：此前这里用 window.confirm，成了第二种确认样式
    setConfirmBatch({
     ids,
-    title: `删除这 ${ids.length} 个对话？`,
-    detail: "会连同 jsonl 会话文件一起删除，不可恢复。",
+    title: fmt(t.batchDeleteTitle, ids.length),
+    detail: t.batchDeleteDetail,
    });
    return;
   }
@@ -187,10 +191,15 @@ export function Sidebar() {
    }
    await refreshSessions();
    if (res.failed.length > 0) {
-    setError(`${kind === "archive" ? "归档" : "删除"}部分失败：${res.failed.map((f) => f.message || f.id).join("；")}`);
+    setError(
+     fmt(
+      kind === "archive" ? t.batchArchivePartial : t.batchDeletePartial,
+      res.failed.map((f) => f.message || f.id).join("；"),
+     ),
+    );
    }
   } catch (e) {
-   setError(e instanceof Error ? e.message : `${kind === "archive" ? "归档" : "删除"}失败`);
+   setError(e instanceof Error ? e.message : kind === "archive" ? t.batchArchiveFailed : t.batchDeleteFailed);
   } finally {
    setBusy(false);
   }
@@ -214,7 +223,7 @@ export function Sidebar() {
    });
    await refreshAll();
   } catch (e) {
-   setError(e instanceof Error ? e.message : "删除工作区失败");
+   setError(e instanceof Error ? e.message : t.removeWorkspaceFailed);
   }
  };
 
@@ -273,29 +282,29 @@ export function Sidebar() {
        if (res && !res.ok) setError(res.message);
       }}
       className="mb-2 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-opacity duration-150 hover:opacity-90"
-      aria-label="添加项目"
+      aria-label={t.addProject}
      >
-      <FolderPlus size={14} aria-hidden /> 添加项目
+      <FolderPlus size={14} aria-hidden /> {t.addProject}
      </button>
      {/* 搜索入口：Cursor / DSH 式一体搜索框——图标内置、整块圆角、
             focus-within 时 accent 描边；清除按钮只在有字时出现，不占位跳动 */}
      <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-background px-2.5 py-2 text-sm text-muted transition-colors duration-150 focus-within:border-accent/60 focus-within:text-foreground">
       <Search size={14} aria-hidden className="shrink-0" />
       <label htmlFor="sidebar-search" className="sr-only">
-       搜索会话
+       {t.searchSessions}
       </label>
       <input
        id="sidebar-search"
        value={query}
        onChange={(e) => setQuery(e.target.value)}
-       placeholder="搜索会话…"
+       placeholder={t.searchPlaceholder}
        className="no-focus-ring w-full min-w-0 bg-transparent outline-none placeholder:text-muted/70"
       />
       {query && (
        <button
         onClick={() => setQuery("")}
         className="shrink-0 cursor-pointer rounded-full p-0.5 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground"
-        aria-label="清空搜索"
+        aria-label={t.clearSearch}
        >
         <X size={12} aria-hidden />
        </button>
@@ -307,12 +316,12 @@ export function Sidebar() {
             快捷卡片与下方分组重复，造成“一个项目出现两次”，已删除。 */}
     {projects.length === 0 ? (
      <div className="rounded-lg border border-dashed border-border px-3 py-3 text-sm text-muted">
-      暂无项目，先添加一个目录
+      {t.noProjectsAdd}
      </div>
     ) : (
      q && (
       <div className="px-2 pt-1 pb-1.5 text-[11px] font-medium tracking-wide text-muted">
-       {visibleGroups.reduce((n, g) => n + g.active.length, 0) + visibleOrphanActive.length} 个标题匹配
+       {fmt(t.titleMatches, visibleGroups.reduce((n, g) => n + g.active.length, 0) + visibleOrphanActive.length)}
       </div>
      )
     )}
@@ -320,20 +329,20 @@ export function Sidebar() {
     {q.length >= 2 && (
      <div className="mb-2">
       <div className="px-2 pb-1 text-[11px] font-medium tracking-wide text-muted">
-       {contentReady ? `内容命中 ${contentHits.length} 个会话` : "正在搜索正文…"}
-       {contentReady && content.truncated && <span className="ml-1 opacity-80">· 已到预算上限，结果可能不全</span>}
+       {contentReady ? fmt(t.contentMatches, contentHits.length) : t.contentSearching}
+       {contentReady && content.truncated && <span className="ml-1 opacity-80">{t.contentTruncated}</span>}
       </div>
       {contentHits.map((h) => (
        <button
         key={h.id}
         onClick={() => void openSessionWithHistory(h.id)}
-        title={`${h.title}（命中 ${h.hits} 处）`}
+        title={fmt(t.hitTooltip, h.title, h.hits)}
         className="mb-0.5 block w-full cursor-pointer rounded-lg px-2 py-1.5 text-left transition-colors duration-150 hover:bg-background/70"
        >
         <div className="flex items-center gap-1.5">
          <span className="min-w-0 flex-1 truncate text-[13px]">{h.title}</span>
-         {h.archived && <span className="shrink-0 text-[10px] text-muted">已归档</span>}
-         <span className="shrink-0 font-mono text-[10px] text-muted">{h.hits} 处</span>
+         {h.archived && <span className="shrink-0 text-[10px] text-muted">{t.archivedTag}</span>}
+         <span className="shrink-0 font-mono text-[10px] text-muted">{fmt(t.hitCount, h.hits)}</span>
         </div>
         <div className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-muted">
          {highlightParts(h.snippet, q).map((part, i) =>
@@ -354,12 +363,16 @@ export function Sidebar() {
      {error && (
       <div role="alert" className="mb-1 rounded-md border border-danger/50 px-2 py-1.5 text-xs text-danger">
        {error}
-       <button onClick={() => setError(null)} className="ml-2 cursor-pointer underline" aria-label="关闭错误提示">
-        关闭
+       <button onClick={() => setError(null)} className="ml-2 cursor-pointer underline" aria-label={t.dismissError}>
+        {t.close}
        </button>
       </div>
      )}
      {visibleGroups.map(({ project, active }) => {
+      // 模板里 `{0}` 是项目名（渲染时加粗）：按它切开再各自填充其余占位，
+      // EN 语序不同（名字在后）也对得上。
+      const purgeTitle = t.purgeConfirmTitle.split("{0}");
+      const removeTitle = t.removeConfirmTitle.split("{0}");
       return (
        <details
         key={project.id}
@@ -390,7 +403,7 @@ export function Sidebar() {
          <span className="min-w-0 flex-1 truncate">
           <span className="font-semibold text-foreground">{project.name}</span>
           {project.missing ? (
-           <span className="ml-1.5 rounded bg-warn/15 px-1 py-px text-[11px] text-warn">目录缺失</span>
+           <span className="ml-1.5 rounded bg-warn/15 px-1 py-px text-[11px] text-warn">{t.missingFolder}</span>
           ) : (
            <span className="ml-1.5 truncate font-mono text-[11px] text-muted/70">{project.path}</span>
           )}
@@ -405,8 +418,8 @@ export function Sidebar() {
             onClick={() => void runBatch("archive", active.map((s) => s.id))}
             disabled={busy || active.length === 0}
             className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground disabled:opacity-40"
-            aria-label={`归档 ${project.name} 全部对话`}
-            title="归档本项目全部进行中的对话（可在设置 › 已归档对话 里恢复）"
+            aria-label={fmt(t.archiveAllIn, project.name)}
+            title={t.archiveAllInTitle}
            >
             <Archive size={12} />
            </button>
@@ -414,8 +427,8 @@ export function Sidebar() {
             onClick={() => setConfirmProject({ id: project.id, kind: "purge" })}
             disabled={busy || active.length === 0}
             className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-danger disabled:opacity-40"
-            aria-label={`删除 ${project.name} 全部对话`}
-            title={`删除本项目全部进行中的对话（共 ${active.length} 个，二次确认）`}
+            aria-label={fmt(t.deleteAllIn, project.name)}
+            title={fmt(t.deleteAllInTitle, active.length)}
            >
             <Trash2 size={12} />
            </button>
@@ -423,8 +436,8 @@ export function Sidebar() {
             onClick={() => setConfirmProject({ id: project.id, kind: "remove" })}
             disabled={busy}
             className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-danger disabled:opacity-40"
-            aria-label={`删除工作区 ${project.name}`}
-            title="删除工作区（只解绑目录，不删会话文件；名下对话全部归档保留）"
+            aria-label={fmt(t.removeWorkspaceAria, project.name)}
+            title={t.removeWorkspaceTitle}
            >
             <FolderMinus size={12} />
            </button>
@@ -437,19 +450,18 @@ export function Sidebar() {
           {confirmProject.kind === "purge" ? (
            <>
             <div>
-             删除 <span className="font-medium text-foreground">{project.name}</span> 下全部 {active.length} 个对话？
+             {fmt(purgeTitle[0], project.name, active.length)}
+             <span className="font-medium text-foreground">{project.name}</span>
+             {fmt(purgeTitle[1] ?? "", project.name, active.length)}
             </div>
-            <div className="leading-5 text-muted">
-             这 {active.length} 个对话对应的 jsonl 会话文件将被永久删除，不可恢复；
-             已归档的对话不在这里删（去「设置 › 已归档对话」），只想摘掉项目就用「删除工作区」。
-            </div>
+            <div className="leading-5 text-muted">{fmt(t.purgeConfirmBody, active.length)}</div>
             <div className="flex flex-wrap justify-end gap-1.5">
              <button
               onClick={() => setConfirmProject(null)}
               className="cursor-pointer rounded-md border border-border px-2.5 py-1 transition-colors duration-150 hover:bg-background"
-              aria-label="取消"
+              aria-label={t.cancel}
              >
-              取消
+              {t.cancel}
              </button>
              <button
               onClick={() =>
@@ -459,37 +471,37 @@ export function Sidebar() {
               }
               disabled={busy}
               className="cursor-pointer rounded-md bg-danger px-2.5 py-1 text-white transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
-              aria-label={`确认删除 ${project.name} 全部对话`}
+              aria-label={fmt(t.deleteAllIn, project.name)}
              >
-              删除 {active.length} 个对话
+              {fmt(t.purgeConfirmButton, active.length)}
              </button>
             </div>
            </>
           ) : (
            <>
             <div>
-             删除工作区 <span className="font-medium text-foreground">{project.name}</span>？
+             {fmt(removeTitle[0], project.name)}
+             <span className="font-medium text-foreground">{project.name}</span>
+             {fmt(removeTitle[1] ?? "", project.name)}
             </div>
             <div className="leading-5 text-muted">
-             {active.length > 0
-              ? `只解绑目录，不删任何 jsonl 文件；名下 ${active.length} 个对话将全部归档保留，可在「设置 › 已归档对话」里找回。`
-              : "只解绑目录，不删任何文件；名下暂无对话。"}
+             {active.length > 0 ? fmt(t.removeConfirmBodyChats, active.length) : t.removeConfirmBodyEmpty}
             </div>
             <div className="flex flex-wrap justify-end gap-1.5">
              <button
               onClick={() => setConfirmProject(null)}
               className="cursor-pointer rounded-md border border-border px-2.5 py-1 transition-colors duration-150 hover:bg-background"
-              aria-label="取消"
+              aria-label={t.cancel}
              >
-              取消
+              {t.cancel}
              </button>
              <button
               onClick={() => void removeWorkspace(project.id)}
               disabled={busy}
               className="cursor-pointer rounded-md border border-danger/60 px-2.5 py-1 text-danger transition-colors duration-150 hover:bg-danger/10 disabled:opacity-40"
-              aria-label={`确认删除工作区 ${project.name}`}
+              aria-label={fmt(t.removeWorkspaceAria, project.name)}
              >
-              删除工作区
+              {t.removeWorkspace}
              </button>
             </div>
            </>
@@ -499,14 +511,14 @@ export function Sidebar() {
         {project.missing && (
          <div className="mx-1.5 mb-1 flex items-center gap-1.5 rounded-lg bg-warn/10 px-2 py-1.5 text-[11px] text-warn">
           <FolderSearch size={12} aria-hidden className="shrink-0" />
-          <span className="min-w-0 flex-1 truncate">目录已不存在，会话仍可回放</span>
+          <span className="min-w-0 flex-1 truncate">{t.missingFolderHint}</span>
           <button
            onClick={() => void relocate(project.id, project.name)}
            className="shrink-0 cursor-pointer rounded border border-warn/40 px-1.5 py-0.5 transition-colors duration-150 hover:bg-warn/15"
-           aria-label={`重定位项目 ${project.name}`}
-           title="重新选择该项目的目录（只改绑定路径，不动会话文件）"
+           aria-label={fmt(t.relocateAria, project.name)}
+           title={t.relocateTitle}
           >
-           重定位
+           {t.relocate}
           </button>
          </div>
         )}
@@ -518,12 +530,12 @@ export function Sidebar() {
           }}
           disabled={project.missing || busy}
           className="flex w-full cursor-pointer items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs text-muted transition-colors duration-150 hover:bg-background/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-          aria-label={`在 ${project.name} 新建会话`}
+          aria-label={fmt(t.newSessionIn, project.name)}
          >
-          <Plus size={12} /> 新建会话
+          <Plus size={12} /> {t.newSession}
          </button>
          {active.length === 0 && (
-          <div className="px-2.5 py-1 text-xs text-muted/70">暂无进行中的会话</div>
+          <div className="px-2.5 py-1 text-xs text-muted/70">{t.noActiveChats}</div>
          )}
          {active.map((s) => (
           <SessionRow key={s.id} s={s} onChanged={refreshSessions} />
@@ -537,7 +549,7 @@ export function Sidebar() {
        <summary className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1.5 text-xs font-semibold text-foreground/80 transition-colors duration-150 hover:bg-background/70 [&::-webkit-details-marker]:hidden">
         <ChevronRight size={12} aria-hidden className="transition-transform duration-150 group-open/orphan:rotate-90" />
         <Inbox size={13} aria-hidden className="shrink-0 text-accent/70" />
-        <span className="min-w-0 flex-1 truncate">未归属会话</span>
+        <span className="min-w-0 flex-1 truncate">{t.orphanChats}</span>
         <span className="relative flex h-5 w-[52px] shrink-0 items-center justify-end">
          <span className="font-mono group-hover/orphan:invisible">{visibleOrphanActive.length}</span>
          <span className="absolute inset-y-0 right-0 hidden items-center gap-0.5 group-hover/orphan:flex" onClick={(e) => e.preventDefault()}>
@@ -545,8 +557,8 @@ export function Sidebar() {
            onClick={() => void runBatch("archive", visibleOrphanActive.map((s) => s.id))}
            disabled={busy || visibleOrphanActive.length === 0}
            className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-foreground disabled:opacity-40"
-           aria-label="归档全部未归属对话"
-           title="归档全部未归属对话"
+           aria-label={t.archiveOrphanAll}
+           title={t.archiveOrphanAll}
           >
            <Archive size={12} />
           </button>
@@ -554,8 +566,8 @@ export function Sidebar() {
            onClick={() => void runBatch("delete", visibleOrphanActive.map((s) => s.id))}
            disabled={busy || visibleOrphanActive.length === 0}
            className="flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-150 hover:bg-background hover:text-danger disabled:opacity-40"
-           aria-label="删除全部未归属对话"
-           title="删除全部未归属对话（二次确认）"
+           aria-label={t.deleteOrphanAll}
+           title={t.deleteOrphanAllTitle}
           >
            <Trash2 size={12} />
           </button>
@@ -570,7 +582,7 @@ export function Sidebar() {
       </details>
      )}
      {projects.length === 0 && (
-      <div className="px-1.5 py-1 text-xs text-muted">暂无会话，先添加项目</div>
+      <div className="px-1.5 py-1 text-xs text-muted">{t.noSessionsAddProject}</div>
      )}
     </div>
    </div>
@@ -578,14 +590,14 @@ export function Sidebar() {
    {sessionScan.totalFiles > sessionScan.scannedFiles && (
     <div className="shrink-0 border-t border-border/70 px-3 py-2 text-[11px] text-muted">
      <div>
-      已扫描最近 {sessionScan.scannedFiles} 个会话（共 {sessionScan.totalFiles} 个）
+      {fmt(t.scanScanned, sessionScan.scannedFiles, sessionScan.totalFiles)}
      </div>
      <button
       onClick={() => void scanMoreSessions()}
       disabled={sessionScanLimit >= SCAN_MAX}
       className="mt-1 cursor-pointer rounded-lg border border-border px-2 py-0.5 transition-colors duration-150 hover:bg-background hover:text-foreground disabled:cursor-default disabled:opacity-50"
      >
-      {sessionScanLimit >= SCAN_MAX ? `已达上限（${SCAN_MAX}）` : `继续扫描更早的 ${SCAN_STEP} 个`}
+      {sessionScanLimit >= SCAN_MAX ? fmt(t.scanLimitReached, SCAN_MAX) : fmt(t.scanMore, SCAN_STEP)}
      </button>
     </div>
    )}
@@ -594,16 +606,16 @@ export function Sidebar() {
     <button
      onClick={() => set({ settingsOpen: true, sidebarOpen: false })}
      className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors duration-150 hover:bg-background/70"
-     aria-label="设置"
+     aria-label={t.settingsOpenAria}
     >
-     <Settings size={15} /> 设置
+     <Settings size={15} /> {t.settingsOpenAria}
     </button>
    </div>
    <ConfirmDialog
     open={confirmBatch !== null}
     title={confirmBatch?.title ?? ""}
     detail={confirmBatch?.detail}
-    confirmLabel="删除"
+    confirmLabel={t.delete}
     danger
     onCancel={() => setConfirmBatch(null)}
     onConfirm={() => {

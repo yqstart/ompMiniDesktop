@@ -2,16 +2,18 @@ import { useCallback, useEffect, useState } from "react";
 import { Shield } from "lucide-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
+import { fmt } from "../../lib/locale";
 import { useDropdown } from "../../lib/useDropdown";
-
-const LABEL: Record<string, string> = {
-  "always-ask": "每次询问",
-  write: "写入询问",
-  yolo: "自动通过",
-};
+import { useText } from "../../lib/useText";
 
 export function PermissionBadge({ compact = false, align = "right" }: { compact?: boolean; align?: "left" | "right" }) {
   const { activeSessionId, composerMenu } = useApp();
+  const t = useText();
+  const LABEL: Record<string, string> = {
+    "always-ask": t.permAlwaysAsk,
+    write: t.permWrite,
+    yolo: t.permYolo,
+  };
   const open = composerMenu === "permission";
   const setOpen = useCallback(
     (v: boolean) => useApp.setState({ composerMenu: v ? "permission" : null }),
@@ -52,7 +54,7 @@ export function PermissionBadge({ compact = false, align = "right" }: { compact?
       <button
         onClick={() => setOpen(!open)}
         className={`flex cursor-pointer items-center gap-1.5 rounded-full px-2.5 py-1 transition-colors duration-150 hover:bg-background ${compact ? "text-xs" : "text-sm"} ${danger ? "text-danger" : "text-muted hover:text-foreground"}`}
-        aria-label={`权限：${LABEL[shown] ?? shown}`}
+        aria-label={fmt(t.permAria, LABEL[shown] ?? shown)}
         aria-expanded={open}
       >
         <Shield size={13} aria-hidden />
@@ -60,7 +62,7 @@ export function PermissionBadge({ compact = false, align = "right" }: { compact?
       </button>
       {open && (
         <div className={`absolute bottom-9 z-10 w-56 rounded-xl border border-border bg-surface p-1 shadow-xl ${align === "left" ? "left-0" : "right-0"}`}>
-          <div className="px-2 py-1 text-xs text-muted">全局</div>
+          <div className="px-2 py-1 text-xs text-muted">{t.permGlobal}</div>
           {Object.keys(LABEL).map((m) => (
             <button
               key={m}
@@ -68,10 +70,10 @@ export function PermissionBadge({ compact = false, align = "right" }: { compact?
               className="block w-full cursor-pointer rounded px-2 py-1.5 text-left text-sm transition-colors duration-200 hover:bg-background"
             >
               {LABEL[m]}
-              {m === "yolo" && <span className="text-danger"> · 跳过所有确认</span>}
+              {m === "yolo" && <span className="text-danger">{t.permYoloNote}</span>}
             </button>
           ))}
-          <div className="border-t border-border px-2 py-1 text-xs text-muted">本会话覆盖</div>
+          <div className="border-t border-border px-2 py-1 text-xs text-muted">{t.permSession}</div>
           {Object.keys(LABEL).map((m) => (
             <button
               key={m}

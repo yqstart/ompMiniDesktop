@@ -3,6 +3,8 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { Check, Copy } from "lucide-react";
 import { useState } from "react";
+import { fmt } from "../../lib/locale";
+import { useText } from "../../lib/useText";
 
 /**
  * Assistant 正文渲染（MASTER §8 组件名 `AssistantText`）。
@@ -15,6 +17,7 @@ import { useState } from "react";
  * - 代码块右上角复制按钮：长命令/长 diff 是高频复用内容。
  */
 export function AssistantText({ text, complete }: { text: string; complete: boolean }) {
+  const t = useText();
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);
   // 未闭合的围栏代码块：流式中会出现，长度用奇偶判断（Markdown 里 ``` 必须成对）
   const openFence = (text.match(/```/g)?.length ?? 0) % 2 === 1;
@@ -50,7 +53,7 @@ export function AssistantText({ text, complete }: { text: string; complete: bool
       </ReactMarkdown>
       {pendingUrl && (
         <span className="mx-1 inline-flex items-center gap-1 rounded border border-border bg-surface px-1.5 py-0.5 text-xs">
-          在浏览器打开 {pendingUrl.length > 40 ? `${pendingUrl.slice(0, 40)}…` : pendingUrl}？
+          {fmt(t.openLinkConfirm, pendingUrl.length > 40 ? `${pendingUrl.slice(0, 40)}…` : pendingUrl)}
           <button
             className="cursor-pointer text-accent hover:opacity-80"
             onClick={() => {
@@ -59,15 +62,15 @@ export function AssistantText({ text, complete }: { text: string; complete: bool
               void import("@tauri-apps/plugin-opener").then((m) => m.openUrl(url).catch(() => undefined));
             }}
           >
-            打开
+            {t.openLink}
           </button>
           <button className="cursor-pointer text-muted hover:text-foreground" onClick={() => setPendingUrl(null)}>
-            取消
+            {t.cancel}
           </button>
         </span>
       )}
       {openFence && (
-        <div className="mt-1.5 space-y-1.5 rounded-lg bg-code p-3" aria-label="代码块生成中" role="status">
+        <div className="mt-1.5 space-y-1.5 rounded-lg bg-code p-3" aria-label={t.codeBlockGenerating} role="status">
           <div className="h-3 w-2/3 animate-pulse rounded bg-border/70" />
           <div className="h-3 w-1/2 animate-pulse rounded bg-border/70" />
         </div>
@@ -81,6 +84,7 @@ export function AssistantText({ text, complete }: { text: string; complete: bool
 
 /** 代码块容器：自带复制（纯前端剪贴板，不落盘、不联网）。 */
 function CodeBlock({ children, ...props }: React.ComponentProps<"pre">) {
+  const t = useText();
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     const el = document.activeElement as HTMLElement | null;
@@ -102,11 +106,11 @@ function CodeBlock({ children, ...props }: React.ComponentProps<"pre">) {
       <button
         onClick={() => void copy()}
         className="absolute top-1.5 right-1.5 flex cursor-pointer items-center gap-1 rounded border border-border/70 bg-surface/90 px-1.5 py-0.5 text-[11px] text-muted opacity-0 transition-opacity duration-150 group-hover/code:opacity-100 focus-visible:opacity-100"
-        aria-label="复制代码块"
-        title="复制代码块"
+        aria-label={t.copy}
+        title={t.copy}
       >
         {copied ? <Check size={11} aria-hidden /> : <Copy size={11} aria-hidden />}
-        {copied ? "已复制" : "复制"}
+        {copied ? t.copied : t.copy}
       </button>
     </div>
   );
