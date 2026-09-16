@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { IPC } from "@shared/ipc";
 import { api } from "@shared/api";
@@ -403,13 +403,26 @@ function applyRuntime(sid: string, rt: SessionRuntime) {
  }
 }
 
+/**
+ * 补拉一次运行时真值（模型 / 思考档 / 上下文占用 / 命令面）。
+ *
+ * 两个调用点，缺一不可：订阅建立时（消除「推送早于订阅」的竞态）与 `open_session`
+ * 返回之后（消除「补拉早于 spawn 完成」的竞态——resume 的长驻进程是在 open 里起的，
+ * 订阅那次补拉必然拉空）。不是当前会话的包不动，避免切走之后被旧会话覆盖。
+ */
+export async function syncSessionRuntime(sid: string): Promise<void> {
+ try {
+  const rt = await api.getSessionRuntime(sid);
+  if (rt && useApp.getState().activeSessionId === sid) applyRuntime(sid, rt);
+ } catch {
+  // 拉不到不影响阅读：会话内的推送与下一次回读会补
+ }
+}
+
 export function useSessionEvents() {
  const { activeSessionId, set } = useApp();
- const sidRef = useRef(activeSessionId);
 
  useEffect(() => {
-  // ref 只在 effect 里更新（render 期写 ref 会触发 react-hooks/refs）
-  sidRef.current = activeSessionId;
   const sid = activeSessionId;
   if (!sid) return;
   let off1: (() => void) | undefined;
@@ -435,14 +448,10 @@ export function useSessionEvents() {
      statusBySession: { ...st.statusBySession, [sid]: { state: e.payload.state } as SessionStatus },
     });
    });
-   // 运行时真值：实时推送 + 订阅建立后补拉一次（spawn 握手可能早于本订阅）
+   // 运行时真值：实时推送 + 订阅建立后补拉一次（spawn 握手可能早于本订阅；
+   // 若本订阅早于 spawn，则由 `openSessionWithHistory` 在 open 返回后再补一次）
    off3 = await listen<SessionRuntime>(IPC.sessionRuntime(sid), (e) => applyRuntime(sid, e.payload));
-   void api
-    .getSessionRuntime(sid)
-    .then((rt) => {
-     if (rt && sidRef.current === sid) applyRuntime(sid, rt);
-    })
-    .catch(() => undefined);
+   void syncSessionRuntime(sid);
   })();
   return () => {
    off1?.();

@@ -397,7 +397,14 @@ pub async fn spawn_long_lived(
 
     // 启动后台 pump：stdin 写 + stdout 读分发（先把握手期间攒下的帧原序回放）
     let stdin = stdin_opt.take().unwrap();
-    start_pump(app.clone(), key, reader, stdin, rx, sid.clone(), leftover);
+    start_pump(app.clone(), key.clone(), reader, stdin, rx, sid.clone(), leftover);
+
+    // 开场真值快照：omp 的握手回包里已经有模型 / 思考档 / 上下文占用，但那份回包
+    // **只在本地消化**（不进事件流），而前端建订阅后的那次 `get_session_runtime` 补拉
+    // 会早于 spawn 完成（拉空）——不在这里补一发，打开旧会话后工具行上的模型与思考档
+    // 就一直空着，直到用户手动切一次模型。前端建订阅通常早于握手完成（会话先选中、
+    // spawn 要等 omp 起来），所以这一发能收到；真收不到也有那次补拉兜底。
+    let _ = app.emit(&format!("omp-state://{key}"), &meta);
     Ok((sid, sfile, meta))
 }
 

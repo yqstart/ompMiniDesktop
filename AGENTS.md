@@ -16,6 +16,7 @@ Tauri v2 + React + TS + Tailwind v4 + Zustand，包管理 pnpm。
 | 五期排期 | `docs/v5-schedule.md` | 使用统计页（会话 jsonl 的用量聚合）的实测口径与完成口径 |
 | 六期排期 | `docs/v6-schedule.md` | 用量限额入口（供应商配额：5 小时 / 每周 / 每月）的实测口径与完成口径 |
 | 七期排期 | `docs/v7-schedule.md` | 输入框上下文容量（容量环 + 分项面板）的实测口径与完成口径 |
+| 八期排期 | `docs/v8-schedule.md` | 通用设置（omp 常用配置项：40 项白名单 + 读写口径）的实测口径与完成口径 |
 | 设计真相 | `design-system/MASTER.md` | token、布局、交互、组件命名（改 UI 先读） |
 | 应用图标 | `design-system/icon/omp-mini-icon.svg` | π 字标矢量唯一源，`pnpm icon` 重新生成 `src-tauri/icons/` |
 | 更新日志 | `CHANGELOG.md` | Keep a Changelog 风格，发版时归入新版本节 |
@@ -69,7 +70,7 @@ scripts/                   # fake-omp.mjs（canned RPC 联调：history|approve|
 
 - 会话真相永远是 `~/.omp/agent/sessions/<slug>/*.jsonl`（`PI_CODING_AGENT_DIR` 可覆盖）；app 只存轻量覆盖层 `$APPDATA/omp-mini/overlay.json`（项目列表/归档/备注/会话级权限）。app 可删可重装，不丢会话。
 - 实时输出只走 RPC 事件流，不轮询文件。文件只用于列表与历史回放。
-- 后端 per-会话 spawn `omp --mode rpc`，stdout 行解析 → `rpc_chunk` 重组 → `omp-event://<sessionId>`，状态机推 `omp-status://<sessionId>`；运行时真值（模型 / 可用思考档 / 当前档 / 上下文占用 / 本轮用量与耗时）推 `omp-state://<sessionId>`，打开会话时另经 `get_session_runtime` 补拉一次以消除订阅竞态。用量真值来自 `message_end.message.usage`（`duration` / `ttft` 实测就是毫秒，原样透传不换算）；`get_state` 回读时保留用量字段，不许被抹掉。
+- 后端 per-会话 spawn `omp --mode rpc`，stdout 行解析 → `rpc_chunk` 重组 → `omp-event://<sessionId>`，状态机推 `omp-status://<sessionId>`；运行时真值（模型 / 可用思考档 / 当前档 / 上下文占用 / 本轮用量与耗时）推 `omp-state://<sessionId>`，`get_session_runtime` 补拉**两次**以消除两个方向的竞态：订阅建立时（推送可能早于订阅）+ `open_session` 返回后（resume 的长驻进程是在 open 里 spawn 的，订阅那次补拉必然早于它完成而拉空——不补第二次，打开旧会话后工具行上的模型与思考档就一直空着）；`spawn_long_lived` 握手完成后另主动推一发开场快照（握手回包只在本地消化、不进事件流，否则真值只能等下一次回读）。用量真值来自 `message_end.message.usage`（`duration` / `ttft` 实测就是毫秒，原样透传不换算）；`get_state` 回读时保留用量字段，不许被抹掉。
 - `prompt` 的即时 ack 只代表接受，完成信号以 `agent_end(isTerminal !== false)` 为准；流式中 composer 只允许停止（`abort`），不排队。
 - 图片附件（V2 M6）：三条入口（粘贴 / 拖拽 / 点回形针选文件）都读成 base64 存内存（`attachmentsBySession`），发送时随 `prompt{message, images:[{type:"image",data,mimeType}]}` 一次性交给 omp——**不落盘、不写覆盖层、不塞草稿**；选文件走后端 `read_image_file`（WebView 拿不到任意本地路径内容）。渲染只认消息内容块里的 `type:"image"`（实时与 jsonl 同构）；单张上限 10MB，历史回放里超过 512KB base64 的块按 `imagesOmitted` 计数省略，不许无上限常驻内存。
 - `@文件` 提及（V2 M6b）：**展开动作是 omp 做的**（prompt 时把命中的文件读成 `role:"fileMention"` 消息），壳侧只做两件事——输入框把草稿里的提及显示成芯片并用后端 `check_paths`（只 stat）标出「路径不存在」，转录区把 `fileMention` 渲染成一排文件芯片（跳过项 `skippedReason` 用 warn 色）。解析规则与 omp 的 `extractFileMentions` 逐条对齐（`src/lib/mentions.ts`：引号形式、行首/空白边界、ASCII 首尾修剪）——**规则漂移会让芯片与真正读进上下文的文件对不上**。

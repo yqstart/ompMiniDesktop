@@ -3,6 +3,7 @@ import { useApp } from "../stores/app";
 import { fmt, TEXT } from "./locale";
 import { viewMsgsFromJsonlLines } from "./viewmsg";
 import { loadSessions } from "./sessionList";
+import { syncSessionRuntime } from "./useSessionEvents";
 
 /**
  * 消息流回底（Thread 的 `role="log"` 容器）：双 rAF 等首帧绘制完成再读底，
@@ -58,7 +59,7 @@ export async function createSessionIn(
 }
 /**
  * 打开会话的**唯一实现**（左栏会话行与输入框上方项目下拉共用，避免两处漂移）：
- * 选中即读底 → 起/聚焦长驻 RPC → 拉历史去重合并 → 再读底。
+ * 选中即读底 → 起/聚焦长驻 RPC → 补拉运行时真值 → 拉历史去重合并 → 再读底。
  *
  * 全程不抛错：会话打不开（文件被删 / omp 缺失）时仍允许看旧缓存，
  * 状态胶囊会报 exited / omp 不可用，不由这里弹错。
@@ -80,6 +81,10 @@ export async function openSessionWithHistory(id: string): Promise<void> {
    ...(known ? {} : { sessions: [opened, ...cur.sessions] }),
    statusBySession: { ...cur.statusBySession, [opened.id]: { state: "idle" } },
   });
+  // 运行时真值：**必须等 open 返回之后再补拉**——resume 的长驻进程是在 `open_session`
+  // 里 spawn 的，订阅建立时那次补拉必然早于它完成（拉不到），于是模型 / 思考档 /
+  // 上下文占用一直空着，直到用户手动切一次模型。这里补拉时进程一定已在。
+  await syncSessionRuntime(opened.id);
  } catch {
   // 打不开时保留旧缓存可读，状态胶囊会报 exited / 不可用
  }
