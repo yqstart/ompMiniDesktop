@@ -153,7 +153,7 @@ function handle(line) {
       // `/` 开头的本地命令：无 agent turn，经 command_output + agentInvoked:false 收尾
       if (typeof cmd.message === "string" && cmd.message.startsWith("/")) {
         out({ id, type: "response", command: "prompt", success: true });
-        out({ type: "command_output", id, output: `本地命令已执行：${cmd.message}` });
+        out({ type: "command_output", id, text: `本地命令已执行：${cmd.message}` });
         out({ id, type: "response", command: "prompt", success: true, data: { agentInvoked: false } });
         break;
       }

@@ -7,7 +7,7 @@ import type { SessionRuntime, SessionStatus, ViewMsg } from "@shared/types";
 import { summarizeArgs, mentionFilesOf, diffStatOf } from "./viewmsg";
 import { fmt, TEXT, type Text } from "./locale";
 import { imagesFromContent } from "./attachments";
-import { normalizeCommands } from "./slashCommands";
+import { parseCapabilityProbe } from "./capabilities";
 import { resolveThinking } from "./thinking";
 import { mergeViewMsgs, type IncomingViewMsg } from "./mergeEvents";
 
@@ -299,10 +299,26 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dic
   return out;
  }
  // 本地命令输出（`/` 命令经 prompt 直发，无 agent turn）：
- // 后端已把状态收敛到 idle，此处只渲染输出文本。
+ // 后端已把状态收敛到 idle，此处渲染输出文本，并顺带认一下 omp 的能力状态行
+ // （`/advisor status` / `/computer status`）落进 store——「能力」面板的状态来源。
+ // 字段名以真机为准：omp 18.2.1 发的是 `text`（`output` 是早期 canned 脚本的形状，一并兼容）。
  if (t === "command_output") {
-  const text = String((frame as Record<string, unknown>).output ?? "");
+  const text = String(
+   (frame as Record<string, unknown>).text ?? (frame as Record<string, unknown>).output ?? "",
+  );
   if (text) out.push({ kind: "command", id: `cmd-${String(frame.id ?? Date.now())}`, output: text });
+  const probe = parseCapabilityProbe(text);
+  if (probe) {
+   useApp.setState((s) => ({
+    capabilitiesBySession: {
+     ...s.capabilitiesBySession,
+     [sid]: {
+      ...(s.capabilitiesBySession[sid] ?? {}),
+      [probe.id]: { value: probe.value, detail: probe.detail, at: Date.now() },
+     },
+    },
+   }));
+  }
   return out;
  }
  // 本地命令完成信号（`prompt_result{agentInvoked:false}`）：无输出就不渲染，
@@ -353,19 +369,6 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dic
   out.push({ kind: "divider", id: `${t}-${Date.now()}`, divider: "turn", text: dict.dividerSubagent });
   return out;
  }
- // 可用命令面（`available_commands_update`）：缓存供 `/` 补全，不渲染消息。
- if (t === "available_commands_update") {
-  const cmds = (frame as Record<string, unknown>).commands;
-  if (Array.isArray(cmds)) {
-   useApp.setState((s) => ({
-    commandsBySession: {
-     ...s.commandsBySession,
-     [sid]: normalizeCommands(cmds),
-    },
-   }));
-  }
-  return out;
- }
  if (t === "turn_start" || t === "turn_end" || t === "agent_start" || t === "agent_end") return out;
  // 单向宿主通知（握手期就会到，现在经回放正常抵达）：没有渲染面，安静忽略，
  // 不占「未知帧」告警位（那是留给真正的协议漂移的）。
@@ -391,9 +394,6 @@ function applyRuntime(sid: string, rt: SessionRuntime) {
   currentRuntime: rt,
   ...(rt.model ? { currentModel: `${rt.model.provider}/${rt.model.id}` } : {}),
   currentThinking: level,
-  ...(Array.isArray(rt.commands)
-   ? { commandsBySession: { ...s.commandsBySession, [sid]: rt.commands } }
-   : {}),
   ...(Array.isArray(rt.todoPhases) && rt.todoPhases.length > 0
    ? { plansBySession: { ...s.plansBySession, [sid]: rt.todoPhases } }
    : {}),

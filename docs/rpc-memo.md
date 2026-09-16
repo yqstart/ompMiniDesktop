@@ -23,6 +23,18 @@ omp --mode rpc --cwd <项目目录> [--resume <sessionId前缀>] [--model <selec
   （回放要走 `update_meta` 写命令面缓存，快照里没这一条就白回）。
 - `available_commands_update.commands[]` 形状：`{name, aliases?, description, input?:{hint?}, subcommands?:[{name, description, usage?}], source}`。
   本机实测 48 条（内置 + 技能命令）；`input.hint` 是**参数提示**（`/compact` → `[soft|remote|snapcompact] [focus]`），补全行要带上它才说得清参数怎么给。
+- **内建斜杠命令分两类，RPC 只能驱动其中一类**（二进制里逐条命令的实现 + 真机逐条发 prompt 验证）：
+  每个内建项都带 `handle`（ACP/RPC 用）与 `handleTui`（终端 TUI 用）两个实现，**只有 `handle` 的才能在 RPC 里跑**。
+  - 两类都有（RPC 可驱动）：`fast` / `skillful` / `extended-context` / **`computer`** / **`advisor`** / `model` / `usage` / `stats` / `compact` / `todo` / `session` …（就是 `available_commands_update` 里那 48 条）。
+  - **只有 `handleTui`（RPC 驱动不了）**：`plan` / `plan-review` / `goal` / `guided-goal` / `vibe` / `loop` / `queue` / `setup`。
+    把 `/plan` 当普通 prompt 发出去**不会**触发命令，而是真的开一个 agent turn 把这段文字喂给模型（实测：`agent_start` + 工具调用全跑起来了）——所以壳侧**不能**靠发 `/plan` 来切计划模式，只能如实标为「仅 TUI」。
+  - 计划 / 目标模式的状态也不在 `get_state` 里（`get_state` 只有 `fastModeEnabled/fastModeActive`、`autoCompactionEnabled`、`steeringMode/followUpMode/interruptMode`、`todoPhases` 等）。
+    `goal` 连配置项都没有（`omp config list --json` 里没有 `goal.*`）；`plan` 有 `plan.enabled` / `plan.defaultOnStartup`，`computer` 有 `computer.enabled`，`advisor` 有 `advisor.enabled`。
+- `computer` / `advisor` 的**状态只能从它们自己的输出里读**（`get_state` 没有这两个字段）：
+  - `/computer status` → `Computer use: enabled · prelude: active · configured: display=all, maxWidth=3840, maxHeight=2400`
+  - `/advisor status` → `Advisor is enabled (provider/model). Context: … Spend: …` / `Advisor is disabled.`
+  - 开关自己的回执**不带状态**（`Computer use enabled for this session.` / `Advisor disabled.`），所以「切完」要再发一次 `status` 才能把状态确认下来。
+- `command_output` 帧的正文在 **`text`** 字段（`{type:"command_output", text:"…"}`，实测 omp 18.2.1）。壳侧早期按 `output` 读，真实 omp 的命令输出整段被丢掉（只有 canned 脚本发的 `output` 能显示）；现在两个字段都认。
 - `/` 命令的**执行**就是普通 `prompt`：`{type:"prompt", message:"/usage"}` → `command_output{text}` + `response{command:"prompt", success:true, data:{agentInvoked:false}}`，
   **没有 agent turn、不会有 `agent_end`**（壳据此把状态收敛回 idle，见 `is_local_prompt_result`）。
 - `get_state` 返回：`model{provider,id,…} / thinkingLevel / isStreaming / sessionFile / sessionId / messageCount / contextUsage{tokens,contextWindow,percent}`。注意**没有 `sessionName`**（实测 `undefined`）——会话名显示走 jsonl 的 `title`，不要指望 state。
