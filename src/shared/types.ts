@@ -283,6 +283,29 @@ export type ModelRolesInfo = {
 };
 
 /**
+ * 失败转移链（omp `retry.fallbackChains`）+ 两个配套开关——模型请求失败时
+ * 「由哪个模型接手」的那份配置。
+ *
+ * 口径（上游 description，omp 18.2.1 实测）：
+ * - `chains` 的 key 三种形态，匹配规则全在 omp 里（壳侧只读写，不复制那套规则）：
+ *   **角色名**（`default`）、**模型 selector**（`provider/model-id`，该模型活跃时生效、
+ *   与角色无关）、**供应商通配**（`provider/*` 保留失败模型的 id 只换供应商；
+ *   `openrouter/google/*` 这类 id 前缀通配 omp 也认——界面不做它的候选，手写的照原样显示）；
+ * - 值是**有序**备用 selector（omp 按序尝试，顺序是语义的一部分）；
+ * - 条目可带 `:档位` 后缀（`low` / `high` / `max` / `off`）；不带则**继承失败轮次的档位**，
+ *   `provider/*` 条目总是继承；
+ * - 触发时机：限流 / 过载 / 5xx / 网络类错误；**上下文溢出不走这条**（那个走压缩）；
+ * - `modelFallback = false` 时链**完全不生效**（omp 的判据）。
+ */
+export type FallbackChainsInfo = {
+ chains: Record<string, string[]>;
+ /** `retry.modelFallback`（默认 true）。 */
+ modelFallback: boolean;
+ /** `retry.fallbackRevertPolicy`：`cooldown-expiry`（默认，冷却结束回主模型）/ `never`。 */
+ revertPolicy: string;
+};
+
+/**
  * 记忆文件分类（后端按相对路径判定）：长期记忆 / 摘要 / 原始记忆 / 教训 /
  * 会话摘要 / 技能包 / 其他——前端据此显示中文标签。
  */
@@ -576,3 +599,15 @@ export type UpdateState =
  | { status: "downloading"; version: string; downloaded: number; total: number | null }
  | { status: "ready"; version: string }
  | { status: "error"; message: string };
+
+/**
+ * omp 设置项（设置 › 通用 ›「omp 常用设置」）：值来自 `omp config list --json`。
+ * `kind` 是 omp 的 schema 类型（boolean / number / enum / …），`description` 是上游英文说明
+ * （原样透传，不翻译）；上游没有这个键时它整个缺席，界面据此显示「当前 omp 版本没有这个设置」。
+ */
+export type OmpSetting = {
+ key: string;
+ value: unknown;
+ kind: string;
+ description: string;
+};

@@ -1,65 +1,51 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Layers, Loader, Refresh, Sliders, Star } from "reicon-react";
 import { api } from "@shared/api";
-import type { ModelInfo, ModelRolesInfo } from "@shared/types";
+import type { FallbackChainsInfo, ModelInfo, ModelRolesInfo } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { favoriteEntries, toggleFavorite } from "../../lib/favoriteModels";
-import { fmt, type Text } from "../../lib/locale";
+import { fmt } from "../../lib/locale";
+import { fmtContextWindow } from "../../lib/modelNames";
+import { splitSelector, withLevel } from "../../lib/modelSelector";
+import { roleLabel } from "../../lib/roleNames";
+import { thinkingLevelsOf, THINKING_ORDER } from "../../lib/thinking";
 import { useText } from "../../lib/useText";
 import { useDropdown } from "../../lib/useDropdown";
+import { FallbackChainsSection } from "./FallbackChains";
+import { ModelPickList } from "./ModelPickList";
 
 /**
- * 设置 › 模型：omp 的 **model roles**（角色 → 模型分配）与**可用模型目录**（只读）。
+ * 设置 › 模型：omp 的 **model roles**（角色 → 模型 + 思考档）、**失败转移链**
+ * （`retry.fallbackChains`）与**可用模型目录**（只读）。
  *
  * 口径（实现依据见 `src-tauri/src/providers.rs` 头注释）：
  * - 角色写的是 **omp 全局配置**（`omp config set modelRoles`，record 只能整表写，
  *   后端是「读 → 改一键 → 写回」并回读），未配置的角色按 omp 自己的回退规则解析，本页不复制那套规则；
- * - 「可用模型」= omp 当前可用的模型（有凭证或免钥的供应商），也是角色选择器的候选来源；
+ *   角色值可带 `:思考档` 后缀（`provider/model:max`），档位候选按该模型声明的档裁剪；
+ * - 失败转移链（`retry.fallbackChains`）是同一层配置：模型请求失败时由链上的备用模型接手，
+ *   区块内见 `FallbackChains.tsx` 的口径说明；
+ * - 「可用模型」= omp 当前可用的模型（有凭证或免钥的供应商），也是角色 / 转移目标的候选来源；
  *   这份目录与输入框 `ModelPicker` **共用同一份 store**（同一次刷新，两处同步）。
  *
  * 登录 / 登出在「供应商」页签（本页不碰凭证）。
  */
 
-/** 内置角色的可读名（上游 role id → 本应用文案）；自定义角色原样显示 id。 */
-function roleLabel(role: string, t: Text): string {
- const map: Record<string, string | undefined> = {
-  default: t.roleDefault,
-  smol: t.roleSmol,
-  slow: t.roleSlow,
-  vision: t.roleVision,
-  plan: t.rolePlan,
-  commit: t.roleCommit,
-  tiny: t.roleTiny,
-  task: t.roleTask,
-  advisor: t.roleAdvisor,
- };
- return map[role] ?? role;
-}
-
-function shortName(m: ModelInfo): string {
- return m.name.replace(/^Claude\s+/i, "").replace(/\s+\d\.\d+$/, "");
-}
-
-function fmtCtx(n: number | null): string {
- if (!n) return "";
- if (n >= 1_000_000) return `${Math.round(n / 1_000_000)}M`;
- return `${Math.round(n / 1000)}K`;
-}
-
 export function ModelsPanel() {
  const t = useText();
  const { models, set, favoriteModels, setFavoriteModels } = useApp();
  const [roles, setRoles] = useState<ModelRolesInfo | null>(null);
+ const [chains, setChains] = useState<FallbackChainsInfo | null>(null);
  const [err, setErr] = useState<string | null>(null);
  const [busy, setBusy] = useState(false);
 
- /** 拉角色表 + 模型目录；`force` 时强制刷新目录。
+ /** 拉角色表 + 失败转移链 + 模型目录；`force` 时强制刷新目录。
   *  写成 promise 链（而不是在 effect 里同步调用）——state 只在回调里更新，
   *  符合 react-hooks 对「effect 内同步 setState 会级联渲染」的约束。 */
  const load = useCallback(
   (force: boolean) =>
    Promise.allSettled([
     api.getModelRoles().then((r) => setRoles(r)),
+    api.getFallbackChains().then((c) => setChains(c)),
     (force ? api.refreshModels() : api.getModels()).then((c) => set({ models: c })),
    ]).then((res) => {
     const bad = res.find((r) => r.status === "rejected");
@@ -161,6 +147,16 @@ export function ModelsPanel() {
     </div>
    </section>
 
+   {/* 失败转移：omp retry.fallbackChains（模型请求失败时由备用模型接手）+ 两个配套开关 */}
+   <FallbackChainsSection
+    info={chains}
+    models={models?.models ?? []}
+    roles={roleKeys}
+    busy={busy}
+    onSaved={setChains}
+    onRefresh={() => void refreshAll()}
+   />
+
    {/* 常用模型：本应用偏好（localStorage），挑中的模型才出现在输入框的模型选择器里 */}
    <section aria-label={t.favoritesSection} className="rounded-md border border-border bg-surface p-3.5">
     <div className="flex items-center gap-2">
@@ -205,7 +201,8 @@ export function ModelsPanel() {
  );
 }
 
-/** 一行角色：角色名 + 当前模型 + 内联展开的模型选择器（撑开布局，不做浮层——设置页是可滚动容器，浮层会被裁掉）。 */
+/** 一行角色：角色名 + 当前 selector（模型 + 档位）+ 档位按钮 + 内联展开的模型选择器。
+ *  撑开布局、不做浮层——设置页是可滚动容器，浮层会被裁掉。 */
 function RoleRow({
  role,
  label,
@@ -221,14 +218,31 @@ function RoleRow({
 }) {
  const t = useText();
  const [open, setOpen] = useState(false);
- const [q, setQ] = useState("");
+ const [levelOpen, setLevelOpen] = useState(false);
  const [saving, setSaving] = useState(false);
  const ref = useDropdown(open, () => setOpen(false));
+ const lvRef = useDropdown(levelOpen, () => setLevelOpen(false));
+
+ // 角色值 = 模型 selector + 可选的 `:思考档` 后缀；两截分开显示、分开改
+ const { base, level } = splitSelector(current ?? "");
+ // 档位候选按该模型声明的档裁剪；目录里查不到（自定义 / 角色别名）退回全集——不挡用户，
+ // 非法档 omp 自己会忽略，但界面不给一个必然无效的窄集合
+ const model = models.find((m) => m.selector === base);
+ const levels = model ? thinkingLevelsOf(model.thinking) : [...THINKING_ORDER];
+ // 明确不支持思考的模型（可用档只有 off）不显示档位按钮，免得点开只有「默认 / off」两项
+ const canLevel = current !== null && levels.length > 1;
 
  const pick = async (m: ModelInfo) => {
   setOpen(false);
   setSaving(true);
   await onSave(role, m.selector);
+  setSaving(false);
+ };
+
+ const setLevel = async (lv: string | null) => {
+  setLevelOpen(false);
+  setSaving(true);
+  await onSave(role, withLevel(base, lv));
   setSaving(false);
  };
 
@@ -238,16 +252,6 @@ function RoleRow({
   setSaving(false);
  };
 
- const list = models.filter((m) =>
-  q.trim() ? `${m.provider}/${m.id} ${m.name}`.toLowerCase().includes(q.toLowerCase()) : true,
- );
- const groups = new Map<string, ModelInfo[]>();
- for (const m of list) {
-  const g = groups.get(m.provider) ?? [];
-  g.push(m);
-  groups.set(m.provider, g);
- }
-
  return (
   <div className="border-t border-border-soft py-2 first:border-t-0">
    <div className="flex items-center gap-2">
@@ -256,8 +260,27 @@ function RoleRow({
      {label !== role && <div className="font-mono text-xs text-muted">{role}</div>}
     </div>
     <div className="min-w-0 flex-1 font-mono text-xs break-all">
-     {current ? <span>{current}</span> : <span className="text-muted">{t.roleUnset}</span>}
+     {current ? (
+      <span>
+       {base}
+       {level && <span className="ml-1 rounded border border-border px-1 text-[10px]">{level}</span>}
+      </span>
+     ) : (
+      <span className="text-muted">{t.roleUnset}</span>
+     )}
     </div>
+    {canLevel && (
+     <button
+      onClick={() => setLevelOpen((v) => !v)}
+      disabled={saving}
+      className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+      aria-label={fmt(t.roleLevelAria, label)}
+      aria-expanded={levelOpen}
+      title={t.roleLevelDefaultHint}
+     >
+      {level ?? t.roleLevelDefault}
+     </button>
+    )}
     <button
      onClick={() => setOpen((v) => !v)}
      disabled={saving}
@@ -280,39 +303,42 @@ function RoleRow({
     {saving && <Loader size={12} className="shrink-0 animate-spin text-muted" aria-hidden />}
    </div>
 
+   {/* 思考档：行内芯片排（设置页是可滚动容器，浮层会被裁掉）；
+       「默认」= 不写后缀，交给 omp 自己的 defaultThinkingLevel */}
+   {levelOpen && (
+    <div ref={lvRef} className="mt-2 flex flex-wrap gap-1 rounded-md border border-border bg-background p-2">
+     <button
+      onClick={() => void setLevel(null)}
+      aria-pressed={level === null}
+      title={t.roleLevelDefaultHint}
+      className={`cursor-pointer rounded-md border px-2 py-0.5 text-[12px] transition-colors duration-100 ${
+       level === null
+        ? "border-accent/50 bg-active text-foreground"
+        : "border-border text-muted hover:bg-hover hover:text-foreground"
+      }`}
+     >
+      {t.roleLevelDefault}
+     </button>
+     {levels.map((lv) => (
+      <button
+       key={lv}
+       onClick={() => void setLevel(lv)}
+       aria-pressed={level === lv}
+       className={`cursor-pointer rounded-md border px-2 py-0.5 font-mono text-[12px] transition-colors duration-100 ${
+        level === lv
+         ? "border-accent/50 bg-active text-foreground"
+         : "border-border text-muted hover:bg-hover hover:text-foreground"
+       }`}
+      >
+       {lv}
+      </button>
+     ))}
+    </div>
+   )}
+
    {open && (
     <div ref={ref} className="mt-2 rounded-md border border-border bg-background p-2">
-     <div className="flex items-center gap-2">
-      <input
-       value={q}
-       onChange={(e) => setQ(e.target.value)}
-       placeholder={t.roleSearchPlaceholder}
-       aria-label={t.roleSearchPlaceholder}
-       className="min-w-0 flex-1 rounded-md border border-border bg-surface px-2 py-1 text-[13px] outline-none"
-      />
-     </div>
-     <div className="mt-1 max-h-56 overflow-y-auto">
-      {[...groups].map(([provider, ms]) => (
-       <div key={provider}>
-        <div className="px-1 pt-1.5 pb-0.5 font-mono text-xs text-muted">{provider}</div>
-        {ms.map((m) => (
-         <button
-          key={m.selector}
-          onClick={() => void pick(m)}
-          className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-left text-[13px] transition-colors duration-100 hover:bg-hover"
-          aria-label={fmt(t.useModelAria, m.name)}
-         >
-          <span className="truncate">{shortName(m)}</span>
-          <span className="ml-auto flex shrink-0 gap-1 font-mono text-xs text-muted">
-           {m.contextWindow ? <span>{fmtCtx(m.contextWindow)}</span> : null}
-           {m.thinking?.length ? <span>{m.thinking.length}</span> : null}
-          </span>
-         </button>
-        ))}
-       </div>
-      ))}
-      {list.length === 0 && <div className="p-2 text-[13px] text-muted">{t.noModelMatch}</div>}
-     </div>
+     <ModelPickList models={models} onPick={(m) => void pick(m)} />
     </div>
    )}
   </div>
@@ -410,7 +436,7 @@ function CatalogSection({
           <div key={m.selector} className="flex items-center gap-2 py-0.5 pl-4 text-[13px]">
            <span className="truncate">{m.name}</span>
            <span className="ml-auto flex shrink-0 gap-1.5 font-mono text-muted">
-            {m.contextWindow ? <span>{fmtCtx(m.contextWindow)}</span> : null}
+            {m.contextWindow ? <span>{fmtContextWindow(m.contextWindow)}</span> : null}
             {m.input?.includes("image") ? <span>{t.imageCap}</span> : null}
            </span>
            <StarToggle

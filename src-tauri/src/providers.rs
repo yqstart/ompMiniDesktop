@@ -17,6 +17,15 @@
 //! 实测报 "Unknown setting"）。所以这里是「读 → 改一个键 → 写回」，用 `roles_edit`
 //! 互斥锁串行化，避免两次并发编辑互相覆盖。
 //!
+//! **失败转移链（`retry.fallbackChains`）走同一套模式**：它也是 record（键 = 角色名 /
+//! 模型 selector / 供应商通配，值 = 有序备用 selector 数组），整表写回、用 `retry_edit`
+//! 串行化；两个配套开关（`retry.modelFallback` / `retry.fallbackRevertPolicy`）是本页
+//! 顺带映射的，因为 `modelFallback = false` 时链**完全不生效**——拆开两个界面会让
+//! 「链配好了却没生效」变成一个看不见的坑。读这三个键**必须钉住 agentDir**：实测
+//! `omp config get` 读的是合并项目层后的有效值（`<cwd>/.omp/config.yml` 有覆盖时给项目值），
+//! 而 `omp config set` 任何 cwd 下都只写全局 agentDir 的 config.yml——只有读也钉在 agentDir，
+//! 显示的才是用户正在改的那一层。
+//!
 //! 纯逻辑（解析、合并、校验）都在文末单测里锁着，进程调用只负责喂字符串。
 
 use serde::Serialize;
@@ -313,15 +322,133 @@ pub fn apply_role_edit(
     Ok(())
 }
 
+// ---------- 失败转移链（retry.fallbackChains） ----------
+
+/// 一条转移链：键 → **有序**备用 selector。
+///
+/// 键的三种形态（上游 `retry.fallbackChains` 的 description，omp 18.2.1 实测）：
+/// - **角色名**（`default`）：该角色在用的模型失败时转移；
+/// - **模型 selector**（`provider/model-id`）：该模型活跃时生效，与角色无关；
+/// - **供应商通配**（`provider/*`）：保留失败模型的 id、只换供应商；
+///   另有 id 前缀通配（`openrouter/google/*`）——壳侧不做它的候选，手写过的照原样读写。
+///
+/// 匹配规则全在 omp 里，壳侧不复制：只负责整表读写与形态校验。
+/// 条目可带思考档后缀（`provider/model:high`）；不带后缀的继承失败轮次的档位，
+/// `provider/*` 条目**总是**继承。
+pub type ChainMap = std::collections::BTreeMap<String, Vec<String>>;
+
+/// 失败转移链 + 两个配套开关（`retry` 组里与「换模型」直接相关的三个键）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FallbackChainsInfo {
+    /// 键 → 有序备用 selector（可带 `:档位` 后缀）。顺序即 omp 的尝试顺序。
+    pub chains: ChainMap,
+    /// `retry.modelFallback`：为 false 时链**完全不生效**（omp 的判据），默认 true。
+    pub model_fallback: bool,
+    /// `retry.fallbackRevertPolicy`：`cooldown-expiry`（默认，冷却结束回主模型）/ `never`。
+    pub revert_policy: String,
+}
+
+/// `retry.fallbackRevertPolicy` 的合法值（上游 enum；实测传别的直接报
+/// `Invalid value: … Valid values: cooldown-expiry, never`）。
+pub const REVERT_POLICIES: [&str; 2] = ["cooldown-expiry", "never"];
+
+/// 解析 `retry.fallbackChains` 的值（`{"<key>": ["sel", …]}`，纯函数，单测覆盖）。
+///
+/// **容错**：值不是数组、数组里混了非字符串、键为空、链为空的条目一律丢弃——配置可能被人
+/// 手改坏，读不动就当没有，绝不 panic。
+pub fn parse_chains(v: &serde_json::Value) -> ChainMap {
+    let mut out = ChainMap::new();
+    let Some(obj) = v.as_object() else { return out };
+    for (key, val) in obj {
+        if key.trim().is_empty() {
+            continue;
+        }
+        let Some(arr) = val.as_array() else { continue };
+        let items: Vec<String> = arr
+            .iter()
+            .filter_map(|x| x.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && !s.chars().any(|c| c.is_control()))
+            .map(str::to_string)
+            .collect();
+        // 空链没有语义（omp 视同没配），不往界面端一张空行
+        if !items.is_empty() {
+            out.insert(key.clone(), items);
+        }
+    }
+    out
+}
+
+/// 链键的合法性：三种形态都放行——语义由 omp 判定，壳侧只拒「空 / 空白 / 控制字符」
+/// 这类写进 config.yml 没意义的脏值。
+pub fn validate_chain_key(key: &str) -> Result<(), String> {
+    let t = key.trim();
+    if t.is_empty() {
+        return Err("转移链的键不能为空".into());
+    }
+    if t != key || key.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err("转移链的键不能包含空白或控制字符".into());
+    }
+    Ok(())
+}
+
+/// 在链表上应用一次编辑（纯函数，单测覆盖）：
+/// `Some(非空)` = 设置 / 覆盖；`None` 或过滤后为空 = 删除该键（空链没有意义）。
+/// **顺序原样保留**（omp 按序尝试备用模型，排序会改变语义）。
+pub fn apply_chain_edit(chains: &mut ChainMap, key: &str, fallbacks: Option<&[String]>) -> Result<(), String> {
+    validate_chain_key(key)?;
+    let items: Vec<String> = match fallbacks {
+        Some(list) => {
+            let mut out = Vec::with_capacity(list.len());
+            for s in list {
+                let t = s.trim();
+                if t.is_empty() {
+                    // 空项忽略（界面不会发；手滑不该毁掉整次编辑）
+                    continue;
+                }
+                if t.chars().any(|c| c.is_control()) {
+                    return Err("转移模型不能包含控制字符".into());
+                }
+                out.push(t.to_string());
+            }
+            out
+        }
+        None => Vec::new(),
+    };
+    if items.is_empty() {
+        chains.remove(key);
+    } else {
+        chains.insert(key.to_string(), items);
+    }
+    Ok(())
+}
+
 // ---------- 进程调用 ----------
 
 /// 跑一次 omp CLI 并回 stdout（非零退出把 stderr 尾部当原因）。
 /// `pub(crate)`：`quota.rs` 的 `omp usage --json` 走同一套超时与错误口径。
 pub(crate) async fn run_omp(bin: &str, args: &[&str]) -> Result<String, String> {
-    let fut = tokio::process::Command::new(bin)
-        .args(args)
-        .stdin(Stdio::null())
-        .output();
+    run_omp_in(None, bin, args).await
+}
+
+/// 同上，但显式钉住工作目录。
+///
+/// **为什么需要它**：`omp config list|get` 读的是**合并了项目层之后的有效值**——实测同一个
+/// key 在「有 `<cwd>/.omp/config.yml` 覆盖」与「没有」的目录下读到不同结果。设置 › 通用
+/// 改的是全局层，读数也必须钉在一个没有项目层的目录上（agentDir），否则从项目目录启动 app
+/// 时，界面显示的是该项目的覆盖值，用户改全局会「看起来没生效」。
+pub(crate) async fn run_omp_in(
+    dir: Option<&std::path::Path>,
+    bin: &str,
+    args: &[&str],
+) -> Result<String, String> {
+    let mut cmd = tokio::process::Command::new(bin);
+    cmd.args(args).stdin(Stdio::null());
+    if let Some(d) = dir {
+        cmd.current_dir(d);
+    }
+    let fut = cmd.output();
     match tokio::time::timeout(CLI_TIMEOUT, fut).await {
         Ok(Ok(o)) if o.status.success() => Ok(String::from_utf8_lossy(&o.stdout).to_string()),
         Ok(Ok(o)) => {
@@ -346,6 +473,33 @@ async fn config_get(bin: &str, key: &str) -> Result<serde_json::Value, String> {
     let out = run_omp(bin, &["config", "get", key, "--json"]).await?;
     let v: serde_json::Value = serde_json::from_str(out.trim()).map_err(|e| format!("配置解析失败：{e}"))?;
     Ok(v.get("value").cloned().unwrap_or(serde_json::Value::Null))
+}
+
+/// 同上，但**钉住 agentDir**：`omp config get` 读的是「合并项目层覆盖之后」的有效值
+/// （实测：同键在 `<cwd>/.omp/config.yml` 有覆盖时读到项目值），而模型页写的是**全局层**
+/// ——读也钉在 agentDir，才与写入同层，不会出现「界面显示项目覆盖值、改的是全局」的错位。
+/// 写不需要钉（实测 `omp config set` 任何 cwd 下都只写全局 agentDir 的 config.yml）。
+async fn config_get_global(state: &tauri::State<'_, AppState>, bin: &str, key: &str) -> Result<serde_json::Value, String> {
+    let dir = state.agent_dir.lock().await.clone();
+    let out = run_omp_in(Some(&dir), bin, &["config", "get", key, "--json"]).await?;
+    let v: serde_json::Value = serde_json::from_str(out.trim()).map_err(|e| format!("配置解析失败：{e}"))?;
+    Ok(v.get("value").cloned().unwrap_or(serde_json::Value::Null))
+}
+
+/// 读 retry 组里与转移链有关的三个键（读命令与两个写命令的回读共用）。
+/// `chains` 读失败要冒泡：不能兜底成空表——界面拿空表编辑后写回会把用户的链清空。
+/// 两个开关读不到就按 omp 自己的默认值显示（新 agentDir 下 `config get` 也返回默认值）。
+async fn read_retry_info(state: &tauri::State<'_, AppState>, bin: &str) -> Result<FallbackChainsInfo, String> {
+    let chains = config_get_global(state, bin, "retry.fallbackChains").await?;
+    let model_fallback = config_get_global(state, bin, "retry.modelFallback").await.unwrap_or(serde_json::Value::Null);
+    let revert = config_get_global(state, bin, "retry.fallbackRevertPolicy")
+        .await
+        .unwrap_or(serde_json::Value::Null);
+    Ok(FallbackChainsInfo {
+        chains: parse_chains(&chains),
+        model_fallback: model_fallback.as_bool().unwrap_or(true),
+        revert_policy: revert.as_str().unwrap_or(REVERT_POLICIES[0]).to_string(),
+    })
 }
 
 // ---------- Tauri 命令 ----------
@@ -549,6 +703,70 @@ pub async fn set_model_role(
     })
 }
 
+/// 失败转移链表（`retry.fallbackChains`）+ 两个配套开关——模型请求失败时由哪个模型接手。
+#[tauri::command]
+pub async fn get_fallback_chains(state: tauri::State<'_, AppState>) -> Result<FallbackChainsInfo, CmdError> {
+    let bin = omp_bin(&state)?;
+    read_retry_info(&state, &bin)
+        .await
+        .map_err(|e| cmd_err("RETRY_READ_FAILED", e, None))
+}
+
+/// 改一条转移链：`fallbacks = Some(非空)` 设置 / 覆盖，`None`（或空数组）删除该键。
+/// 与 `set_model_role` 同款：读 → 改 → 整表写回，`retry_edit` 串行化；写完回读一次确认。
+#[tauri::command]
+pub async fn set_fallback_chain(
+    state: tauri::State<'_, AppState>,
+    key: String,
+    fallbacks: Option<Vec<String>>,
+) -> Result<FallbackChainsInfo, CmdError> {
+    let bin = omp_bin(&state)?;
+    let _guard = state.retry_edit.lock().await;
+    let current = config_get_global(&state, &bin, "retry.fallbackChains")
+        .await
+        .map_err(|e| cmd_err("RETRY_READ_FAILED", e, None))?;
+    let mut chains = parse_chains(&current);
+    apply_chain_edit(&mut chains, &key, fallbacks.as_deref())
+        .map_err(|e| cmd_err("CHAIN_INVALID", e, None))?;
+    let json = serde_json::to_string(&chains)
+        .map_err(|e| cmd_err("RETRY_WRITE_FAILED", format!("转移链序列化失败：{e}"), None))?;
+    run_omp(&bin, &["config", "set", "retry.fallbackChains", &json])
+        .await
+        .map_err(|e| cmd_err("RETRY_WRITE_FAILED", format!("写入转移链失败：{e}"), None))?;
+    read_retry_info(&state, &bin)
+        .await
+        .map_err(|e| cmd_err("RETRY_READ_FAILED", e, None))
+}
+
+/// 改两个配套开关（`retry.modelFallback` / `retry.fallbackRevertPolicy`）。
+/// omp 对 bool 只认 `true` / `false` 字面量（实测传 `yes` 会被静默归一成 true），
+/// 回归策略传非法值直接报错——两个值都在这里先定死再发。
+#[tauri::command]
+pub async fn set_retry_options(
+    state: tauri::State<'_, AppState>,
+    model_fallback: bool,
+    revert_policy: String,
+) -> Result<FallbackChainsInfo, CmdError> {
+    let bin = omp_bin(&state)?;
+    if !REVERT_POLICIES.contains(&revert_policy.as_str()) {
+        return Err(cmd_err(
+            "RETRY_OPTION_INVALID",
+            format!("不支持的回归策略：{revert_policy}"),
+            None,
+        ));
+    }
+    let flag = if model_fallback { "true" } else { "false" };
+    run_omp(&bin, &["config", "set", "retry.modelFallback", flag])
+        .await
+        .map_err(|e| cmd_err("RETRY_WRITE_FAILED", format!("写入失败转移开关失败：{e}"), None))?;
+    run_omp(&bin, &["config", "set", "retry.fallbackRevertPolicy", &revert_policy])
+        .await
+        .map_err(|e| cmd_err("RETRY_WRITE_FAILED", format!("写入回归策略失败：{e}"), None))?;
+    read_retry_info(&state, &bin)
+        .await
+        .map_err(|e| cmd_err("RETRY_READ_FAILED", e, None))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -672,6 +890,79 @@ mod tests {
         let json = serde_json::to_string(&serde_json::Value::Object(roles)).unwrap();
         // selector 里的 `/` 与 `:` 必须原样保留（provider/modelId:level 的既有形态）
         assert_eq!(json, r#"{"default":"commandcode/meta/muse-spark-1.3-contributor:xhigh"}"#);
+    }
+
+    #[test]
+    fn chains_parsed_from_record_value() {
+        // 本机配置的实测形态：键是模型 selector，值是单元素数组
+        let v = serde_json::json!({
+            "opencode-go/muse-spark-1.3-contributor": ["opencode-go/deepseek-v4.1-flash"],
+            "default": ["openai/gpt-4o-mini", "google/*"],
+        });
+        let m = parse_chains(&v);
+        assert_eq!(m["default"], vec!["openai/gpt-4o-mini", "google/*"]);
+        assert_eq!(m["opencode-go/muse-spark-1.3-contributor"], vec!["opencode-go/deepseek-v4.1-flash"]);
+        assert_eq!(m.len(), 2);
+    }
+
+    #[test]
+    fn chains_parse_drops_bad_shapes_without_panic() {
+        assert!(parse_chains(&serde_json::json!(null)).is_empty());
+        assert!(parse_chains(&serde_json::json!("nope")).is_empty());
+        // 值不是数组 / 空链没有语义 / 键为空——都当没有
+        assert!(parse_chains(&serde_json::json!({"default": "openai/gpt-4o-mini"})).is_empty());
+        assert!(parse_chains(&serde_json::json!({"default": []})).is_empty());
+        assert!(parse_chains(&serde_json::json!({"": ["a/b"]})).is_empty());
+        // 数组里的坏项剔除，好项保留
+        let m = parse_chains(&serde_json::json!({"default": ["a/b", 42, "", "   ", "c/d:high"]}));
+        assert_eq!(m["default"], vec!["a/b", "c/d:high"]);
+    }
+
+    #[test]
+    fn chain_edit_sets_overrides_and_deletes() {
+        let mut m = ChainMap::new();
+        apply_chain_edit(&mut m, "default", Some(&["a/b".to_string()])).unwrap();
+        assert_eq!(m["default"], vec!["a/b"]);
+        // 覆盖同一个键
+        apply_chain_edit(&mut m, "default", Some(&["c/d".to_string(), "e/f".to_string()])).unwrap();
+        assert_eq!(m["default"], vec!["c/d", "e/f"]);
+        // 删除：None / 空数组 / 全是空项等价，且不影响其他键
+        apply_chain_edit(&mut m, "smol", Some(&["g/h".to_string()])).unwrap();
+        apply_chain_edit(&mut m, "default", None).unwrap();
+        assert!(!m.contains_key("default"));
+        assert_eq!(m["smol"], vec!["g/h"]);
+        apply_chain_edit(&mut m, "smol", Some(&[])).unwrap();
+        apply_chain_edit(&mut m, "w/*", Some(&["  ".to_string()])).unwrap();
+        assert!(m.is_empty());
+    }
+
+    #[test]
+    fn chain_edit_rejects_bad_keys_and_entries() {
+        let mut m = ChainMap::new();
+        assert!(apply_chain_edit(&mut m, "", Some(&["a/b".to_string()])).is_err());
+        assert!(apply_chain_edit(&mut m, " default", Some(&["a/b".to_string()])).is_err());
+        assert!(apply_chain_edit(&mut m, "de fault", Some(&["a/b".to_string()])).is_err());
+        assert!(apply_chain_edit(&mut m, "default", Some(&["a/b\nc".to_string()])).is_err());
+        // 键的三种形态都放行（角色 / 模型 / 供应商通配，含 id 前缀通配）
+        for k in [
+            "default",
+            "my-role_2",
+            "opencode-go/deepseek-v4.1-flash",
+            "opencode-go/*",
+            "openrouter/google/*",
+        ] {
+            apply_chain_edit(&mut m, k, Some(&["a/b:high".to_string()])).unwrap();
+        }
+        assert_eq!(m.len(), 5);
+    }
+
+    #[test]
+    fn chain_edit_serializes_to_record_json() {
+        let mut m = ChainMap::new();
+        apply_chain_edit(&mut m, "opencode-go/*", Some(&["anthropic/claude-sonnet-5:max".to_string()])).unwrap();
+        let json = serde_json::to_string(&m).unwrap();
+        // 通配键的 `*`、条目里的 `/` 与 `:` 必须原样保留（omp 的既有形态）
+        assert_eq!(json, r#"{"opencode-go/*":["anthropic/claude-sonnet-5:max"]}"#);
     }
 
     #[test]

@@ -37,6 +37,8 @@ pub struct AppState {
     /// 模型角色「读 → 改 → 写」的串行锁：`modelRoles` 是 record，只能整表写回，
     /// 两次并发编辑不加锁会互相覆盖（丢键）。
     pub roles_edit: Mutex<()>,
+    /// 失败转移链（`retry.fallbackChains`）的同类锁：record 也只能整表写回。
+    pub retry_edit: Mutex<()>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1629,6 +1631,7 @@ pub fn load_state(app: &AppHandle) -> AppState {
         login: std::sync::Arc::new(Mutex::new(None)),
         login_status: std::sync::Arc::new(Mutex::new(Default::default())),
         roles_edit: Mutex::new(()),
+        retry_edit: Mutex::new(()),
     }
 }
 

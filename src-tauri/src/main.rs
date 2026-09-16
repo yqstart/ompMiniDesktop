@@ -7,6 +7,7 @@ mod providers;
 mod quota;
 mod runtime;
 mod session_scan;
+mod settings;
 mod usage;
 
 use commands::*;
@@ -76,13 +77,19 @@ fn main() {
             providers::logout_provider,
             providers::get_model_roles,
             providers::set_model_role,
+            providers::get_fallback_chains,
+            providers::set_fallback_chain,
+            providers::set_retry_options,
             memories::list_memories,
             memories::read_memory_file,
             memories::delete_memory_file,
             memories::delete_memory_project,
             usage::get_usage_stats,
             quota::get_provider_usage,
-            context::get_context_breakdown
+            context::get_context_breakdown,
+            settings::get_omp_settings,
+            settings::set_omp_setting,
+            settings::reset_omp_setting
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ContextBreakdown, GitInfo, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, OmpInfo, Overlay, PathCheck, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, SessionPage, SessionRuntime, SessionSearchResult, SessionView, UsageStats, ViewMsg } from "./types";
+import type { ContextBreakdown, FallbackChainsInfo, GitInfo, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, OmpInfo, OmpSetting, Overlay, PathCheck, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, SessionPage, SessionRuntime, SessionSearchResult, SessionView, UsageStats, ViewMsg } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -119,6 +119,17 @@ export const api = {
  setModelRole: (role: string, selector: string | null) =>
   call<ModelRolesInfo>("set_model_role", { role, selector }),
  /**
+  * 失败转移链（设置 › 模型）：omp `retry.fallbackChains` 的读写与两个配套开关
+  * （`retry.modelFallback` / `retry.fallbackRevertPolicy`），写的是 omp 全局配置。
+  */
+ getFallbackChains: () => call<FallbackChainsInfo>("get_fallback_chains"),
+ /** 改一条链；`fallbacks = null`（或空数组）删除该键。顺序即 omp 的尝试顺序。 */
+ setFallbackChain: (key: string, fallbacks: string[] | null) =>
+  call<FallbackChainsInfo>("set_fallback_chain", { key, fallbacks }),
+ /** 改两个配套开关（`false` 时链完全不生效；回归策略只认两个上游合法值）。 */
+ setRetryOptions: (modelFallback: boolean, revertPolicy: string) =>
+  call<FallbackChainsInfo>("set_retry_options", { modelFallback, revertPolicy }),
+ /**
   * 记忆（设置 › 记忆）：omp 项目记忆（`<agentDir>/memories/` 下按 cwd 一目录一份）。
   * 上游没有 `omp memory` CLI，记忆由 omp 自己生成——壳侧只列 / 读 / 删，**从不写**。
   */
@@ -143,4 +154,15 @@ export const api = {
   * 不直连任何配额 API、不读 omp 凭证库；`reports` 为空 = 没有可显示的配额（不是错误）。
   */
  getProviderUsage: () => call<ProviderUsage>("get_provider_usage"),
+ /**
+  * omp 常用设置（设置 › 通用）：白名单键的**批量读**（一次 `omp config list --json`，
+  * 不逐键 spawn 进程）+ 单键写 / 恢复默认。写的是 omp **全局层**
+  * （`~/.omp/agent/config.yml`，`<cwd>/.omp/config.yml` 的项目覆盖优先于它），
+  * 不动覆盖层、不碰凭证库；上游没有的键整个缺席（界面据此显示「没有这个设置」）。
+  */
+ getOmpSettings: (keys: string[]) => call<OmpSetting[]>("get_omp_settings", { keys }),
+ /** 写一个设置项；返回值是**写入后回读**的真相（omp 静默丢弃写入时界面不该显示假值）。 */
+ setOmpSetting: (key: string, value: unknown) => call<OmpSetting>("set_omp_setting", { key, value }),
+ /** 恢复该键的 schema 默认值（`omp config reset`，把默认值写回全局配置）。 */
+ resetOmpSetting: (key: string) => call<OmpSetting>("reset_omp_setting", { key }),
 };

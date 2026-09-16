@@ -53,6 +53,10 @@ export const IPC = {
   logoutProvider: "logout_provider",
   getModelRoles: "get_model_roles",
   setModelRole: "set_model_role",
+  // 失败转移链（设置 › 模型）：retry.fallbackChains 的读写与两个配套开关
+  getFallbackChains: "get_fallback_chains",
+  setFallbackChain: "set_fallback_chain",
+  setRetryOptions: "set_retry_options",
   // 记忆（设置 › 记忆）：omp 项目记忆的列表 / 查看 / 删除
   listMemories: "list_memories",
   readMemoryFile: "read_memory_file",
@@ -62,6 +66,10 @@ export const IPC = {
   getUsageStats: "get_usage_stats",
   // 供应商配额（输入框上方「用量限额」）：`omp usage --json` 报的供应商侧限额窗口（只读）
   getProviderUsage: "get_provider_usage",
+  // omp 常用设置（设置 › 通用）：白名单键的批量读 / 单键写 / 恢复默认（写 omp 全局配置）
+  getOmpSettings: "get_omp_settings",
+  setOmpSetting: "set_omp_setting",
+  resetOmpSetting: "reset_omp_setting",
   // events
   sessionEvent: (id: string) => `omp-event://${id}`,
   sessionStatus: (id: string) => `omp-status://${id}`,

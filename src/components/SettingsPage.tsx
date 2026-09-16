@@ -6,6 +6,7 @@ import { fmt } from "../lib/locale";
 import { useText } from "../lib/useText";
 import { useEffect, useState } from "react";
 import { ArchivedSessions } from "./ArchivedSessions";
+import { GeneralSettingsPanel } from "./settings/GeneralSettingsPanel";
 import { MemoryPanel } from "./settings/MemoryPanel";
 import { ModelsPanel } from "./settings/ModelsPanel";
 import { ProvidersPanel } from "./settings/ProvidersPanel";
@@ -166,6 +167,8 @@ export function SettingsPage() {
               )}
               <p className="mt-1.5 text-[13px] text-faint">{t.diagFoot}</p>
             </section>
+
+            <GeneralSettingsPanel />
 
             <section aria-label={t.updateSection} className="rounded-md border border-border bg-surface p-3.5">
               <div className="flex items-center gap-2">

@@ -37,6 +37,7 @@ const COMMANDS = [
  "set_omp_path",
  "list_providers", "get_provider_login", "start_provider_login", "provider_login_input",
  "cancel_provider_login", "logout_provider", "get_model_roles", "set_model_role",
+ "get_fallback_chains", "set_fallback_chain", "set_retry_options",
  "list_memories", "read_memory_file", "delete_memory_file", "delete_memory_project",
  "get_usage_stats",
  "get_provider_usage",
