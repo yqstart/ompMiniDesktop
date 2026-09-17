@@ -303,3 +303,41 @@ Paste your DeepSeek API key (sk-...):
 - 「可用模型」平铺目录按用户口径删除：模型一览只在「挑选模型」弹窗里（按供应商 + 搜索过滤），
   「不挑 = 全部」的候选来源仍是 omp 目录本身（`candidateModels`），不受影响；
 - 星标只写本应用 localStorage：**omp TUI 不受影响**（`enabledModels` 不动，见 §6.1 / §6.4）。
+
+## 7.5 V12c 修订：供应商置顶、自定义供应商可改名、接口类型收两档
+
+> 用户口径：「模型 Tab 中，把供应商调整到最上方；自定义的供应商现在不支持修改名称；
+> 自定义供应商接口类型只支持 openai 和 claude 协议即可，并且认证方式只有 apikey。」
+
+- **区块顺序**：设置 › 模型的四块改为 **供应商 → 我的模型 → 模型角色 → 失败转移**（供应商置顶：
+  「先添加供应商 → 在弹窗里挑模型 → 挑进的进我的模型」才是使用动线）；`providersHint` 的方位词
+  随之改成「下面的『我的模型』」。
+- **自定义供应商可改名**：表单的「名称」不再锁定。`CustomProviderForm` 增 `originalId`（`providerFormOf`
+  读出原键名；新建时不带），`upsertProvider` 在 `originalId !== id` 时**就地替换 YAML 键**
+  （`pair.key.value = id`）——块的位置与键上的注释保留，其余块 / 界面之外的键 / 模型级字段逐字节不动
+  （§2 的「名称（新建可改、编辑锁定）」口径由本节取代）。改名撞已有 id：UI 拦（`isDuplicateProviderId`，
+  编辑保留原名不算冲突）+ 保存按钮禁用 + 提示「名称已被别的供应商占用」；库层兜底（目标键已存在则
+  不改名）保证**绝不写出重复键**（此前「新建撞名会覆盖已有块」的缺陷一并收口）。
+- **接口类型两档**：`API_OPTIONS` 收窄为 `openai-completions`（OpenAI 兼容）/ `anthropic-messages`
+  （Claude 协议）；既有文件里写了别的 wire API（如 `google-vertex`）时由 `apiOptionsFor` 把当前值
+  追加进下拉——**不改动也能保存**，保真口径不破。
+- **认证只有 API Key**：删掉「API Key / 无需鉴权」分段控件（`Switch` 的 auth 档位状态一并删除；
+  字典删 `customFormAuth` / `customFormAuthNone` / `customFormApiKey`，新增 `customFormDupId`），
+  Key 输入框常驻；**留空 = 该端点无需鉴权**（落盘 `auth: none`，hint 文案写明）——既有 `auth: none`
+  的块仍可原样保存。
+- 后端与 IPC 零改动；`pnpm check` 全绿（77 单测，`customModels.test.ts` 18 → 23 项：改名保真 /
+  撞名兜底 / `apiOptionsFor` / `isDuplicateProviderId`）。
+- 界面核对（静态构建 + 注入 IPC mock）：区块顺序 = 供应商 / 我的模型 / 模型角色 / 失败转移；
+  编辑态名称输入可改（值可编辑）；接口类型下拉两项（`google-vertex` 的旧块下拉 = 三项）；
+  无「无需鉴权」、有「API Key」标签；改名保存的写出文本 = 原位置变 `renamed-gw:`、顶部注释与
+  `headers` 保留、其余块逐字节不变；新建 `claude-gw` 选 `anthropic-messages` + 字面量 key 追加末尾；
+  改名撞已有 id → 保存禁用 + 「名称已被别的供应商占用」。
+- **自定义块也能挑选模型**：`CustomRow` 补「挑选模型」按钮（与登录型行同款，`picking` 状态放宽为
+  `{ id, name }`）——此前自定义块的模型虽在目录里却无处星标；覆盖型块保持只读（无按钮，其 provider id
+  若在目录里，入口在登录型 / 自定义行上）。挑选弹窗的空态文案改「检查凭证 / 配置」（对自定义块也贴切）。
+- **名称支持中文**：`isValidProviderId` 从 ASCII 白名单放宽为 `/^[\p{L}\p{N}][\p{L}\p{N}._-]*$/u`——
+  实测 omp 对 provider 键**无字符集约束**（隔离 agentDir：`云渡中转/gpt-6-astra` 收录进
+  `omp models --json`，stderr 干净），只挡空白与 `/` `:` `#` 等 YAML 键名 / selector 的歧义字符。
+  格式错时给专门提示（`customFormIdInvalid`，不再只显示笼统的「还有必填项没填完」），输入框 tooltip
+  说明它是键名 / selector 前缀（`customFormNameHint`）。改名会让引用旧 selector 的地方失配
+  （「我的模型」标「已不可用」；omp 侧手写的角色 / 转移链要自行更新）。

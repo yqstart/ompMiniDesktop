@@ -4,6 +4,34 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **「模型」页微调：供应商置顶、自定义供应商可改名、接口类型收两档、认证只留 API Key**。设置 › 模型 的四块改为 **供应商 → 我的模型 → 模型角色 → 失败转移**（先添加供应商、再在弹窗里挑模型才是使用动线）。自定义供应商表单：**名称可改**——保存时把 YAML 键就地改名（块的位置与键上的注释保留，其余块与界面之外的字段逐字节不动），改名撞已有 id 时保存禁用并提示「名称已被别的供应商占用」（顺带收口了「新建撞名会覆盖已有块」的旧缺陷）；**接口类型只给 `openai-completions` / `anthropic-messages` 两档**（既有文件里的其它值如 `google-vertex` 仍原样列在下拉里，不改动也能保存）；**认证只有 API Key**（删「无需鉴权」分段控件，Key 输入框常驻；留空 = 该端点无需鉴权，落盘 `auth: none`，既有 `auth: none` 的块照旧可保存）。后端与 IPC 零改动。
+  - 结构：`lib/customModels.ts` 的 `API_OPTIONS` 收窄 + 新增 `apiOptionsFor` / `isDuplicateProviderId`，`CustomProviderForm` 增 `originalId`（`providerFormOf` 读出、`upsertProvider` 据此就地改名）；`CustomProviderEditForm` 去掉 `isNew` 与认证分段控件；`ProvidersSection` 的 `editing` 状态从 `{ form, isNew }` 收成 `CustomProviderForm | null`；字典删 `customFormAuth` / `customFormAuthNone` / `customFormApiKey`、增 `customFormDupId`；`customModels.test.ts` 18 → 23 项。
+  - 验证：`pnpm check` 全绿（77 单测）；界面核对（静态构建 + 注入 IPC mock）：区块顺序、编辑态名称可改、下拉两档（遗留值三项）、无「无需鉴权」、改名写出文本逐字节核对（键就地替换、注释与 `headers` 保留、其余块不动）、新建 `anthropic-messages` 块、撞名守卫（保存禁用 + 提示）。
+
+- **设置改为标签栏里的一个标签（单例），不再替换整个主区**。此前打开设置会把终端区整块换掉——进程虽然保住了，终端标签也跟着消失、切不回去；现在主区顶部是**常驻标签栏**：终端标签 + 「设置」标签并列，终端面板与设置面板都常驻挂载、只切显隐（切标签不重建 xterm，也不丢设置页的页签选择与滚动位置）。左栏「设置」入口打开 / 聚焦该标签；设置标签的 `×`（或 ⌘W）关闭它并回到上次的终端标签；关闭最后一个终端标签时若设置标签开着，自动切过去。关闭终端的二次确认弹窗移到 App 层——设置标签激活时点终端标签的 `×` 也弹得出来。
+  - 结构：`TerminalTabs` 扩为「终端标签 + 设置标签 + ＋」并自 `TerminalView` 移到 `App`；`TerminalView` 只剩面板区与空态；终端关闭确认（`ConfirmDialog`）挂到 `App`；`SettingsPage` 加 `visible`（隐藏不卸载）；store 的 `settingsOpen: boolean` 换成 `settingsTabOpen` / `settingsTabActive` + `openSettingsTab()` / `closeSettingsTab()`（切标签时 `activeTerminalId` 保持不变，作为「上次的终端」）。
+  - 验证：`pnpm check` 全绿；界面核对（注入 IPC mock）：开终端收输出 → 打开设置（标签栏两枚标签、设置高亮、xterm 隐藏而 `pty_kill` 计数不变）→ 点终端标签切回（xterm 可见、设置页隐藏）→ 设置页内部页签切到「已归档对话」后切走再切回仍是它 → ⌘W 关闭设置标签 → 设置标签激活时点终端标签的 `×` 弹确认、确认后 `pty_kill` +1 且无终端时自动切到设置标签；截图核对。
+- **设置页导航从顶部横排页签改为左侧竖向菜单**：五项（通用 / 模型 / 记忆 / 使用统计 / 已归档对话）竖排在一列 176px 的导航栏里——标题在菜单上方（原来的副标题「omp 诊断、应用更新……」与底部「返回」按钮按用户口径一并删除；关闭设置标签走标签栏的 `×` / ⌘W）；右侧是内容区（唯一滚动容器，`role="tabpanel"` + `aria-labelledby`）。选中项走全局选中语言（`bg-active` + semibold，未选中 `text-muted hover:bg-hover`），不再是下划线页签；设置页整体宽度 `max-w-3xl` → `max-w-4xl`（两栏）。UI 口径已同步 `design-system/MASTER.md`（§3 行长、§4 布局、§8 组件表）。
+  - 验证：`pnpm check` 全绿；界面核对（注入 IPC mock）：`aria-orientation="vertical"`、五项同列 x 对齐且 y 递增（31px 行高）、选中项 `bg-active` + 字重 600、点击切换后 `tabpanel` 的 `aria-labelledby` 跟随（general → archived）、导航列只有标题与菜单（无副标题、无「返回」）；截图核对。
+
+### 修复
+
+- **omp 里改完模型角色，切回设置页就能看到**：设置 › 模型的「模型角色」与「失败转移」此前只在组件挂载时读一次——在终端标签的 omp TUI 里改了 `modelRoles`，点回设置标签看到的还是旧值（得手动点「刷新」或重开设置标签才更新）。现在**每次设置标签重新激活**都重读 omp 侧的角色 / 转移链（挂载时也拉一次）；模型目录不额外重拉——`get_models` 后端有 5 分钟缓存，页内的「刷新」按钮才走 `refresh_models` 强制重拉。
+  - 结构：`ModelsPanel` 的加载 effect 从「仅挂载一次」改为依赖 store 的 `settingsTabActive`（隐藏时不读、重新激活时重读）；新增 `ModelsPanel.test.tsx`（2 项：重新激活时重读且界面显示 omp 的新值、未激活时不读）——把 effect 依赖改回 `[]` 实测第 1 项失败（`roleCalls` 停在 1）。
+  - 验证：`pnpm check` 全绿（80 单测 + `e2e:ipc` 43 命令）；界面核对（`pnpm dev` + 注入 IPC mock）：打开设置 › 模型读一次 → 模拟 omp 侧改 `modelRoles` → 点工作区行开终端（切走）→ 点设置标签切回 → 角色行显示 omp 的新值、`get_model_roles` 计数 2 → 3。
+
+- **自定义供应商的名字现在可以用中文**：编辑器此前把「名称」限死在 ASCII 字符集，`云渡中转` 这类名字改完点不动保存按钮（只显示笼统的「还有必填项没填完」）。实测 omp 对 provider 键**没有字符集约束**（隔离 agentDir 里 `云渡中转/gpt-6-astra` 照常出现在 `omp models --json` 里、stderr 干净），于是把校验放宽到 Unicode 字母 / 数字（中文、日文… 与 `.` `_` `-` 都放行），仍挡空白与 `/` `:` `#` 这类会让 YAML 键名或 selector 歧义的字符。名字格式不对时给出专门提示「名称只能用字母、数字或中文，以及 . _ -」，输入框 tooltip 说明它就是 models.yml 的键名 / 模型选择器的前缀（omp 侧没有单独的显示名字段）。
+  - 注意：名称 = provider 键名 = selector 前缀，**改名会让引用旧前缀的地方失配**——「我的模型」里的旧条目标「已不可用」，omp 侧 `modelRoles` / 失败转移里手写的旧 selector 要自行更新。
+  - 验证：`pnpm check` 全绿（78 单测）；界面核对（注入 IPC mock）：`y` 改名 `云渡中转` 保存成功、写出文本为 `  云渡中转:`（原位置，注释与其它块不动）、行列表随之更新；名字带空格时保存禁用 + 专门提示、`aria-invalid=true`；真机实测（隔离 agentDir）`omp models --json` 收录中文键且 stderr 干净。
+
+- **自定义供应商的模型现在可以收藏**：设置 › 模型的「自定义」行此前只有「编辑 / 删除」——它声明的模型虽已在 omp 目录里（行上「已生效 N 个模型」），却没有「挑选模型」入口，星标收藏无从下手。行上补了「挑选模型」（与登录型行同款：弹窗标题「挑选 X 的模型」，搜索 / 全选 / 清空 / 计数一致），挑进的照旧只进本应用 localStorage 的「我的模型」。覆盖型块（`modelOverrides` 之类，界面只读）**不加按钮**——它的 provider id 若在目录里，入口在登录型 / 自定义行上。挑选弹窗的空态文案同步改为「检查凭证 / 配置」（不再只说「登录状态」，对自定义块也贴切）。
+  - 验证：`pnpm check` 全绿；界面核对（注入 IPC mock）：自定义行按钮 = 挑选模型 / 编辑 / 删除，弹窗列出 `y/gpt-5.4-mini`（计数「已挑 0 / 1」→ 星标后「已挑 1 / 1」），`localStorage["omp.favoriteModels.v1"]` 与「我的模型」区块同步；覆盖型行仍无按钮。
+
+- **设置页弹窗里输入不再失焦**：`DialogShell` / `ConfirmDialog` 的挂载 effect 把调用方内联的 `onClose` / `onCancel` 放进了依赖——父级每重渲染一次就重跑一遍 `focus()`，输入框里每敲一个字都会把焦点抢回弹窗卡片（实测：自定义供应商表单「打一个字就失焦」）。回调改经 ref 取最新值，`focus()` 只在挂载 / 打开时执行一次；顺带补两个 jsdom 组件回归测试（`DialogShell.test.tsx` / `ConfirmDialog.test.tsx`，6 项：焦点落点、重渲染不抢焦点、Esc 走最新回调）——未修复时其中 2 项失败。
+- **打开设置页不再打断终端里正在跑的任务**：主区此前是条件渲染（`settingsOpen ? <SettingsPage /> : <TerminalView />`），打开设置即卸载整个终端区——每个 `TerminalPane` 的清理 effect 会 `pty_kill`，进行中的 omp 任务随之被杀。现在终端区**常驻挂载**、只切显隐（`<TerminalView visible={!settingsOpen} />` → `hidden` 类 + `{settingsOpen && <SettingsPage />}`）：隐藏期间面板按非活跃处理（不量尺寸、不推 resize，`FitAddon` 对 0 尺寸本就不动作），返回时走「切到本 tab」重跑 fit + 聚焦；输出的字节在隐藏期间照常进 xterm 缓冲，返回后完整补渲染。关闭终端 tab 的 kill 语义不变（运行中仍走二次确认）。（随后按用户口径把设置改成标签栏里的常驻标签，见「变更」。）
+
 ## [0.1.0] - 2026-09-17
 
 首个公开发布：oh-my-pi 的极简桌面壳——**终端工作区形态**（左侧项目 / 分支树 + 右侧 omp 终端标签页）。

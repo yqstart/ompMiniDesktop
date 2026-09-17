@@ -90,7 +90,6 @@ const ZH = {
  retry: "重试",
  copied: "已复制",
  refresh: "刷新",
- back: "返回",
 
  // 侧栏：入口 / 搜索
  addProject: "添加项目",
@@ -149,7 +148,6 @@ const ZH = {
 
  // 数据层：分隔线与错误行
  title: "设置",
- subtitle: "omp 诊断、应用更新，以及 omp 的模型与供应商配置。",
  languageSection: "界面语言",
  languageHint: "只切换本应用的界面展示，不改 omp 配置。",
  localeSystem: "跟随系统",
@@ -286,7 +284,7 @@ const ZH = {
  // 设置 › 模型 ›「供应商」区块（合并的「添加供应商」面板：登录型凭据 + 自定义 models.yml）
  providersSection: "供应商",
  providersHint:
-  "添加 / 管理模型供应商：登录型（API key / OAuth）走 omp 自己的 auth-broker，凭证写进 omp 的凭证库；「自定义」写 omp 的 models.yml（自建端点 / 网关 / 本地推理）。「已配置」= 该供应商已出现在 omp 的模型目录里。添加后按星标挑选模型——挑进的进上面的「我的模型」，只影响本应用的选择器，不改 omp。",
+  "添加 / 管理模型供应商：登录型（API key / OAuth）走 omp 自己的 auth-broker，凭证写进 omp 的凭证库；「自定义」写 omp 的 models.yml（自建端点 / 网关 / 本地推理）。「已配置」= 该供应商已出现在 omp 的模型目录里。添加后按星标挑选模型——挑进的进下面的「我的模型」，只影响本应用的选择器，不改 omp。",
  providersAdd: "添加供应商",
  providersAddTitle: "添加 {0}",
  providersAddCount: "{0} 个提供商",
@@ -303,7 +301,7 @@ const ZH = {
  providersPickCount: "已挑 {0} / {1}",
  providersPickAll: "全选",
  providersPickNone: "清空",
- providersPickEmpty: "该供应商暂无可列出的模型（检查登录状态，或用右上角刷新）。",
+ providersPickEmpty: "该供应商暂无可列出的模型（检查凭证 / 配置，或用右上角刷新）。",
  providerConfigured: "已配置",
  providerLogin: "登录",
  providerLogout: "登出",
@@ -342,14 +340,15 @@ const ZH = {
  customFormEdit: "编辑 {0}",
  customFormIncomplete: "还有必填项没填完",
  customFormName: "名称",
+ customFormNameHint:
+  "models.yml 里的供应商键名，也是模型选择器的前缀（名称/模型 id）——omp 侧没有单独的显示名字段；中文照常可用。",
+ customFormIdInvalid: "名称只能用字母、数字或中文，以及 . _ -（不能有空格 / 斜杠）",
  customFormBaseUrl: "接口地址",
  customFormApi: "接口类型",
- customFormAuth: "认证",
  customFormAuthKey: "API Key",
- customFormAuthNone: "无需鉴权",
- customFormApiKey: "Key / 环境变量名",
  customFormApiKeyHint:
-  "填环境变量名（推荐）或直接填密钥；以 ! 开头表示用命令取（如 !op read …）。omp 的解析顺序：环境变量名优先，其次字面量。",
+  "填环境变量名（推荐）或直接填密钥；留空 = 该端点无需鉴权（不写 apiKey）；以 ! 开头表示用命令取（如 !op read …）。omp 的解析顺序：环境变量名优先，其次字面量。",
+ customFormDupId: "名称已被别的供应商占用",
  customFormModels: "模型",
  customModelId: "模型 id",
  customModelName: "显示名",
@@ -558,7 +557,6 @@ const EN: Record<TextKey, string> = {
  retry: "Retry",
  copied: "Copied",
  refresh: "Refresh",
- back: "Back",
 
  addProject: "Add project",
  noProjectsAdd: "No projects yet — add a folder to start",
@@ -610,7 +608,6 @@ const EN: Record<TextKey, string> = {
  devNoUpdateCheck: "Update checks are disabled in dev mode",
 
  title: "Settings",
- subtitle: "omp diagnostics, app updates — plus omp model and provider configuration.",
  languageSection: "Language",
  languageHint: "Only changes this app's UI text. Does not touch omp config.",
  localeSystem: "Follow system",
@@ -744,7 +741,7 @@ const EN: Record<TextKey, string> = {
 
  providersSection: "Providers",
  providersHint:
-  "Add and manage model providers: sign-in providers (API key / OAuth) go through omp's own auth-broker into omp's credential store; Custom writes omp's models.yml (gateways, self-hosted servers, local engines). \"Configured\" means the provider shows up in omp's model catalog. Star models afterwards to put them into My models above — that only affects this app's pickers, never omp.",
+  "Add and manage model providers: sign-in providers (API key / OAuth) go through omp's own auth-broker into omp's credential store; Custom writes omp's models.yml (gateways, self-hosted servers, local engines). \"Configured\" means the provider shows up in omp's model catalog. Star models afterwards to put them into My models below — that only affects this app's pickers, never omp.",
  providersAdd: "Add provider",
  providersAddTitle: "Add {0}",
  providersAddCount: "{0} providers",
@@ -761,7 +758,7 @@ const EN: Record<TextKey, string> = {
  providersPickCount: "{0} of {1} picked",
  providersPickAll: "Select all",
  providersPickNone: "Clear",
- providersPickEmpty: "No listed models for this provider yet (check sign-in, or refresh).",
+ providersPickEmpty: "No listed models for this provider yet (check credentials / config, or refresh).",
  providerConfigured: "Configured",
  providerLogin: "Sign in",
  providerLogout: "Sign out",
@@ -800,14 +797,15 @@ const EN: Record<TextKey, string> = {
  customFormEdit: "Edit {0}",
  customFormIncomplete: "fill in the required fields",
  customFormName: "Name",
+ customFormNameHint:
+  "The provider key in models.yml and the prefix of model selectors (name/model-id) — omp has no separate display name field; CJK names work.",
+ customFormIdInvalid: "Name may use letters, digits, CJK, and . _ - (no spaces or slashes)",
  customFormBaseUrl: "Base URL",
  customFormApi: "API",
- customFormAuth: "Auth",
  customFormAuthKey: "API key",
- customFormAuthNone: "No auth",
- customFormApiKey: "Key / env var",
  customFormApiKeyHint:
-  "An environment variable name (recommended) or the literal key; prefix with ! to read it from a command (e.g. !op read …). omp resolves the env name first, then the literal.",
+  "An environment variable name (recommended) or the literal key; leave empty when the endpoint needs no auth (no apiKey is written); prefix with ! to read it from a command (e.g. !op read …). omp resolves the env name first, then the literal.",
+ customFormDupId: "name already used by another provider",
  customFormModels: "Models",
  customModelId: "Model id",
  customModelName: "Display name",

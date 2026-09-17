@@ -2,7 +2,9 @@ import { useState } from "react";
 import { ChevronDown, Loader, Plus, Trash2 } from "reicon-react";
 import { useText } from "../../lib/useText";
 import {
- API_OPTIONS,
+ apiOptionsFor,
+ isDuplicateProviderId,
+ isValidProviderId,
  providerFormComplete,
  type CustomModelForm,
  type CustomProviderForm,
@@ -15,10 +17,13 @@ import { Switch } from "./Switch";
  *
  * 表单只改本地态，保存时交给 `lib/customModels.ts` 的保真编辑（注释与界面之外的字段原样保留），
  * 再由后端预校验 / 备份 / 原子写。
+ *
+ * 口径：**名称可改**（`form.originalId` 记录原键名，保存时就地改名）；**接口类型两档**
+ * （openai-completions / anthropic-messages，既有文件里的其它值原样列出）；**认证只有 API Key**
+ * 一种（Key 常驻输入框；留空 = 该端点无需鉴权，落盘为 `auth: none`）。
  */
 export function CustomProviderEditForm({
  form,
- isNew,
  busy,
  error,
  existingIds,
@@ -27,7 +32,6 @@ export function CustomProviderEditForm({
  onSave,
 }: {
  form: CustomProviderForm;
- isNew: boolean;
  busy: boolean;
  error: string | null;
  existingIds: string[];
@@ -36,12 +40,13 @@ export function CustomProviderEditForm({
  onSave: () => void;
 }) {
  const t = useText();
- /** 认证方式两档：`key`（写 apiKey）与 `none`（写 `auth: none`）。切换只改本地态，
-  *  保存时按档位落键——不会因为切来切去把用户输入的 key 弄丢。 */
- const [authMode, setAuthMode] = useState<"key" | "none">(form.apiKey ? "key" : "none");
  const [apiOpen, setApiOpen] = useState(false);
- const dupId = isNew && existingIds.includes(form.id.trim()) && form.id.trim() !== "";
+ const idTrim = form.id.trim();
+ /** 名称格式错（空串 = 还没填，归入「必填项没填完」）：给专门提示，不然用户只看到笼统的「没填完」。 */
+ const invalidId = idTrim !== "" && !isValidProviderId(idTrim);
+ const dupId = isDuplicateProviderId(form, existingIds);
  const complete = providerFormComplete(form) && !dupId;
+ const hint = invalidId ? t.customFormIdInvalid : dupId ? t.customFormDupId : t.customFormIncomplete;
 
  const setModel = (i: number, next: Partial<CustomModelForm>) => {
   const models = form.models.map((m, j) => (j === i ? { ...m, ...next } : m));
@@ -59,9 +64,10 @@ export function CustomProviderEditForm({
      <input
       value={form.id}
       onChange={(e) => onChange({ ...form, id: e.target.value })}
-      disabled={!isNew}
       placeholder="my-gateway"
-      className={`${inputCls} font-mono disabled:opacity-60`}
+      title={t.customFormNameHint}
+      aria-invalid={invalidId}
+      className={`${inputCls} font-mono`}
      />
     </label>
     <label className="flex min-w-64 flex-1 items-center gap-1.5 text-[13px]">
@@ -88,45 +94,21 @@ export function CustomProviderEditForm({
      </button>
     </div>
 
-    <div className="flex items-center gap-1.5 text-[13px]">
-     <span className="text-muted">{t.customFormAuth}</span>
-     <div className="flex gap-0.5 rounded-md border border-border p-0.5">
-      <button
-       onClick={() => setAuthMode("key")}
-       aria-pressed={authMode === "key"}
-       className={`cursor-pointer rounded px-2 py-0.5 text-[12px] transition-colors duration-100 hover:bg-hover ${authMode === "key" ? "bg-active text-foreground" : "text-muted"
-        }`}
-      >
-       {t.customFormAuthKey}
-      </button>
-      <button
-       onClick={() => setAuthMode("none")}
-       aria-pressed={authMode === "none"}
-       className={`cursor-pointer rounded px-2 py-0.5 text-[12px] transition-colors duration-100 hover:bg-hover ${authMode === "none" ? "bg-active text-foreground" : "text-muted"
-        }`}
-      >
-       {t.customFormAuthNone}
-      </button>
-     </div>
-    </div>
-
-    {authMode === "key" && (
-     <label className="flex min-w-52 flex-1 items-center gap-1.5 text-[13px]">
-      <span className="shrink-0 text-muted">{t.customFormApiKey}</span>
-      <input
-       value={form.apiKey}
-       onChange={(e) => onChange({ ...form, apiKey: e.target.value })}
-       placeholder="MY_GW_KEY"
-       title={t.customFormApiKeyHint}
-       className={`${inputCls} font-mono`}
-      />
-     </label>
-    )}
+    <label className="flex min-w-52 flex-1 items-center gap-1.5 text-[13px]">
+     <span className="shrink-0 text-muted">{t.customFormAuthKey}</span>
+     <input
+      value={form.apiKey}
+      onChange={(e) => onChange({ ...form, apiKey: e.target.value })}
+      placeholder="MY_GW_KEY"
+      title={t.customFormApiKeyHint}
+      className={`${inputCls} font-mono`}
+     />
+    </label>
    </div>
 
    {apiOpen && (
     <div className="mt-1.5 space-y-0.5 rounded-md border border-border bg-background p-1">
-     {API_OPTIONS.map((opt) => (
+     {apiOptionsFor(form.api).map((opt) => (
       <button
        key={opt}
        onClick={() => {
@@ -246,7 +228,7 @@ export function CustomProviderEditForm({
    <div className="mt-2.5 flex items-center gap-2">
     <button
      onClick={onSave}
-     disabled={busy}
+     disabled={busy || !complete}
      className="flex cursor-pointer items-center gap-1 rounded-md border border-accent/60 bg-accent/15 px-3 py-1 text-[13px] transition-colors duration-100 hover:bg-accent/25 disabled:opacity-50"
     >
      {busy && <Loader size={12} className="animate-spin" aria-hidden />}
@@ -259,7 +241,7 @@ export function CustomProviderEditForm({
     >
      {t.cancel}
     </button>
-    {!complete && <span className="text-[11px] text-warn">{t.customFormIncomplete}</span>}
+    {!complete && <span className="text-[11px] text-warn">{hint}</span>}
     <span className="text-[11px] text-faint">{t.customSaveHint}</span>
    </div>
   </>

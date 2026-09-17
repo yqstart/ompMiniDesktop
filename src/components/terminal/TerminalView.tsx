@@ -2,47 +2,35 @@ import { BrowserTerminal } from "reicon-react";
 import { useApp } from "../../stores/app";
 import { newTerminalInActiveWorkspace } from "../../lib/workspaces";
 import { useText } from "../../lib/useText";
-import { ConfirmDialog } from "../ConfirmDialog";
-import { TerminalTabs } from "./TerminalTabs";
 import { TerminalPane } from "./TerminalPane";
 
 /**
- * 右侧终端工作区（V11）：标签栏 + 全部终端面板。
+ * 终端面板区（V11）：全部终端面板。标签栏在 `App.tsx` 里常驻（设置标签激活时也要可见），
+ * 这里只负责面板本身与空态；关闭终端的 ConfirmDialog 同样挂在 App（任何标签下都要弹得出来）。
  *
- * 面板**全部挂载**、靠 CSS 切显隐——切 tab 不销毁 xterm，滚动缓冲区与正在绘制的
+ * 面板**全部挂载**、靠 CSS 切显隐——切标签不销毁 xterm，滚动缓冲区与正在绘制的
  * TUI 都保持原样；隐藏面板的 fit/resize 由 TerminalPane 内部用 active 判断挡掉。
+ *
+ * `visible=false`（设置标签激活）同样只隐藏、不卸载：PTY 必须活过设置标签的开合，
+ * 面板按隐藏处理（不量尺寸 / 不推 resize），回来时按「切到本 tab」重新 fit + 聚焦。
  */
-export function TerminalView() {
+export function TerminalView({ visible = true }: { visible?: boolean }) {
  const terminals = useApp((s) => s.terminals);
  const activeId = useApp((s) => s.activeTerminalId);
- const closingId = useApp((s) => s.closingTerminalId);
- const t = useText();
  return (
-  <div className="flex h-full min-w-0 flex-1 flex-col bg-background">
-   {terminals.length > 0 && <TerminalTabs />}
-   <div className="relative min-h-0 flex-1">
-    {terminals.length === 0 ? (
-     <EmptyTerminal />
-    ) : (
-     terminals.map((term) => (
-      <div
-       key={term.id}
-       className={term.id === activeId ? "absolute inset-0" : "hidden"}
-      >
-       <TerminalPane term={term} active={term.id === activeId} />
-      </div>
-     ))
-    )}
-   </div>
-   <ConfirmDialog
-    open={closingId !== null}
-    title={t.termCloseRunningTitle}
-    detail={t.termCloseRunningBody}
-    confirmLabel={t.termClose}
-    danger
-    onConfirm={() => useApp.getState().confirmCloseTerminal()}
-    onCancel={() => useApp.getState().cancelCloseTerminal()}
-   />
+  <div className={visible ? "relative min-h-0 flex-1" : "hidden"}>
+   {terminals.length === 0 ? (
+    <EmptyTerminal />
+   ) : (
+    terminals.map((term) => (
+     <div
+      key={term.id}
+      className={term.id === activeId && visible ? "absolute inset-0" : "hidden"}
+     >
+      <TerminalPane term={term} active={term.id === activeId && visible} />
+     </div>
+    ))
+   )}
   </div>
  );
 }

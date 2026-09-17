@@ -10,70 +10,75 @@ import { useText } from "../lib/useText";
  * - z-index 30（MASTER §4：对话框 30，下拉 10，审批 20，toast 50）。
  */
 export function ConfirmDialog({
-  open,
-  title,
-  detail,
-  confirmLabel,
-  cancelLabel,
-  danger = false,
-  onConfirm,
-  onCancel,
+ open,
+ title,
+ detail,
+ confirmLabel,
+ cancelLabel,
+ danger = false,
+ onConfirm,
+ onCancel,
 }: {
-  open: boolean;
-  title: string;
-  detail?: string;
-  confirmLabel?: string;
-  cancelLabel?: string;
-  danger?: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
+ open: boolean;
+ title: string;
+ detail?: string;
+ confirmLabel?: string;
+ cancelLabel?: string;
+ danger?: boolean;
+ onConfirm: () => void;
+ onCancel: () => void;
 }) {
-  const cancelRef = useRef<HTMLButtonElement>(null);
-  const t = useText();
+ const cancelRef = useRef<HTMLButtonElement>(null);
+ const t = useText();
+ /** 最新 `onCancel` 的引用：调用方传的都是内联箭头函数，若放进下面 effect 的依赖，
+  *  打开期间的每次重渲染都会重跑 `focus()`，把焦点抢回「取消」按钮（与 DialogShell 同款坑）。 */
+ const onCancelRef = useRef(onCancel);
+ useEffect(() => {
+  onCancelRef.current = onCancel;
+ });
 
-  useEffect(() => {
-    if (!open) return;
-    cancelRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, onCancel]);
+ useEffect(() => {
+  if (!open) return;
+  cancelRef.current?.focus();
+  const onKey = (e: KeyboardEvent) => {
+   if (e.key === "Escape") onCancelRef.current();
+  };
+  document.addEventListener("keydown", onKey);
+  return () => document.removeEventListener("keydown", onKey);
+ }, [open]);
 
-  if (!open) return null;
-  return (
-    <div
-      className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4"
+ if (!open) return null;
+ return (
+  <div
+   className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4"
+   onClick={onCancel}
+  >
+   <div
+    role="dialog"
+    aria-modal="true"
+    aria-label={title}
+    className="w-full max-w-sm rounded-lg border border-border bg-elevated p-4 shadow-pop"
+    onClick={(e) => e.stopPropagation()}
+   >
+    <div className="text-sm font-medium">{title}</div>
+    {detail && <div className="mt-1.5 text-[13px] leading-5 text-muted">{detail}</div>}
+    <div className="mt-3.5 flex justify-end gap-2">
+     <button
+      ref={cancelRef}
       onClick={onCancel}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className="w-full max-w-sm rounded-lg border border-border bg-elevated p-4 shadow-pop"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="text-sm font-medium">{title}</div>
-        {detail && <div className="mt-1.5 text-[13px] leading-5 text-muted">{detail}</div>}
-        <div className="mt-3.5 flex justify-end gap-2">
-          <button
-            ref={cancelRef}
-            onClick={onCancel}
-            className="cursor-pointer rounded-md border border-border px-3.5 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover"
-          >
-            {cancelLabel ?? t.cancel}
-          </button>
-          <button
-            onClick={onConfirm}
-            className={`cursor-pointer rounded-lg px-3.5 py-1.5 text-[13px] text-white transition-opacity duration-100 hover:opacity-90 ${
-              danger ? "bg-danger" : "bg-accent"
-            }`}
-          >
-            {confirmLabel ?? t.confirm}
-          </button>
-        </div>
-      </div>
+      className="cursor-pointer rounded-md border border-border px-3.5 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover"
+     >
+      {cancelLabel ?? t.cancel}
+     </button>
+     <button
+      onClick={onConfirm}
+      className={`cursor-pointer rounded-lg px-3.5 py-1.5 text-[13px] text-white transition-opacity duration-100 hover:opacity-90 ${danger ? "bg-danger" : "bg-accent"
+       }`}
+     >
+      {confirmLabel ?? t.confirm}
+     </button>
     </div>
-  );
+   </div>
+  </div>
+ );
 }

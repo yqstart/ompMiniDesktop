@@ -14,7 +14,14 @@ type AppState = {
  /** 我的模型（本应用偏好，localStorage 持久化；模型选择器的候选范围，空 = 全部；见 src/lib/myModels.ts）。 */
  myModels: string[];
  setMyModels: (list: string[]) => void;
- settingsOpen: boolean;
+ /** 设置标签（单例）是否打开：打开后在标签栏里与终端标签并列；关闭才卸载设置页。 */
+ settingsTabOpen: boolean;
+ /** 主区当前显示的是设置标签（`activeTerminalId` 保持不变，作为「上次的终端」）。 */
+ settingsTabActive: boolean;
+ /** 打开 / 聚焦设置标签（已打开则只切过去）。 */
+ openSettingsTab: () => void;
+ /** 关闭设置标签：主区回到最近激活的终端标签（一个终端都没有则回到空态）。 */
+ closeSettingsTab: () => void;
  sidebarOpen: boolean;
  update: UpdateState;
  updateDismissedVersion: string | null;
@@ -39,7 +46,7 @@ type AppState = {
  workspaces: WorkspaceView[];
  /** 打开中的终端（tab 元数据；PTY 进程与高频字节流都不进 store）。 */
  terminals: TerminalView[];
- /** 当前激活的终端 tab。 */
+ /** 终端标签里当前激活的那个（切去设置标签时保持不变，回来就是「上次的终端」）。 */
  activeTerminalId: string | null;
  /** 左栏选中的工作区（按 `path` 标识；`＋` 新建终端用它当目录）。 */
  activeWorkspacePath: string | null;
@@ -105,7 +112,10 @@ export const useApp = create<AppState>((set, get) => ({
   saveMyModels(list);
   set({ myModels: list });
  },
- settingsOpen: false,
+ settingsTabOpen: false,
+ settingsTabActive: false,
+ openSettingsTab: () => set({ settingsTabOpen: true, settingsTabActive: true }),
+ closeSettingsTab: () => set({ settingsTabOpen: false, settingsTabActive: false }),
  sidebarOpen: false,
  update: { status: "idle" },
  updateDismissedVersion: null,
@@ -162,13 +172,19 @@ export const useApp = create<AppState>((set, get) => ({
    spawnSeq: 0,
    createdAt: Date.now(),
   };
-  set((s) => ({ terminals: [...s.terminals, term], activeTerminalId: id, activeWorkspacePath: cwd }));
+  set((s) => ({
+   terminals: [...s.terminals, term],
+   activeTerminalId: id,
+   activeWorkspacePath: cwd,
+   // 新终端必然切回终端视图（设置标签留在标签栏里）
+   settingsTabActive: false,
+  }));
   return id;
  },
  focusTerminal: (id) =>
   set((s) => {
    const hit = s.terminals.find((t) => t.id === id);
-   return hit ? { activeTerminalId: id, activeWorkspacePath: hit.cwd } : {};
+   return hit ? { activeTerminalId: id, activeWorkspacePath: hit.cwd, settingsTabActive: false } : {};
   }),
  closeTerminal: (id) =>
   set((s) => {
@@ -181,7 +197,9 @@ export const useApp = create<AppState>((set, get) => ({
     const next = terminals[Math.min(idx, terminals.length - 1)] ?? null;
     activeTerminalId = next ? next.id : null;
    }
-   return { terminals, activeTerminalId };
+   // 最后一个终端也关掉时：设置标签开着就切过去（否则主区回到空态）
+   const settingsTabActive = terminals.length === 0 && s.settingsTabOpen ? true : s.settingsTabActive;
+   return { terminals, activeTerminalId, settingsTabActive };
   }),
  setTerminalStatus: (id, status, code) =>
   set((s) => ({

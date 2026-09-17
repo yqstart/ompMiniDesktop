@@ -23,15 +23,22 @@ export function DialogShell({
 }) {
  const t = useText();
  const cardRef = useRef<HTMLDivElement>(null);
+ /** 最新 `onClose` 的引用：调用方传的都是内联箭头函数，若把它放进下面 effect 的依赖，
+  *  父级每次重渲染都会重跑 effect —— `cardRef` 的 `focus()` 会把输入框的焦点抢回卡片
+  *  （实测：自定义供应商表单每敲一个字就失焦）。effect 只在挂载时跑一次，回调经 ref 取最新值。 */
+ const closeRef = useRef(onClose);
+ useEffect(() => {
+  closeRef.current = onClose;
+ });
 
  useEffect(() => {
   cardRef.current?.focus();
   const onKey = (e: KeyboardEvent) => {
-   if (e.key === "Escape") onClose();
+   if (e.key === "Escape") closeRef.current();
   };
   document.addEventListener("keydown", onKey);
   return () => document.removeEventListener("keydown", onKey);
- }, [onClose]);
+ }, []);
 
  return (
   <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>

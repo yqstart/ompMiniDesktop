@@ -1,4 +1,4 @@
-import { isMap, isSeq, parseDocument, type Document, type YAMLMap, type YAMLSeq } from "yaml";
+import { isMap, isScalar, isSeq, parseDocument, type Document, type YAMLMap, type YAMLSeq } from "yaml";
 
 /**
  * 自定义模型接入（`<agentDir>/models.yml`）的数据层：**保真编辑** omp 的用户级
@@ -20,18 +20,17 @@ import { isMap, isSeq, parseDocument, type Document, type YAMLMap, type YAMLSeq 
  * 写入的最后一公里（预校验 / 备份 / 原子写 / 乐观锁）在后端 `src-tauri/src/models_config.rs`。
  */
 
-/** omp `models.yml` 支持的 wire API（上游 `omp://models.md` 的允许值，原样展示不翻译）。 */
-export const API_OPTIONS = [
- "openai-completions",
- "openai-responses",
- "openai-codex-responses",
- "azure-openai-responses",
- "anthropic-messages",
- "google-generative-ai",
- "google-gemini-cli",
- "google-vertex",
- "bedrock-converse-stream",
-] as const;
+/** 界面提供的接口类型（两档，覆盖绝大多数自建端点）：`openai-completions` = OpenAI 兼容
+ *  （/chat/completions，网关与本地推理引擎的通用协议）、`anthropic-messages` = Claude 的
+ *  Messages 协议。omp 的 schema 还认其它 wire API（`omp://models.md` 的允许值），但界面
+ *  不再列出——既有文件里写了别的值也不受影响：`apiOptionsFor` 把当前值一并列出，保存原样写回。 */
+export const API_OPTIONS = ["openai-completions", "anthropic-messages"] as const;
+
+/** 接口类型下拉的候选：两档 + 当前值（属于界面之外的档时原样保留，保证不改动也能保存）。 */
+export function apiOptionsFor(current: string): string[] {
+ const v = current.trim();
+ return v && !(API_OPTIONS as readonly string[]).includes(v) ? [...API_OPTIONS, v] : [...API_OPTIONS];
+}
 
 /** 界面管理的 provider 级键；其余键一律原样保留。 */
 const MANAGED_PROVIDER_KEYS = new Set(["baseUrl", "api", "apiKey", "auth", "models"]);
@@ -50,6 +49,9 @@ export type CustomModelForm = {
 /** 一个自定义供应商的表单值。 */
 export type CustomProviderForm = {
  id: string;
+ /** 编辑态 = 该块在 `providers` 里的**原键名**（新建时为 undefined）。用户改了 `id` 时，
+  *  `upsertProvider` 依据它把 YAML 键就地改名；相等则只是普通更新。 */
+ originalId?: string;
  baseUrl: string;
  api: string;
  /** 空串 = 无需鉴权（`auth: none`）；否则写 `apiKey`（环境变量名 / 字面量 / `!命令`，原样透传）。 */
@@ -205,6 +207,7 @@ export function providerFormOf(text: string, id: string): CustomProviderForm | n
  const modelsNode = node.get("models", true);
  return {
   id,
+  originalId: id,
   baseUrl: str(node.get("baseUrl", true)),
   api: str(node.get("api", true)) || API_OPTIONS[0],
   apiKey: str(node.get("apiKey", true)),
@@ -214,9 +217,12 @@ export function providerFormOf(text: string, id: string): CustomProviderForm | n
 
 // ---------- 校验 ----------
 
-/** 供应商 id：omp 没有硬性字符集约束，这里限制成安全可读的形态（写进 YAML 键名无歧义）。 */
+/** 供应商 id（= `providers` 下的键名，也是模型 selector 的前缀，omp 侧没有单独的显示名字段）。
+ *  omp 本身没有字符集约束——实测中文键照常收录（`云渡中转/gpt-6-astra` 出现在 `omp models` 里、
+ *  stderr 干净），所以这里只挡「写进 YAML 键名 / selector 会歧义」的字符：空白、`/` `:` `#` 引号等。
+ *  Unicode 字母 / 数字（中文、日文…）与 `.` `_` `-` 都放行。 */
 export function isValidProviderId(id: string): boolean {
- return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(id);
+ return /^[\p{L}\p{N}][\p{L}\p{N}._-]*$/u.test(id);
 }
 
 /** 正整数（空串 = 不填，返回 null；非法返回 undefined）。 */
@@ -247,6 +253,13 @@ export function providerFormComplete(f: CustomProviderForm): boolean {
   f.models.length > 0 &&
   f.models.every(modelFormComplete)
  );
+}
+
+/** id 是否与**别的**块冲突（新建撞任何已有 id / 编辑改名撞别人 = 冲突；编辑保留原名不算）。 */
+export function isDuplicateProviderId(f: CustomProviderForm, existingIds: string[]): boolean {
+ const id = f.id.trim();
+ if (!id || id === (f.originalId ?? "").trim()) return false;
+ return existingIds.includes(id);
 }
 
 // ---------- 保真编辑 ----------
@@ -309,6 +322,8 @@ function buildModelsSeq(doc: Document, current: unknown, forms: CustomModelForm[
 /**
  * 新增 / 更新一个自定义供应商（返回新文本，原文本不动）。
  * 已有块里界面不管理的键与模型级字段原样保留；`apiKey` 与 `auth: none` 互斥。
+ * 表单带 `originalId` 且与 `id` 不同 = **改名**：YAML 键就地替换（块的位置与键上的注释保留）。
+ * 目标键已被别的块占用（界面已拦，这里兜底）时不改名，按原名更新——绝不制造重复键。
  */
 export function upsertProvider(text: string, form: CustomProviderForm): EditResult {
  const parsed = readDoc(text);
@@ -317,6 +332,11 @@ export function upsertProvider(text: string, form: CustomProviderForm): EditResu
  const providers = ensureProviders(doc);
 
  const id = form.id.trim();
+ const from = (form.originalId ?? "").trim();
+ if (from && from !== id && !providers.items.some((p) => str(p.key) === id)) {
+  const pair = providers.items.find((p) => str(p.key) === from);
+  if (pair && isScalar(pair.key)) pair.key.value = id;
+ }
  const current: unknown = providers.get(id, true);
  let node: YAMLMap;
  if (isMap(current)) {

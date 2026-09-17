@@ -9,6 +9,7 @@ import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
 import {
  emptyProviderForm,
+ isDuplicateProviderId,
  parseModelsConfig,
  providerFormComplete,
  providerFormOf,
@@ -49,13 +50,13 @@ export function ProvidersSection() {
  const [busy, setBusy] = useState(false);
  const [refreshing, setRefreshing] = useState(false);
  const [pendingLogout, setPendingLogout] = useState<ProviderView | null>(null);
- /** 打开「挑选模型」弹窗的登录型供应商（null = 关闭）。 */
- const [picking, setPicking] = useState<ProviderView | null>(null);
+ /** 打开「挑选模型」弹窗的供应商（登录型或自定义块；null = 关闭）——只需要 id / 标题。 */
+ const [picking, setPicking] = useState<{ id: string; name: string } | null>(null);
  /** 添加面板：打开态 / 已选的登录型提供商（null = 还在选提供商）。 */
  const [addOpen, setAddOpen] = useState(false);
  const [addPick, setAddPick] = useState<string | null>(null);
- /** 自定义供应商表单（新建或编辑）；非 null 时占据面板位。 */
- const [editing, setEditing] = useState<{ form: CustomProviderForm; isNew: boolean } | null>(null);
+ /** 自定义供应商表单（新建或编辑；`originalId` 非空 = 编辑该块）；非 null 时占据面板位。 */
+ const [editing, setEditing] = useState<CustomProviderForm | null>(null);
  const [formErr, setFormErr] = useState<string | null>(null);
  /** 自定义行的删除确认目标（行内确认：设置页是可滚动容器，浮层会被裁掉）。 */
  const [pendingRemove, setPendingRemove] = useState<string | null>(null);
@@ -125,7 +126,7 @@ export function ProvidersSection() {
   setFormErr(null);
   setPendingRemove(null);
   if (id === PICK_CUSTOM) {
-   setEditing({ form: emptyProviderForm(), isNew: true });
+   setEditing(emptyProviderForm());
    return;
   }
   setAddPick(id);
@@ -177,17 +178,22 @@ export function ProvidersSection() {
   setPicking(null);
   setAddPick(null);
   setAddOpen(true);
-  setEditing({ form, isNew: false });
+  setEditing(form);
  };
 
  /** 保存自定义供应商：表单 → 保真编辑 → 后端预校验 + 落盘（失败时原文件不动）。 */
  const saveCustom = async () => {
   if (!editing || !file) return;
-  if (!providerFormComplete(editing.form)) {
+  if (!providerFormComplete(editing)) {
    setFormErr(t.customFormIncomplete);
    return;
   }
-  const edited = upsertProvider(file.text, editing.form);
+  // 改名撞已有 id（编辑保留原名不算）——挡在写盘前
+  if (isDuplicateProviderId(editing, parseModelsConfig(file.text).providers.map((p) => p.id))) {
+   setFormErr(t.customFormDupId);
+   return;
+  }
+  const edited = upsertProvider(file.text, editing);
   if (!edited.ok) {
    setFormErr(edited.error);
    return;
@@ -345,8 +351,9 @@ export function ProvidersSection() {
          activeCount={catalog.filter((m) => m.provider === v.id).length}
          busy={busy}
          pending={pendingRemove === v.id}
-         editing={!editing?.isNew && editing?.form.id === v.id}
+         editing={editing?.originalId === v.id}
          onEdit={() => beginEdit(v.id)}
+         onPick={() => setPicking({ id: v.id, name: v.id })}
          onAskRemove={() => {
           setPendingRemove(v.id);
           setEditing(null);
@@ -392,9 +399,9 @@ export function ProvidersSection() {
     <DialogShell
      title={
       editing
-       ? editing.isNew
-        ? t.customFormNew
-        : fmt(t.customFormEdit, editing.form.id)
+       ? editing.originalId
+        ? fmt(t.customFormEdit, editing.id)
+        : t.customFormNew
        : addPick === null
         ? t.providersAddPick
         : fmt(t.providersAddTitle, pickedProvider?.name ?? addPick)
@@ -404,12 +411,11 @@ export function ProvidersSection() {
     >
      {editing ? (
       <CustomProviderEditForm
-       form={editing.form}
-       isNew={editing.isNew}
+       form={editing}
        busy={busy}
        error={formErr}
        existingIds={parsed.providers.map((p) => p.id)}
-       onChange={(form) => setEditing({ ...editing, form })}
+       onChange={setEditing}
        onCancel={() => {
         setEditing(null);
         setFormErr(null);
@@ -445,7 +451,7 @@ export function ProvidersSection() {
  );
 }
 
-/** 一行自定义供应商（models.yml）：自定义块给编辑 / 删除；覆盖型块只读（手工维护的语义界面表达不了）。 */
+/** 一行自定义供应商（models.yml）：自定义块给挑选 / 编辑 / 删除；覆盖型块只读（手工维护的语义界面表达不了）。 */
 function CustomRow({
  view,
  activeCount,
@@ -453,6 +459,7 @@ function CustomRow({
  pending,
  editing,
  onEdit,
+ onPick,
  onAskRemove,
  onCancelRemove,
  onRemove,
@@ -463,6 +470,7 @@ function CustomRow({
  pending: boolean;
  editing: boolean;
  onEdit: () => void;
+ onPick: () => void;
  onAskRemove: () => void;
  onCancelRemove: () => void;
  onRemove: () => void;
@@ -509,6 +517,13 @@ function CustomRow({
     </>
    ) : (
     <>
+     <button
+      onClick={onPick}
+      disabled={busy || editing}
+      className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+     >
+      {t.providersPick}
+     </button>
      <button
       onClick={onEdit}
       disabled={busy || editing}

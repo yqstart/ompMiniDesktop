@@ -56,15 +56,15 @@
 - 界面：系统栈 `-apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", Inter, sans-serif`。中文优先苹方 / 微软雅黑。
 - 等宽（工具参数、路径、session id 前缀）：`"JetBrains Mono", "SF Mono", Menlo, monospace`，12–13px；等宽文本自动带 `tabular-nums`（时间、token 数、行号对齐不跳动）。
 - 字阶（**只有三级**，禁止再发明）：正文 14px；控件 13px（按钮、页签、下拉项、终端标签）；元信息 11px（时间、计数、路径、徽章，配 `font-mono` 或 `faint` 色）。终端内的字号由 xterm 自己管（13px 等宽 + 1.25 行高），不归字阶管。
-- 行长：设置页内容列 `max-w-3xl` 居中；终端列随窗口（xterm 自动重排）。
+- 行长：设置页整体 `max-w-4xl` 居中（左栏竖向菜单 176px + 右侧内容列）；终端列随窗口（xterm 自动重排）。
 
 ## 4. 布局
 
-- V11 两栏：左栏可拖拽（**292–480px，默认 292**，`sidebarWidth` 存 Zustand + localStorage 持久化；窄窗 <768px 收抽屉）→ 右侧终端工作区（标签栏 + xterm 全尺寸铺满）。**下限 = 左栏底部那一行的内容宽度**（设置全称 + 语言 + 皮肤并排不挤压，按最宽的英文界面算；实测 288px 临界 + 4px 字体余量），不为审美而定——改它之前先量那一行。
+- V11 两栏：左栏可拖拽（**292–480px，默认 292**，`sidebarWidth` 存 Zustand + localStorage 持久化；窄窗 <768px 收抽屉）→ 右侧工作区（**常驻标签栏**：终端标签 + 设置标签；xterm 全尺寸铺满）。**下限 = 左栏底部那一行的内容宽度**（设置全称 + 语言 + 皮肤并排不挤压，按最宽的英文界面算；实测 288px 临界 + 4px 字体余量），不为审美而定——改它之前先量那一行。
 - 左栏（`WorkspaceSidebar`）：顶部固定区 = macOS 红绿灯占位行（`data-tauri-drag-region`，`h-9`）+「添加项目」主入口（稀释强调色，`FolderPlus`；与终端空态的引导共用 `src/lib/projects.ts` 的 `pickAndAddProject`）→ 滚动区 = 项目组列表（每项目 = 折叠头 + 工作区行）→ 底部固定「设置」行（左「设置」，右端依次 `LanguageToggle`、`ThemeToggle`；设置入口角上是「有可用更新」的小点）。滚动区用 `[scrollbar-gutter:stable]`，有无滚动条不横跳。
 - 项目组（`ProjectGroup`）：**折叠头** = chevron + 文件夹图标 + 项目名（13px semibold）+ 悬浮槽位（`Clock` 会话弹窗入口 / `Nodes` 新建 worktree，都带 `aria-label` + `title`；目录缺失时标题旁常驻 warn 角标，并在下方给一行「重定位」）。**左栏不做不可逆操作**：删除只在会话弹窗与归档页，且都有二次确认。
 - 工作区行：`圆点 · 分支名（mono 12.5px）· 位置徽章`——主目录圆点 `bg-accent`、worktree 圆点 `bg-faint` + 右侧「worktree」细边徽章（10px）；detached 显示「游离 + 短 sha」；目录缺失整行 50% 透明且不可点。选中态 = `bg-active` 底 + `text-foreground`（与全局选中视觉同源）；点击 = 打开 / 聚焦该目录的终端。从属关系用左侧 hairline 引导线（`border-l border-border-soft pl-1.5`）表达。
-- 右侧终端工作区（`TerminalView`）：**标签栏 40px**（`h-10`，`bg-sidebar` + 下边框）→ 终端面板（绝对定位铺满）。标签栏整条挂 `data-tauri-drag-region`（空白处拖窗口；按钮自身的 mousedown 不触发拖拽）。标签 = `终端图标（运行中 accent / 已退出 faint）+ 标题（13px，truncate，max-w-220px）+ 关闭按钮`，激活标签 `bg-active`、未激活 `text-muted hover:bg-hover`；关闭按钮 hover / focus 才显形（激活标签常驻半透明），最右是常驻 `＋`（28px 方形圆角按钮）。标签标题 = omp 的 OSC 标题（`π > 会话名`），未发过就是工作区名。
+- 右侧工作区（`App` 装配）：**常驻标签栏 40px**（`h-10`，`bg-sidebar` + 下边框）→ 面板区（终端面板绝对定位铺满 / 设置页）。标签栏整条挂 `data-tauri-drag-region`（空白处拖窗口；按钮自身的 mousedown 不触发拖拽）。标签 = `图标（终端：运行中 accent / 已退出 faint；设置：Settings faint）+ 标题（13px，truncate，max-w-220px）+ 关闭按钮`，激活标签 `bg-active`、未激活 `text-muted hover:bg-hover`；关闭按钮 hover / focus 才显形（激活标签常驻半透明），最右是常驻 `＋`（28px 方形圆角按钮）。标签标题 = omp 的 OSC 标题（`π > 会话名`，未发过就是工作区名）；设置标签标题 = 「设置」。**终端面板与设置面板都只切显隐、不条件渲染**（卸载终端面板 = `pty_kill`，那是「关闭标签」才该发生的事）。
 - 终端面板：xterm 全尺寸铺满（`FitAddon` 跟随容器；隐藏面板不与后端同步尺寸）。omp 退出后浮层 = `bg-background/75` 遮罩 + `bg-elevated` 小卡（13px muted「omp 已退出」；异常退出显示「omp 意外退出（退出代码 N）」+「重启」accent 实心键 +「关闭」描边键）。**终端自己就是内容面**——不再套卡片、边框或内边距。
 - 空态（无终端）：居中引导（`BrowserTerminal` 图标盒 + 15px semibold 标题 + 13px muted 说明 +「新建终端」主按钮；无项目时按钮位置换成「先添加一个项目」提示行）。
 - 圆角（`@theme` 覆盖了 Tailwind 默认刻度）：`rounded-sm` 5px（小徽章）/ `rounded-md` 7px（按钮、列表行、下拉项）/ `rounded-lg` 10px（卡片、下拉面板、对话框）/ `rounded-xl` 12px（大容器）。**按钮不用 `rounded-full`**——只有状态点、圆点用。
@@ -95,7 +95,7 @@
 - 颜色不作唯一信号：状态同时有文字（运行中/成功/失败/等待审批）。
 - 异步内容预留占位，禁止内容跳动（content-jumping）。**滚动条也要占位**：左栏会话列表 `[scrollbar-gutter:stable]`——列表从「不满一屏」长到「有滚动条」时，内容宽度不变、横向不跳一下。
 
-## 8. 组件速查（V11 终端工作区 + 设置页五页签）
+## 8. 组件速查（V11 终端工作区 + 设置页五项菜单）
 
 ### 图标（Reicon）
 
@@ -111,8 +111,8 @@
 - `ProjectGroup`（`src/components/sidebar/ProjectGroup.tsx`）= 项目组：折叠头（chevron + `Folder` + 名称 + 悬浮槽位 `Clock`（会话弹窗）/ `Nodes`（新建 worktree））+ 工作区行 + `WorktreePanel` + 目录缺失时的「重定位」行。悬浮槽位只在 hover / focus-within 出现。
 - `WorktreePanel`（ProjectGroup 内私有）= 新建 worktree 面板（绝对定位浮层：`left-2 right-2 top-full` + `shadow-pop`，点外部 / Esc 关）：输入框（过滤未检出的本地分支）→ 候选行（圆点 + mono 分支名）→「新建分支「输入名」」选项（输入非空且不在候选时出现）；创建中禁用控件，失败回抛左栏错误条。
 - `WorkspaceRow`（ProjectGroup 内私有）= 工作区行（口径见 §4）：圆点 + 分支名（mono）+「worktree」徽章 + 缺失态；点击 = 打开 / 聚焦该目录的终端（`lib/workspaces.ts` 的 `openOrFocusWorkspace`）。
-- `TerminalView`（`src/components/terminal/TerminalView.tsx`）= 右侧容器：标签栏 + 全部终端面板（`hidden` 切显隐不销毁）+ 关闭确认（一个 `ConfirmDialog` 实例，`closingTerminalId` 驱动）+ 空态引导。
-- `TerminalTabs`（`src/components/terminal/TerminalTabs.tsx`）= 标签栏（视觉口径见 §4）：`role="tab"` + `aria-selected`，Enter / Space 聚焦；关闭按钮 `aria-label` 走字典；`＋` 常驻最右。
+- `TerminalView`（`src/components/terminal/TerminalView.tsx`）= 终端面板区：全部终端面板（`hidden` 切显隐不销毁）+ 空态引导。标签栏与关闭确认（一个 `ConfirmDialog` 实例，`closingTerminalId` 驱动）都挂在 `App` 层——设置标签激活时它们也要可见 / 可弹。
+- `TerminalTabs`（`src/components/terminal/TerminalTabs.tsx`）= 标签栏（视觉口径见 §4）：终端标签 + **设置标签（单例，`settingsTabOpen` / `settingsTabActive`）** + `＋`；`role="tab"` + `aria-selected`，Enter / Space 聚焦；关闭按钮 `aria-label` 走字典（设置标签走 `closeSettingsTab`，不进确认流程）；`＋` 常驻最右。
 - `TerminalPane`（`src/components/terminal/TerminalPane.tsx`）= 单个终端：xterm 实例（随 id 建立 / 销毁，切 tab 不丢滚动缓冲）+ PTY 管道（`pty_spawn` 的 Channel 直推）+ fit / resize（仅可见时）+ 退出浮层（重启 / 关闭）。
 - `SessionPopup`（`src/components/sidebar/SessionPopup.tsx`）= 项目会话弹窗（`fixed inset-0 z-30` 遮罩 + `max-w-lg` 卡，`max-h-[70vh]`）：标题（`项目名 · 会话` + mono 路径 + ×）→ 会话行（标题 + 时间 + 归档角标；行点击 = 新终端 `omp --resume`；hover 槽位 = 归档 / 恢复 + 删除）→ 无底部按钮（关闭 = 遮罩 / Esc / ×）。删除走 `ConfirmDialog`；挂载方用 `key={project.id}` 保证换项目即重挂载。
 - `HealthBanner`（`src/components/HealthBanner.tsx`）= omp 不可用横幅（warn 边），按钮「重新检测」「指定路径」。
@@ -120,10 +120,10 @@
 - `ConfirmDialog`（`src/components/ConfirmDialog.tsx`）已落地：受控浮层、Esc / 遮罩取消、焦点默认在「取消」、危险操作走 danger 色。**全 app 唯一的确认浮层**——终端关闭、会话删除、归档删除、供应商登出、记忆删除都走它；不许再造第二种确认样式。
 - `ThemeToggle`（`src/components/ThemeToggle.tsx`）= 皮肤三档分段控件（跟随系统 / 深色 / 浅色），**只挂在左栏底部「设置」行右侧**：`role="radiogroup"` + 三个 `role="radio"`（`aria-checked`），左右方向键组内循环；选中 `bg-active`。只切 `<html class="dark">`（localStorage `omp.theme.v1`），不写 omp 配置。终端配色跟着它换（`--term-*`）。
 - `LanguageToggle`（`src/components/LanguageToggle.tsx`）= 界面语言三档分段控件（跟随系统 / 简体中文 / English），**只挂在左栏底部、`ThemeToggle` 左侧**，样式同款。语言名是自称（`LOCALE_NAMES` / `LOCALE_SHORT` 不进字典）；`system` 档实际语言由 `resolveLocale` 解析（`zh*` → 中文）。偏好存 localStorage `omp.locale.v1`。
-- `SettingsPage`（`src/components/SettingsPage.tsx`）= 设置页外壳（占满终端区），顶部页签（`role="tablist"`，选中页签 accent 下划线）：`通用` + `模型` + `记忆` + `使用统计` + `已归档对话`（V12b 起「供应商」并入「模型」，五页签）。底部「返回」。
+- `SettingsPage`（`src/components/SettingsPage.tsx`）= 设置页外壳（标签栏里设置标签的面板；`visible` 切显隐、不卸载——页签选择与滚动位置保留）：**左侧竖向菜单**（`nav` = 标题「设置」+ `role="tablist"` + `aria-orientation="vertical"`；菜单项 = 13px、`rounded-md`、31px 行高，选中 `bg-active` + semibold / 未选中 `text-muted hover:bg-hover`）+ **右侧内容区**（唯一滚动容器，`role="tabpanel"` + `aria-labelledby`）：`通用` + `模型` + `记忆` + `使用统计` + `已归档对话`（V12b 起「供应商」并入「模型」，五项）。关闭设置标签＝标签栏的 `×` / ⌘W（`closeSettingsTab`，回到上次的终端标签），页内不放第二个关闭入口。
 - `GeneralSettingsPanel`（`src/components/settings/GeneralSettingsPanel.tsx`）= 「设置 › 通用」的「omp 常用设置」：**41 个常用键**（白名单 / 分组 / 枚举取值表在 `src/lib/ompSettings.ts`；V11 起含 `tools.approvalMode`）的读写面。折叠分组 + 开关 / 行内枚举 / 数字框 + 行尾「恢复 omp 默认值」；写入乐观更新、失败回滚；整行 `title` 是上游英文说明。**V11 的 V11 键块（`s_tools_approvalMode` 等）与值标签（`svApproval*`）是动态字典键，不许被"未使用键"清理误删。**
-- `CustomProviders`（`src/components/settings/CustomProviders.tsx`）= 「设置 › 模型 › 自定义模型」（V12）：omp `models.yml` 的读写面。供应商行（自定义 / 覆盖内置徽章 + 生效模型数 + 编辑 / 删除；覆盖型只读）+ 行内展开表单（名称 / 接口地址 / 接口类型行内列表 / 认证两档分段 + key / 模型列表 + 保存 / 取消）+ 行内删除确认。错误用内联 danger 条（同页风格）。`StarToggle`（`src/components/settings/StarToggle.tsx`）= 共享挑选星标（可用模型目录 / 供应商挑选面板 / 我的模型列表共用一份）；`Switch`（`src/components/settings/Switch.tsx`）= 共享开关（通用设置行与自定义模型表单共用一份，不许各写一份）。
-- `ModelsPanel`（`src/components/settings/ModelsPanel.tsx`）= 「设置 › 模型」的页壳（V12b 起为**唯一模型管理面**，六区块顺序：**我的模型 → 供应商 → 自定义模型 → 模型角色 → 失败转移 → 可用模型目录**）；`ProvidersSection`（登录 / 登出 + 已配置计划的「挑选模型」，挑选结果进「我的模型」）/ `FallbackChains` / `ModelPickList` / `MemoryPanel` / `ArchivedSessions` / `UsagePanel`：设置页其余区块 / 页签，口径同各自排期文档（v3 / v4 / v5 / v9 / v12 §6）。其中 `ArchivedSessions`（`src/components/ArchivedSessions.tsx`）= 「已归档对话」：标题行（计数 + 刷新）→ 口径说明 → 按项目分组（组头 = 折叠 + 名称 + 路径 + 计数 + 恢复全部 / 删除全部）→ 会话行（**点击 = 恢复并在终端里继续**（V11：unarchive + 新终端 resume；旧「只读回放」已随聊天界面退场）+ 日期 + 恢复 / 删除）。删除走 `ConfirmDialog`。数据来自 `list_archived_sessions`（不看扫描窗口）。
+- `ProviderPicker` / `CustomProviderEditForm` / `ProviderModelsDialog` / `DialogShell`（`src/components/settings/`）= 「添加供应商」与「挑选模型」两个模态（V12c）：选择器（搜索 + 已配置置顶 + 首项「自定义」）、models.yml 表单（名称可改 / 接口类型两档 / 只有 API Key / 模型列表）、供应商模型星标列表（全选 / 清空作用于过滤结果）、模态壳（`fixed` 全屏遮罩 + 居中卡片，Esc / 遮罩 / × 关）。`StarToggle`（`src/components/settings/StarToggle.tsx`）= 共享挑选星标（挑选面板 / 我的模型列表共用一份）；`Switch`（`src/components/settings/Switch.tsx`）= 共享开关（通用设置行与自定义模型表单共用一份，不许各写一份）。
+- `ModelsPanel`（`src/components/settings/ModelsPanel.tsx`）= 「设置 › 模型」的页壳（V12b 起为**唯一模型管理面**，四区块顺序：**供应商 → 我的模型 → 模型角色 → 失败转移**——供应商置顶，因为「先添加供应商、再在弹窗里挑模型」是使用动线）；`ProvidersSection`（登录 / 登出 + 已添加列表 + 「添加供应商」/「挑选模型」两个弹窗）/ `FallbackChains` / `ModelPickList` / `MemoryPanel` / `ArchivedSessions` / `UsagePanel`：设置页其余区块 / 页签，口径同各自排期文档（v3 / v4 / v5 / v9 / v12 §6）。其中 `ArchivedSessions`（`src/components/ArchivedSessions.tsx`）= 「已归档对话」：标题行（计数 + 刷新）→ 口径说明 → 按项目分组（组头 = 折叠 + 名称 + 路径 + 计数 + 恢复全部 / 删除全部）→ 会话行（**点击 = 恢复并在终端里继续**（V11：unarchive + 新终端 resume；旧「只读回放」已随聊天界面退场）+ 日期 + 恢复 / 删除）。删除走 `ConfirmDialog`。数据来自 `list_archived_sessions`（不看扫描窗口）。
 - 新增组件先查此表，禁止同义重复（如第二种 confirm 框、第二种标签栏）。
 
 ## 9. 应用图标

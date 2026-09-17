@@ -144,6 +144,7 @@ worktree 里产生的会话归到所属项目，不再落「未归属」。
 - 终端全尺寸铺满（`FitAddon`）；omp 退出后浮层显示「omp 已退出」（异常退出才带退出码）+ 重启 / 关闭按钮。
 - 关闭运行中的终端：ConfirmDialog 二次确认（防误杀进行中的 agent）；已退出的直接关。
 - 键盘：`⌘T` 新建终端，`⌘W` 关闭当前终端，`⌘1..9` 切换标签。
+- **标签栏与设置标签（收口后调整）**：标签栏（`TerminalTabs`）在主区顶部**常驻**——终端标签 + 设置标签（单例）+ `＋`；设置**不是主区替换**，而是与终端并列的一个标签：`<TerminalView visible={!settingsTabActive} />` + `{settingsTabOpen && <SettingsPage visible={settingsTabActive} />}`。面板只切显隐——条件渲染（早期实现）会在打开设置时卸载整个终端区，`TerminalPane` 的清理 effect 随即 `pty_kill`，**正在跑的任务被直接打断**；现在隐藏期间面板按非活跃处理（不量尺寸 / 不推 resize），切回时按「切到本 tab」重新 fit + 聚焦，隐藏期间到达的输出照常进 xterm 缓冲，设置页的页签选择 / 滚动位置也保留（关标签才卸载）。左栏「设置」入口打开 / 聚焦该标签；`×` / ⌘W 关闭并回到上次的终端标签；终端关闭确认（`ConfirmDialog`）挂在 App 层，设置标签激活时点终端标签的 `×` 也弹得出来。
 
 ### 4.3 会话弹窗（`SessionPopup`）
 
@@ -206,6 +207,14 @@ worktree 里产生的会话归到所属项目，不再落「未归属」。
   `components/update/UpdateBell` 等）；`UpdateDialog` 保留并由 App 常驻挂载。
 - Tauri 插件收敛：删 `tauri-plugin-shell`（残留未用）、`tauri-plugin-store`（overlay 用 std::fs）、
   `tauri-plugin-notification`（`useTaskNotifications` 退场后无消费者）；`capabilities/default.json` 同步。
+
+### 6.2 收口后修复与调整（2026-09-17）
+
+- **打开设置页不再打断终端里跑着的任务**：主区从条件渲染（`settingsOpen ? <SettingsPage /> : <TerminalView />`）改为**终端区常驻挂载 + 设置页叠加**（口径见 §4.2）。核对（`pnpm dev` + 注入 IPC mock 驱动浏览器）：开终端收到输出后打开设置——`pty_kill` 计数不变、`.xterm` 仍在 DOM（`display:none` 隐藏）、spawn 不增加；设置页开着时继续推入的输出在返回后完整渲染（`TASK-RUNNING-1` + `TASK-RUNNING-2`）；返回触发 fit + `pty_resize`（139×46）。回归：关闭运行中终端仍弹二次确认并 kill（计数 +1）。反证：直接卸载终端树（`root.unmount()`，即旧条件渲染的等价路径）立即触发 `pty_kill`——确认根因。（该实现随后演进为标签栏里的设置标签，见下条。）
+
+- **设置改为标签栏里的单例标签**（同日，收口后调整）：终端标签与设置标签并列于**常驻标签栏**（口径见 §4.2）；store 的 `settingsOpen` 拆成 `settingsTabOpen` / `settingsTabActive` + `openSettingsTab` / `closeSettingsTab`，切标签时 `activeTerminalId` 保持不变（作为「上次的终端」）。核对（注入 IPC mock）：开终端 → 打开设置（标签栏两枚标签、设置高亮、xterm 隐藏而 `pty_kill` 计数不变）→ 点终端标签切回（xterm 可见）→ 设置页内部页签（已归档对话）切走再切回仍保留 → ⌘W 关闭设置标签 → 设置标签激活时点终端标签的 `×` 弹确认、确认后 `pty_kill` +1 且无终端时自动切到设置标签；截图核对（标签栏两态）。
+
+- **设置页改为左侧竖向菜单**（同日，收口后调整）：五个入口从顶部横排页签改为 176px 导航列（标题 / 菜单——副标题「omp 诊断、应用更新……」与底部「返回」按钮按用户口径删除，关闭设置标签走标签栏的 × / ⌘W），右侧内容区为唯一滚动容器（`role="tabpanel"` + `aria-labelledby`）；设置页整体宽 `max-w-3xl` → `max-w-4xl`。UI 口径同步 `design-system/MASTER.md`（§3 行长 / §4 布局 / §8 组件表）。核对（注入 IPC mock）：竖向排布（`aria-orientation="vertical"`、五项同列 x、31px 行高、y 递增）、选中态 `bg-active` + semibold、切换后 `tabpanel` 的 `aria-labelledby` 跟随（general → archived）、导航列只剩标题与菜单（无副标题、无「返回」按钮，页内无第二个关闭入口）；截图核对。
 
 ## 7. 明确不做（用户已确认）
 

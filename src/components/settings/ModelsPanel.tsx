@@ -17,7 +17,8 @@ import { StarToggle } from "./StarToggle";
 
 /**
  * 设置 › 模型：omp 模型相关的**唯一管理面**（V12b 把原「供应商」页签整体并了进来）。
- * 区块顺序 = 使用动线：**我的模型 → 供应商 → 模型角色 → 失败转移**。
+ * 区块顺序 = 使用动线：**供应商 → 我的模型 → 模型角色 → 失败转移**（先添加供应商，再在弹窗里
+ * 挑选模型——挑进的进「我的模型」，角色与转移的候选随之收窄）。
  *
  * 口径：
  * - **我的模型**（本应用偏好，localStorage；`src/lib/myModels.ts`）是「小范围」的唯一开关：
@@ -28,13 +29,16 @@ import { StarToggle } from "./StarToggle";
  * - 模型角色写 omp 全局配置（`omp config set modelRoles`，record 整表读写 + 回读），未配置的
  *   角色按 omp 自己的回退规则解析，本页不复制那套规则；角色值可带 `:思考档` 后缀，
  *   档位候选按该模型声明的档裁剪。
+ * - **omp 侧改完切回来就该看到**：角色与转移链在挂载时拉一次、**每次设置标签重新激活时重读**
+ *   （终端标签里的 omp 改过 `modelRoles` 后，点回设置标签即刷新）；模型目录不额外重拉——
+ *   `get_models` 后端有 5 分钟缓存，页内的「刷新」按钮才走 `refresh_models` 强制重拉。
  * - 失败转移链（`retry.fallbackChains`）与角色同层，口径见 `FallbackChains.tsx`。
  * - 供应商（登录型 + 自定义）合并成一个「添加供应商」弹窗：登录型走 `omp auth-broker`
  *   （凭证进 omp 凭证库），自定义写 `<agentDir>/models.yml`——见 `ProvidersSection.tsx`。
  */
 export function ModelsPanel() {
  const t = useText();
- const { models, set, myModels, setMyModels } = useApp();
+ const { models, set, myModels, setMyModels, settingsTabActive } = useApp();
  const [roles, setRoles] = useState<ModelRolesInfo | null>(null);
  const [chains, setChains] = useState<FallbackChainsInfo | null>(null);
  const [err, setErr] = useState<string | null>(null);
@@ -62,10 +66,14 @@ export function ModelsPanel() {
   [set, t.modelsLoadFailed],
  );
 
+ // 挂载时拉一次；**每次设置标签重新激活**（从终端标签切回来）都重读——omp 侧（TUI / CLI）
+ // 改过的模型角色与转移链，切回设置页就该看到，不该要求用户先点「刷新」或重开设置标签。
+ // 模型目录走 `get_models` 的 5 分钟缓存（`models` 已在 store 里时不强制重拉），这轮重读很轻。
  useEffect(() => {
+  if (!settingsTabActive) return;
   void load(!models);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅挂载时拉一次
- }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在挂载与激活态翻转时重读
+ }, [settingsTabActive]);
 
  /** 角色编辑：后端写整表并回读，返回的就是写入后的真相。 */
  const saveRole = async (role: string, selector: string | null) => {
@@ -108,6 +116,9 @@ export function ModelsPanel() {
     </p>
    )}
 
+   {/* 供应商：添加（登录型 API key / OAuth + 自定义 models.yml）+ 按供应商挑选模型 */}
+   <ProvidersSection />
+
    {/* 我的模型：本应用偏好；挑过之后下面角色 / 转移的候选只列这些 */}
    <section aria-label={t.myModelsSection} className="rounded-md border border-border bg-surface p-3.5">
     <div className="flex items-center gap-2">
@@ -145,9 +156,6 @@ export function ModelsPanel() {
      )}
     </div>
    </section>
-
-   {/* 供应商：添加（登录型 API key / OAuth + 自定义 models.yml）+ 按供应商挑选模型 */}
-   <ProvidersSection />
 
    {/* 模型角色：把 omp 的 modelRoles 读写给用户（候选 = 我的模型 或 全部） */}
    <section aria-label={t.rolesSection} className="rounded-md border border-border bg-surface p-3.5">

@@ -14,8 +14,8 @@ import { UsagePanel } from "./settings/UsagePanel";
 /** 设置页分页签；顺序即界面顺序。 */
 const TABS = ["general", "models", "memories", "usage", "archived"] as const;
 
-export function SettingsPage() {
-  const { health, set, update } = useApp();
+export function SettingsPage({ visible = true }: { visible?: boolean }) {
+  const { health, update } = useApp();
   const t = useText();
   const [version, setVersion] = useState("…");
   const [diagError, setDiagError] = useState<string | null>(null);
@@ -57,39 +57,61 @@ export function SettingsPage() {
               ? fmt(t.updateError, update.message)
               : null;
 
+  // 设置标签面板：切到终端标签只隐藏（页签选择、滚动位置都保留），关闭标签才卸载
   return (
-    <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-4 overflow-hidden px-4 pt-6 pb-6">
-      <h1 className="shrink-0 text-[17px] font-semibold tracking-tight">{t.title}</h1>
-      <p className="shrink-0 text-[13px] text-muted">{t.subtitle}</p>
-      {/* 分页签：设置页五块——通用（本应用诊断 / 更新；界面语言与皮肤是纯展示层偏好，
-          入口在左栏底部「设置」行，这里不重复放）、模型（**omp 模型相关唯一管理面**：我的模型 /
-          供应商登录与挑选 / 自定义模型 / 模型角色 / 失败转移 / 可用模型目录）、记忆（omp 项目记忆的
-          查看 / 删除）、使用统计（会话 jsonl 的用量聚合，只读）、已归档对话（归档管理面，
-          归档会话不在左栏出现）。 */}
-      <div role="tablist" aria-label={t.title} className="flex shrink-0 gap-1 border-b border-border">
-        {TABS.map((k) => (
-          <button
-            key={k}
-            role="tab"
-            aria-selected={tab === k}
-            onClick={() => setTab(k)}
-            className={`-mb-px cursor-pointer border-b-2 px-3 py-1.5 text-[13px] transition-colors duration-100 ${tab === k ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground"
-              }`}
-          >
-            {k === "general"
-              ? t.tabGeneral
-              : k === "models"
-                ? t.tabModels
-                : k === "memories"
-                  ? t.tabMemories
-                  : k === "usage"
-                    ? t.tabUsage
-                    : t.tabArchived}
-          </button>
-        ))}
-      </div>
+    <div
+      className={
+        visible
+          ? "mx-auto flex min-h-0 w-full max-w-4xl flex-1 gap-6 overflow-hidden px-4 pt-6 pb-6"
+          : "hidden"
+      }
+    >
+      {/* 左栏：标题 + 竖向菜单。设置是标签栏里的标签——关闭走标签栏的 × / ⌘W
+          （`closeSettingsTab`，回到上次的终端标签），页内不放第二个关闭入口。
+          五个入口：通用（本应用诊断 / 更新；
+          界面语言与皮肤是纯展示层偏好，入口在左栏底部「设置」行，这里不重复放）、模型
+          （**omp 模型相关唯一管理面**：我的模型 / 供应商登录与挑选 / 自定义模型 / 模型角色 /
+          失败转移 / 可用模型目录）、记忆（omp 项目记忆的查看 / 删除）、使用统计（会话 jsonl 的
+          用量聚合，只读）、已归档对话（归档管理面，归档会话不在左栏出现）。 */}
+      <nav aria-label={t.title} className="flex w-44 shrink-0 flex-col gap-1">
+        <h1 className="mb-2 shrink-0 px-2.5 text-[17px] font-semibold tracking-tight">{t.title}</h1>
+        <div
+          role="tablist"
+          aria-orientation="vertical"
+          aria-label={t.title}
+          className="flex flex-col gap-0.5"
+        >
+          {TABS.map((k) => (
+            <button
+              key={k}
+              id={`settings-tab-${k}`}
+              role="tab"
+              aria-selected={tab === k}
+              onClick={() => setTab(k)}
+              className={`cursor-pointer rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors duration-100 ${tab === k
+                ? "bg-active font-semibold text-foreground"
+                : "text-muted hover:bg-hover hover:text-foreground"
+                }`}
+            >
+              {k === "general"
+                ? t.tabGeneral
+                : k === "models"
+                  ? t.tabModels
+                  : k === "memories"
+                    ? t.tabMemories
+                    : k === "usage"
+                      ? t.tabUsage
+                      : t.tabArchived}
+            </button>
+          ))}
+        </div>
+      </nav>
       {/* tab 内容区是唯一的滚动容器：外层只定高（底边距 24px），滚动条不出设置页外框。 */}
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-1">
+      <div
+        role="tabpanel"
+        aria-labelledby={`settings-tab-${tab}`}
+        className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto pb-1"
+      >
         {tab === "archived" ? (
           <ArchivedSessions />
         ) : tab === "models" ? (
@@ -200,15 +222,6 @@ export function SettingsPage() {
             </section>
           </>
         )}
-      </div>
-
-      <div className="shrink-0">
-        <button
-          onClick={() => set({ settingsOpen: false })}
-          className="cursor-pointer rounded-md border border-border px-4 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover"
-        >
-          {t.back}
-        </button>
       </div>
     </div>
   );

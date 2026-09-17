@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   API_OPTIONS,
+  apiOptionsFor,
   emptyProviderForm,
+  isDuplicateProviderId,
   isValidProviderId,
   modelFormComplete,
   parseModelsConfig,
@@ -83,6 +85,7 @@ describe("providerFormOf", () => {
   it("读出表单初值（未声明 input 时按只收文本）", () => {
     const f = providerFormOf(SAMPLE, "my-gw");
     expect(f).not.toBeNull();
+    expect(f!.originalId).toBe("my-gw");
     expect(f!.baseUrl).toBe("https://gw.example.com/v1");
     expect(f!.api).toBe("openai-completions");
     expect(f!.apiKey).toBe("GW_KEY");
@@ -169,6 +172,16 @@ describe("upsertProvider 保真编辑", () => {
     expect(r.text.indexOf("new-gw:")).toBeGreaterThan(r.text.indexOf("my-gw:"));
   });
 
+  it("中文供应商名：键原样写出、可被解析回来（omp 实测收录该键）", () => {
+    const r = upsertProvider("", form({ id: "云渡中转" }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.text).toContain("云渡中转:");
+    const back = parseModelsConfig(r.text);
+    expect(back.error).toBeNull();
+    expect(back.providers.map((p) => p.id)).toEqual(["云渡中转"]);
+  });
+
   it("解析不了的文本拒绝编辑（不覆盖）", () => {
     const r = upsertProvider("providers: [", form());
     expect(r.ok).toBe(false);
@@ -181,6 +194,58 @@ describe("upsertProvider 保真编辑", () => {
     expect(out).toContain("cost: {input: 1, output: 2, cacheRead: 0, cacheWrite: 0}");
     expect(out).toContain("maxTokens: 2048");
     expect(out).toContain("id: m2");
+  });
+
+  it("改名：YAML 键就地替换（块的位置与键上的注释保留）", () => {
+    const text = [
+      "providers:",
+      "  first:",
+      "    baseUrl: http://a/v1",
+      "  # 待改名的块",
+      "  mid:",
+      "    baseUrl: http://b/v1",
+      "    api: anthropic-messages",
+      "    apiKey: K2",
+      "    models:",
+      "      - id: n",
+      "  last:",
+      "    baseUrl: http://c/v1",
+      "",
+    ].join("\n");
+    const f = providerFormOf(text, "mid")!;
+    f.id = "renamed";
+    const r = upsertProvider(text, f);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.text).not.toContain("mid:");
+    expect(r.text.indexOf("renamed:")).toBeGreaterThan(r.text.indexOf("first:"));
+    expect(r.text.indexOf("renamed:")).toBeLessThan(r.text.indexOf("last:"));
+    expect(r.text).toContain("  # 待改名的块");
+    expect(r.text).toContain("api: anthropic-messages");
+  });
+
+  it("改名：其余块、界面之外的键与模型级字段全部原样保留", () => {
+    const f = providerFormOf(SAMPLE, "my-gw")!;
+    f.id = "renamed-gw";
+    const out = (upsertProvider(SAMPLE, f) as { ok: true; text: string }).text;
+    expect(out).toContain("  renamed-gw:\n");
+    expect(out).not.toContain("my-gw");
+    expect(out).toContain("# 顶部注释：保留说明");
+    expect(out).toContain("X-Team: platform");
+    expect(out).toContain("GW_KEY");
+    expect(out).toContain("cost: {input: 1, output: 2, cacheRead: 0, cacheWrite: 0}");
+  });
+
+  it("改名撞已有 id / originalId 与 id 相同：都不制造重复键", () => {
+    const clash = providerFormOf(SAMPLE, "my-gw")!;
+    clash.id = "deepseek";
+    const out = (upsertProvider(SAMPLE, clash) as { ok: true; text: string }).text;
+    expect(out.match(/^ {2}deepseek:$/gm)?.length).toBe(1);
+    expect(out).toContain("my-gw:");
+
+    const same = providerFormOf(SAMPLE, "my-gw")!;
+    const kept = (upsertProvider(SAMPLE, same) as { ok: true; text: string }).text;
+    expect(kept.match(/my-gw:/g)?.length).toBe(1);
   });
 });
 
@@ -211,9 +276,11 @@ describe("removeProvider", () => {
 });
 
 describe("表单校验", () => {
-  it("provider id 字符集", () => {
-    for (const ok of ["a", "my-gw", "llama.cpp", "a_b-1.2"]) expect(isValidProviderId(ok)).toBe(true);
-    for (const bad of ["", "-gw", ".gw", "a b", "a/b", "中文"]) expect(isValidProviderId(bad)).toBe(false);
+  it("provider id 字符集（Unicode 字母——中文 / 日文——放行，omp 侧无约束）", () => {
+    for (const ok of ["a", "my-gw", "llama.cpp", "a_b-1.2", "云渡中转", "模型-2", "プロバイダ"])
+      expect(isValidProviderId(ok), ok).toBe(true);
+    for (const bad of ["", "-gw", ".gw", "a b", "a/b", "云渡 中转", ":x", "a:b", "a#b"])
+      expect(isValidProviderId(bad), bad).toBe(false);
   });
 
   it("模型字段完整性与整体可保存性", () => {
@@ -223,6 +290,7 @@ describe("表单校验", () => {
     expect(modelFormComplete({ id: "", name: "", contextWindow: "", maxTokens: "", reasoning: false, input: [] })).toBe(false);
 
     expect(providerFormComplete(form())).toBe(true);
+    expect(providerFormComplete(form({ id: "云渡中转" }))).toBe(true);
     expect(providerFormComplete(form({ baseUrl: "gw.example.com" }))).toBe(false);
     expect(providerFormComplete(form({ api: "" }))).toBe(false);
     expect(providerFormComplete(form({ models: [] }))).toBe(false);
@@ -230,5 +298,27 @@ describe("表单校验", () => {
 
   it("默认表单指向 openai-completions", () => {
     expect(emptyProviderForm().api).toBe(API_OPTIONS[0]);
+  });
+});
+
+describe("接口类型候选（apiOptionsFor）", () => {
+  it("界面只提供两档；既有文件里写的其它值原样追加（不改动也能保存）", () => {
+    expect(API_OPTIONS).toEqual(["openai-completions", "anthropic-messages"]);
+    for (const cur of ["", " openai-completions "]) {
+      expect(apiOptionsFor(cur)).toEqual(["openai-completions", "anthropic-messages"]);
+    }
+    expect(apiOptionsFor("anthropic-messages")).toEqual(["openai-completions", "anthropic-messages"]);
+    expect(apiOptionsFor("google-vertex")).toEqual(["openai-completions", "anthropic-messages", "google-vertex"]);
+  });
+});
+
+describe("isDuplicateProviderId", () => {
+  const ids = ["a", "b"];
+  it("新建撞已有 / 编辑改名撞别人算冲突；保留原名或改回原名不算", () => {
+    expect(isDuplicateProviderId(form({ id: "a" }), ids)).toBe(true);
+    expect(isDuplicateProviderId(form({ id: "c" }), ids)).toBe(false);
+    expect(isDuplicateProviderId(form({ id: "" }), ids)).toBe(false);
+    expect(isDuplicateProviderId({ ...form({ id: "b" }), originalId: "a" }, ids)).toBe(true);
+    expect(isDuplicateProviderId({ ...form({ id: "a" }), originalId: "a" }, ids)).toBe(false);
   });
 });

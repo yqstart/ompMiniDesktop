@@ -5,6 +5,8 @@ import { useText } from "../lib/useText";
 import { api } from "@shared/api";
 import { WorkspaceSidebar } from "../components/sidebar/WorkspaceSidebar";
 import { TerminalView } from "../components/terminal/TerminalView";
+import { TerminalTabs } from "../components/terminal/TerminalTabs";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HealthBanner } from "../components/HealthBanner";
 import { SettingsPage } from "../components/SettingsPage";
 import { UpdateDialog } from "../components/update/UpdateDialog";
@@ -48,6 +50,12 @@ function useTerminalHotkeys() {
     e.preventDefault();
     newTerminalInActiveWorkspace();
    } else if (e.key === "w") {
+    // 设置标签激活时，⌘W 关的是设置标签（终端标签的关闭语义不变）
+    if (s.settingsTabActive) {
+     e.preventDefault();
+     s.closeSettingsTab();
+     return;
+    }
     if (!s.activeTerminalId) return;
     e.preventDefault();
     s.requestCloseTerminal(s.activeTerminalId);
@@ -156,7 +164,8 @@ function SidebarDrawer({ children }: { children: React.ReactNode }) {
 }
 
 export function App() {
- const { settingsOpen, set, sidebarWidth, setSidebarWidth, updateDialogOpen } = useApp();
+ const { settingsTabOpen, settingsTabActive, closingTerminalId, set, sidebarWidth, setSidebarWidth, updateDialogOpen } = useApp();
+ const terminals = useApp((s) => s.terminals);
  const t = useText();
  useTheme();
  useLocale();
@@ -216,7 +225,22 @@ export function App() {
    </SidebarShell>
    <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
     <HealthBanner />
-    {settingsOpen ? <SettingsPage /> : <TerminalView />}
+    {/* 标签栏常驻（主区顶部）：终端标签 + 设置标签（单例）——设置打开时也看得见标签栏、
+        点得回终端。终端区与设置页都**常驻挂载、只切显隐**（卸载 `TerminalPane` 的
+        清理 effect 会 `pty_kill`，那是「关闭标签」才该发生的事）。 */}
+    {(terminals.length > 0 || settingsTabOpen) && <TerminalTabs />}
+    <TerminalView visible={!settingsTabActive} />
+    {settingsTabOpen && <SettingsPage visible={settingsTabActive} />}
+    {/* 关闭确认常驻这层：设置标签激活时点终端标签的 × 也要弹得出来 */}
+    <ConfirmDialog
+     open={closingTerminalId !== null}
+     title={t.termCloseRunningTitle}
+     detail={t.termCloseRunningBody}
+     confirmLabel={t.termClose}
+     danger
+     onConfirm={() => useApp.getState().confirmCloseTerminal()}
+     onCancel={() => useApp.getState().cancelCloseTerminal()}
+    />
    </main>
    {updateDialogOpen && <UpdateDialog />}
   </div>

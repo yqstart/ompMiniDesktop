@@ -90,7 +90,10 @@ export function WorkspaceSidebar() {
    </div>
    <div className="flex shrink-0 items-center gap-1 border-t border-border px-2 py-2">
     <button
-     onClick={() => useApp.getState().set({ settingsOpen: true, sidebarOpen: false })}
+     onClick={() => {
+      useApp.getState().openSettingsTab();
+      useApp.getState().set({ sidebarOpen: false });
+     }}
      className="relative flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover"
      aria-label={t.settingsOpenAria}
     >
