@@ -284,7 +284,7 @@ const ZH = {
  // 设置 › 模型 ›「供应商」区块（合并的「添加供应商」面板：登录型凭据 + 自定义 models.yml）
  providersSection: "供应商",
  providersHint:
-  "添加 / 管理模型供应商：登录型（API key / OAuth）走 omp 自己的 auth-broker，凭证写进 omp 的凭证库；「自定义」写 omp 的 models.yml（自建端点 / 网关 / 本地推理）。「已配置」= 该供应商已出现在 omp 的模型目录里。添加后按星标挑选模型——挑进的进下面的「我的模型」，只影响本应用的选择器，不改 omp。",
+  "连接模型供应商，或添加自定义端点。添加后点击「挑选模型」，将常用模型加入下方列表。",
  providersAdd: "添加供应商",
  providersAddTitle: "添加 {0}",
  providersAddCount: "{0} 个提供商",
@@ -383,8 +383,8 @@ const ZH = {
  roleAdvisor: "顾问",
  myModelsSection: "我的模型",
  myModelsHint:
-  "星标挑选（供应商行的「挑选模型」弹窗，带搜索过滤）：挑过之后，下面「模型角色」与「失败转移」里能选的只有这些；一个都没挑时列全部可用模型。只影响本应用的选择器，不改 omp 配置——终端里 /model 的可选范围不受影响。",
- myModelsEmpty: "还没挑模型——添加供应商后点它的「挑选模型」，在弹窗里星标；现在所有选择器都列全部可用模型。",
+  "模型角色与失败转移只列出这里的星标模型；未挑选时列出全部模型。不影响终端 /model 的可选范围。",
+ myModelsEmpty: "还没有星标模型。点击供应商旁的「挑选模型」开始添加。",
  myModelsCount: "{0} 个",
  myModelsClear: "清空",
  myModelsAddAria: "加入我的模型 {0}",
@@ -532,8 +532,11 @@ const ZH = {
  termExitedCode: "omp 意外退出（退出代码 {0}）",
  termPaneAria: "终端",
  termStartFailed: "启动失败",
- termEmptyTitle: "打开一个终端",
- termEmptyBody: "每个终端就是一个 omp 会话。点击左栏的工作区，或直接新建一个终端。",
+ workspaceTitle: "终端工作区",
+ workspaceShow: "显示项目侧栏",
+ termSwitch: "切换终端",
+ termEmptyTitle: "下一件作品，从这里开始。",
+ termEmptyBody: "选择左侧工作区，让 omp 和你一起构建。每个终端都是独立的会话，切换项目也不打断思路。",
  // 会话弹窗
  sessTitleOf: "{0} · 会话",
  sessResumeHint: "在新终端里用 omp --resume 接着聊",
@@ -741,7 +744,7 @@ const EN: Record<TextKey, string> = {
 
  providersSection: "Providers",
  providersHint:
-  "Add and manage model providers: sign-in providers (API key / OAuth) go through omp's own auth-broker into omp's credential store; Custom writes omp's models.yml (gateways, self-hosted servers, local engines). \"Configured\" means the provider shows up in omp's model catalog. Star models afterwards to put them into My models below — that only affects this app's pickers, never omp.",
+  "Connect a provider or add a custom endpoint. Then use Pick models to add your everyday models to the list below.",
  providersAdd: "Add provider",
  providersAddTitle: "Add {0}",
  providersAddCount: "{0} providers",
@@ -840,8 +843,8 @@ const EN: Record<TextKey, string> = {
  roleAdvisor: "Advisor",
  myModelsSection: "My models",
  myModelsHint:
-  "Star models in a provider's Pick models dialog (with search): once you pick any, the model roles and fallback-chain targets on this page only offer those. Pick nothing to keep every available model listed. Local to this app — omp's config is untouched, so the terminal's /model list is unaffected.",
- myModelsEmpty: "No picks yet — add a provider, then star models in its Pick models dialog. Until then every picker lists all available models.",
+  "Roles and fallback pickers use your starred models, or all available models when none are picked. The terminal's /model list is unchanged.",
+ myModelsEmpty: "No starred models yet. Use Pick models next to a provider to get started.",
  myModelsCount: "{0}",
  myModelsClear: "Clear",
  myModelsAddAria: "Add {0} to my models",
@@ -983,8 +986,11 @@ const EN: Record<TextKey, string> = {
  termExitedCode: "omp exited unexpectedly (code {0})",
  termPaneAria: "Terminal",
  termStartFailed: "Failed to start",
- termEmptyTitle: "Open a terminal",
- termEmptyBody: "Each terminal is one omp session. Pick a workspace on the left, or open a terminal right away.",
+ workspaceTitle: "Terminal workspace",
+ workspaceShow: "Show projects",
+ termSwitch: "Switch terminals",
+ termEmptyTitle: "Your next idea starts here.",
+ termEmptyBody: "Choose a workspace and build with omp. Each terminal is an independent session, so you can switch projects without losing your flow.",
  sessTitleOf: "{0} · Sessions",
  sessResumeHint: "Continue in a new terminal via omp --resume",
  sessEmpty: "No sessions in this project yet",

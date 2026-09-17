@@ -177,7 +177,7 @@ export function TerminalPane({ term, active }: { term: TerminalView; active: boo
       <div className="flex gap-2">
        <button
         onClick={() => useApp.getState().restartTerminal(term.id)}
-        className="cursor-pointer rounded-md bg-accent px-3.5 py-1.5 text-[13px] text-white transition-opacity duration-100 hover:opacity-90"
+        className="cursor-pointer rounded-md bg-accent px-3.5 py-1.5 text-[13px] text-accent-foreground transition-opacity duration-100 hover:opacity-90"
        >
         {t.termRestart}
        </button>

@@ -1,4 +1,4 @@
-import { BrowserTerminal, Plus, Settings, X } from "reicon-react";
+import { BrowserTerminal, Folder, Plus, Settings, X } from "reicon-react";
 import { useApp } from "../../stores/app";
 import { newTerminalInActiveWorkspace } from "../../lib/workspaces";
 import { useText } from "../../lib/useText";
@@ -18,13 +18,28 @@ export function TerminalTabs() {
  const activeId = useApp((s) => s.activeTerminalId);
  const settingsTabOpen = useApp((s) => s.settingsTabOpen);
  const settingsTabActive = useApp((s) => s.settingsTabActive);
+ const hasProjects = useApp((s) => s.projects.length > 0);
  const t = useText();
  return (
   <div
-   className="flex h-10 shrink-0 items-stretch border-b border-border bg-sidebar"
+   className="flex h-12 shrink-0 items-stretch border-b border-border-soft bg-sidebar/50"
    data-tauri-drag-region
   >
-   <div className="flex min-w-0 flex-1 items-stretch gap-0.5 overflow-x-auto px-1.5 py-1">
+   <button
+    onClick={() => useApp.getState().set({ sidebarOpen: true })}
+    aria-label={t.workspaceShow}
+    title={t.workspaceShow}
+    className="my-1 ml-2 flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted hover:bg-hover md:hidden"
+   >
+    <Folder size={16} aria-hidden />
+   </button>
+   <div role="tablist" aria-label={t.termPaneAria} className="flex min-w-0 flex-1 items-stretch gap-1 overflow-x-auto px-2 py-2">
+    {terminals.length === 0 && !settingsTabOpen && (
+     <div className="flex items-center gap-2 px-2 text-[12px] font-medium text-muted">
+      <BrowserTerminal size={14} aria-hidden />
+      {t.workspaceTitle}
+     </div>
+    )}
     {terminals.map((term) => {
      const active = term.id === activeId && !settingsTabActive;
      return (
@@ -41,7 +56,7 @@ export function TerminalTabs() {
          useApp.getState().focusTerminal(term.id);
         }
        }}
-       className={`group flex min-w-0 max-w-[220px] shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-[13px] transition-colors duration-100 ${active ? "bg-active text-foreground" : "text-muted hover:bg-hover"
+       className={`group flex min-w-0 max-w-[220px] shrink-0 cursor-pointer items-center gap-2 rounded-md border px-3 text-[12px] transition-colors duration-100 ${active ? "border-border bg-surface font-medium text-foreground" : "border-transparent text-muted hover:bg-hover"
         }`}
       >
        <BrowserTerminal
@@ -74,7 +89,7 @@ export function TerminalTabs() {
         useApp.getState().openSettingsTab();
        }
       }}
-      className={`group flex min-w-0 max-w-[220px] shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-[13px] transition-colors duration-100 ${settingsTabActive ? "bg-active text-foreground" : "text-muted hover:bg-hover"
+      className={`group flex min-w-0 max-w-[220px] shrink-0 cursor-pointer items-center gap-2 rounded-md border px-3 text-[12px] transition-colors duration-100 ${settingsTabActive ? "border-border bg-surface font-medium text-foreground" : "border-transparent text-muted hover:bg-hover"
        }`}
      >
       <Settings className="size-3.5 shrink-0 text-faint" />
@@ -96,9 +111,10 @@ export function TerminalTabs() {
    <div className="flex items-center px-2">
     <button
      onClick={() => newTerminalInActiveWorkspace()}
+     disabled={!hasProjects}
      aria-label={t.termNew}
      title={t.termNewHint}
-     className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+     className="flex size-8 cursor-pointer items-center justify-center rounded-md border border-border-soft bg-surface text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
     >
      <Plus className="size-4" />
     </button>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronRight, Clock, Folder, Nodes } from "reicon-react";
+import { ChevronRight, Clock, DiagramTree, Folder, Nodes } from "reicon-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "@shared/api";
 import type { ProjectView, WorkspaceView } from "@shared/types";
@@ -49,26 +49,28 @@ export function ProjectGroup({
  };
 
  return (
-  <div className="relative mb-1">
-   <div className="group flex items-center rounded-md px-1 py-1 text-[13px] font-semibold text-muted transition-colors duration-100 hover:bg-hover">
+  <div className="relative mb-3">
+   <div className="group flex min-h-9 items-center gap-1 rounded-md px-1 py-1 text-[13px] font-semibold text-foreground transition-colors duration-100 hover:bg-hover">
     <button
      onClick={() => setExpanded((v) => !v)}
-     className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
+     className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md text-left"
      aria-expanded={expanded}
+     title={project.path}
     >
      <ChevronRight
       size={12}
       aria-hidden
-      className={`shrink-0 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
+      className={`shrink-0 text-faint transition-transform duration-100 ${expanded ? "rotate-90" : ""}`}
      />
-     <Folder size={13} aria-hidden className="shrink-0 text-faint" />
+     <span className={`flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface ${project.missing ? "text-warn" : "text-muted"}`}>
+      <Folder size={14} aria-hidden />
+     </span>
      <span className="min-w-0 flex-1 truncate">{project.name}</span>
-     {project.missing && <span className="shrink-0 text-[10px] text-warn">{t.missingFolder}</span>}
     </button>
     <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100">
      <button
       onClick={onOpenSessions}
-      className="flex size-6 cursor-pointer items-center justify-center rounded text-muted transition-colors duration-100 hover:bg-active hover:text-foreground"
+      className="flex size-6 cursor-pointer items-center justify-center rounded-sm text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
       aria-label={t.wsSessionsAria}
       title={t.wsSessionsTitle}
      >
@@ -76,9 +78,10 @@ export function ProjectGroup({
      </button>
      <button
       onClick={() => setWtOpen((v) => !v)}
-      className="flex size-6 cursor-pointer items-center justify-center rounded text-muted transition-colors duration-100 hover:bg-active hover:text-foreground"
+      className={`flex size-6 cursor-pointer items-center justify-center rounded-sm transition-colors duration-100 ${wtOpen ? "bg-active text-accent" : "text-muted hover:bg-hover hover:text-foreground"}`}
       aria-label={t.wsNewWorktree}
       title={t.wsNewWorktreeTitle}
+      aria-expanded={wtOpen}
      >
       <Nodes size={13} />
      </button>
@@ -86,7 +89,7 @@ export function ProjectGroup({
    </div>
 
    {project.missing && (
-    <div className="mt-0.5 flex items-center gap-1.5 px-2.5 py-1 text-[11px] text-warn">
+    <div className="ml-5 mt-1 flex items-start gap-2 rounded-md border border-warn/20 bg-warn/5 px-2.5 py-2 text-[11px] leading-relaxed text-warn">
      <span className="min-w-0 flex-1">{t.missingFolderHint}</span>
      <button
       onClick={() => void relocate()}
@@ -100,12 +103,12 @@ export function ProjectGroup({
    )}
 
    {expanded && (
-    <div className="mt-0.5 space-y-px border-l border-border-soft pl-1.5">
+    <div className="ml-5 mt-1 space-y-1 border-l border-border-soft pl-2">
      {items.map((ws) => (
       <WorkspaceRow key={ws.path} ws={ws} active={ws.path === activeWorkspacePath} />
      ))}
      {items.length === 0 && !project.missing && (
-      <p className="px-2.5 py-1 text-[11px] text-faint">{t.unknownBranch}</p>
+      <p className="px-2 py-2 text-[11px] text-faint">{t.unknownBranch}</p>
      )}
     </div>
    )}
@@ -132,16 +135,16 @@ function WorkspaceRow({ ws, active }: { ws: WorkspaceView; active: boolean }) {
    onClick={() => openOrFocusWorkspace(ws)}
    disabled={ws.missing}
    title={ws.path}
-   className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-[12.5px] transition-colors duration-100 ${active ? "bg-active text-foreground" : "text-muted hover:bg-hover hover:text-foreground"
+   aria-current={active ? "location" : undefined}
+   className={`flex min-h-8 w-full items-center gap-2 rounded-md border-l-2 px-2 py-1 text-left text-[13px] transition-colors duration-100 ${active ? "border-accent bg-active text-foreground" : "border-transparent text-muted hover:bg-hover hover:text-foreground"
     } ${ws.missing ? "cursor-default opacity-50" : "cursor-pointer"}`}
   >
-   <span
-    aria-hidden
-    className={`size-1.5 shrink-0 rounded-full ${ws.isMain ? "bg-accent" : "bg-faint"}`}
-   />
-   <span className="min-w-0 flex-1 truncate font-mono">{label}</span>
+   <span className={`flex size-5 shrink-0 items-center justify-center ${ws.isMain || active ? "text-accent" : "text-faint"}`}>
+    <DiagramTree size={13} aria-hidden />
+   </span>
+   <span className={`min-w-0 flex-1 truncate font-mono ${active ? "font-semibold" : ""}`}>{label}</span>
    {!ws.isMain && (
-    <span className="shrink-0 rounded border border-border-soft px-1 py-px text-[10px] text-faint">
+    <span className="shrink-0 rounded-sm border border-border-soft bg-surface/60 px-1.5 py-px text-[10px] leading-4 text-faint">
      worktree
     </span>
    )}
@@ -212,22 +215,23 @@ function WorktreePanel({
  return (
   <div
    ref={ref}
-   className="absolute left-2 right-2 top-full z-20 mt-1 rounded-lg border border-border bg-elevated p-2 shadow-pop"
+   className="absolute left-0 right-0 top-full z-20 mt-2 rounded-lg border border-border bg-elevated p-3 shadow-pop"
   >
    <input
     autoFocus
     value={q}
     onChange={(e) => setQ(e.target.value)}
     placeholder={t.wsBranchPlaceholder}
+    aria-label={t.wsBranchPlaceholder}
     disabled={busy}
-    className="mb-1.5 w-full rounded-md border border-border bg-surface px-2 py-1.5 text-[12px] outline-none focus:border-accent disabled:opacity-50"
+    className="mb-2 h-9 w-full rounded-md border border-border bg-surface px-2.5 text-[13px] outline-none focus:border-accent disabled:opacity-50"
    />
-   <div className="max-h-44 overflow-y-auto">
+   <div className="max-h-44 space-y-1 overflow-y-auto">
     {canCreate && (
      <button
       onClick={() => void create(query, true)}
       disabled={busy}
-      className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-left text-[12px] text-accent transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+      className="flex min-h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-accent transition-colors duration-100 hover:bg-hover disabled:opacity-50"
      >
       <Nodes size={12} aria-hidden className="shrink-0" />
       <span className="min-w-0 flex-1 truncate">{fmt(t.wsBranchNew, query)}</span>
@@ -239,9 +243,9 @@ function WorktreePanel({
       key={b}
       onClick={() => void create(b, false)}
       disabled={busy}
-      className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-left text-[12px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-50"
+      className="flex min-h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-50"
      >
-      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-faint" />
+      <DiagramTree size={13} aria-hidden className="shrink-0 text-faint" />
       <span className="min-w-0 flex-1 truncate font-mono">{b}</span>
      </button>
     ))}

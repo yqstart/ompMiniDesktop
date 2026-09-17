@@ -50,19 +50,19 @@ export function ConfirmDialog({
  if (!open) return null;
  return (
   <div
-   className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4"
+   className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
    onClick={onCancel}
   >
    <div
     role="dialog"
     aria-modal="true"
     aria-label={title}
-    className="w-full max-w-sm rounded-lg border border-border bg-elevated p-4 shadow-pop"
+    className="w-full max-w-sm rounded-xl border border-border bg-elevated p-6 shadow-dialog"
     onClick={(e) => e.stopPropagation()}
    >
-    <div className="text-sm font-medium">{title}</div>
-    {detail && <div className="mt-1.5 text-[13px] leading-5 text-muted">{detail}</div>}
-    <div className="mt-3.5 flex justify-end gap-2">
+    <div className="text-[17px] font-semibold tracking-tight">{title}</div>
+    {detail && <div className="mt-3 text-[13px] leading-6 text-muted">{detail}</div>}
+    <div className="mt-6 flex justify-end gap-2 border-t border-border-soft pt-4">
      <button
       ref={cancelRef}
       onClick={onCancel}
@@ -72,7 +72,7 @@ export function ConfirmDialog({
      </button>
      <button
       onClick={onConfirm}
-      className={`cursor-pointer rounded-lg px-3.5 py-1.5 text-[13px] text-white transition-opacity duration-100 hover:opacity-90 ${danger ? "bg-danger" : "bg-accent"
+      className={`cursor-pointer rounded-md border px-3.5 py-1.5 text-[13px] font-medium transition-colors duration-100 ${danger ? "border-danger/25 bg-danger/10 text-danger hover:bg-danger/15" : "border-transparent bg-accent text-accent-foreground hover:opacity-90"
        }`}
      >
       {confirmLabel ?? t.confirm}

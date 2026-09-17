@@ -38,17 +38,17 @@ export function ModelPickList({
         onChange={(e) => setQ(e.target.value)}
         placeholder={t.roleSearchPlaceholder}
         aria-label={t.roleSearchPlaceholder}
-        className="w-full rounded-md border border-border bg-surface px-2 py-1 text-[13px] outline-none"
+        className="w-full rounded-md border border-border bg-surface px-3 py-2 text-[13px]"
       />
-      <div className="mt-1 max-h-56 overflow-y-auto">
+      <div className="mt-2 max-h-56 overflow-y-auto">
         {[...groups].map(([provider, ms]) => (
           <div key={provider}>
-            <div className="px-1 pt-1.5 pb-0.5 font-mono text-xs text-muted">{provider}</div>
+            <div className="px-2 pt-3 pb-1 font-mono text-[11px] break-all text-faint">{provider}</div>
             {ms.map((m) => (
               <button
                 key={m.selector}
                 onClick={() => onPick(m)}
-                className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-left text-[13px] transition-colors duration-100 hover:bg-hover"
+                className="flex min-h-9 w-full cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-left text-[13px] transition-colors duration-100 hover:bg-hover"
                 aria-label={fmt(t.useModelAria, m.name)}
               >
                 <span className="truncate">{shortModelName(m)}</span>

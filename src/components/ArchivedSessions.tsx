@@ -106,22 +106,22 @@ export function ArchivedSessions() {
  ];
 
  return (
-  <section aria-label={t.tabArchived} className="rounded-md border border-border bg-surface p-3.5">
+  <section aria-label={t.tabArchived} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
    <div className="flex flex-wrap items-center gap-2">
-    <Archive size={14} aria-hidden className="text-muted" />
-    <h2 className="text-sm font-medium">{t.tabArchived}</h2>
+    <Archive size={16} aria-hidden className="text-muted" />
+    <h2 className="text-sm font-semibold">{t.tabArchived}</h2>
     <span className="font-mono text-xs text-muted">{total}</span>
     <button
      onClick={() => setReloadKey((k) => k + 1)}
      disabled={busy}
-     className="ml-auto flex cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+     className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
      aria-label={t.archivedRefresh}
     >
      {busy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
      {t.archivedRefresh}
     </button>
    </div>
-   <p className="mt-1.5 text-[13px] text-faint">{t.archivedHint}</p>
+   <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.archivedHint}</p>
    {error && (
     <p role="alert" className="mt-1.5 text-[13px] text-danger">
      {error}
@@ -131,19 +131,19 @@ export function ArchivedSessions() {
    {rows === null ? (
     <p className="mt-3 text-[13px] text-muted">{t.archivedLoading}</p>
    ) : total === 0 ? (
-    <p className="mt-3 rounded-lg border border-dashed border-border px-3 py-3 text-[13px] text-muted">{t.archivedEmpty}</p>
+    <p className="mt-4 rounded-lg bg-background px-4 py-8 text-center text-[13px] leading-relaxed text-muted">{t.archivedEmpty}</p>
    ) : (
-    <div className="mt-2 space-y-3">
+    <div className="mt-5 space-y-5">
      {buckets.map((b) => {
       const folded = collapsed[b.key] === true;
       return (
        <div key={b.key}>
-        <div className="flex items-center gap-1.5 border-b border-border pb-1">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border-soft pb-3">
          <button
           onClick={() => setCollapsed((m) => ({ ...m, [b.key]: !m[b.key] }))}
           aria-expanded={!folded}
           aria-label={`${b.name}`}
-          className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded text-left"
+          className="flex min-h-8 min-w-0 basis-full cursor-pointer items-center gap-2 rounded-md text-left @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0"
          >
           <ChevronRight
            size={12}
@@ -186,14 +186,14 @@ export function ArchivedSessions() {
         {!folded && (
          <div className="mt-0.5 space-y-px">
           {b.rows.map((s) => (
-           <div key={s.id} className="flex h-8 min-w-0 items-center gap-2 rounded-lg px-2 transition-colors duration-100 hover:bg-hover/60">
+           <div key={s.id} className="flex min-h-11 min-w-0 flex-wrap items-center gap-2 rounded-md px-2 py-2 transition-colors duration-100 hover:bg-hover">
             <button
              onClick={() => void resumeInTerminal(s)}
-             className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+             className="flex min-w-0 basis-full cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 text-left @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0"
              aria-label={s.title}
              title={t.archivedOpenHint}
             >
-             <span className="min-w-0 flex-1 truncate text-[13px]">{s.title}</span>
+             <span className="min-w-0 basis-full truncate text-[13px] @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0">{s.title}</span>
              <span className="shrink-0 font-mono text-[11px] text-faint">
               {new Date(s.timestamp).toLocaleString(locale === "zh-CN" ? "zh-CN" : "en-US", {
                year: "numeric",

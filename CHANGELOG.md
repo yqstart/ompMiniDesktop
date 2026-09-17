@@ -6,6 +6,9 @@
 
 ### 变更
 
+- **整体界面精修**：冷灰/石墨蓝双主题、内嵌圆角工作面、常驻终端标签栏、品牌与分支树层级、终端空态及快捷键提示；设置中心统一图标导航、卡片、表单、统计和弹窗。窄窗口保留项目抽屉入口，设置导航随实际内容宽度收拢。保留 PTY、会话、模型与配置数据链路；同时修正设置开关滑块缺少左定位导致跑出轨道的问题。
+  - 验证：`pnpm check`（80 单测、43 IPC 命令）与生产构建通过；浏览器注入隔离 IPC 数据核对双主题/中英文、375/768/1440px 五个设置页面无横向溢出、292px 英文侧栏底部控件、弹窗与连续输入；切设置不增加 `pty_kill`，隐藏期间输出返回后保留。原生 WebView 未实测。
+
 - **「模型」页微调：供应商置顶、自定义供应商可改名、接口类型收两档、认证只留 API Key**。设置 › 模型 的四块改为 **供应商 → 我的模型 → 模型角色 → 失败转移**（先添加供应商、再在弹窗里挑模型才是使用动线）。自定义供应商表单：**名称可改**——保存时把 YAML 键就地改名（块的位置与键上的注释保留，其余块与界面之外的字段逐字节不动），改名撞已有 id 时保存禁用并提示「名称已被别的供应商占用」（顺带收口了「新建撞名会覆盖已有块」的旧缺陷）；**接口类型只给 `openai-completions` / `anthropic-messages` 两档**（既有文件里的其它值如 `google-vertex` 仍原样列在下拉里，不改动也能保存）；**认证只有 API Key**（删「无需鉴权」分段控件，Key 输入框常驻；留空 = 该端点无需鉴权，落盘 `auth: none`，既有 `auth: none` 的块照旧可保存）。后端与 IPC 零改动。
   - 结构：`lib/customModels.ts` 的 `API_OPTIONS` 收窄 + 新增 `apiOptionsFor` / `isDuplicateProviderId`，`CustomProviderForm` 增 `originalId`（`providerFormOf` 读出、`upsertProvider` 据此就地改名）；`CustomProviderEditForm` 去掉 `isNew` 与认证分段控件；`ProvidersSection` 的 `editing` 状态从 `{ form, isNew }` 收成 `CustomProviderForm | null`；字典删 `customFormAuth` / `customFormAuthNone` / `customFormApiKey`、增 `customFormDupId`；`customModels.test.ts` 18 → 23 项。
   - 验证：`pnpm check` 全绿（77 单测）；界面核对（静态构建 + 注入 IPC mock）：区块顺序、编辑态名称可改、下拉两档（遗留值三项）、无「无需鉴权」、改名写出文本逐字节核对（键就地替换、注释与 `headers` 保留、其余块不动）、新建 `anthropic-messages` 块、撞名守卫（保存禁用 + 提示）。

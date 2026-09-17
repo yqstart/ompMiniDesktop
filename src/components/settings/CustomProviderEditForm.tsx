@@ -54,12 +54,12 @@ export function CustomProviderEditForm({
  };
 
  const inputCls =
-  "min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-[13px] outline-none transition-colors duration-100 focus:border-accent/70";
+  "min-w-0 w-full rounded-md border border-border bg-surface px-3 py-2 text-[13px] transition-colors duration-100 focus:border-accent";
 
  return (
   <>
-   <div className="flex flex-wrap items-center gap-2">
-    <label className="flex w-52 items-center gap-1.5 text-[13px]">
+   <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+    <label className="flex min-w-0 flex-col gap-2 text-[13px]">
      <span className="shrink-0 text-muted">{t.customFormName}</span>
      <input
       value={form.id}
@@ -70,7 +70,7 @@ export function CustomProviderEditForm({
       className={`${inputCls} font-mono`}
      />
     </label>
-    <label className="flex min-w-64 flex-1 items-center gap-1.5 text-[13px]">
+    <label className="flex min-w-0 flex-col gap-2 text-[13px]">
      <span className="shrink-0 text-muted">{t.customFormBaseUrl}</span>
      <input
       value={form.baseUrl}
@@ -81,20 +81,20 @@ export function CustomProviderEditForm({
     </label>
    </div>
 
-   <div className="mt-2 flex flex-wrap items-center gap-2">
-    <div className="flex items-center gap-1.5 text-[13px]">
+   <div className="mt-4 grid min-w-0 gap-4 sm:grid-cols-2">
+    <div className="flex min-w-0 flex-col gap-2 text-[13px]">
      <span className="text-muted">{t.customFormApi}</span>
      <button
       onClick={() => setApiOpen((v) => !v)}
       aria-expanded={apiOpen}
-      className="flex cursor-pointer items-center gap-1 rounded-md border border-border bg-background px-2 py-1 font-mono text-[12px] transition-colors duration-100 hover:bg-hover"
+      className="flex min-h-9 min-w-0 cursor-pointer items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 font-mono text-[12px] transition-colors duration-100 hover:bg-hover"
      >
-      {form.api}
-      <ChevronDown size={11} aria-hidden />
+      <span className="min-w-0 flex-1 truncate">{form.api}</span>
+      <ChevronDown size={12} className="shrink-0" aria-hidden />
      </button>
     </div>
 
-    <label className="flex min-w-52 flex-1 items-center gap-1.5 text-[13px]">
+    <label className="flex min-w-0 flex-col gap-2 text-[13px]">
      <span className="shrink-0 text-muted">{t.customFormAuthKey}</span>
      <input
       value={form.apiKey}
@@ -125,17 +125,17 @@ export function CustomProviderEditForm({
     </div>
    )}
 
-   <div className="mt-2.5">
-    <div className="text-[13px] text-muted">{t.customFormModels}</div>
+   <div className="mt-6 border-t border-border-soft pt-4">
+    <div className="text-[13px] font-semibold">{t.customFormModels}</div>
     {form.models.map((m, i) => (
-     <div key={i} className="mt-1.5 rounded border border-border bg-background p-2">
-      <div className="flex items-center gap-2">
+     <div key={i} className="mt-3 rounded-lg border border-border-soft bg-background p-3 sm:p-4">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
        <input
         value={m.id}
         onChange={(e) => setModel(i, { id: e.target.value })}
         placeholder="model-id"
         aria-label={t.customModelId}
-        className={`${inputCls} font-mono`}
+        className={`${inputCls} col-span-2 font-mono sm:col-span-1`}
        />
        <input
         value={m.name}
@@ -149,12 +149,12 @@ export function CustomProviderEditForm({
         disabled={form.models.length <= 1}
         aria-label={t.customModelRemove}
         title={t.customModelRemove}
-        className="flex shrink-0 cursor-pointer items-center rounded border border-border p-1 text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-30"
+        className="flex min-h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-danger disabled:opacity-30"
        >
         <Trash2 size={11} aria-hidden />
        </button>
       </div>
-      <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[12px]">
+      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-3 text-[12px]">
        <label className="flex items-center gap-1.5">
         <span className="text-muted">{t.customModelContext}</span>
         <input
@@ -163,7 +163,7 @@ export function CustomProviderEditForm({
          inputMode="numeric"
          placeholder="128000"
          aria-label={t.customModelContext}
-         className="no-focus-ring w-20 rounded border border-border bg-surface px-1.5 py-0.5 text-right font-mono outline-none focus:border-accent/70"
+         className="w-24 rounded-md border border-border bg-surface px-2 py-1.5 text-right font-mono focus:border-accent"
         />
        </label>
        <label className="flex items-center gap-1.5">
@@ -174,7 +174,7 @@ export function CustomProviderEditForm({
          inputMode="numeric"
          placeholder="8192"
          aria-label={t.customModelMaxTokens}
-         className="no-focus-ring w-20 rounded border border-border bg-surface px-1.5 py-0.5 text-right font-mono outline-none focus:border-accent/70"
+         className="w-24 rounded-md border border-border bg-surface px-2 py-1.5 text-right font-mono focus:border-accent"
         />
        </label>
        <label className="flex items-center gap-1.5">
@@ -212,7 +212,7 @@ export function CustomProviderEditForm({
        models: [...form.models, { id: "", name: "", contextWindow: "", maxTokens: "", reasoning: false, input: ["text"] }],
       })
      }
-     className="mt-1.5 flex cursor-pointer items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[12px] transition-colors duration-100 hover:bg-hover"
+     className="mt-3 flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-[13px] text-accent transition-colors duration-100 hover:bg-hover"
     >
      <Plus size={11} aria-hidden />
      {t.customModelAdd}
@@ -220,16 +220,16 @@ export function CustomProviderEditForm({
    </div>
 
    {error && (
-    <p role="alert" className="mt-2 font-mono text-xs whitespace-pre-wrap text-danger">
+    <p role="alert" className="mt-3 font-mono text-xs whitespace-pre-wrap break-all text-danger">
      {error}
     </p>
    )}
 
-   <div className="mt-2.5 flex items-center gap-2">
+   <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-border-soft pt-4">
     <button
      onClick={onSave}
      disabled={busy || !complete}
-     className="flex cursor-pointer items-center gap-1 rounded-md border border-accent/60 bg-accent/15 px-3 py-1 text-[13px] transition-colors duration-100 hover:bg-accent/25 disabled:opacity-50"
+     className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md bg-active px-4 py-2 text-[13px] font-medium text-accent transition-colors duration-100 hover:bg-hover disabled:opacity-50"
     >
      {busy && <Loader size={12} className="animate-spin" aria-hidden />}
      {t.customSave}
@@ -237,12 +237,12 @@ export function CustomProviderEditForm({
     <button
      onClick={onCancel}
      disabled={busy}
-     className="cursor-pointer rounded-md border border-border px-3 py-1 text-[13px] text-muted transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+     className="min-h-9 cursor-pointer rounded-md px-3 py-2 text-[13px] text-muted transition-colors duration-100 hover:bg-hover disabled:opacity-50"
     >
      {t.cancel}
     </button>
     {!complete && <span className="text-[11px] text-warn">{hint}</span>}
-    <span className="text-[11px] text-faint">{t.customSaveHint}</span>
+    <span className="basis-full text-[11px] leading-relaxed text-faint">{t.customSaveHint}</span>
    </div>
   </>
  );

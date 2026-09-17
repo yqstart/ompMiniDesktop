@@ -31,8 +31,8 @@ export function UpdateDialog() {
  const close = () => set({ updateDialogOpen: false });
 
  return (
-  <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/30" role="dialog" aria-modal="true" aria-label={t.updateDialogAria}>
-   <div className="w-[420px] max-w-[90vw] rounded-lg border border-border bg-surface p-4 shadow-pop">
+  <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={t.updateDialogAria}>
+   <div className="w-[420px] max-w-full rounded-xl border border-border bg-elevated p-6 shadow-dialog">
     <div className="flex items-center gap-2">
      <Download size={16} className="text-accent" aria-hidden />
      <h2 className="text-[15px] font-semibold">
@@ -55,7 +55,7 @@ export function UpdateDialog() {
        </button>
        <button
         onClick={() => void installUpdate()}
-        className="cursor-pointer rounded-md bg-accent px-3 py-1.5 text-[13px] text-white transition-opacity duration-100 hover:opacity-90"
+        className="cursor-pointer rounded-md bg-accent px-3 py-1.5 text-[13px] text-accent-foreground transition-opacity duration-100 hover:opacity-90"
        >
         {t.updateNow}
        </button>
@@ -79,7 +79,7 @@ export function UpdateDialog() {
        </button>
        <button
         onClick={() => void relaunchToApply()}
-        className="cursor-pointer rounded-md bg-accent px-3 py-1.5 text-[13px] text-white transition-opacity duration-100 hover:opacity-90"
+        className="cursor-pointer rounded-md bg-accent px-3 py-1.5 text-[13px] text-accent-foreground transition-opacity duration-100 hover:opacity-90"
        >
         {t.updateRestartNow}
        </button>
@@ -96,7 +96,7 @@ export function UpdateDialog() {
        </button>
        <button
         onClick={() => void checkForUpdate("manual")}
-        className="flex cursor-pointer items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-[13px] text-white transition-opacity duration-100 hover:opacity-90"
+        className="flex cursor-pointer items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-[13px] text-accent-foreground transition-opacity duration-100 hover:opacity-90"
        >
         <Loader size={14} aria-hidden /> {t.retry}
        </button>

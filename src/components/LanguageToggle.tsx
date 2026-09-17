@@ -9,7 +9,7 @@ import { LOCALE_MODES, LOCALE_NAMES, LOCALE_SHORT, type LocaleMode } from "../li
  * 皮肤切换（`ThemeToggle`）**左侧**——两个展示层偏好挨着，设置页不再重复放一份。
  *
  * - 与 `ThemeToggle` 同款结构与视觉（`radiogroup` + 逐项 `aria-checked` + 左右方向键组内循环、
- *   同一套 `bg-active` 选中底），档位按钮高度也对齐 26px（主题按钮 = `p-1.5` + 14px 图标）。
+ *   同一套 `bg-active` 选中底），档位按钮统一为 24 × 26px，保证中英文下底栏不挤压。
  * - 「跟随系统」档与皮肤同款用 `Monitor` 图标（语义都是"听系统的"），两个语言档显简称
  *   （`中` / `EN`）——窄处放不下全称，全称进 `title` / `aria-label`；容器 `title` 是
  *   「只改本应用展示、不写 omp 配置」那句口径说明（设置页移走语言区后仅存的位置）。
@@ -38,7 +38,7 @@ export function LanguageToggle() {
       aria-label={t.languageSection}
       title={t.languageHint}
       onKeyDown={onKeyDown}
-      className="flex shrink-0 items-center gap-0.5 rounded-md border border-border p-0.5"
+      className="flex shrink-0 items-center gap-0.5 rounded-md border border-border bg-surface/60 p-0.5"
     >
       {LOCALE_MODES.map((mode) => {
         const selected = localeMode === mode;
@@ -52,9 +52,9 @@ export function LanguageToggle() {
             aria-label={label}
             title={label}
             onClick={() => setLocaleMode(mode)}
-            className={`flex h-[26px] cursor-pointer items-center justify-center rounded-sm px-1.5 text-[11px] leading-none transition-colors duration-100 ${
+            className={`flex h-[26px] w-6 cursor-pointer items-center justify-center rounded-sm text-[11px] font-medium leading-none transition-colors duration-100 ${
               selected
-                ? "bg-active text-foreground"
+                ? "bg-active text-accent"
                 : "text-muted hover:bg-hover hover:text-foreground"
             }`}
           >

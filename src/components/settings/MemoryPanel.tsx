@@ -141,15 +141,15 @@ export function MemoryPanel() {
     const open = preview?.key === key;
     return (
       <div key={f.path}>
-        <div className="flex h-8 min-w-0 items-center gap-2 rounded-lg px-2 transition-colors duration-100 hover:bg-hover/60">
+        <div className="flex min-h-11 min-w-0 items-start gap-2 rounded-md px-2 py-2 transition-colors duration-100 hover:bg-hover">
           <button
             onClick={() => void togglePreview(group.dir, f.path)}
             aria-expanded={open}
             aria-label={`${open ? t.memoryHide : t.memoryView} ${f.path}`}
-            className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+            className="flex min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 text-left"
           >
-            <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{f.path}</span>
-            <span className="shrink-0 rounded border border-border px-1 text-[10px] text-faint">
+            <span className="min-w-0 basis-full truncate font-mono text-[12px] @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0">{f.path}</span>
+            <span className="shrink-0 rounded-sm bg-background px-1.5 py-0.5 text-[11px] text-faint">
               {kindLabel(f.kind)}
             </span>
             <span className="shrink-0 font-mono text-[11px] text-faint">
@@ -177,7 +177,7 @@ export function MemoryPanel() {
           </button>
         </div>
         {open && (
-          <div className="mt-0.5 mb-1.5 rounded-md border border-border bg-background p-3">
+          <div className="mt-1 mb-3 rounded-lg border border-border-soft bg-background p-3">
             {preview && preview.state === "loading" && (
               <p className="text-[13px] text-muted">{t.memoryLoading}</p>
             )}
@@ -194,7 +194,7 @@ export function MemoryPanel() {
                   </p>
                 )}
                 {/* 正文按不可信输入处理：react-markdown 默认不渲染原始 HTML */}
-                <div className="md-body max-h-96 overflow-auto">
+                <div className="md-body min-w-0 max-h-96 overflow-auto">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
@@ -211,22 +211,22 @@ export function MemoryPanel() {
   };
 
   return (
-    <section aria-label={t.tabMemories} className="rounded-md border border-border bg-surface p-3.5">
+    <section aria-label={t.tabMemories} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
       <div className="flex flex-wrap items-center gap-2">
-        <Notebook size={14} aria-hidden className="text-muted" />
-        <h2 className="text-sm font-medium">{t.tabMemories}</h2>
+        <Notebook size={16} aria-hidden className="text-muted" />
+        <h2 className="text-sm font-semibold">{t.tabMemories}</h2>
         {rows !== null && <span className="font-mono text-xs text-muted">{fmt(t.memoryProjectCount, total)}</span>}
         <button
           onClick={() => setReloadKey((k) => k + 1)}
           disabled={busy}
-          className="ml-auto flex cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+          className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
           aria-label={t.memoryRefresh}
         >
           {busy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
           {t.memoryRefresh}
         </button>
       </div>
-      <p className="mt-1.5 text-[13px] text-faint">{t.memoryHint}</p>
+      <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.memoryHint}</p>
       {error && (
         <p role="alert" className="mt-1.5 text-[13px] text-danger">
           {error}
@@ -236,21 +236,21 @@ export function MemoryPanel() {
       {rows === null ? (
         <p className="mt-3 text-[13px] text-muted">{t.memoryLoading}</p>
       ) : total === 0 ? (
-        <p className="mt-3 rounded-lg border border-dashed border-border px-3 py-3 text-[13px] text-muted">
+        <p className="mt-4 rounded-lg bg-background px-4 py-8 text-center text-[13px] leading-relaxed text-muted">
           {t.memoryEmpty}
         </p>
       ) : (
-        <div className="mt-2 space-y-3">
+        <div className="mt-5 space-y-5">
           {rows.map((g) => {
             const folded = collapsed[g.dir] === true;
             return (
               <div key={g.dir}>
-                <div className="flex items-center gap-1.5 border-b border-border pb-1">
+                <div className="flex flex-wrap items-center gap-2 border-b border-border-soft pb-3">
                   <button
                     onClick={() => setCollapsed((m) => ({ ...m, [g.dir]: !m[g.dir] }))}
                     aria-expanded={!folded}
                     aria-label={g.name}
-                    className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded text-left"
+                    className="flex min-h-8 min-w-0 basis-full cursor-pointer items-center gap-2 rounded-md text-left @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0"
                   >
                     <ChevronRight
                       size={12}

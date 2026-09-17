@@ -1,4 +1,4 @@
-import { Check, Copy, FolderError, Loader, Refresh } from "reicon-react";
+import { Archive, ChartBar, Check, Copy, FolderError, Key, Loader, Notebook, Refresh, Settings, Sliders } from "reicon-react";
 import { useApp } from "../stores/app";
 import { checkForUpdate, getAppVersion, openUpdateDialog } from "../lib/appUpdate";
 import { pickOmpExecutable, refreshOmpHealth } from "../lib/ompDiag";
@@ -13,6 +13,7 @@ import { UsagePanel } from "./settings/UsagePanel";
 
 /** 设置页分页签；顺序即界面顺序。 */
 const TABS = ["general", "models", "memories", "usage", "archived"] as const;
+const TAB_ICONS = { general: Sliders, models: Key, memories: Notebook, usage: ChartBar, archived: Archive };
 
 export function SettingsPage({ visible = true }: { visible?: boolean }) {
   const { health, update } = useApp();
@@ -62,7 +63,7 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
     <div
       className={
         visible
-          ? "mx-auto flex min-h-0 w-full max-w-4xl flex-1 gap-6 overflow-hidden px-4 pt-6 pb-6"
+          ? "@container/settings mx-auto flex min-h-0 min-w-0 w-full max-w-6xl flex-1 gap-3 overflow-hidden p-3 sm:gap-5 sm:p-5"
           : "hidden"
       }
     >
@@ -70,47 +71,50 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
           （`closeSettingsTab`，回到上次的终端标签），页内不放第二个关闭入口。
           五个入口：通用（本应用诊断 / 更新；
           界面语言与皮肤是纯展示层偏好，入口在左栏底部「设置」行，这里不重复放）、模型
-          （**omp 模型相关唯一管理面**：我的模型 / 供应商登录与挑选 / 自定义模型 / 模型角色 /
-          失败转移 / 可用模型目录）、记忆（omp 项目记忆的查看 / 删除）、使用统计（会话 jsonl 的
+          （**omp 模型相关唯一管理面**：供应商 / 我的模型 / 模型角色 / 失败转移）、
+          记忆（omp 项目记忆的查看 / 删除）、使用统计（会话 jsonl 的
           用量聚合，只读）、已归档对话（归档管理面，归档会话不在左栏出现）。 */}
-      <nav aria-label={t.title} className="flex w-44 shrink-0 flex-col gap-1">
-        <h1 className="mb-2 shrink-0 px-2.5 text-[17px] font-semibold tracking-tight">{t.title}</h1>
+      <nav aria-label={t.title} className="flex w-11 shrink-0 flex-col gap-3 @min-[640px]/settings:w-44">
+        <h1 className="flex h-11 items-center gap-2.5 px-3 text-[17px] font-semibold tracking-tight">
+          <Settings size={18} className="shrink-0 text-muted" aria-hidden />
+          <span className="sr-only @min-[640px]/settings:not-sr-only">{t.title}</span>
+        </h1>
         <div
           role="tablist"
           aria-orientation="vertical"
           aria-label={t.title}
-          className="flex flex-col gap-0.5"
+          className="flex flex-col gap-1 rounded-xl bg-sidebar p-1"
         >
-          {TABS.map((k) => (
-            <button
-              key={k}
-              id={`settings-tab-${k}`}
-              role="tab"
-              aria-selected={tab === k}
-              onClick={() => setTab(k)}
-              className={`cursor-pointer rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors duration-100 ${tab === k
-                ? "bg-active font-semibold text-foreground"
-                : "text-muted hover:bg-hover hover:text-foreground"
-                }`}
-            >
-              {k === "general"
-                ? t.tabGeneral
-                : k === "models"
-                  ? t.tabModels
-                  : k === "memories"
-                    ? t.tabMemories
-                    : k === "usage"
-                      ? t.tabUsage
-                      : t.tabArchived}
-            </button>
-          ))}
+          {TABS.map((k) => {
+            const Icon = TAB_ICONS[k];
+            const label = k === "general" ? t.tabGeneral : k === "models" ? t.tabModels : k === "memories" ? t.tabMemories : k === "usage" ? t.tabUsage : t.tabArchived;
+            return (
+              <button
+                key={k}
+                id={`settings-tab-${k}`}
+                role="tab"
+                aria-selected={tab === k}
+                aria-controls="settings-panel"
+                title={label}
+                onClick={() => setTab(k)}
+                className={`flex min-h-11 cursor-pointer items-center justify-center gap-2.5 rounded-md text-left text-[13px] transition-colors duration-100 @min-[640px]/settings:justify-start @min-[640px]/settings:px-3 ${tab === k
+                  ? "bg-active font-semibold text-accent"
+                  : "text-muted hover:bg-hover hover:text-foreground"
+                  }`}
+              >
+                <Icon size={16} className="shrink-0" aria-hidden />
+                <span className="sr-only @min-[640px]/settings:not-sr-only">{label}</span>
+              </button>
+            );
+          })}
         </div>
       </nav>
       {/* tab 内容区是唯一的滚动容器：外层只定高（底边距 24px），滚动条不出设置页外框。 */}
       <div
+        id="settings-panel"
         role="tabpanel"
         aria-labelledby={`settings-tab-${tab}`}
-        className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto pb-1"
+        className="@container/panel flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto pb-1 [overflow-wrap:anywhere] [scrollbar-gutter:stable]"
       >
         {tab === "archived" ? (
           <ArchivedSessions />
@@ -122,15 +126,15 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
           <UsagePanel />
         ) : (
           <>
-            <section aria-label={t.diagSection} className="rounded-md border border-border bg-surface p-3.5">
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-medium">{t.diagSection}</h2>
-                <span className={`font-mono text-xs ${health?.ok ? "text-ok" : "text-warn"}`}>
+            <section aria-label={t.diagSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm font-semibold">{t.diagSection}</h2>
+                <span className={`rounded-sm px-2 py-0.5 font-mono text-[11px] ${health?.ok ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"}`}>
                   {health?.ok ? t.diagOk : t.diagBad}
                 </span>
                 <button
                   onClick={() => void runDiag(refreshOmpHealth)}
-                  className="ml-auto flex cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover"
+                  className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover"
                   aria-label={t.recheck}
                 >
                   <Refresh size={12} aria-hidden />
@@ -138,7 +142,7 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
                 </button>
                 <button
                   onClick={() => void runDiag(pickOmpExecutable)}
-                  className="flex cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover"
+                  className="flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover"
                   aria-label={t.pickPath}
                   title={t.pickPathTitle}
                 >
@@ -146,7 +150,7 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
                   {t.pickPath}
                 </button>
               </div>
-              <dl className="mt-2 space-y-1 text-[13px]">
+              <dl className="mt-4 space-y-3 rounded-md bg-background p-3 text-[13px]">
                 <div className="flex gap-2">
                   <dt className="w-20 shrink-0 text-muted">{t.ompPath}</dt>
                   <dd className="min-w-0 flex-1 font-mono break-all">{health?.omp.ompPath ?? t.notFound}</dd>
@@ -183,14 +187,14 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
                   {diagError}
                 </p>
               )}
-              <p className="mt-1.5 text-[13px] text-faint">{t.diagFoot}</p>
+              <p className="mt-3 text-[13px] leading-relaxed text-faint">{t.diagFoot}</p>
             </section>
 
             <GeneralSettingsPanel />
 
-            <section aria-label={t.updateSection} className="rounded-md border border-border bg-surface p-3.5">
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-medium">{t.updateSection}</h2>
+            <section aria-label={t.updateSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm font-semibold">{t.updateSection}</h2>
                 <span className="font-mono text-xs text-muted">
                   {t.current} v{version}
                 </span>
@@ -201,7 +205,7 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
                     })
                   }
                   disabled={checking}
-                  className="ml-auto flex cursor-pointer items-center gap-1 rounded-md border border-border px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+                  className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
                   aria-label={t.checkUpdate}
                 >
                   {checking ? <Loader size={14} className="animate-spin" aria-hidden /> : <Refresh size={14} aria-hidden />}
@@ -218,7 +222,7 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
                   )}
                 </div>
               )}
-              <p className="mt-1 text-[13px] text-muted">{t.updateFoot}</p>
+              <p className="mt-3 text-[13px] leading-relaxed text-muted">{t.updateFoot}</p>
             </section>
           </>
         )}

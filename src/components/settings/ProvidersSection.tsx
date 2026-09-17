@@ -279,14 +279,14 @@ export function ProvidersSection() {
     </p>
    )}
 
-   <section aria-label={t.providersSection} className="rounded-md border border-border bg-surface p-3.5">
-    <div className="flex items-center gap-2">
-     <Key size={14} aria-hidden className="text-muted" />
-     <h2 className="text-sm font-medium">{t.providersSection}</h2>
+   <section aria-label={t.providersSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
+    <div className="flex flex-wrap items-center gap-2">
+     <Key size={16} aria-hidden className="text-muted" />
+     <h2 className="text-sm font-semibold">{t.providersSection}</h2>
      <button
       onClick={() => void refreshAll()}
       disabled={refreshing || busy}
-      className="ml-auto flex cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+      className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
       aria-label={t.providersRefresh}
       title={t.providersRefresh}
      >
@@ -294,7 +294,7 @@ export function ProvidersSection() {
       {t.refresh}
      </button>
     </div>
-    <p className="mt-1.5 text-[13px] text-faint">{t.providersHint}</p>
+    <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.providersHint}</p>
 
     {parsed.error && (
      <p role="alert" className="mt-2 rounded border border-danger/40 bg-danger/5 px-3 py-2 text-[13px] text-danger">
@@ -302,7 +302,7 @@ export function ProvidersSection() {
      </p>
     )}
 
-    <div className="mt-2">
+    <div className="mt-4">
      {providers === null ? (
       <div className="py-2 text-[13px] text-muted">{t.archivedLoading}</div>
      ) : (
@@ -315,10 +315,10 @@ export function ProvidersSection() {
        )}
        {configured.map((p) => (
         <div key={p.id} className="border-t border-border-soft first:border-t-0">
-         <div className="flex items-center gap-2 py-2">
-          <div className="min-w-0 flex-1">
+         <div className="flex flex-wrap items-center gap-2 py-3">
+          <div className="min-w-0 basis-full @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0">
            <div className="truncate text-sm">{p.name}</div>
-           <div className="font-mono text-xs text-muted">{p.id}</div>
+           <div className="mt-0.5 break-all font-mono text-[11px] text-faint">{p.id}</div>
           </div>
           <span className="shrink-0 text-[13px] text-ok">{t.providerConfigured}</span>
           <button
@@ -367,7 +367,7 @@ export function ProvidersSection() {
     </div>
 
     {file && (
-     <p className="mt-2 font-mono text-[10px] break-all text-faint" title={file.path}>
+     <p className="mt-3 font-mono text-[11px] break-all text-faint" title={file.path}>
       {file.path}
       {!file.exists && ` · ${t.customFileMissing}`}
      </p>
@@ -376,7 +376,7 @@ export function ProvidersSection() {
     <button
      onClick={openAdd}
      disabled={providers === null || !!parsed.error}
-     className="mt-2 flex cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+     className="mt-4 flex min-h-9 cursor-pointer items-center gap-2 rounded-md bg-active px-3 py-2 text-[13px] font-medium text-accent transition-colors duration-100 hover:bg-hover disabled:opacity-50"
     >
      <Plus size={12} aria-hidden />
      {t.providersAdd}
@@ -478,9 +478,9 @@ function CustomRow({
  const t = useText();
  const kindLabel = view.kind === "custom" ? t.customKindCustom : t.customKindOverride;
  return (
-  <div className="flex items-center gap-2 border-t border-border-soft py-2 first:border-t-0">
-   <div className="min-w-0 flex-1">
-    <div className="flex items-center gap-1.5">
+  <div className="flex flex-wrap items-center gap-2 border-t border-border-soft py-3 first:border-t-0">
+   <div className="min-w-0 basis-full @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0">
+    <div className="flex flex-wrap items-center gap-1.5">
      <span className="truncate font-mono text-sm">{view.id}</span>
      <span className="shrink-0 rounded border border-border px-1 text-[10px] text-muted">{kindLabel}</span>
      {view.kind === "custom" && (
@@ -500,7 +500,7 @@ function CustomRow({
     <span className="shrink-0 max-w-40 text-right text-[11px] text-faint">{t.customOverrideHint}</span>
    ) : pending ? (
     <>
-     <span className="shrink-0 text-[13px] text-warn">{fmt(t.customRemoveConfirm, view.id)}</span>
+     <span className="min-w-0 basis-full text-[13px] break-all text-warn">{fmt(t.customRemoveConfirm, view.id)}</span>
      <button
       onClick={onRemove}
       disabled={busy}
@@ -606,8 +606,8 @@ function LoginFlow({
     : t.loginFailed;
 
  return (
-  <div className="rounded border border-accent/40 bg-accent/5 p-2.5">
-   <div className="flex items-center gap-2 text-sm">
+  <div className="rounded-lg border border-border-soft bg-background p-3 sm:p-4">
+   <div className="flex flex-wrap items-center gap-2 text-sm">
     {running ? (
      <Loader size={14} className="shrink-0 animate-spin text-accent" aria-hidden />
     ) : ok ? (
@@ -616,7 +616,7 @@ function LoginFlow({
      <Key size={14} className="shrink-0 text-warn" aria-hidden />
     )}
     <span className={running || ok ? "" : "text-warn"}>{title}</span>
-    <span className="ml-auto shrink-0 font-mono text-xs text-muted">{providerId}</span>
+    <span className="ml-auto min-w-0 break-all font-mono text-xs text-muted">{providerId}</span>
     <button
      onClick={onClose}
      className="shrink-0 cursor-pointer rounded border border-border px-2 py-0.5 text-[12px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
@@ -630,8 +630,8 @@ function LoginFlow({
    )}
 
    {status?.url && (
-    <div className="mt-2 flex items-start gap-2">
-     <code className="min-w-0 flex-1 font-mono text-xs break-all text-muted">{status.url}</code>
+    <div className="mt-3 flex flex-wrap items-start gap-2">
+     <code className="min-w-0 basis-full font-mono text-xs break-all text-muted">{status.url}</code>
      <button
       onClick={() => void openUrl(status.url!)}
       className="flex shrink-0 cursor-pointer items-center gap-1 rounded-md border border-border px-2 py-1 text-[13px] transition-colors duration-100 hover:bg-hover"
@@ -654,7 +654,7 @@ function LoginFlow({
    {status && status.lines.length > 0 && (
     <div className="mt-2">
      <div className="text-[13px] text-faint">{t.loginOutput}</div>
-     <pre className="mt-1 max-h-36 overflow-y-auto rounded bg-background p-2 font-mono text-xs whitespace-pre-wrap text-muted">
+     <pre className="mt-2 max-h-36 overflow-y-auto rounded-md bg-surface p-3 font-mono text-xs whitespace-pre-wrap break-all text-muted">
       {status.lines.join("\n")}
      </pre>
     </div>
@@ -675,7 +675,7 @@ function LoginFlow({
        onChange={(e) => setText(e.target.value)}
        placeholder={t.loginInputHint}
        aria-label={t.loginSend}
-       className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-[13px] outline-none"
+       className="min-w-0 flex-1 rounded-md border border-border bg-surface px-3 py-2 text-[13px]"
       />
       <button
        type="submit"

@@ -133,14 +133,14 @@ export function GeneralSettingsPanel() {
  const missingOmp = health?.ok === false;
 
  return (
-  <section aria-label={t.ompSettingsSection} className="rounded-md border border-border bg-surface p-3.5">
-   <div className="flex items-center gap-2">
-    <Sliders size={14} aria-hidden className="text-muted" />
-    <h2 className="text-sm font-medium">{t.ompSettingsSection}</h2>
+  <section aria-label={t.ompSettingsSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
+   <div className="flex flex-wrap items-center gap-2">
+    <Sliders size={16} aria-hidden className="text-muted" />
+    <h2 className="text-sm font-semibold">{t.ompSettingsSection}</h2>
     <button
      onClick={refresh}
      disabled={refreshing}
-     className="ml-auto flex cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+     className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
      aria-label={t.ompSettingsRefresh}
      title={t.ompSettingsRefresh}
     >
@@ -148,7 +148,7 @@ export function GeneralSettingsPanel() {
      {t.refresh}
     </button>
    </div>
-   <p className="mt-1.5 text-[13px] text-faint">{t.ompSettingsHint}</p>
+   <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.ompSettingsHint}</p>
    {missingOmp && <p className="mt-2 text-[13px] text-warn">{t.ompSettingsMissing}</p>}
    {err && (
     <p role="alert" className="mt-2 rounded border border-danger/40 bg-danger/5 px-3 py-2 text-[13px] text-danger">
@@ -156,7 +156,7 @@ export function GeneralSettingsPanel() {
     </p>
    )}
 
-   <div className="mt-3 space-y-3">
+   <div className="mt-5 space-y-4">
     {GROUPS.map(({ group, specs }) => {
      const isClosed = closed.has(group);
      return (
@@ -164,14 +164,14 @@ export function GeneralSettingsPanel() {
        <button
         onClick={() => toggleGroup(group)}
         aria-expanded={!isClosed}
-        className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors duration-100 hover:bg-hover/60"
+        className="flex min-h-10 w-full cursor-pointer items-center gap-2 rounded-md bg-background px-3 py-2 text-left transition-colors duration-100 hover:bg-hover"
        >
         {isClosed ? <ChevronRight size={12} aria-hidden /> : <ChevronDown size={12} aria-hidden />}
         <span className="text-[13px] font-medium">{t[groupLabelKey(group)]}</span>
         <span className="font-mono text-[11px] text-faint">{specs.length}</span>
        </button>
        {!isClosed && (
-        <div className="mt-0.5 space-y-0.5">
+        <div className="mt-1 divide-y divide-border-soft">
          {specs.map((spec) => {
           const item = items[spec.key];
           const busy = busyKeys.has(spec.key);
@@ -233,11 +233,11 @@ function SettingRow({
  const hint = item?.description || undefined;
 
  return (
-  <div className="rounded-lg px-2 py-1.5 transition-colors duration-100 hover:bg-hover/60">
-   <div className="flex items-center gap-2">
-    <div className="min-w-0 flex-1" title={hint}>
-     <div className="truncate text-[13px]">{label}</div>
-     <div className="truncate font-mono text-[10px] text-faint">
+  <div className="px-1 py-3">
+   <div className="flex flex-wrap items-center gap-2">
+    <div className="min-w-0 basis-full @min-[480px]/panel:flex-1 @min-[480px]/panel:basis-0" title={hint}>
+     <div className="text-[13px] leading-5">{label}</div>
+     <div className="mt-0.5 font-mono text-[11px] break-all text-faint">
       {spec.key}
       {unavailable && ` · ${t.ompSettingsUnavailable}`}
       {spec.tuiOnly && ` · ${t.ompSettingsTuiOnly}`}
@@ -247,7 +247,7 @@ function SettingRow({
     <button
      onClick={() => onReset(spec.key)}
      disabled={busy || unavailable}
-     className="shrink-0 cursor-pointer rounded p-1 text-faint transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-30"
+     className="shrink-0 cursor-pointer rounded-md p-2 text-faint transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-30"
      aria-label={`${t.ompSettingsReset}: ${label}`}
      title={t.ompSettingsReset}
     >
@@ -265,7 +265,7 @@ function SettingRow({
       onClick={onToggleEnum}
       disabled={busy || unavailable}
       aria-expanded={open}
-      className="flex shrink-0 cursor-pointer items-center gap-1 rounded-md border border-border px-2 py-1 font-mono text-[12px] transition-colors duration-100 hover:bg-hover disabled:opacity-40"
+      className="flex min-h-8 max-w-full cursor-pointer items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-[12px] transition-colors duration-100 hover:bg-hover disabled:opacity-40"
      >
       {busy ? <Loader size={11} className="animate-spin" aria-hidden /> : null}
       {typeof value === "string" ? value : "—"}
@@ -283,7 +283,7 @@ function SettingRow({
       }}
       aria-label={label}
       title={hint}
-      className="no-focus-ring w-20 shrink-0 rounded-md border border-border bg-background px-1.5 py-1 text-right font-mono text-[12px] transition-colors duration-100 focus:border-accent/70 disabled:opacity-40"
+      className="w-24 shrink-0 rounded-md border border-border bg-background px-2.5 py-1.5 text-right font-mono text-[12px] transition-colors duration-100 focus:border-accent disabled:opacity-40"
      />
     )}
    </div>

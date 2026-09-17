@@ -41,12 +41,12 @@ function fmtPercent(x: number): string {
 /** 一张总览卡：标签（11px faint）+ 数值（mono）+ 可选副行（过长换行，不截断关键数字）。 */
 function Tile({ label, value, sub }: { label: string; value: string; sub?: ReactNode }) {
   return (
-    <div className="min-w-0 rounded-md border border-border bg-background px-3 py-2">
-      <div className="truncate text-[11px] text-faint">{label}</div>
-      <div className="mt-0.5 truncate font-mono text-[15px] tabular-nums" title={value}>
+    <div className="min-w-0 rounded-lg bg-background p-4">
+      <div className="text-[11px] leading-4 text-faint">{label}</div>
+      <div className="mt-2 truncate font-mono text-[18px] font-medium tabular-nums" title={value}>
         {value}
       </div>
-      {sub && <div className="mt-0.5 text-[11px] text-muted">{sub}</div>}
+      {sub && <div className="mt-2 text-[11px] leading-relaxed text-muted">{sub}</div>}
     </div>
   );
 }
@@ -54,7 +54,7 @@ function Tile({ label, value, sub }: { label: string; value: string; sub?: React
 /** 比例条（模型 / 工具 / 项目行共用）：细底槽 + accent 实心段。 */
 function ShareBar({ ratio }: { ratio: number }) {
   return (
-    <span className="h-1.5 w-20 shrink-0 overflow-hidden rounded-full bg-accent/15" aria-hidden>
+    <span className="h-1.5 w-14 shrink-0 overflow-hidden rounded-full bg-active @min-[600px]/panel:w-20" aria-hidden>
       <span className="block h-full rounded-full bg-accent" style={{ width: `${Math.max(ratio * 100, 2)}%` }} />
     </span>
   );
@@ -163,21 +163,21 @@ export function UsagePanel() {
       : "";
 
   return (
-    <section aria-label={t.tabUsage} className="rounded-md border border-border bg-surface p-3.5">
+    <section aria-label={t.tabUsage} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
       <div className="flex flex-wrap items-center gap-2">
-        <ChartBar size={14} aria-hidden className="text-muted" />
-        <h2 className="text-sm font-medium">{t.tabUsage}</h2>
-        <div role="radiogroup" aria-label={t.usageRangeAria} className="flex flex-wrap gap-1">
+        <ChartBar size={16} aria-hidden className="text-muted" />
+        <h2 className="text-sm font-semibold">{t.tabUsage}</h2>
+        <div role="radiogroup" aria-label={t.usageRangeAria} className="order-last flex basis-full flex-wrap gap-1 rounded-md bg-background p-1 @min-[600px]/panel:order-none @min-[600px]/panel:basis-auto">
           {RANGES.map((r) => (
             <button
               key={r.key}
               role="radio"
               aria-checked={range === r.key}
               onClick={() => setRange(r.key)}
-              className={`cursor-pointer rounded-md border px-2.5 py-0.5 text-[12px] transition-colors duration-100 ${
+              className={`min-h-8 cursor-pointer rounded-md px-2.5 py-1 text-[12px] transition-colors duration-100 ${
                 range === r.key
-                  ? "border-accent/60 bg-accent/10 text-foreground"
-                  : "border-border text-muted hover:bg-hover hover:text-foreground"
+                  ? "bg-active font-medium text-accent"
+                  : "text-muted hover:bg-hover hover:text-foreground"
               }`}
             >
               {rangeLabel(r.key)}
@@ -187,14 +187,14 @@ export function UsagePanel() {
         <button
           onClick={() => setReloadKey((k) => k + 1)}
           disabled={busy}
-          className="ml-auto flex cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+          className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
           aria-label={t.refresh}
         >
           {busy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
           {t.refresh}
         </button>
       </div>
-      <p className="mt-1.5 text-[13px] text-faint">{t.usageHint}</p>
+      <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.usageHint}</p>
       {error && (
         <p role="alert" className="mt-1.5 text-[13px] text-danger">
           {error}
@@ -207,13 +207,13 @@ export function UsagePanel() {
       {data === null ? (
         <p className="mt-3 text-[13px] text-muted">{busy ? t.usageLoading : ""}</p>
       ) : !totals || totals.calls === 0 ? (
-        <p className="mt-3 rounded-lg border border-dashed border-border px-3 py-3 text-[13px] text-muted">
+        <p className="mt-4 rounded-lg bg-background px-4 py-8 text-center text-[13px] leading-relaxed text-muted">
           {t.usageEmpty}
         </p>
       ) : (
         <>
           {/* 总览：token / 费用 / 请求 / 工具 / 命中率 / 活跃度 / 最常用模型 / 峰值时段 / 日均 */}
-          <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3">
+          <div className="mt-5 grid grid-cols-1 gap-3 @min-[360px]/panel:grid-cols-2 @min-[640px]/panel:grid-cols-3">
             <Tile
               label={t.usageTokens}
               value={fmtTokens(totals.total, numLocale)}
@@ -282,7 +282,7 @@ export function UsagePanel() {
           </div>
 
           {/* 每日趋势：补零天的堆叠柱，悬停读数 */}
-          <div className="mt-4">
+          <div className="mt-6 rounded-lg border border-border-soft p-3">
             <div className="flex flex-wrap items-baseline gap-2">
               <h3 className="text-[13px] font-medium">{t.usageDailyTrend}</h3>
               <span className="font-mono text-[11px] text-faint">{readout}</span>
@@ -292,11 +292,11 @@ export function UsagePanel() {
                 </span>
               )}
             </div>
-            <div className="mt-1.5 flex h-24 items-end gap-px" onMouseLeave={() => setHover(null)}>
+            <div className="mt-4 flex h-28 items-end gap-px" onMouseLeave={() => setHover(null)}>
               {byDay.map((d, i) => (
                 <div
                   key={d.date}
-                  className={`flex h-full flex-1 flex-col justify-end rounded-sm ${hover === i ? "bg-hover/60" : ""}`}
+                  className={`flex h-full min-w-0 flex-1 flex-col justify-end rounded-sm ${hover === i ? "bg-hover" : ""}`}
                   onMouseEnter={() => setHover(i)}
                 >
                   <DayBar
@@ -331,7 +331,7 @@ export function UsagePanel() {
           </div>
 
           {/* 按模型 */}
-          <div className="mt-4">
+          <div className="mt-6">
             <h3 className="text-[13px] font-medium">{t.usageByModel}</h3>
             {data.byModel.length === 0 ? (
               <p className="mt-1.5 text-[13px] text-faint">{t.usageByModelEmpty}</p>
@@ -340,9 +340,9 @@ export function UsagePanel() {
                 {data.byModel.map((m, i) => (
                   <div
                     key={`${m.provider}/${m.model}/${i}`}
-                    className="flex h-8 min-w-0 items-center gap-2 rounded-md px-2 transition-colors duration-100 hover:bg-hover/60"
+                    className="flex min-h-11 min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2 py-2 transition-colors duration-100 hover:bg-hover"
                   >
-                    <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                    <span className="flex min-w-0 basis-full items-baseline gap-1.5 @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0">
                       <span className="min-w-0 truncate text-[13px]" title={m.model}>
                         {m.model || t.usageUnknownModel}
                       </span>
@@ -351,13 +351,13 @@ export function UsagePanel() {
                       )}
                     </span>
                     <ShareBar ratio={m.total / maxModel} />
-                    <span className="w-16 shrink-0 text-right font-mono text-[11px] text-faint">
+                    <span className="min-w-0 font-mono text-[11px] text-faint @min-[600px]/panel:w-16 @min-[600px]/panel:text-right">
                       {fmt(t.usageColCalls, m.calls)}
                     </span>
-                    <span className="w-20 shrink-0 text-right font-mono text-[12px] tabular-nums">
+                    <span className="min-w-0 font-mono text-[12px] tabular-nums @min-[600px]/panel:w-20 @min-[600px]/panel:text-right">
                       {fmtTokens(m.total, numLocale)}
                     </span>
-                    <span className="w-16 shrink-0 text-right font-mono text-[11px] text-faint">
+                    <span className="min-w-0 font-mono text-[11px] text-faint @min-[600px]/panel:w-16 @min-[600px]/panel:text-right">
                       {fmtCost(m.cost)}
                     </span>
                   </div>
@@ -367,7 +367,7 @@ export function UsagePanel() {
           </div>
 
           {/* 工具调用分布 + 时段分布：宽屏并排，窄屏各自成行 */}
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="mt-6 grid min-w-0 gap-6 @min-[600px]/panel:grid-cols-2">
             <div>
               <h3 className="text-[13px] font-medium">{t.usageByTool}</h3>
               {data.byTool.length === 0 ? (
@@ -377,7 +377,7 @@ export function UsagePanel() {
                   {data.byTool.map((row) => (
                     <div
                       key={row.name}
-                      className="flex h-7 min-w-0 items-center gap-2 rounded-md px-2 transition-colors duration-100 hover:bg-hover/60"
+                      className="flex min-h-9 min-w-0 items-center gap-2 rounded-md px-2 transition-colors duration-100 hover:bg-hover"
                     >
                       <span className="min-w-0 flex-1 truncate font-mono text-[12px]" title={row.name}>
                         {row.name}
@@ -398,7 +398,7 @@ export function UsagePanel() {
                   <div
                     key={h.hour}
                     title={`${String(h.hour).padStart(2, "0")}:00 · ${fmtTokens(h.tokens, numLocale)} tokens · ${fmt(t.usageColCalls, h.calls)}`}
-                    className="flex h-full flex-1 flex-col justify-end rounded-sm hover:bg-hover/60"
+                    className="flex h-full min-w-0 flex-1 flex-col justify-end rounded-sm hover:bg-hover"
                   >
                     <span
                       className={`block w-full rounded-sm ${totals.peakHour === h.hour ? "bg-accent" : "bg-accent/30"}`}
@@ -418,31 +418,31 @@ export function UsagePanel() {
           </div>
 
           {/* 按项目 */}
-          <div className="mt-4">
+          <div className="mt-6">
             <h3 className="text-[13px] font-medium">{t.usageByProject}</h3>
             <div className="mt-1 space-y-px">
               {data.byProject.map((p, i) => (
                 <div
                   key={`${p.projectId ?? p.path ?? "orphan"}/${i}`}
-                  className="flex h-8 min-w-0 items-center gap-2 rounded-md px-2 transition-colors duration-100 hover:bg-hover/60"
+                  className="flex min-h-11 min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2 py-2 transition-colors duration-100 hover:bg-hover"
                 >
-                  <span className="min-w-0 shrink-0 max-w-[40%] truncate text-[13px]" title={p.name}>
+                  <span className="min-w-0 basis-full truncate text-[13px] @min-[600px]/panel:max-w-[30%] @min-[600px]/panel:basis-auto" title={p.name}>
                     {p.name || t.usageUnowned}
                   </span>
                   <span
-                    className="min-w-0 flex-1 truncate font-mono text-[11px] text-faint"
+                    className="min-w-0 basis-full truncate font-mono text-[11px] text-faint @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0"
                     title={p.path ?? undefined}
                   >
                     {p.path ?? ""}
                   </span>
                   <ShareBar ratio={p.total / maxProject} />
-                  <span className="w-24 shrink-0 text-right font-mono text-[11px] text-faint">
+                  <span className="min-w-0 font-mono text-[11px] text-faint @min-[600px]/panel:w-24 @min-[600px]/panel:text-right">
                     {fmt(t.usageColSessions, p.sessions)}
                   </span>
-                  <span className="w-20 shrink-0 text-right font-mono text-[12px] tabular-nums">
+                  <span className="min-w-0 font-mono text-[12px] tabular-nums @min-[600px]/panel:w-20 @min-[600px]/panel:text-right">
                     {fmtTokens(p.total, numLocale)}
                   </span>
-                  <span className="w-16 shrink-0 text-right font-mono text-[11px] text-faint">
+                  <span className="min-w-0 font-mono text-[11px] text-faint @min-[600px]/panel:w-16 @min-[600px]/panel:text-right">
                     {fmtCost(p.cost)}
                   </span>
                 </div>

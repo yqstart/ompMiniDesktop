@@ -83,14 +83,14 @@ export function FallbackChainsSection({
   };
 
   return (
-    <section aria-label={t.fallbackSection} className="rounded-md border border-border bg-surface p-3.5">
-      <div className="flex items-center gap-2">
-        <DiagramTree size={14} aria-hidden className="text-muted" />
-        <h2 className="text-sm font-medium">{t.fallbackSection}</h2>
+    <section aria-label={t.fallbackSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
+      <div className="flex flex-wrap items-center gap-2">
+        <DiagramTree size={16} aria-hidden className="text-muted" />
+        <h2 className="text-sm font-semibold">{t.fallbackSection}</h2>
         <button
           onClick={onRefresh}
           disabled={busy || writing}
-          className="ml-auto flex cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+          className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
           aria-label={t.modelsRefresh}
           title={t.modelsRefresh}
         >
@@ -98,7 +98,7 @@ export function FallbackChainsSection({
           {t.refresh}
         </button>
       </div>
-      <p className="mt-1.5 text-[13px] text-faint">{t.fallbackHint}</p>
+      <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.fallbackHint}</p>
 
       {err && (
         <p role="alert" className="mt-1.5 rounded border border-danger/40 bg-danger/5 px-2 py-1.5 text-[13px] text-danger">
@@ -111,7 +111,7 @@ export function FallbackChainsSection({
       ) : (
         <>
           {/* 总开关 + 回归策略：链配得再好，总开关关了也不生效，所以两者同屏 */}
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             <button
               type="button"
               role="switch"
@@ -137,7 +137,7 @@ export function FallbackChainsSection({
                 role="radiogroup"
                 aria-label={t.fallbackRevertLabel}
                 title={t.fallbackRevertHint}
-                className="flex shrink-0 items-center gap-0.5 rounded-md border border-border p-0.5"
+                className="flex min-w-0 flex-wrap items-center gap-1 rounded-md bg-background p-1"
               >
                 {(
                   [
@@ -180,7 +180,7 @@ export function FallbackChainsSection({
             ) : (
               chains.map(([key, targets]) => (
                 <div key={key} className="border-t border-border-soft py-2 first:border-t-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="shrink-0 rounded border border-border px-1.5 py-0.5 text-xs text-muted">
                       {kindLabel(chainKind(key), t)}
                     </span>
@@ -228,13 +228,13 @@ export function FallbackChainsSection({
                   {/* 转移目标：按 omp 的尝试顺序排 */}
                   <div className="mt-1 flex flex-wrap items-center gap-1 pl-1">
                     {targets.map((sel, i) => (
-                      <span key={`${sel}-${i}`} className="flex items-center gap-1">
+                      <span key={`${sel}-${i}`} className="flex min-w-0 max-w-full items-center gap-1">
                         {i > 0 && (
                           <span aria-hidden className="text-[11px] text-faint">
                             →
                           </span>
                         )}
-                        <span className="rounded border border-border-soft px-1.5 py-0.5 font-mono text-[11px] text-muted">
+                        <span className="min-w-0 rounded-sm bg-background px-2 py-1 font-mono text-[11px] break-all text-muted">
                           {sel}
                         </span>
                       </span>
@@ -357,7 +357,7 @@ function ChainEditor({
           <div
             role="radiogroup"
             aria-label={t.fallbackKindLabel}
-            className="flex shrink-0 items-center gap-0.5 rounded-md border border-border p-0.5"
+            className="flex min-w-0 flex-wrap items-center gap-1 rounded-md bg-surface p-1"
           >
             {(
               [
@@ -384,7 +384,7 @@ function ChainEditor({
             ))}
           </div>
         ) : (
-          <span className="shrink-0 font-mono text-xs">{key}</span>
+          <span className="min-w-0 break-all font-mono text-xs">{key}</span>
         )}
       </div>
 
@@ -447,7 +447,7 @@ function ChainEditor({
       )}
 
       {/* 转移目标：有序列表（上移 / 下移改的就是 omp 的尝试顺序） */}
-      <div className="mt-2 flex items-center gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <span className="text-[13px] text-muted">{t.fallbackTargetsLabel}</span>
         <span className="text-[11px] text-faint">{t.fallbackTargetsHint}</span>
       </div>
@@ -457,7 +457,7 @@ function ChainEditor({
             <span aria-hidden className="w-4 shrink-0 text-right font-mono text-[11px] text-faint">
               {i + 1}
             </span>
-            <span className="min-w-0 flex-1 truncate font-mono text-xs">{sel}</span>
+            <span className="min-w-0 flex-1 basis-4/5 break-all font-mono text-xs @min-[600px]/panel:basis-0">{sel}</span>
             {/* 通配条目总是继承档位（omp 的规则），不给后缀选择 */}
             {isWildcard(sel) ? (
               <span className="shrink-0 rounded border border-border-soft px-1.5 py-0.5 text-[11px] text-faint">

@@ -165,7 +165,6 @@ function SidebarDrawer({ children }: { children: React.ReactNode }) {
 
 export function App() {
  const { settingsTabOpen, settingsTabActive, closingTerminalId, set, sidebarWidth, setSidebarWidth, updateDialogOpen } = useApp();
- const terminals = useApp((s) => s.terminals);
  const t = useText();
  useTheme();
  useLocale();
@@ -214,7 +213,7 @@ export function App() {
  }, []);
 
  return (
-  <div className="flex h-screen overflow-hidden bg-background text-sm text-foreground">
+  <div className="flex h-screen overflow-hidden bg-sidebar text-sm text-foreground">
    <SidebarShell
     width={sidebarWidth}
     onResize={(w) => {
@@ -223,12 +222,12 @@ export function App() {
    >
     <WorkspaceSidebar />
    </SidebarShell>
-   <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+   <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background md:my-2 md:mr-2 md:rounded-xl md:border md:border-border">
     <HealthBanner />
     {/* 标签栏常驻（主区顶部）：终端标签 + 设置标签（单例）——设置打开时也看得见标签栏、
         点得回终端。终端区与设置页都**常驻挂载、只切显隐**（卸载 `TerminalPane` 的
         清理 effect 会 `pty_kill`，那是「关闭标签」才该发生的事）。 */}
-    {(terminals.length > 0 || settingsTabOpen) && <TerminalTabs />}
+    <TerminalTabs />
     <TerminalView visible={!settingsTabActive} />
     {settingsTabOpen && <SettingsPage visible={settingsTabActive} />}
     {/* 关闭确认常驻这层：设置标签激活时点终端标签的 × 也要弹得出来 */}

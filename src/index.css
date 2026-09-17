@@ -1,35 +1,24 @@
 @import "tailwindcss";
 
-/* ---- ompMiniDesktop tokens（design-system/MASTER.md §2） ----
-   稳重的分层灰：应用底 → 侧栏 → 卡片 → 悬浮，四层各差一档亮度，
-   边界优先靠**亮度差**表达，边框只做最后一道描线。
-   侧栏比消息流亮一档（VSCode 式）：导航面稍亮、内容面沉下去，
-   两套皮肤同向。两套皮肤同一个色相家族（冷青灰 H≈200°）：中性、不带暖色偏移，
-   浅色不刺白、深色不落纯黑；唯一的彩色是 `accent`（稀释后同时充当全局悬浮色与选中色）。
-
-   皮肤切换（跟随系统 / 深色 / 浅色，见 src/lib/theme.ts）就落在这两个选择器上：
-   浅色是 `:root` 默认值，深色全挂在 `.dark` 下，切皮肤 = 切 `<html>` 的 class。 */
+/* 冷灰工作台：外壳、工作面与浮层独立分级；强调色只标记动作与选中。 */
 :root {
- --background: #edf0f2;
- --sidebar: #f6f8f9;
+ --background: #f3f5f9;
+ --sidebar: #eaeef5;
  --surface: #ffffff;
  --elevated: #ffffff;
- --foreground: #1e2226;
- --muted: #4c565d;
- --faint: #626c74;
- --border: #d3dade;
- --border-soft: #e6ebed;
+ --foreground: #202737;
+ --muted: #515e73;
+ --faint: #606b80;
+ --border: #d5dce8;
+ --border-soft: #e3e8f0;
  --accent: #4f46e5;
+ --accent-foreground: #ffffff;
  --danger: #dc2626;
  --warn: #b45309;
  --ok: #047857;
- /* 代码块底比应用底（#EDF0F2）再深一点：对调后两者原本几乎同色，
-     代码块会糊在消息流里（实测对比度不到 1.03:1）。 */
- --code: #e1e7e9;
- /* 全局悬浮色 = 会话选中底色的同一配方（accent 稀释 15%）。
-     悬浮与选中同源，选中靠更实的填充 + 左侧细条拉开层次。 */
- --hover: color-mix(in srgb, var(--accent) 15%, transparent);
- --active: color-mix(in srgb, var(--accent) 22%, transparent);
+ --code: #e7ebf3;
+ --hover: color-mix(in srgb, var(--accent) 8%, transparent);
+ --active: color-mix(in srgb, var(--accent) 14%, transparent);
  /* ---- 终端 16 色（V11，xterm.js）----
     xterm 的 theme 只吃具体颜色、不吃 CSS 变量，所以由 `lib/termTheme.ts` 在运行时
     把这里读出来喂给它——色值仍集中在 CSS（组件禁止写死色值）。
@@ -55,25 +44,25 @@
  --term-bright-white: #1e2226;
 }
 
-/* 深色：侧栏取主色 `#222628`（比消息流亮一档），应用底退到 `#1B1F21`，
-   再往上卡片 / 浮层逐层变亮——四层从暗到亮：底 → 侧栏 → 卡片 → 悬浮。 */
+/* 深色沿用同一冷灰色系，避免纯黑底与过亮的边框。 */
 .dark {
- --background: #1b1f21;
- --sidebar: #222628;
- --surface: #2a2f32;
- --elevated: #31363a;
- --foreground: #e9ecee;
- --muted: #b0b7bc;
- --faint: #8e969b;
- --border: #3a4145;
- --border-soft: #2f3538;
- --accent: #818cf8;
+ --background: #181c25;
+ --sidebar: #202531;
+ --surface: #262d3b;
+ --elevated: #30394a;
+ --foreground: #e8edf6;
+ --muted: #b1bdd0;
+ --faint: #95a3ba;
+ --border: #3b4659;
+ --border-soft: #2e3748;
+ --accent: #a5b4fc;
+ --accent-foreground: #181c25;
  --danger: #f87171;
  --warn: #fbbf24;
  --ok: #34d399;
- --code: #15181a;
- --hover: color-mix(in srgb, var(--accent) 15%, transparent);
- --active: color-mix(in srgb, var(--accent) 22%, transparent);
+ --code: #141820;
+ --hover: color-mix(in srgb, var(--accent) 8%, transparent);
+ --active: color-mix(in srgb, var(--accent) 14%, transparent);
  /* 终端 16 色（深色档；见 :root 的同名块注释） */
  --term-background: var(--background);
  --term-foreground: var(--foreground);
@@ -107,6 +96,7 @@
  --color-border: var(--border);
  --color-border-soft: var(--border-soft);
  --color-accent: var(--accent);
+ --color-accent-foreground: var(--accent-foreground);
  --color-danger: var(--danger);
  --color-warn: var(--warn);
  --color-ok: var(--ok);
@@ -114,13 +104,12 @@
  --color-hover: var(--hover);
  --color-active: var(--active);
 
- /* 圆角收敛一档：卡片 10 / 面板 12 / 按钮 7 / 小控件 5。
-     比 Tailwind 默认更紧，去掉"消费级"的圆润感。 */
+ /* 统一控件、卡片与工作面的轮廓。 */
  --radius-sm: 5px;
- --radius-md: 7px;
- --radius-lg: 10px;
- --radius-xl: 12px;
- --radius-2xl: 14px;
+ --radius-md: 8px;
+ --radius-lg: 12px;
+ --radius-xl: 16px;
+ --radius-2xl: 20px;
 
  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", Inter, sans-serif;
  --font-mono: "JetBrains Mono", "SF Mono", Menlo, monospace;

@@ -13,7 +13,7 @@ export function StarToggle({ on, name, onClick }: { on: boolean; name: string; o
    onClick={onClick}
    aria-pressed={on}
    aria-label={fmt(on ? t.myModelsRemoveAria : t.myModelsAddAria, name)}
-   className="shrink-0 cursor-pointer rounded p-0.5 transition-colors duration-100 hover:bg-hover"
+   className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors duration-100 hover:bg-hover"
   >
    <Star size={13} weight={on ? "Filled" : "Outline"} aria-hidden className={on ? "text-accent" : "text-muted"} />
   </button>

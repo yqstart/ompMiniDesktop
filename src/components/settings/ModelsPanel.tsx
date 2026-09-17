@@ -120,32 +120,32 @@ export function ModelsPanel() {
    <ProvidersSection />
 
    {/* 我的模型：本应用偏好；挑过之后下面角色 / 转移的候选只列这些 */}
-   <section aria-label={t.myModelsSection} className="rounded-md border border-border bg-surface p-3.5">
-    <div className="flex items-center gap-2">
-     <Star size={14} aria-hidden className="text-muted" />
-     <h2 className="text-sm font-medium">{t.myModelsSection}</h2>
+   <section aria-label={t.myModelsSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
+    <div className="flex flex-wrap items-center gap-2">
+     <Star size={16} aria-hidden className="text-muted" />
+     <h2 className="text-sm font-semibold">{t.myModelsSection}</h2>
      {entries.length > 0 && (
       <span className="text-[13px] text-muted">{fmt(t.myModelsCount, String(entries.length))}</span>
      )}
      {entries.length > 0 && (
       <button
        onClick={() => setMyModels([])}
-       className="ml-auto cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+       className="ml-auto min-h-8 cursor-pointer rounded-md bg-background px-3 py-1.5 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
       >
        {t.myModelsClear}
       </button>
      )}
     </div>
-    <p className="mt-1.5 text-[13px] text-faint">{t.myModelsHint}</p>
-    <div className="mt-2">
+    <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.myModelsHint}</p>
+    <div className="mt-4">
      {entries.length === 0 ? (
       <p className="py-2 text-[13px] text-muted">{t.myModelsEmpty}</p>
      ) : (
       entries.map(({ selector, model }) => (
-       <div key={selector} className="flex items-center gap-2 border-t border-border-soft py-2 first:border-t-0">
+       <div key={selector} className="flex flex-wrap items-center gap-2 border-t border-border-soft py-3 first:border-t-0">
         <StarToggle on name={model?.name ?? selector} onClick={() => setMyModels(toggleMyModel(myModels, selector))} />
         <span className="min-w-0 flex-1 truncate text-[13px]">{model?.name ?? selector}</span>
-        {model && <span className="shrink-0 font-mono text-xs text-muted">{selector}</span>}
+        {model && <span className="min-w-0 basis-full pl-9 font-mono text-[11px] break-all text-faint @min-[600px]/panel:ml-auto @min-[600px]/panel:basis-auto @min-[600px]/panel:pl-0">{selector}</span>}
         {!model && (
          <span className="shrink-0 rounded border border-warn/40 bg-warn/5 px-1.5 py-0.5 text-xs text-warn">
           {t.myModelsUnavailable}
@@ -158,14 +158,14 @@ export function ModelsPanel() {
    </section>
 
    {/* 模型角色：把 omp 的 modelRoles 读写给用户（候选 = 我的模型 或 全部） */}
-   <section aria-label={t.rolesSection} className="rounded-md border border-border bg-surface p-3.5">
-    <div className="flex items-center gap-2">
-     <Sliders size={14} aria-hidden className="text-muted" />
-     <h2 className="text-sm font-medium">{t.rolesSection}</h2>
+   <section aria-label={t.rolesSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
+    <div className="flex flex-wrap items-center gap-2">
+     <Sliders size={16} aria-hidden className="text-muted" />
+     <h2 className="text-sm font-semibold">{t.rolesSection}</h2>
      <button
       onClick={() => void refreshAll()}
       disabled={busy}
-      className="ml-auto flex cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+      className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
       aria-label={t.modelsRefresh}
       title={t.modelsRefresh}
      >
@@ -173,7 +173,7 @@ export function ModelsPanel() {
       {t.refresh}
      </button>
     </div>
-    <p className="mt-1.5 text-[13px] text-faint">{t.rolesHint}</p>
+    <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.rolesHint}</p>
     {roles?.storage === "project" && (
      <p className="mt-1.5 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
       {t.roleStorageProject}
@@ -262,13 +262,13 @@ function RoleRow({
  };
 
  return (
-  <div className="border-t border-border-soft py-2 first:border-t-0">
-   <div className="flex items-center gap-2">
-    <div className="min-w-0 w-32 shrink-0">
+  <div className="border-t border-border-soft py-4 first:border-t-0">
+   <div className="flex flex-wrap items-center gap-2">
+    <div className="min-w-0 basis-full @min-[600px]/panel:w-32 @min-[600px]/panel:basis-auto">
      <div className="truncate text-sm">{label}</div>
      {label !== role && <div className="font-mono text-xs text-muted">{role}</div>}
     </div>
-    <div className="min-w-0 flex-1 font-mono text-xs break-all">
+    <div className="min-w-0 basis-full font-mono text-xs break-all @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0">
      {current ? (
       <span>
        {base}

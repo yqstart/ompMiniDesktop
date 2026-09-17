@@ -39,10 +39,10 @@ export function ProviderModelsList({
     onChange={(e) => setQ(e.target.value)}
     placeholder={t.providersPickSearch}
     aria-label={t.providersPickSearch}
-    className="w-full rounded-md border border-border bg-surface px-2 py-1 text-[13px] outline-none"
+    className="w-full rounded-md border border-border bg-background px-3 py-2.5 text-[13px]"
    />
-   <div className="mt-1.5 flex items-center gap-2">
-    <span className="text-[12px] text-faint">{fmt(t.providersPickCount, String(picked), String(models.length))}</span>
+   <div className="mt-3 flex flex-wrap items-center gap-2">
+    <span className="text-[11px] text-faint">{fmt(t.providersPickCount, String(picked), String(models.length))}</span>
     <button
      onClick={() => onChange(addManyMyModels(myModels, shownSelectors))}
      disabled={shownSelectors.length === 0}
@@ -63,15 +63,15 @@ export function ProviderModelsList({
    ) : shown.length === 0 ? (
     <p className="mt-3 text-[13px] text-muted">{t.noModelMatch}</p>
    ) : (
-    <div className="mt-1.5">
+    <div className="mt-3">
      {shown.map((m) => (
       <div
        key={m.selector}
-       className="flex items-center gap-2 border-t border-border-soft py-1.5 text-[13px] first:border-t-0"
+       className="flex flex-wrap items-center gap-2 border-t border-border-soft py-3 text-[13px] first:border-t-0"
       >
        <StarToggle on={myModels.includes(m.selector)} name={m.name} onClick={() => onChange(toggleMyModel(myModels, m.selector))} />
        <span className="min-w-0 flex-1 truncate">{m.name}</span>
-       <span className="shrink-0 font-mono text-xs text-muted">{m.selector}</span>
+       <span className="min-w-0 basis-full pl-9 font-mono text-[11px] break-all text-faint sm:ml-auto sm:max-w-[50%] sm:basis-auto sm:pl-0">{m.selector}</span>
       </div>
      ))}
     </div>

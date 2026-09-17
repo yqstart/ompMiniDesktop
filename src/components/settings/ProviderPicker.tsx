@@ -34,29 +34,29 @@ export function ProviderPicker({
     onChange={(e) => setQ(e.target.value)}
     placeholder={t.providersAddSearch}
     aria-label={t.providersAddSearch}
-    className="w-full rounded-md border border-border bg-surface px-2 py-1 text-[13px] outline-none"
+    className="w-full rounded-md border border-border bg-background px-3 py-2.5 text-[13px]"
    />
-   <div className="mt-1 flex items-center text-[12px] text-faint">
+   <div className="mt-3 flex items-center text-[11px] text-faint">
     <span>{fmt(t.providersAddCount, String(list.length))}</span>
    </div>
-   <div className="mt-1 max-h-72 overflow-y-auto">
+   <div className="mt-2 max-h-80 space-y-1 overflow-y-auto">
     <button
      onClick={() => onPick(PICK_CUSTOM)}
-     className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors duration-100 hover:bg-hover"
+     className="flex min-h-11 w-full cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 rounded-md bg-background px-3 py-3 text-left text-[13px] transition-colors duration-100 hover:bg-hover"
     >
-     <span className="truncate">{t.customKindCustom}</span>
-     <span className="ml-auto shrink-0 text-[11px] text-faint">{t.providersAddCustomHint}</span>
+     <span className="min-w-0 truncate font-medium">{t.customKindCustom}</span>
+     <span className="ml-auto min-w-0 text-[11px] text-faint">{t.providersAddCustomHint}</span>
     </button>
     {list.map((p) => (
      <button
       key={p.id}
       onClick={() => onPick(p.id)}
-      className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors duration-100 hover:bg-hover"
+      className="flex min-h-11 w-full cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 rounded-md px-3 py-2 text-left text-[13px] transition-colors duration-100 hover:bg-hover"
      >
-      <span className="truncate">{p.name}</span>
-      <span className="ml-auto flex shrink-0 items-center gap-2">
+      <span className="min-w-0 truncate">{p.name}</span>
+      <span className="ml-auto flex min-w-0 flex-wrap items-center gap-2">
        {p.configured && <span className="text-[11px] text-ok">{t.providerConfigured}</span>}
-       <span className="font-mono text-xs text-muted">{p.id}</span>
+       <span className="min-w-0 break-all font-mono text-[11px] text-faint">{p.id}</span>
       </span>
      </button>
     ))}

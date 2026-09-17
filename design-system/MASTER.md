@@ -1,40 +1,39 @@
 # ompMiniDesktop 设计系统 MASTER（全局唯一真相）
 
 > 适用范围：V11 全页面（终端工作区形态）。页面级覆盖文件放在 `design-system/pages/`，按需覆盖本文件。
-> 风格锚点：Cursor / Codex 桌面端式的**稳重**——四层灰阶拉开结构、单强调色稀释使用、密度高但装饰低。
+> 风格锚点：精致的冷灰桌面工作台——内嵌工作面、清晰的导航与内容分层、克制靛蓝，保持终端工具的安静与效率。
 > 技术栈：Tauri v2 + React + TS + Tailwind v4 + Zustand + Xterm.js。图标一律 **Reicon**（`reicon-react`、Outline 权重、具名导入，映射表见 §8），禁止 emoji 图标，也禁止再手写内联 SVG。
 
 ## 1. 产品模式与风格
 
 - 产品模式：桌面端 **agent 终端工作台**（左侧项目 / 分支树 + 右侧 omp 终端标签页），不是聊天界面、不是 landing 页、不是 dashboard。终端里的输出就是终端，壳侧不做结构化渲染。
-- 视觉风格：quiet utility（安静工具风）。分级靠**亮度**（background → sidebar → surface → elevated 四层）与 1px 低对比线，不靠装饰；唯一记忆点是「终端标签栏 + 工作区树的紧凑结构」。
-- 稳重 = 少动效、少圆角、少强调色占比；形状统一（同一类控件只有一种圆角/一种悬浮色），层次清楚，密度紧凑（列表行 32px、正文 14px、控件 13px）。
+- 视觉风格：quiet utility（安静工具风）。外壳、工作面、内容卡片与浮层各有亮度层级；签名结构是「项目分支树 + 内嵌工作面」，不是仪表盘。
+- 精致来自稳定的间距、统一轮廓与文字层级。项目头 36px、分支行 32px、设置导航 44px；正文 14px、控件 13px，避免密密麻麻的多重描边。
 - 反模式：拒绝暖米色 + 衬线大标题、拒绝纯黑 + 荧光绿、拒绝报纸式 hairline 密排（三者都是 AI 默认脸，本项目禁用）。
 
 ## 2. 色彩（token 定义见 `src/index.css`）
 
-四层灰阶，两套皮肤**同向**：应用底 → 侧栏 → 卡片 → 悬浮逐层变亮（侧栏比消息流亮一档：
-导航面稍亮、内容面沉下去，VSCode 式）；边界优先靠**亮度差**表达，1px 边框只做最后一道描线。
-两套皮肤同一个冷青灰色相家族（H≈200°，不带暖偏移）：浅色不刺白、深色不落纯黑。
+浅色：冷灰侧栏托起接近白色的工作面与白色卡片；深色：石墨蓝工作面沉下去，侧栏、卡片、浮层依次抬亮。两套使用相同语义 token，不在组件里分叉配色。
 
 | token | 浅色 | 深色 | 用途 |
 |---|---|---|---|
-| `background` | `#EDF0F2` | `#1B1F21` | 应用底、消息流底 |
-| `sidebar` | `#F6F8F9` | `#222628` | 左栏底（**深色主色**） |
-| `surface` | `#FFFFFF` | `#2A2F32` | 卡片、下拉、输入框 |
-| `elevated` | `#FFFFFF` | `#31363A` | 下拉面板、浮层、对话框 |
-| `foreground` | `#1E2226` | `#E9ECEE` | 正文 |
-| `muted` | `#4C565D` | `#B0B7BC` | 次要文字（≥4.5:1） |
-| `faint` | `#626C74` | `#8E969B` | 元信息（时间 / 计数 / 路径，≥4.5:1） |
-| `border` | `#D3DADE` | `#3A4145` | 分隔线、卡边 |
-| `border-soft` | `#E6EBED` | `#2F3538` | 弱分隔（分组引导线、卡内分隔线） |
-| `accent` | `#4F46E5` | `#818CF8` | 发送、主按钮、运行态、链接、选中 |
+| `background` | `#F3F5F9` | `#181C25` | 工作面 |
+| `sidebar` | `#EAEEF5` | `#202531` | 应用外壳、左栏 |
+| `surface` | `#FFFFFF` | `#262D3B` | 卡片、控件、激活标签 |
+| `elevated` | `#FFFFFF` | `#30394A` | 浮层、对话框 |
+| `foreground` | `#202737` | `#E8EDF6` | 正文 |
+| `muted` | `#515E73` | `#B1BDD0` | 次要文字 |
+| `faint` | `#606B80` | `#95A3BA` | 元信息 |
+| `border` | `#D5DCE8` | `#3B4659` | 结构边界 |
+| `border-soft` | `#E3E8F0` | `#2E3748` | 卡片与内部分隔 |
+| `accent` | `#4F46E5` | `#A5B4FC` | 主动作、选中、链接 |
+| `accent-foreground` | `#FFFFFF` | `#181C25` | 强调色实心按钮文字 |
 | `danger` | `#DC2626` | `#F87171` | 删除、拒绝、失败边 |
 | `warn` | `#B45309` | `#FBBF24` | 审批、yolo、目录缺失 |
 | `ok` | `#047857` | `#34D399` | 成功态 |
-| `code` | `#E1E7E9` | `#15181A` | 行内代码与代码块底（比应用底再深一档，否则糊在消息流里） |
-| `hover` | accent 15% | accent 15% | **全局唯一悬浮底** |
-| `active` | accent 22% | accent 22% | 选中底（行 / 分组头 / 菜单当前项） |
+| `code` | `#E7EBF3` | `#141820` | 代码背景 |
+| `hover` | accent 8% | accent 8% | 统一悬浮底 |
+| `active` | accent 14% | accent 14% | 选中填充 |
 
 - **皮肤切换**（跟随系统 / 深色 / 浅色）落在 `<html class="dark">` 这一个 class 上：
   浅色是 `:root` 默认值、深色全挂在 `.dark` 下（`src/index.css`），逻辑在 `src/lib/theme.ts`，
@@ -43,10 +42,10 @@
   存 localStorage（`omp.theme.v1` / `omp.locale.v1`），不写 omp 配置、不写覆盖层；
   **侧栏最小值就是这一行的内容宽度**（§4）。
 
-- **强调色只用一个**（`accent`），禁止第二强调色。审批卡的「允许一次」用 `accent` 实心按钮、Deny 用 `danger` 描边（hover 走 `bg-danger/15`，不整块翻红）。
+- **强调色只用一个**（`accent`）。实心主按钮用 `text-accent-foreground`，保证深色亮强调底上的文字对比；危险按钮用 danger 稀释填充与描边，不铺大红色块。
 - **悬浮色全局统一为 `hover`**：行、按钮、菜单项、下拉项、补全项、图标按钮一律 `hover:bg-hover`。禁止再出现 `hover:bg-background` / `hover:bg-surface` 这类第二套悬浮灰（同一个界面里飘着三四种灰是上一版最主要的不统一）。危险项 hover 用 `hover:bg-danger/15`，warning 项用 `hover:bg-warn/15`。
-- **选中态 = `bg-active` + 左侧 2px `accent` 竖条 + 标题 `font-semibold`**，会话行与当前项目分组头共用同一套。悬浮（15%）与选中（22%）同源同色系，靠深浅拉开，不再发明第二套选中配色。
-- 主入口「添加项目」是稀释强调色（`bg-accent/10` + `border-accent/25` + `text-accent`），不是实心色块——侧栏顶部放一块高饱和实心按钮太吵。
+- **树行选中态 = `bg-active` + 左侧 2px `accent` 竖条 + `font-semibold`**。设置导航选中用 `bg-active` + 强调色文字；终端激活标签用 `surface` + 描边，以页签形状表达层级。
+- 「添加项目」采用 surface 描边按钮，图标用 accent；不在左栏顶部铺高饱和色块。
 - 对比底线：正文与次要文字均 ≥ 4.5:1，元信息 `faint` 也 ≥ 4.5:1（本表已满足，勿再调浅）。
 - **终端 16 色（V11）**：`--term-*` 两套色板（浅 / 深各一份，定义在 `index.css`，语义对齐应用 token：红=danger、绿=ok、黄=warn、蓝=accent，灰阶取四层亮度体系）。xterm 的 `theme` 只吃具体颜色、不吃 CSS 变量，所以由 `src/lib/termTheme.ts` 在运行时读取喂给它——**终端色值只准写在 `--term-*`**（组件与数据层都不写死终端颜色；终端背景 = `--background`、前景 = `--foreground`、光标 = `--accent`、选区 = accent 30%）。皮肤切换时终端实时换色（`<html class="dark">` 的 MutationObserver）。
 - **元信息一律保持灰阶**：时间戳、路径、计数、次要说明——彩色只留给"内容"与状态信号。
@@ -55,22 +54,22 @@
 
 - 界面：系统栈 `-apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", Inter, sans-serif`。中文优先苹方 / 微软雅黑。
 - 等宽（工具参数、路径、session id 前缀）：`"JetBrains Mono", "SF Mono", Menlo, monospace`，12–13px；等宽文本自动带 `tabular-nums`（时间、token 数、行号对齐不跳动）。
-- 字阶（**只有三级**，禁止再发明）：正文 14px；控件 13px（按钮、页签、下拉项、终端标签）；元信息 11px（时间、计数、路径、徽章，配 `font-mono` 或 `faint` 色）。终端内的字号由 xterm 自己管（13px 等宽 + 1.25 行高），不归字阶管。
-- 行长：设置页整体 `max-w-4xl` 居中（左栏竖向菜单 176px + 右侧内容列）；终端列随窗口（xterm 自动重排）。
+- 字阶：正文 14px；控件 13px（标签栏 12px）；元信息 11px；设置标题 17px；终端空态标题 24px / 宽窗 28px。空态展示标题是唯一大字使用场景。终端仍是 13px 等宽、1.25 行高。
+- 设置页 `max-w-6xl` 居中；依据实际内容宽度做容器查询，导航在设置容器 <640px 时缩成 44px 图标栏，否则 176px；面板是唯一滚动区。
 
 ## 4. 布局
 
 - V11 两栏：左栏可拖拽（**292–480px，默认 292**，`sidebarWidth` 存 Zustand + localStorage 持久化；窄窗 <768px 收抽屉）→ 右侧工作区（**常驻标签栏**：终端标签 + 设置标签；xterm 全尺寸铺满）。**下限 = 左栏底部那一行的内容宽度**（设置全称 + 语言 + 皮肤并排不挤压，按最宽的英文界面算；实测 288px 临界 + 4px 字体余量），不为审美而定——改它之前先量那一行。
-- 左栏（`WorkspaceSidebar`）：顶部固定区 = macOS 红绿灯占位行（`data-tauri-drag-region`，`h-9`）+「添加项目」主入口（稀释强调色，`FolderPlus`；与终端空态的引导共用 `src/lib/projects.ts` 的 `pickAndAddProject`）→ 滚动区 = 项目组列表（每项目 = 折叠头 + 工作区行）→ 底部固定「设置」行（左「设置」，右端依次 `LanguageToggle`、`ThemeToggle`；设置入口角上是「有可用更新」的小点）。滚动区用 `[scrollbar-gutter:stable]`，有无滚动条不横跳。
-- 项目组（`ProjectGroup`）：**折叠头** = chevron + 文件夹图标 + 项目名（13px semibold）+ 悬浮槽位（`Clock` 会话弹窗入口 / `Nodes` 新建 worktree，都带 `aria-label` + `title`；目录缺失时标题旁常驻 warn 角标，并在下方给一行「重定位」）。**左栏不做不可逆操作**：删除只在会话弹窗与归档页，且都有二次确认。
-- 工作区行：`圆点 · 分支名（mono 12.5px）· 位置徽章`——主目录圆点 `bg-accent`、worktree 圆点 `bg-faint` + 右侧「worktree」细边徽章（10px）；detached 显示「游离 + 短 sha」；目录缺失整行 50% 透明且不可点。选中态 = `bg-active` 底 + `text-foreground`（与全局选中视觉同源）；点击 = 打开 / 聚焦该目录的终端。从属关系用左侧 hairline 引导线（`border-l border-border-soft pl-1.5`）表达。
-- 右侧工作区（`App` 装配）：**常驻标签栏 40px**（`h-10`，`bg-sidebar` + 下边框）→ 面板区（终端面板绝对定位铺满 / 设置页）。标签栏整条挂 `data-tauri-drag-region`（空白处拖窗口；按钮自身的 mousedown 不触发拖拽）。标签 = `图标（终端：运行中 accent / 已退出 faint；设置：Settings faint）+ 标题（13px，truncate，max-w-220px）+ 关闭按钮`，激活标签 `bg-active`、未激活 `text-muted hover:bg-hover`；关闭按钮 hover / focus 才显形（激活标签常驻半透明），最右是常驻 `＋`（28px 方形圆角按钮）。标签标题 = omp 的 OSC 标题（`π > 会话名`，未发过就是工作区名）；设置标签标题 = 「设置」。**终端面板与设置面板都只切显隐、不条件渲染**（卸载终端面板 = `pty_kill`，那是「关闭标签」才该发生的事）。
+- 左栏：40px macOS 红绿灯占位 → ompMiniDesktop 字标 → 36px 添加项目按钮 → 工作区标题与项目树 → 固定底栏。字标区同样支持拖窗；滚动区预留滚动条槽位。
+- 项目组：36px 折叠头（chevron + 24px 文件夹图标底 + 项目名）与 hover/focus 操作槽（会话、新建 worktree）；缺失目录给 warning 修复条，不在树里放不可逆操作。
+- 工作区：32px 行，`DiagramTree` + 等宽分支名 + worktree 徽章；选中左线、填充与加粗。主目录图标 accent，普通 worktree faint；缺失目录禁用。从属关系用弱引导线表达。
+- 右侧工作面：桌面端外沿 8px 留白、16px 圆角与轻描边；终端本身无额外 padding。48px 常驻标签栏（即便没有任何标签也保留工作区标题与新建入口），激活标签 surface 填充与细边框；窄窗左端显示项目抽屉按钮。标题截断、关闭入口和常驻 `＋` 行为不变；终端和设置面板只切显隐，不卸载。
 - 终端面板：xterm 全尺寸铺满（`FitAddon` 跟随容器；隐藏面板不与后端同步尺寸）。omp 退出后浮层 = `bg-background/75` 遮罩 + `bg-elevated` 小卡（13px muted「omp 已退出」；异常退出显示「omp 意外退出（退出代码 N）」+「重启」accent 实心键 +「关闭」描边键）。**终端自己就是内容面**——不再套卡片、边框或内边距。
-- 空态（无终端）：居中引导（`BrowserTerminal` 图标盒 + 15px semibold 标题 + 13px muted 说明 +「新建终端」主按钮；无项目时按钮位置换成「先添加一个项目」提示行）。
-- 圆角（`@theme` 覆盖了 Tailwind 默认刻度）：`rounded-sm` 5px（小徽章）/ `rounded-md` 7px（按钮、列表行、下拉项）/ `rounded-lg` 10px（卡片、下拉面板、对话框）/ `rounded-xl` 12px（大容器）。**按钮不用 `rounded-full`**——只有状态点、圆点用。
+- 终端空态：64px 图标盒、等宽终端标识、24/28px 邀请式标题、限宽说明、稀释强调色新建按钮与快捷键提示；无项目时提示先添加项目。
+- 圆角：`rounded-sm` 5px / `rounded-md` 8px / `rounded-lg` 12px / `rounded-xl` 16px / `rounded-2xl` 20px。圆角全局 token 驱动，不现场定第二套。
 - 边框：默认 `border-border`；分组内的弱分隔用 `border-border-soft`。禁止 `border-border/60`、`/70` 这类透明度档现场手调。
 - 阴影只有两档：`shadow-pop`（下拉、浮层）、`shadow-dialog`（对话框、抽屉）。普通容器不用阴影，靠亮度与边框分层。
-- 间距：4 / 8 / 12 / 16 四档常用；左栏项目行约 28–32px；对话框内边距 16。
+- 间距：4 / 8 / 12 / 16 / 20 / 24；设置卡片 16–20px padding，对话框 16–24px，空态保留更宽的呼吸区。
 - z-index：`10` 下拉 / 菜单浮层，`20` worktree 创建面板，`30` 对话框。
 - 响应：窄窗（<768px）左栏收成抽屉（遮罩 + 侧滑面板），终端区占满；禁止横向滚动。
 
@@ -120,7 +119,7 @@
 - `ConfirmDialog`（`src/components/ConfirmDialog.tsx`）已落地：受控浮层、Esc / 遮罩取消、焦点默认在「取消」、危险操作走 danger 色。**全 app 唯一的确认浮层**——终端关闭、会话删除、归档删除、供应商登出、记忆删除都走它；不许再造第二种确认样式。
 - `ThemeToggle`（`src/components/ThemeToggle.tsx`）= 皮肤三档分段控件（跟随系统 / 深色 / 浅色），**只挂在左栏底部「设置」行右侧**：`role="radiogroup"` + 三个 `role="radio"`（`aria-checked`），左右方向键组内循环；选中 `bg-active`。只切 `<html class="dark">`（localStorage `omp.theme.v1`），不写 omp 配置。终端配色跟着它换（`--term-*`）。
 - `LanguageToggle`（`src/components/LanguageToggle.tsx`）= 界面语言三档分段控件（跟随系统 / 简体中文 / English），**只挂在左栏底部、`ThemeToggle` 左侧**，样式同款。语言名是自称（`LOCALE_NAMES` / `LOCALE_SHORT` 不进字典）；`system` 档实际语言由 `resolveLocale` 解析（`zh*` → 中文）。偏好存 localStorage `omp.locale.v1`。
-- `SettingsPage`（`src/components/SettingsPage.tsx`）= 设置页外壳（标签栏里设置标签的面板；`visible` 切显隐、不卸载——页签选择与滚动位置保留）：**左侧竖向菜单**（`nav` = 标题「设置」+ `role="tablist"` + `aria-orientation="vertical"`；菜单项 = 13px、`rounded-md`、31px 行高，选中 `bg-active` + semibold / 未选中 `text-muted hover:bg-hover`）+ **右侧内容区**（唯一滚动容器，`role="tabpanel"` + `aria-labelledby`）：`通用` + `模型` + `记忆` + `使用统计` + `已归档对话`（V12b 起「供应商」并入「模型」，五项）。关闭设置标签＝标签栏的 `×` / ⌘W（`closeSettingsTab`，回到上次的终端标签），页内不放第二个关闭入口。
+- `SettingsPage` = 设置标签面板，左侧五项图标导航 + 右侧唯一滚动内容区，宽窗 176px 导航 / 紧凑内容区 44px 图标导航（保留可访问名称与 title）；44px 导航行。五个入口与隐藏保活语义不变；组件用 `@container/settings` / `@container/panel` 随可用空间换行，不按全窗口宽度猜测面板宽度。
 - `GeneralSettingsPanel`（`src/components/settings/GeneralSettingsPanel.tsx`）= 「设置 › 通用」的「omp 常用设置」：**41 个常用键**（白名单 / 分组 / 枚举取值表在 `src/lib/ompSettings.ts`；V11 起含 `tools.approvalMode`）的读写面。折叠分组 + 开关 / 行内枚举 / 数字框 + 行尾「恢复 omp 默认值」；写入乐观更新、失败回滚；整行 `title` 是上游英文说明。**V11 的 V11 键块（`s_tools_approvalMode` 等）与值标签（`svApproval*`）是动态字典键，不许被"未使用键"清理误删。**
 - `ProviderPicker` / `CustomProviderEditForm` / `ProviderModelsDialog` / `DialogShell`（`src/components/settings/`）= 「添加供应商」与「挑选模型」两个模态（V12c）：选择器（搜索 + 已配置置顶 + 首项「自定义」）、models.yml 表单（名称可改 / 接口类型两档 / 只有 API Key / 模型列表）、供应商模型星标列表（全选 / 清空作用于过滤结果）、模态壳（`fixed` 全屏遮罩 + 居中卡片，Esc / 遮罩 / × 关）。`StarToggle`（`src/components/settings/StarToggle.tsx`）= 共享挑选星标（挑选面板 / 我的模型列表共用一份）；`Switch`（`src/components/settings/Switch.tsx`）= 共享开关（通用设置行与自定义模型表单共用一份，不许各写一份）。
 - `ModelsPanel`（`src/components/settings/ModelsPanel.tsx`）= 「设置 › 模型」的页壳（V12b 起为**唯一模型管理面**，四区块顺序：**供应商 → 我的模型 → 模型角色 → 失败转移**——供应商置顶，因为「先添加供应商、再在弹窗里挑模型」是使用动线）；`ProvidersSection`（登录 / 登出 + 已添加列表 + 「添加供应商」/「挑选模型」两个弹窗）/ `FallbackChains` / `ModelPickList` / `MemoryPanel` / `ArchivedSessions` / `UsagePanel`：设置页其余区块 / 页签，口径同各自排期文档（v3 / v4 / v5 / v9 / v12 §6）。其中 `ArchivedSessions`（`src/components/ArchivedSessions.tsx`）= 「已归档对话」：标题行（计数 + 刷新）→ 口径说明 → 按项目分组（组头 = 折叠 + 名称 + 路径 + 计数 + 恢复全部 / 删除全部）→ 会话行（**点击 = 恢复并在终端里继续**（V11：unarchive + 新终端 resume；旧「只读回放」已随聊天界面退场）+ 日期 + 恢复 / 删除）。删除走 `ConfirmDialog`。数据来自 `list_archived_sessions`（不看扫描窗口）。

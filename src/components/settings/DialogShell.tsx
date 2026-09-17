@@ -41,28 +41,28 @@ export function DialogShell({
  }, []);
 
  return (
-  <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+  <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-3 sm:p-6" onClick={onClose}>
    <div
     ref={cardRef}
     tabIndex={-1}
     role="dialog"
     aria-modal="true"
     aria-label={title}
-    className={`flex max-h-[85vh] w-full ${width} flex-col rounded-lg border border-border bg-elevated p-4 shadow-pop outline-none`}
+    className={`flex max-h-[85dvh] min-w-0 w-full ${width} flex-col overflow-hidden rounded-xl border border-border bg-elevated shadow-dialog outline-none`}
     onClick={(e) => e.stopPropagation()}
    >
-    <div className="flex shrink-0 items-center gap-2">
-     <div className="text-sm font-medium">{title}</div>
+    <div className="flex shrink-0 items-center gap-3 border-b border-border-soft px-4 py-3 sm:px-5">
+     <div className="min-w-0 text-sm font-semibold break-words">{title}</div>
      <button
       onClick={onClose}
       aria-label={t.close}
       title={t.close}
-      className="ml-auto flex cursor-pointer items-center rounded-md border border-border p-1 text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+      className="ml-auto flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
      >
       <X size={12} aria-hidden />
      </button>
     </div>
-    <div className="mt-2.5 min-h-0 flex-1 overflow-y-auto">{children}</div>
+    <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 [overflow-wrap:anywhere] [scrollbar-gutter:stable] sm:p-5">{children}</div>
    </div>
   </div>
  );

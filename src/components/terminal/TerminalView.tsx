@@ -40,23 +40,29 @@ function EmptyTerminal() {
  const hasProjects = useApp((s) => s.projects.length > 0);
  const t = useText();
  return (
-  <div className="flex h-full items-center justify-center p-8">
-   <div className="flex max-w-sm flex-col items-center gap-3 text-center">
-    <div className="flex size-12 items-center justify-center rounded-xl border border-border bg-surface">
-     <BrowserTerminal className="size-6 text-faint" />
+  <div className="flex h-full flex-col items-center justify-center overflow-y-auto px-6 py-10">
+   <div className="flex w-full max-w-md flex-col items-center text-center">
+    <div className="mb-7 flex size-16 items-center justify-center rounded-2xl border border-border bg-surface text-accent">
+     <BrowserTerminal size={28} aria-hidden />
     </div>
-    <h2 className="text-[15px] font-medium">{t.termEmptyTitle}</h2>
-    <p className="text-[13px] leading-5 text-muted">{t.termEmptyBody}</p>
+    <p className="mb-3 font-mono text-[11px] tracking-[0.16em] text-faint">omp / {t.termPaneAria}</p>
+    <h2 className="text-[24px] leading-tight font-semibold tracking-tight sm:text-[28px]">{t.termEmptyTitle}</h2>
+    <p className="mt-4 max-w-[340px] text-[13px] leading-6 text-muted">{t.termEmptyBody}</p>
     {hasProjects ? (
      <button
       onClick={() => newTerminalInActiveWorkspace()}
-      className="mt-1 cursor-pointer rounded-lg bg-accent px-3.5 py-1.5 text-[13px] text-white transition-opacity duration-100 hover:opacity-90"
+      className="mt-7 flex cursor-pointer items-center gap-4 rounded-md border border-accent/25 bg-accent/10 px-4 py-2.5 text-[13px] font-medium text-accent transition-colors duration-100 hover:bg-hover"
      >
       {t.termNew}
+      <kbd className="font-mono text-[11px] opacity-75">⌘ T</kbd>
      </button>
     ) : (
-     <p className="text-[12px] text-faint">{t.emptyNoProjectTitle}</p>
+     <p className="mt-7 rounded-md border border-border-soft bg-surface px-4 py-2.5 text-[12px] text-muted">{t.emptyNoProjectTitle}</p>
     )}
+    <div className="mt-12 flex flex-wrap justify-center gap-x-6 gap-y-3 border-t border-border-soft pt-5 text-[11px] text-faint">
+     <span className="flex items-center gap-2"><kbd className="rounded-sm border border-border bg-surface px-1.5 py-0.5 font-mono">⌘ T</kbd>{t.termNew}</span>
+     <span className="flex items-center gap-2"><kbd className="rounded-sm border border-border bg-surface px-1.5 py-0.5 font-mono">⌘ 1–9</kbd>{t.termSwitch}</span>
+    </div>
    </div>
   </div>
  );

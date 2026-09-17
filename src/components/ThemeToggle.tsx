@@ -40,7 +40,7 @@ export function ThemeToggle() {
       role="radiogroup"
       aria-label={t.themeSection}
       onKeyDown={onKeyDown}
-      className="flex shrink-0 items-center gap-0.5 rounded-md border border-border p-0.5"
+      className="flex shrink-0 items-center gap-0.5 rounded-md border border-border bg-surface/60 p-0.5"
     >
       {ITEMS.map(({ mode, Icon }) => {
         const selected = theme === mode;
@@ -53,9 +53,9 @@ export function ThemeToggle() {
             aria-label={label[mode]}
             title={label[mode]}
             onClick={() => setTheme(mode)}
-            className={`flex cursor-pointer items-center justify-center rounded-sm p-1.5 transition-colors duration-100 ${
+            className={`flex h-[26px] w-6 cursor-pointer items-center justify-center rounded-sm transition-colors duration-100 ${
               selected
-                ? "bg-active text-foreground"
+                ? "bg-active text-accent"
                 : "text-muted hover:bg-hover hover:text-foreground"
             }`}
           >
