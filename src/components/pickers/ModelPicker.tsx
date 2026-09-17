@@ -30,6 +30,8 @@ export function ModelPicker({ compact = false }: { compact?: boolean }) {
  const ref = useDropdown(open, () => setOpen(false));
  const [q, setQ] = useState("");
  const [loading, setLoading] = useState(false);
+ /** 目录加载失败的内联提示（刷新按钮下方）；成功后清掉。 */
+ const [loadErr, setLoadErr] = useState<string | null>(null);
  const catalog = models?.models ?? [];
  const current: ModelInfo | null = catalog.find((m) => m.selector === currentModel) ?? null;
 
@@ -57,11 +59,13 @@ export function ModelPicker({ compact = false }: { compact?: boolean }) {
 
  const load = async (force: boolean) => {
   setLoading(true);
+  setLoadErr(null);
   try {
    const cat = force ? await api.refreshModels() : await api.getModels();
    set({ models: cat });
-  } catch {
-   // 内联错误由 M3-1 补，此处静默
+  } catch (e) {
+   // 目录加载失败：内联给原因（刷新按钮下方），不再静默
+   setLoadErr(e instanceof Error ? e.message : String(e));
   } finally {
    setLoading(false);
   }
@@ -115,6 +119,9 @@ export function ModelPicker({ compact = false }: { compact?: boolean }) {
        <Refresh size={14} className={loading ? "animate-spin" : ""} aria-hidden />
       </button>
      </div>
+     {loadErr && (
+      <p role="alert" className="px-1 pt-1.5 text-xs text-danger">{fmt(t.pickerLoadError, loadErr)}</p>
+     )}
      {showAllModels && (
       <div className="px-1 pt-1.5 text-xs text-faint">{t.pickerAllModelsHint}</div>
      )}

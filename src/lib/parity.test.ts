@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { TEXT } from "./locale";
 import { viewMsgsFromJsonlLines } from "./viewmsg";
+import type { ViewMsg } from "@shared/types";
 
 const zh = TEXT["zh-CN"];
 
@@ -60,6 +61,16 @@ const hasOmp = (() => {
 
 const norm = (s: string) => s.replace(/\s+/g, "");
 
+/**
+ * 正文比对专用归一：只留文字与数字（连标点一起去掉）。
+ *
+ * 原因：`omp render --plain` 把消息按 **Markdown 渲染**，格式字符在渲染侧消失——
+ * jsonl 里的 ``Use parallel `task` research agents`` 渲染出来是 `Use parallel task research agents`。
+ * 逐字符比对只要样例里出现反引号 / 加粗星号 / 链接括号就必然假阴性（实测本机会话里就有）。
+ * 工具名比对仍用 `norm`：它依赖「• <name>」里的 `•` 这个标点。
+ */
+const content = (s: string) => s.replace(/[^\p{L}\p{N}]+/gu, "");
+
 /** 会话头 + 前 `HEAD_ENTRIES` 条的定长切片（对拍输入与取样判据共用同一份）。 */
 function sliceOf(file: string): string[] {
  const all = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
@@ -83,7 +94,7 @@ function parseSlice(lines: string[]): unknown[] {
 /** 切片里是否有够长的用户文本（对拍的硬断言以此为前提）。 */
 function hasUserSample(file: string): boolean {
  const ours = viewMsgsFromJsonlLines(parseSlice(sliceOf(file)), zh);
- return ours.some((m) => m.kind === "user" && norm((m as { text: string }).text).length >= 12);
+ return ours.some((m) => m.kind === "user" && content(m.text).length >= 12);
 }
 
 /**
@@ -124,14 +135,16 @@ describe.skipIf(!hasOmp || cases.length === 0)("omp render --plain 对拍", () =
     fs.rmSync(dir, { recursive: true, force: true });
    }
    const hay = norm(rendered);
+   // omp 渲染会把 Markdown 格式字符吃掉，正文比对降到「只留文字数字」层（见 content 的说明）
+   const hayContent = content(rendered);
    // 用户消息在 omp 渲染里总是完整出现：必须全部命中
    const userSamples = ours
-    .filter((m) => m.kind === "user")
-    .map((m) => norm((m as { text: string }).text))
+    .filter((m): m is Extract<ViewMsg, { kind: "user" }> => m.kind === "user")
+    .map((m) => content(m.text))
     .filter((t) => t.length >= 12)
     .map((t) => t.slice(0, 20));
    expect(userSamples.length).toBeGreaterThan(0);
-   const userHit = userSamples.filter((s) => hay.includes(s));
+   const userHit = userSamples.filter((s) => hayContent.includes(s));
    expect(userHit.length).toBe(userSamples.length);
    // 工具调用：omp 的 transcript 用「• <name>」标出，我们归一出的是同一批 tool 卡
    const toolNames = [

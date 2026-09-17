@@ -89,7 +89,7 @@ export async function openSessionWithHistory(id: string): Promise<void> {
   // 打不开时保留旧缓存可读，状态胶囊会报 exited / 不可用
  }
  try {
-  const history = await api.getHistory(id);
+  const page = await api.getHistory(id);
   const cur = useApp.getState();
   // 同一会话重复打开不叠历史：tool 卡按 toolCallId 稳定 id，其余按行 id。
   // 乐观回显的 `u-local-*` 消息：历史里同一文本的 `u:<行id>` 到达时视为同一条，
@@ -99,7 +99,7 @@ export async function openSessionWithHistory(id: string): Promise<void> {
   const local_by_text = new Map(
    cur_list.filter((m) => m.kind === "user" && m.id.startsWith("u-local-")).map((m) => [m.kind === "user" ? m.text : "", m.id]),
   );
-  const fresh = viewMsgsFromJsonlLines(history, TEXT[useApp.getState().locale]).filter((m) => {
+  const fresh = viewMsgsFromJsonlLines(page.lines, TEXT[useApp.getState().locale]).filter((m) => {
    if (seen.has(m.id)) return false;
    if (m.kind === "user" && local_by_text.has(m.text)) {
     const local_id = local_by_text.get(m.text) as string;
@@ -115,6 +115,18 @@ export async function openSessionWithHistory(id: string): Promise<void> {
    return true;
   });
   if (fresh.length > 0) useApp.getState().appendEvents(id, fresh);
+  // 回放超限（5000 行 / 2000 条）时在流尾注明——绝不静默丢内容。
+  // 固定 id + 先查已有：重复打开同一会话不叠第二条。
+  if (page.truncated && !cur_list.some((m) => m.id === "hist-truncated")) {
+   useApp.getState().appendEvents(id, [
+    {
+     kind: "divider",
+     id: "hist-truncated",
+     divider: "turn",
+     text: TEXT[useApp.getState().locale].historyTruncated,
+    },
+   ]);
+  }
   // 历史落位后再读一次底，保证停在最新处
   scrollThreadToBottom();
  } catch {

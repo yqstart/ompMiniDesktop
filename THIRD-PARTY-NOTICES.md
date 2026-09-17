@@ -41,6 +41,11 @@
 - 仓库：https://github.com/microsoft/TypeScript · https://github.com/vitest-dev/vitest · https://github.com/eslint/eslint · https://github.com/typescript-eslint/typescript-eslint
 - 许可证：Apache-2.0 / MIT / MIT
 
+### jsdom（测试环境）
+- 仓库：https://github.com/jsdom/jsdom
+- 许可证：MIT
+- 说明：组件渲染测试的 DOM 环境（`Thread.test.tsx` 的 jsdom + createRoot），仅测试期使用，不进构建产物。
+
 ## Rust 依赖
 
 ### Tauri（tauri、tauri-build、tauri-plugin-dialog/opener/store/shell）
@@ -59,4 +64,4 @@
 
 ### oh-my-pi（omp）
 - 仓库：https://github.com/ldx/oh-my-pi
-- 本 app 通过 `omp --mode rpc` 子进程驱动它；`docs/rpc-memo.md` 记录了实测协议要点。
+- 本 app 通过 `omp --mode rpc-ui` 子进程驱动它；`docs/rpc-memo.md` 记录了实测协议要点。

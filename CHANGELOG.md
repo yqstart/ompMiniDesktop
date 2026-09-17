@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **omp 子进程改用 `--mode rpc-ui`：解锁 `ask` 工具**。此前跑 `--mode rpc`（工具面 11 个）；`rpc-ui` 是上游为「有 UI 的宿主」出的 RPC 变体（`hasUI=true`），多挂 `ask`——模型能主动向用户提问（多步选择 / 自由输入），提问帧就是普通 `extension_ui_request{method:"select", options, optionDetails}`，`UiRequestCard` + `respond_ui` 的现有实现直接接住（实测：回包后 agent 正常走完一轮）。改动是一行 spawn 参数（`runtime.rs` 的 `SpawnOpts::args`）+ 1 项单测；实测对比与帧形状见 `docs/rpc-memo.md` §1。
+- **updater 签名密钥已生成、公钥已配置**：`pnpm tauri signer generate -w ~/.tauri/omp-mini.key`（无密码）生成的公钥已填入 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`，release 工作流的守卫不再拦。**私钥全文需写入仓库 Secrets `TAURI_SIGNING_PRIVATE_KEY`**（见 README「应用内更新」）——未上传前打 tag 会构建失败（签不出 updater 产物）。
+- **`get_history` 返回结构改为 `{ lines, truncated }`**：回放超限（5000 行 / 2000 条）时不再静默丢内容——`truncated: true` 如实上报，前端在流尾落一行「历史超出回放上限（5000 行 / 2000 条），更后的内容未载入」（固定 id，重复打开不叠条）。
+
+### 修复
+
+- **子代理不再隐形**：omp 的 subagent 帧默认订阅 `off`，此前后端从未订阅——模型用 task 工具跑子代理时，界面里只有一个转圈的 task 行，看不到任何子代理活动。现在 spawn 握手时发 `set_subagent_subscription{level:"progress"}`（回执经 `classify` 的 `Swallow` 本地消化：旧版 omp 不认这个命令时也不许在会话里冒一条「操作失败」），前端把 `subagent_lifecycle` 落成起止行（`子代理 scout 启动：调研 X` / `完成` / `失败` / `已中止`），`progress` / `event` 高频帧不渲染（否则一次并行调研能刷几十行分隔线）。Rust 2 项单测 + 前端 1 项（`mergeEvents.test.ts`）。
+- **ModelPicker 目录加载失败不再静默**：此前失败被空 `catch` 吞掉；现在刷新按钮下方内联显示原因（`模型目录加载失败：…`，新字典键 ×2 语言）。
+- 清理 `commands/mod.rs` 过期的「M2/M3 占位」分区注释（其下命令——历史回放 / 发消息 / 压缩 / 分支——均已实现多年）。
+
 ### 新增
 
 - **输入框 `/` 命令补全：打 `/` 弹出 omp 自己的命令面**。此前 `/` 只是「本地命令直发」的暗号——omp 有哪些命令全靠记。现在输入 `/` 弹出补全面板（数据来自 omp 的 `available_commands_update`，本机 omp 18.2.1 实测 **52 条**：builtin 41 / skill 7 / extension 1 / custom 2 / file 1），可搜索、可键盘导航、选中即补全。新组件 `src/components/composer/SlashMenu.tsx` + 数据层 `src/lib/slashCommands.ts`（16 项单测），字典新增 5 键 × 2 语言。

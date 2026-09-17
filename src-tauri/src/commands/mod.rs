@@ -1162,11 +1162,16 @@ pub async fn rename_session_note(state: State<'_, AppState>, id: String, note: S
     Ok(())
 }
 
-// ---------- M2/M3 占位：命令先注册，逻辑在各自里程碑实现 ----------
+// ---------- 会话消息与运行控制 ----------
+
+/// 回放上限：最多读 5000 行、最多收 2000 条（message/custom/title 系）。
+const MAX_HISTORY_LINES: usize = 5000;
+const MAX_HISTORY_ENTRIES: usize = 2000;
 
 #[tauri::command]
-pub async fn get_history(state: State<'_, AppState>, id: String) -> Result<Vec<serde_json::Value>, CmdError> {
-    // M1 可用：读 jsonl 全量转 ViewMsg 载荷（本期先返回原始块，前端经 viewmsg 归一）
+pub async fn get_history(state: State<'_, AppState>, id: String) -> Result<serde_json::Value, CmdError> {
+    // M1 可用：读 jsonl 全量转 ViewMsg 载荷（本期先返回原始块，前端经 viewmsg 归一）。
+    // 超过回放上限时 `truncated: true` 如实上报——绝不静默截断（前端在流尾注明）。
     let agent = state.agent_dir.lock().await.clone();
     let prefix = id.chars().take(8).collect::<String>();
     let Some(path) = session_file_for(&agent, &prefix) else {
@@ -1174,18 +1179,24 @@ pub async fn get_history(state: State<'_, AppState>, id: String) -> Result<Vec<s
     };
     let text = std::fs::read_to_string(&path).map_err(|_| cmd_err("CORRUPT", "会话文件已损坏，可删除".into(), None))?;
     let mut out = vec![];
-    for line in text.lines().take(5000) {
+    let mut truncated = false;
+    for (i, line) in text.lines().enumerate() {
+        if i >= MAX_HISTORY_LINES {
+            truncated = true;
+            break;
+        }
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
             // 只回放 message/custom/title_change 系
             if matches!(v.get("type").and_then(|t| t.as_str()), Some("message" | "custom" | "title_change" | "model_change" | "thinking_level_change")) {
+                if out.len() >= MAX_HISTORY_ENTRIES {
+                    truncated = true;
+                    break;
+                }
                 out.push(v);
             }
         }
-        if out.len() >= 2000 {
-            break;
-        }
     }
-    Ok(out)
+    Ok(serde_json::json!({ "lines": out, "truncated": truncated }))
 }
 
 #[tauri::command]

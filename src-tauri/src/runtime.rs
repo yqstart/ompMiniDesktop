@@ -1,7 +1,11 @@
-//! M2 实时运行时：per-会话长驻 `omp --mode rpc` 子进程。
+//! M2 实时运行时：per-会话长驻 `omp --mode rpc-ui` 子进程。
 //!
 //! 线路：spawn → 等 ready → negotiate v2 → get_state（拿身份）→
 //! 后台读 stdout 行 → rpc_chunk 重组 → 按 type 分发 emit 事件。
+//!
+//! 用 `rpc-ui` 而非 `rpc`：上游把 `hasUI=true` 的 RPC 变体单独出一个模式，
+//! 差别是会话会挂上 `ask` 工具（模型能主动向用户提问，UI 请求走既有的
+//! `extension_ui_request` 桥）。实测对比与帧形状见 docs/rpc-memo.md §1。
 
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
@@ -26,7 +30,7 @@ pub struct SpawnOpts {
 
 impl SpawnOpts {
     fn args(&self) -> Vec<String> {
-        let mut a = vec!["--mode".into(), "rpc".into(), "--cwd".into(), self.cwd.clone()];
+        let mut a = vec!["--mode".into(), "rpc-ui".into(), "--cwd".into(), self.cwd.clone()];
         if let Some(r) = &self.resume {
             a.push("--resume".into());
             a.push(r.clone());
@@ -333,6 +337,12 @@ pub async fn spawn_long_lived(
         s.write_all(b"{\"id\":\"h-state\",\"type\":\"get_state\"}\n")
             .await
             .map_err(|e| cmd_err("RPC_IO", format!("写入失败：{e}"), None))?;
+        // 子代理帧订阅：omp 默认 `"off"`，不主动开的话 task 工具跑子代理时壳侧一帧都收不到
+        // （此前界面只有一个转圈的 task 行）。`"progress"` 转发 lifecycle + progress 两类。
+        // 回包（成功 / 旧版不认此命令的失败）由 classify 的 Swallow 分支本地消化，不进前端。
+        s.write_all(b"{\"id\":\"h-sub\",\"type\":\"set_subagent_subscription\",\"level\":\"progress\"}\n")
+            .await
+            .map_err(|e| cmd_err("RPC_IO", format!("写入失败：{e}"), None))?;
         s.flush().await.map_err(|e| cmd_err("RPC_IO", format!("写入失败：{e}"), None))?;
     }
     let (sid, sfile, meta) = loop {
@@ -522,13 +532,16 @@ fn update_meta(app: &AppHandle, key: &str, f: impl FnOnce(&mut SessionMeta)) {
     }
 }
 
-/// 帧分类结果：状态回读 / 普通透传（附可选跟进命令）。
+/// 帧分类结果：状态回读 / 普通透传（附可选跟进命令）/ 本地消化。
 #[derive(Debug, PartialEq)]
 pub enum FrameAction {
     /// 状态回读回包：只更新真值快照 + 推送 `omp-state`，不进会话流
     StateSync,
     /// 透传给前端；`Some(line)` 表示还要追加写回 stdin 的跟进命令
     Forward(Option<String>),
+    /// 壳侧内部管理命令的回包：本地消化，不进前端（用户没发起过这个动作，
+    /// 成功无需展示，失败也只会变成一条莫名其妙的「操作失败」分隔线）。
+    Swallow,
 }
 
 /// 判断一帧要不要跟进命令（纯函数，便于单测）。
@@ -547,6 +560,9 @@ pub fn classify(v: &serde_json::Value) -> FrameAction {
     let cmd = v.get("command").and_then(|c| c.as_str()).unwrap_or("");
     let ok = v.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
     match cmd {
+        // 会话建立时壳侧自己发的订阅命令：回执本地消化（成功无展示价值；旧版 omp
+        // 不认这个命令会回失败，同样不许把它渲染成用户可见的错误行）。
+        "set_subagent_subscription" => FrameAction::Swallow,
         "set_model" if ok => {
             let efforts = v.get("data").and_then(efforts_of);
             let level = highest_effort(efforts.as_ref());
@@ -575,6 +591,7 @@ async fn handle_frame(
 ) {
     if v.get("type").and_then(|t| t.as_str()) == Some("response") {
         match classify(v) {
+            FrameAction::Swallow => return,
             FrameAction::StateSync => {
                 if v.get("success").and_then(|s| s.as_bool()).unwrap_or(false) {
                     let d = v.get("data").cloned().unwrap_or_default();
@@ -948,6 +965,7 @@ mod tests {
         match action {
             FrameAction::Forward(x) => x,
             FrameAction::StateSync => panic!("不应分类为状态回读"),
+            FrameAction::Swallow => panic!("不应分类为本地消化"),
         }
     }
 
@@ -1002,6 +1020,39 @@ mod tests {
         // prompt 回包不触发回读
         let p = serde_json::json!({"id": "p-1", "type": "response", "command": "prompt", "success": true});
         assert_eq!(classify(&p), FrameAction::Forward(None));
+    }
+
+    #[test]
+    fn classify_swallows_subagent_subscription() {
+        // 壳侧自己发的订阅命令：成功与失败（旧版 omp 不认）都在本地消化，不进前端
+        let ok = serde_json::json!({
+            "id": "h-sub", "type": "response", "command": "set_subagent_subscription", "success": true,
+            "data": {"level": "progress"}
+        });
+        assert_eq!(classify(&ok), FrameAction::Swallow);
+        let fail = serde_json::json!({
+            "id": "h-sub", "type": "response", "command": "set_subagent_subscription", "success": false,
+            "error": "Unknown command"
+        });
+        assert_eq!(classify(&fail), FrameAction::Swallow);
+    }
+
+    #[test]
+    fn spawn_args_use_rpc_ui_mode() {
+        // rpc-ui（hasUI=true）而非 rpc：多挂 ask 工具，见 docs/rpc-memo.md §1
+        let opts = SpawnOpts {
+            bin: "omp".into(),
+            cwd: "/tmp/x".into(),
+            resume: None,
+            model: None,
+            thinking: None,
+            approval: None,
+        };
+        let a = opts.args();
+        assert_eq!(&a[0], "--mode");
+        assert_eq!(&a[1], "rpc-ui");
+        assert_eq!(&a[2], "--cwd");
+        assert_eq!(&a[3], "/tmp/x");
     }
 
     #[test]

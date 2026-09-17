@@ -351,11 +351,29 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dic
   out.push({ kind: "divider", id: `${t}-${Date.now()}`, divider: "turn", text: label });
   return out;
  }
- // 子代理帧：分隔线占位（详细转录暂不展开）。
- if (t === "subagent_lifecycle" || t === "subagent_progress" || t === "subagent_event") {
-  out.push({ kind: "divider", id: `${t}-${Date.now()}`, divider: "turn", text: dict.dividerSubagent });
+ // 子代理帧（task 工具 spawn 的子会话；订阅在 spawn 握手时打开，见 runtime.rs）：
+ // lifecycle 起止各落一行；progress / event 是高频帧（每次工具推进都会来），
+ // 不逐条渲染——否则一次并行调研能刷出几十行子代理分隔线。
+ if (t === "subagent_lifecycle") {
+  const p = (frame.payload ?? {}) as Record<string, unknown>;
+  const agent = String(p.agent ?? "").trim() || "?";
+  const status = String(p.status ?? "");
+  const desc = typeof p.description === "string" ? p.description.trim() : "";
+  const text =
+   status === "started"
+    ? desc
+     ? fmt(dict.dividerSubagentStartedWith, agent, desc)
+     : fmt(dict.dividerSubagentStarted, agent)
+    : status === "completed"
+     ? fmt(dict.dividerSubagentDone, agent)
+     : status === "failed"
+      ? fmt(dict.dividerSubagentFailed, agent)
+      : fmt(dict.dividerSubagentAborted, agent);
+  // id 带 status：同一次 spawn 的 started / completed 是两条独立消息（mergeViewMsgs 按 id 去重）
+  out.push({ kind: "divider", id: `sub-${String(p.id ?? "")}-${status || "unknown"}`, divider: "turn", text });
   return out;
  }
+ if (t === "subagent_progress" || t === "subagent_event") return out;
  if (t === "turn_start" || t === "turn_end" || t === "agent_start" || t === "agent_end") return out;
  // 单向宿主通知（握手期就会到，现在经回放正常抵达）：没有渲染面，安静忽略，
  // 不占「未知帧」告警位（那是留给真正的协议漂移的）。

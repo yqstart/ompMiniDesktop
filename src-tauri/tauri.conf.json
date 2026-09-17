@@ -46,7 +46,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "TODO: 首次发布前填入 `pnpm tauri signer generate` 的公钥",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM0MkJERUE1NUFFQUMxOEUKUldTT3dlcGFwZDRyeENrN0dyVzJEWVRrTFNzclRrYnFrTGswb25kV1A3OEpSb3ZKS3RPcU1DbHgK",
       "endpoints": [
         "https://github.com/yqstart/ompMiniDesktop/releases/latest/download/latest.json"
       ],

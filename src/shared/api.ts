@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ContextBreakdown, FallbackChainsInfo, GitInfo, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, OmpInfo, OmpSetting, Overlay, PathCheck, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, SessionPage, SessionRuntime, SessionSearchResult, SessionView, UsageStats, ViewMsg } from "./types";
+import type { ContextBreakdown, FallbackChainsInfo, GitInfo, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, OmpInfo, OmpSetting, Overlay, PathCheck, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, SessionPage, SessionRuntime, SessionSearchResult, SessionView, UsageStats } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -46,7 +46,13 @@ export const api = {
   call<{ ok: number; failed: { id: string; message: string }[] }>("delete_sessions", { ids }),
  renameSessionNote: (id: string, note: string) =>
   call<void>("rename_session_note", { id, note }),
- getHistory: (id: string) => call<ViewMsg[]>("get_history", { id }),
+ /**
+  * 历史回放（后端上限：5000 行 / 2000 条）。`lines` 是 **jsonl 原始行**
+  * （由 `viewMsgsFromJsonlLines` 归一）。`truncated` 为真时前端在流尾注明——
+  * 超限绝不静默丢内容。
+  */
+ getHistory: (id: string) =>
+  call<{ lines: unknown[]; truncated: boolean }>("get_history", { id }),
  sendMessage: (id: string, message: string, images?: ImageAttachment[]) =>
   call<void>("send_message", { id, message, images }),
  /** 流式中转向（`steer`）：在下一个工具调用边界生效，不砍掉进行中的工作。 */

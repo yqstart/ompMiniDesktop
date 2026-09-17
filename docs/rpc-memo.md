@@ -34,11 +34,18 @@ omp --mode rpc --cwd <项目目录> [--resume <sessionId前缀>] [--model <selec
     `plan.defaultOnStartup` **只被 TUI 启动流程消费**（上游只在 `InteractiveMode.init` 里读它；print 模式还专门打印「此模式下忽略，headless 用 `--plan-yolo`」提示），RPC 根本不查；
     goal 的隐藏工具只在 goal 模式激活时挂载（上游 `createTools` 的条件是 `getGoalModeState()?.enabled === true`），而 RPC 进不去 goal 模式——
     实测 `get_state.dumpTools` 里 11 个工具没有 `goal`。所以设置 › 通用里的 `plan.enabled` / `goal.enabled` 两行在界面上标了「仅 TUI 生效」。
-  - **计划模式在 RPC 下唯一的真路径是 `--plan-yolo` 启动参数**（2026-09-16 实测）：spawn 时带上它，会话在第一个 prompt 时进入只读 plan 模式
-    （turn 里注入 `customType:"plan-mode-context"` 的自定义消息：`Plan mode active. Working tree/system read-only: NEVER create, edit, delete…`），
-    模型产出计划后由 omp **自动批准**、自动切 `--plan-yolo-into`（默认 `@smol` 角色）继续实现。
-    与 TUI `/plan` 的两个关键差别：**没有人工审批环节**（TUI 弹计划审阅界面，可以改/批/拒），且**只能在启动时决定**、不能会话中途开关。
-    壳侧 2026-09-16 决定不采用（等上游开放 RPC 切换命令），要再评估时按上面的语义如实写界面。
+  - **计划模式在 RPC 下唯一的真路径是 `--plan-yolo` 启动参数**（2026-09-16 实测；2026-09-17 在 18.2.2 上复测完整事件链）：spawn 时带上它，会话在第一个 prompt 前自动 arm——注入
+    `customType:"plan-mode-context"` 的自定义消息（`Plan mode active. Working tree/system read-only: NEVER create, edit, delete…`）并挂上计划提议处理器。
+    复测实录（prompt「写一个 hello.py」）：`custom/plan-mode-context` → 只读探索（read）→ 模型写计划到 `local://<slug>-plan.md`（**计划全文就在这次 write 的 toolcall 参数里，壳侧可直接渲染**）
+    → `write xd://propose` 提交 → **自动批准**（全程零 `extension_ui_request` 交互帧，只有已装扩展的 `setWidget` 单向帧；与 #5380 里「plan-yolo 下会弹 confirm 审批」的说法不符）
+    → `model_changed` + `notice`（`Plan-yolo: plan approved, switched to <provider>/<model> to implement "…"`）→ steer `custom/plan-yolo-handoff` → 实现（write + bash 自验）→ **单个**终态 `agent_end`。
+    计划与实现同属一个 agent run（handoff 走 steer，不结束 run），壳侧现有「终态 `agent_end` = 完成」的口径无需改动。
+    `--plan-yolo-into` 接受角色别名（实测 `@default` 有效；默认 `@smol`）与任意 selector，**启动时解析**（传错启动即报 `Model "…" not found`）。
+    与 TUI `/plan` 的两个关键差别：**没有人工审批环节**（TUI 弹计划审阅界面，可以改/批/拒——proposal handler 由 omp 内部安装，壳侧无法替换），且**只能在启动时决定**、不能会话中途开关。
+    壳侧 2026-09-16 决定不采用（等上游开放 RPC 切换命令）；再评估口径：作为「先计划再实现」的会话级启动选项可用（如实标注自动批准 + 实现阶段换模型），上游 `set_mode` 落地后应替换、避免两套入口。
+  - **上游 issue / PR 现状（2026-09-17 查证）**：模式控制缺口的修复在推进但**均未合入**——`#5380`（`set_mode` 请求，maintainer 已列设计问题、等人认领）、`#8224`（goal 对 ACP/RPC 不可用的处置提案）、`#8171`/`#8177`（已关闭，让位 `#7529`）；
+    **`#7529`（draft：`set_mode` / `get_plan` / `resolve_plan_approval` + 审批帧，已有第三方 GUI 作者实测端到端跑通）** 是 **`#7439` 的 14 个拆分 PR 栈**（RPC 全面升级为 app-server 面）里的第 9 个；另有 `#6843`（同方向的单体大 PR，185 命令、含 plan/goal/vibe/loop 全模式）。
+    `main` 分支的 `rpc-types.ts` 仍无模式命令。壳侧应做**能力探测**（`get_state.data.mode` 字段出现即为新模式面）而不是版本号判断。
   - **上游已有现成的 headless 实现**（给 omp 提 feature request 的依据）：ACP 协议那条线已实现 Plan 模式——
     `session/set_mode` + `availableModes: [Default, Plan]`（`plan.enabled` 为真时才有 Plan），实现就是
     `session.setPlanModeState({enabled:true, planFilePath, workflow:"parallel", reentry})` + `session.setPlanProposalHandler(...)`，
@@ -53,6 +60,13 @@ omp --mode rpc --cwd <项目目录> [--resume <sessionId前缀>] [--model <selec
   **没有 agent turn、不会有 `agent_end`**（壳据此把状态收敛回 idle，见 `is_local_prompt_result`）。
 - `get_state` 返回：`model{provider,id,…} / thinkingLevel / isStreaming / sessionFile / sessionId / messageCount / contextUsage{tokens,contextWindow,percent}`。注意**没有 `sessionName`**（实测 `undefined`）——会话名显示走 jsonl 的 `title`，不要指望 state。
 - 新建会话不传 `--resume` 即新建，`sessionFile` 形如 `~/.omp/agent/sessions/<slug>/<ts>_<uuid>.jsonl`；slug 如 `--private-tmp-omp-spike-test--`，**不要复刻 slug 算法**，列表按 `session.cwd` 前缀匹配归组。
+- **`--mode rpc-ui` 是 rpc 的宿主 UI 变体（2026-09-17 实测，18.2.2）**：`--mode` 还接受 `rpc-ui`——同一套协议与事件流，差别在 spawn 时 `hasUI=true` 并把工具的 UI context 交给 RPC 桥。
+  可观测差异（`get_state.dumpTools` 对比）：**`rpc-ui` 多一个 `ask` 工具**（`rpc` 11 个 → `rpc-ui` 12 个），即模型可以主动向用户提问；ask 的提问帧是普通 `extension_ui_request`：
+  `{method:"select", title:"你更喜欢哪种水果？", options:["apple (Recommended)","banana","Other (type your own)"], optionDetails:[{description:"苹果"},{description:"香蕉"},{}]}`，
+  回包与普通 select 一致（`{value:"<选中标签>"}`，实测回包后模型正常继续到终态 `agent_end`）——壳侧 `UiRequestCard` + `respond_ui` 的现有实现可直接接住。
+  官方定位（上游 `docs/cli-reference.md`）：*RPC transport with UI extension events enabled*。
+  **壳侧 2026-09-17 已切换**（`runtime.rs` 的 `SpawnOpts::args`，+1 项单测），真机冒烟通过（常规 turn / 审批 / task 子代理全流程）。注意 `rpc-ui` 是 18.2.x 的取值——更老的 omp 可能不认（README 声明「18.x，已验证 18.2.2」）。
+  其余行为待评估（hasUI=true 对 LSP warmup / usage-reserve 确认等分支的影响未逐项核对）。
 - stdin 关闭 → 进程退出 code 0（优雅）。后端 kill 后重建即 `open_session`。
 
 ## 2. 发消息与流式事件（已实测）
@@ -63,6 +77,9 @@ omp --mode rpc --cwd <项目目录> [--resume <sessionId前缀>] [--model <selec
 - `message_update.assistantMessageEvent` 三类 delta：`thinking_delta{delta}` / `toolcall_delta{delta}`（参数 JSON 字符串拼片）/ `text_delta{delta}`，各带 `contentIndex` + `partial`（当前完整块，可直接用 partial 覆盖渲染，容错率高）。
 - `toolcall_end.toolCall = {id, name, arguments, partialArgs, streamIndex, intent?}`；`message_end.message` 即完整 assistant 块（含 `usage{input,output,cacheRead,cacheWrite,totalTokens,cost} / duration / ttft / responseId`）——状态条数据源。
 - jsonl 文件是同一语义的落盘版：`message{role:user/assistant/toolResult/fileMention, content:[{type:text/thinking/toolCall}]}` + `custom{tool_execution_start…}` + `title/model_change/thinking_level_change/session_exit`。历史回放优先用 RPC `get_messages_page`（分页、防大帧），离线列表用扫文件读头。
+- **子代理帧默认订阅 off，要显式打开**（2026-09-17 实测，18.2.2）：发 `{id,type:"set_subagent_subscription",level:"progress"}` → `{id,type:"response",command:"set_subagent_subscription",success:true,data:{level:"progress"}}`（id 正常回显）。
+  此后 `task` 工具 spawn 子代理时逐帧转发：`subagent_lifecycle`（一次 spawn 两条：`started` → `completed`/`failed`/`aborted`；**`description` 实测只在 completed 帧上出现**，`started` 只有 `agent`）与 `subagent_progress`（payload 带 `AgentProgress`：status / currentTool / tokens / toolCount…，实测一次 scout 调研转发 14 条）。
+  `"events"` 档再加完整的 `subagent_event`。壳侧在 spawn 握手时订阅 `"progress"`，回执由 `classify` 的 `FrameAction::Swallow` 本地消化（旧版 omp 不认此命令的失败回包也不进会话流）。
 
 ## 3. 切模型 / 切思考档（已实测）
 
@@ -98,6 +115,7 @@ omp --mode rpc --cwd <项目目录> [--resume <sessionId前缀>] [--model <selec
 | 3 | 双开同一会话（TUI + app） | 未测 | V1 文档警告 + 后开只读提示（§12 设计稿） |
 | 4 | 上游协议漂移（`can1357` fork vs 主仓版本） | 持续风险 | 启动时 `negotiate_protocol` + `--version` 记录；`unknown command` 回包 `id:undefined`，解析层不硬依赖 id 回显 |
 | 5 | `set_session_name` 是否污染远端标题 | 未测 | V1 不用该命令，改名只写覆盖层 notes |
+| 6 | plan / goal / vibe 模式无 RPC 原语（只能 TUI，plan 另有 ACP 一条线） | 上游修复推进中、均未合入（`#7439` 拆分栈 / `#7529` draft；`main` 尚无） | 规划期用 `--plan-yolo` 启动参数缓解（无审批，见 §1）；壳侧按 `get_state.data.mode` 做能力探测，界面如实标注「等 omp 上游」 |
 
 ## 7. 最小可用命令表（V1 后端照此实现）
 

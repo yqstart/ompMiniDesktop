@@ -392,6 +392,22 @@ describe("实时流：本地命令与计划事件", () => {
   expect(msgs[1]).toMatchObject({ kind: "divider", text: "上下文已压缩" });
  });
 
+ it("子代理 lifecycle 落成起止行，progress 高频帧不渲染", () => {
+  const msgs = replay([
+   { type: "subagent_lifecycle", payload: { id: "S1", agent: "scout", status: "started", description: "调研 A 模块", index: 0 } },
+   { type: "subagent_progress", payload: { id: "S1", agent: "scout", index: 0, progress: { status: "running", toolCount: 3 } } },
+   { type: "subagent_lifecycle", payload: { id: "S1", agent: "scout", status: "completed", index: 0 } },
+   { type: "subagent_lifecycle", payload: { id: "S2", agent: "reviewer", status: "failed", index: 1 } },
+   { type: "subagent_lifecycle", payload: { id: "S3", agent: "task", status: "started", index: 2 } },
+  ]);
+  expect(msgs.map((m) => (m.kind === "divider" ? m.text : m.kind))).toEqual([
+   "子代理 scout 启动：调研 A 模块",
+   "子代理 scout 完成",
+   "子代理 reviewer 失败",
+   "子代理 task 启动",
+  ]);
+ });
+
  it("command_output 渲染成 command 块（原文透传，不解析内容）", () => {
   const msgs = replay([
    { type: "command_output", text: "Advisor is enabled (openai/gpt-5.6). Context: 0 / 100 tokens (0%)." },
