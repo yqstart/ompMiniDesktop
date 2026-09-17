@@ -201,6 +201,55 @@ pub fn dir_exists(dir: &str) -> bool {
     Path::new(dir).is_dir()
 }
 
+/// 一个 git worktree（`git worktree list --porcelain` 的解析结果）。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeEntry {
+    pub path: String,
+    pub branch: Option<String>,
+    pub head: Option<String>,
+    /// 主 worktree（= 仓库主目录；porcelain 输出第一块，git 的约定）。
+    pub main: bool,
+}
+
+/// 解析 `git worktree list --porcelain`：
+/// 每块以 `worktree <path>` 开头，随后 `HEAD <sha>`、`branch refs/heads/<name>`
+/// （detached 时无 branch 行）、可选 `bare` / `locked` / `prunable`；块间空行。
+pub fn parse_worktrees(out: &str) -> Vec<WorktreeEntry> {
+    let mut list: Vec<WorktreeEntry> = vec![];
+    for line in out.lines() {
+        let line = line.trim_end();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(p) = line.strip_prefix("worktree ") {
+            list.push(WorktreeEntry {
+                path: p.trim().to_string(),
+                branch: None,
+                head: None,
+                main: list.is_empty(),
+            });
+            continue;
+        }
+        let Some(last) = list.last_mut() else { continue };
+        if let Some(h) = line.strip_prefix("HEAD ") {
+            last.head = Some(h.trim().to_string());
+        } else if let Some(b) = line.strip_prefix("branch refs/heads/") {
+            last.branch = Some(b.trim().to_string());
+        }
+    }
+    list
+}
+
+/// 列出一个仓库的全部 worktree（含主目录）。非仓库 / git 不可用返回空表——
+/// 调用方按「只有主目录」处理，不做特殊错误态。
+pub async fn list_worktrees(git: &str, dir: &str) -> Vec<WorktreeEntry> {
+    match run_git(git, dir, &["worktree", "list", "--porcelain"]).await {
+        Ok(out) => parse_worktrees(&out),
+        Err(_) => vec![],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,6 +303,88 @@ mod tests {
     fn dir_exists_matches_filesystem() {
         assert!(dir_exists("."));
         assert!(!dir_exists("/no/such/dir/omp-mini"));
+    }
+
+    #[test]
+    fn parse_worktrees_reads_blocks() {
+        let out = "\
+worktree /repo
+HEAD 1a2b3c4d
+branch refs/heads/main
+
+worktree /repo.wt/feat
+HEAD 5e6f7a8b
+branch refs/heads/feat/x
+
+";
+        let list = parse_worktrees(out);
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].path, "/repo");
+        assert_eq!(list[0].branch.as_deref(), Some("main"));
+        assert!(list[0].main, "第一块是主 worktree");
+        assert_eq!(list[1].path, "/repo.wt/feat");
+        assert_eq!(list[1].branch.as_deref(), Some("feat/x"), "分支名保留斜杠");
+        assert!(!list[1].main);
+    }
+
+    #[test]
+    fn parse_worktrees_detached_and_extras() {
+        let out = "\
+worktree /repo
+HEAD 1a2b3c4d
+branch refs/heads/main
+locked reason
+
+worktree /repo.wt/det
+HEAD 5e6f7a8b
+detached
+prunable gitdir file points to non-existent location
+
+";
+        let list = parse_worktrees(out);
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[1].branch, None, "detached 块没有分支行");
+        assert_eq!(list[1].head.as_deref(), Some("5e6f7a8b"));
+        assert_eq!(parse_worktrees(""), vec![]);
+        assert_eq!(parse_worktrees("garbage line\n").len(), 0, "没有 worktree 块就不产出行");
+    }
+
+    /// 真实仓库：`git worktree add` 后 list 能同时看到主目录与新增 worktree。
+    /// CI 上没装 git 时静默跳过。
+    #[tokio::test]
+    async fn list_worktrees_reads_a_real_repository() {
+        let Some(git) = git_bin().await else { return };
+        let base = std::env::temp_dir().join(format!("omp-mini-wt-{}", std::process::id()));
+        let dir = base.join("repo");
+        let wt = base.join("repo.wt");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&dir).unwrap();
+        let d = dir.to_string_lossy().to_string();
+        for args in [
+            vec!["init", "-q"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "omp-mini-test"],
+        ] {
+            run_git(&git, &d, &args).await.unwrap();
+        }
+        std::fs::write(dir.join("a.txt"), "a").unwrap();
+        run_git(&git, &d, &["add", "a.txt"]).await.unwrap();
+        run_git(&git, &d, &["commit", "-qm", "init"]).await.unwrap();
+
+        // 非仓库目录：空表而不是报错
+        let plain = base.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        assert!(list_worktrees(&git, &plain.to_string_lossy()).await.is_empty());
+
+        let wt_s = wt.to_string_lossy().to_string();
+        run_git(&git, &d, &["worktree", "add", "-q", "-b", "feat-wt", &wt_s]).await.unwrap();
+        let list = list_worktrees(&git, &d).await;
+        assert_eq!(list.len(), 2, "主目录 + 新 worktree：{list:?}");
+        assert!(list[0].main);
+        assert_eq!(list[1].branch.as_deref(), Some("feat-wt"));
+        assert!(list[1].path.ends_with("repo.wt"), "worktree 路径：{:?}", list[1].path);
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// 真实仓库端到端：非仓库降级 → init/commit 后认分支 → 改动文件后判脏。

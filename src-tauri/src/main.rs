@@ -1,11 +1,10 @@
 mod commands;
-mod context;
 mod git_info;
 mod memories;
+mod models_config;
 mod overlay;
 mod providers;
-mod quota;
-mod runtime;
+mod pty;
 mod session_scan;
 mod settings;
 mod usage;
@@ -18,11 +17,9 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
-            let state = load_state(&app.handle());
+            let state = load_state(app.handle());
             app.manage(state);
             Ok(())
         })
@@ -39,36 +36,16 @@ fn main() {
             relocate_project,
             list_sessions,
             list_archived_sessions,
-            search_sessions,
-            create_session,
-            open_session,
-            archive_session,
-            unarchive_session,
-            delete_session,
             archive_sessions,
             unarchive_sessions,
             delete_sessions,
-            rename_session_note,
-            get_history,
-            send_message,
-            steer_message,
-            follow_up_message,
-            compact_session,
-            branch_session,
-            run_slash,
-            read_image_file,
-            check_paths,
-            complete_path,
-            stop_session,
-            approve,
-            respond_ui,
-            set_model,
-            set_thinking,
-            get_session_runtime,
-            get_global_approval,
-            set_global_approval,
-            set_session_approval,
             get_git_info,
+            list_workspaces,
+            create_worktree,
+            pty::pty_spawn,
+            pty::pty_write,
+            pty::pty_resize,
+            pty::pty_kill,
             providers::list_providers,
             providers::get_provider_login,
             providers::start_provider_login,
@@ -85,12 +62,19 @@ fn main() {
             memories::delete_memory_file,
             memories::delete_memory_project,
             usage::get_usage_stats,
-            quota::get_provider_usage,
-            context::get_context_breakdown,
             settings::get_omp_settings,
             settings::set_omp_setting,
-            settings::reset_omp_setting
+            settings::reset_omp_setting,
+            models_config::read_models_config,
+            models_config::write_models_config
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // 正常退出路径：把全部终端 omp 进程收掉（崩溃残留接受为已知边界）。
+            if let tauri::RunEvent::Exit = event {
+                let state = app.state::<AppState>();
+                pty::kill_all(&state.pty);
+            }
+        });
 }

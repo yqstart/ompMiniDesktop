@@ -1,34 +1,28 @@
 # ompMiniDesktop
 
-oh-my-pi（`omp`）的极简桌面端 —— 把终端里的 agent 会话装进一个安静的两栏界面：
-选项目 → 开会话 → 提问 → 审批 → 切模型再问。
+oh-my-pi（`omp`）的极简桌面端 —— 左侧项目 / 分支树，右侧 omp 终端标签页：
+选工作区 → 开终端 → 在 omp 的 TUI 里干活，**每个终端就是一个会话**。
 
 **许可证：[MIT](LICENSE)** · 纯开源免费
 
 > ompMiniDesktop is a minimal desktop shell for [oh-my-pi](https://github.com/ldx/oh-my-pi)
-> (`omp`): projects + sessions over a long-lived `omp --mode rpc-ui` child process,
-> with streaming output, inline approvals, and model / thinking-level switching.
-> UI switchable between Chinese and English; English summary below.
+> (`omp`): a left sidebar of projects and git worktrees, and a right pane of omp terminals —
+> each one an interactive omp TUI session running in a real PTY. Sessions stay in
+> `~/.omp/agent/sessions/`; the app only keeps a light overlay (projects, archive flags, notes).
+> UI switchable between Chinese and English.
 
 ---
 
 ## 功能概览
 
-- 项目：添加本地目录、移除（仅解绑）、目录缺失标记与重定位
-- 会话：新建、打开（`--resume` 恢复）、归档/取消归档（只读横幅）、删除（二次确认，不可恢复）；会话内容搜索；已归档对话集中管理（恢复 / 删除）
-- 输出渲染：用户气泡 / 流式 Markdown / 思考折叠 / 工具调用一行式痕迹（图标 + 动词 + 文件 + 增删行数，可展开看参数与输出，失败自动展开）/ 计划卡 / 系统分隔线 / 子代理起止行
-- 输入框：`@文件` 提及（芯片 + 路径校验）、图片附件（粘贴 / 拖拽 / 选文件）、`/` 命令补全（omp 命令面 + 技能）、上下文容量环、用量限额入口、模型 / 思考档 / 审批切换、流式中排队与转向
-- 权限：全局三档（每次询问 `always-ask` / 写入询问 `write` / 自动通过 `yolo`）+ 会话级覆盖；工具执行前内联审批卡（允许一次 / 总是允许本会话 / 拒绝）
-- 切换：模型选择器（搜索 + provider 分组 + context/thinking/images 角标）/ 思考档选择器（按模型可用档过滤）
-- 设置页（六个页签）：通用（omp 常用设置 40 项）、供应商、模型、记忆、使用统计、已归档对话，外加 omp 诊断（路径/版本/agentDir + 手动指定路径）与应用更新——**除「通用」「供应商」「模型」三个页签外一律不写 omp 状态**（通用写全局 `config.yml` 白名单键；供应商写凭证库；模型写 `modelRoles` 与失败转移链；记忆只删文件；使用统计只读会话 jsonl）
-  - 供应商：OAuth 登录 / 登出（走 `omp auth-broker`，凭证写进 omp）
-  - 模型：模型角色分配（omp 内置 9 个角色 + 自定义角色 → 模型，写 `modelRoles`）、失败转移链（`retry.fallbackChains` + 两个配套开关）、可用模型目录（只读，按供应商分组）
-  - 记忆：omp 项目记忆（`<agentDir>/memories/` 下按项目一份）的清单、Markdown 预览与删除（单文件 / 整目录；只删文件，不写 omp）
-  - 使用统计：本机会话 jsonl 的 token / 费用 / 工具 / 时段聚合（只读）
-- 界面语言（跟随系统 / 中 / EN）与皮肤（跟随系统 / 深色 / 浅色）：左栏底部「设置」行右侧的两个分段控件，纯展示层偏好，两处都不重复放；语言跟随系统时按系统语言自动选中英（`zh*` → 中文）
-- 应用内更新：GitHub Release `latest.json` + 签名校验（见「应用内更新」节）
+- **项目 / 工作区**：添加本地目录、移除（仅解绑）、目录缺失标记与重定位；每个项目下列出主目录与全部 git worktree（分支名 + `worktree` 徽章），「新建 worktree」按分支创建（走 `omp worktree add`，clone-first，目录在 `~/.omp/wt/`）。
+- **终端**：每个标签页 = 一个跑在 PTY 里的 `omp` 交互式会话；多标签、`⌘T` 新建 / `⌘W` 关闭 / `⌘1..9` 切换；关闭运行中的终端二次确认（防误杀进行中的 agent）；进程退出后显示退出码并可重启；omp 的会话名经 OSC 标题更新到标签页。
+- **会话弹窗**：项目行的「会话」入口列出该项目（含全部 worktree）的会话——点击在新终端 `omp --resume` 接着聊；行内归档 / 恢复 / 删除（删除二次确认）。
+- **已归档对话**（设置 ›）：归档会话的统一管理面（不受列表扫描窗口限制，按项目分组），「打开」= 恢复并在终端里继续；删除真删 jsonl。
+- **设置页（五个页签）**：通用（omp 常用设置 41 项：含工具审批档、上下文与压缩、工具开关、LSP、记忆后端、任务并发等）、**模型**（omp 模型相关的唯一管理面：我的模型 → 供应商 → 模型角色 → 失败转移；「添加供应商」弹窗先选提供商（可搜索、已配置置顶）——登录型走 `omp auth-broker`（API key / OAuth），首项「自定义」写 `models.yml`；「挑选模型」弹窗带搜索过滤，星标进「我的模型」）、记忆（omp 项目记忆的查看与删除）、使用统计（本机会话 jsonl 的 token / 费用聚合）、已归档对话；外加 omp 诊断（路径 / 版本 / agentDir + 手动指定路径）与应用更新。
+- **界面语言**（跟随系统 / 简体中文 / English）与**皮肤**（跟随系统 / 深色 / 浅色）：左栏底部「设置」行右侧的两个分段控件，纯展示层偏好；终端配色跟随皮肤。
 
-**明确不做**：自动化/定时任务、插件/Skill/MCP/Hook 管理、主题市场、云同步、多窗口协作、终端 PTY 仿真、diff 合并编辑器。
+**明确不做**：编辑器 / 文件树 / diff 审查 / 内置浏览器 / SSH / 移动端 / PR 集成 / 终端滚动缓冲持久化 / 分屏 / 多窗口。
 
 ---
 
@@ -39,12 +33,13 @@ oh-my-pi（`omp`）的极简桌面端 —— 把终端里的 agent 会话装进�
 | `omp`（oh-my-pi） | 18.x（已验证 18.2.2） |
 | Node.js | 22+ |
 | pnpm | 11+ |
-| Rust | stable（已验证 1.97）+ `cargo-tauri` |
-| `git`（可选） | 任意版本；仅用于输入框上方展示当前分支，缺失时那里显示「非 Git 目录」，不影响任何功能 |
-| 系统 | macOS arm64 为已验证平台；发布工作流同时构建 macOS x64 / Linux x64 / Windows x64 产物（其余平台未经验证） |
+| Rust | stable（已验证 1.97）+ 本地 `@tauri-apps/cli`（`pnpm tauri:*`） |
+| `git`（可选） | 任意版本；工作区树与分支展示用到，缺失时只显示项目主目录，不影响开终端 |
+| 系统 | macOS arm64 为已验证平台；发布工作流同时构建 macOS x64 / Linux x64 / Windows x64 产物 |
 
 > GUI 启动的 PATH 常不含 `/opt/homebrew/bin`：app 会先问登录 shell（`command -v omp`），
-> 再试已知前缀，仍找不到可在设置页手动指定路径（存 overlay）。
+> 再试已知前缀，仍找不到可在设置页手动指定路径（存 overlay）。**终端进程也会用登录
+> shell 的 PATH**——从 Dock 启动的 app 里开的终端，`git` / `node` 一样找得到。
 
 ---
 
@@ -62,15 +57,15 @@ pnpm tauri:dev
 ```bash
 pnpm dev            # 纯前端
 pnpm build          # tsc + vite 构建
-pnpm check          # 全套：typecheck + lint + test + e2e:ipc + e2e:rpc
+pnpm check          # 全套：typecheck + lint + test + e2e:ipc
 pnpm lint           # eslint（flat config）
-pnpm e2e:rpc        # fake-omp 驱动的行为级端到端（握手/审批双分支/多工具/中断）
 ```
 
 仅 Rust 侧检查：
 
 ```bash
-cargo test --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path src-tauri/Cargo.toml                 # 单测（含真实 PTY 回环）
+cargo test --manifest-path src-tauri/Cargo.toml -- --ignored    # 慢测试：真实 omp TUI 冒烟等
 ```
 
 本机发布构建（仅当前系统）：
@@ -85,8 +80,8 @@ pnpm tauri:build    # 产物见 src-tauri/target/release/bundle/
 ## 应用内更新
 
 - 更新源：GitHub Release 的 `latest.json`（Tauri updater 标准链路，需签名校验）。
-- 触发：启动后静默检查一次（有更新只点亮顶栏入口，不打断）；设置页「应用更新」可手动检查。
-- 行为：有更新弹「立即更新 / 稍后更新」；下载完成后可「立即重启 / 稍后重启」（稍后则下次启动生效）；稍后过的版本本轮不再弹窗，顶栏入口常驻。
+- 触发：启动后静默检查一次（有更新在左栏「设置」入口点亮小点，不打断）；设置页「应用更新」可手动检查。
+- 行为：有更新弹「立即更新 / 稍后更新」；下载完成后可「立即重启 / 稍后重启」（稍后则下次启动生效）；稍后过的版本本轮不再弹窗。
 - 发版流程：打 `v*` tag 推送 → GitHub Actions Release 工作流多平台打包并生成 `latest.json`。
 
 > 首次正式发版前必须先配签名，否则 updater 会拒绝安装：
@@ -103,31 +98,24 @@ pnpm tauri:build    # 产物见 src-tauri/target/release/bundle/
 ## 架构速览
 
 ```
-omp 子进程（per 会话长驻，--mode rpc-ui）
-  stdout JSONL → Rust 行解析 / rpc_chunk 重组 → omp-event://<sessionId>
-                                       └→ 状态机 → omp-status://<sessionId>
-前端：事件 → lib/viewmsg.ts + lib/mergeEvents.ts 归一合并 ViewMsg → Zustand eventsBySession → 首屏 200 条增量渲染（Markdown + 代码高亮）
-会话真相：~/.omp/agent/sessions/<slug>/*.jsonl（PI_CODING_AGENT_DIR 可覆盖）
-app 覆盖层：$APPDATA/omp-mini/overlay.json（项目列表/归档/备注/会话级权限）
+左栏：list_workspaces（项目 × `git worktree list --porcelain`；创建走 `omp worktree add`）
+右侧：xterm.js ← Tauri Channel ← PTY 读线程（增量 UTF-8 解码）← `omp --cwd <dir>`（交互式 TUI）
+      键盘 pty_write / 尺寸 pty_resize / 关闭 pty_kill →
+会话：~/.omp/agent/sessions/<slug>/*.jsonl（TUI 自己写；壳侧弹窗读同一份真相）
+覆盖层：$APPDATA/omp-mini/overlay.json（项目列表 / 归档标记 / 备注 / ompPath）
 ```
 
-> 用 `rpc-ui` 而非 `rpc`：omp 为「有 UI 的宿主」单独出的 RPC 变体（`hasUI=true`），
-> 差别是会话会挂上 `ask` 工具（模型能主动向用户提问），提问走既有的 `extension_ui_request` 桥。
+- 终端是**真 PTY**（Rust `portable-pty`）：壳侧不解析协议、不翻译输出，字节流原样进 xterm；
+  审批、切模型、压缩、`/` 命令全部在 omp 自己的 TUI 里完成。
+- 工作区 = 项目主目录 + 全部 git worktree（分支名展示）；worktree 里产生的会话、用量与
+  记忆按项目归属（壳侧用 `git worktree list` 把两者的路径关联起来）。
+- 会话「继续」= 新终端 `omp --resume <id>`；会话列表来自 `list_sessions`（jsonl 扫描，
+  有扫描窗口；归档管理面不受窗口限制）。
+- 供应商 / 设置 / 用量这类 omp 状态，壳侧一律走 omp 自己的 CLI（`omp auth-broker`、
+  `omp config`、`omp usage`），不直读凭证库、不写配置文件。
 
-- 完成信号以 `agent_end(isTerminal !== false)` 为准；`prompt` 的即时 ack 只代表接受。
-- 流式中 composer 只允许停止（`abort`），不排队。
-- 审批线序：`toolcall_end` → `tool_execution_start` → `extension_ui_request{select}`；
-  通过回 `value:"Approve"`，拒绝回 `cancelled:true`（turn 正常结束，不是中断）。
-- 切模型发 `set_model{provider, modelId}`（两个字段，非 selector 字符串）；
-  切思考档发 `set_thinking_level{level}`。
-- 供应商页（与「通用」「模型」同属会写 omp 状态的三个页签）：登录 / 登出走 `omp auth-broker` 子进程（RPC 模式在「一个供应商都没登录」时起不来），
-  输出经 `omp-provider://login` 推全量快照；角色分配走 `omp config get/set modelRoles`（record 只能整表写，读-改-写 + 回读）。
-- 记忆页（只列 / 读 / 删，不写 omp）：omp 的项目记忆在 `<agentDir>/memories/` 下按 cwd 编码成目录名（与 sessions 的编码不是一套），
-  目录内是 omp 后台整理写出的 Markdown（`MEMORY.md` / 摘要 / `raw_memories.md` / `rollout_summaries/` / `skills/`）；
-  壳侧没有写入路径——上游没有 `omp memory` 这类 CLI，写记忆是 omp 自己的事。
-
-详见 [`docs/v1-design.md`](docs/v1-design.md)（产品冻结稿）、
-[`docs/rpc-memo.md`](docs/rpc-memo.md)（RPC 实测协议备忘）、
+详见 [`docs/v11-schedule.md`](docs/v11-schedule.md)（现行冻结设计）、
+[`docs/v1-design.md`](docs/v1-design.md) 与 [`docs/rpc-memo.md`](docs/rpc-memo.md)（V1–V10 历史存档）、
 [`design-system/MASTER.md`](design-system/MASTER.md)（设计 token）。
 
 ---
@@ -137,24 +125,25 @@ app 覆盖层：$APPDATA/omp-mini/overlay.json（项目列表/归档/备注/会�
 | 现象 | 修复 |
 |---|---|
 | 启动横幅「未找到可用的 omp」 | 安装 oh-my-pi，或把 `omp` 放到 PATH/`/opt/homebrew/bin`，或设置页指定路径 |
-| 「模型目录加载失败」 | 点模型选择器刷新按钮；检查网络 |
-| 项目「目录缺失」 | 重定位到新路径，或移除项目（会话历史仍可回放） |
-| 会话「已损坏，可删除」 | jsonl 头部解析失败，不阻塞列表，直接删除 |
-| 协议漂移（omp 大版本升级后事件对不上） | app 记录 `omp --version`；未知事件只告警不崩，先降级用历史回放 |
+| 终端里 `command not found` / 找不到 node | 终端进程的 PATH 取登录 shell 的探测结果；确认登录 shell 里能跑（`zsh -ilc 'command -v node'`） |
+| 项目「目录缺失」 | 重定位到新路径，或移除项目（会话归档保留） |
+| 会话「已损坏」 | jsonl 头部解析失败，不阻塞列表，可在弹窗或归档页删除 |
+| 新建 worktree 报「already checked out」 | 该分支已在某个工作区（主目录或另一 worktree）检出——直接点那个工作区行即可 |
+| 打开的终端没有响应 | 终端进程退出后浮层会给「重启」；或点 `×` 关闭后重开（运行中关闭会先确认） |
 
 ---
 
 ## English summary
 
-Minimal Tauri v2 + React desktop shell for `omp`: manage projects/sessions,
-stream agent output (text / thinking / tool rows / plan cards / subagent lines), approve tool calls inline,
-and switch models / thinking levels mid-session. Sessions stay in
-`~/.omp/agent/sessions/`; the app only keeps a light overlay
-(projects, archive flags, notes, per-session approval).
-Settings ships six tabs — General (40 curated omp settings), Providers, Models
-(roles + fallback chains), Memories, Usage stats, Archived sessions — plus omp
-diagnostics and in-app updates. Only the General / Providers / Models tabs write
-omp state (global `config.yml`, credentials, `modelRoles`); everything else is read-only.
+Minimal Tauri v2 + React desktop shell for `omp`: a left sidebar of projects and git
+worktrees, and a right pane of omp terminals — each tab is an interactive `omp` TUI
+session running in a real PTY, so approvals, model switching and slash commands happen
+where they always did: inside omp. A per-project session popup lists chats (click to
+resume in a new terminal via `omp --resume`; archive / restore / delete inline), and
+Settings ships six tabs — General (41 curated omp settings), Providers, Models (roles +
+fallback chains), Memories, Usage stats, Archived chats — plus omp diagnostics and
+in-app updates. Only the General / Providers / Models tabs write omp state (global
+`config.yml`, credentials, `modelRoles`); everything else is read-only.
 Contributions welcome — please read [CONTRIBUTING.md](CONTRIBUTING.md) first,
 and report vulnerabilities privately per [SECURITY.md](SECURITY.md).
 

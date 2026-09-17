@@ -462,7 +462,9 @@ pub(crate) async fn run_omp_in(
     }
 }
 
-fn omp_bin(state: &tauri::State<'_, AppState>) -> Result<String, CmdError> {
+/// omp 可执行文件路径（`discover_omp_path` 的唯一入口）。`pub(crate)`：`models_config.rs`
+/// 的预校验也要跑 omp 子进程，错误文案与这里保持一致。
+pub(crate) fn omp_bin(state: &tauri::State<'_, AppState>) -> Result<String, CmdError> {
     crate::commands::discover_omp_path(state).ok_or_else(|| {
         cmd_err("OMP_MISSING", "未找到 omp，无法管理供应商".into(), Some("请先在设置 › 通用里指定 omp 路径".into()))
     })

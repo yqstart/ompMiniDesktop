@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Layers, Loader, Refresh, Sliders, Star } from "reicon-react";
+import { Loader, Refresh, Sliders, Star } from "reicon-react";
 import { api } from "@shared/api";
 import type { FallbackChainsInfo, ModelInfo, ModelRolesInfo } from "@shared/types";
 import { useApp } from "../../stores/app";
-import { favoriteEntries, toggleFavorite } from "../../lib/favoriteModels";
+import { candidateModels, myModelEntries, toggleMyModel } from "../../lib/myModels";
 import { fmt } from "../../lib/locale";
-import { fmtContextWindow } from "../../lib/modelNames";
 import { splitSelector, withLevel } from "../../lib/modelSelector";
 import { roleLabel } from "../../lib/roleNames";
 import { thinkingLevelsOf, THINKING_ORDER } from "../../lib/thinking";
@@ -13,26 +12,29 @@ import { useText } from "../../lib/useText";
 import { useDropdown } from "../../lib/useDropdown";
 import { FallbackChainsSection } from "./FallbackChains";
 import { ModelPickList } from "./ModelPickList";
+import { ProvidersSection } from "./ProvidersSection";
+import { StarToggle } from "./StarToggle";
 
 /**
- * 设置 › 模型：omp 的 **model roles**（角色 → 模型 + 思考档）、**失败转移链**
- * （`retry.fallbackChains`）与**可用模型目录**（只读）。
+ * 设置 › 模型：omp 模型相关的**唯一管理面**（V12b 把原「供应商」页签整体并了进来）。
+ * 区块顺序 = 使用动线：**我的模型 → 供应商 → 模型角色 → 失败转移**。
  *
- * 口径（实现依据见 `src-tauri/src/providers.rs` 头注释）：
- * - 角色写的是 **omp 全局配置**（`omp config set modelRoles`，record 只能整表写，
- *   后端是「读 → 改一键 → 写回」并回读），未配置的角色按 omp 自己的回退规则解析，本页不复制那套规则；
- *   角色值可带 `:思考档` 后缀（`provider/model:max`），档位候选按该模型声明的档裁剪；
- * - 失败转移链（`retry.fallbackChains`）是同一层配置：模型请求失败时由链上的备用模型接手，
- *   区块内见 `FallbackChains.tsx` 的口径说明；
- * - 「可用模型」= omp 当前可用的模型（有凭证或免钥的供应商），也是角色 / 转移目标的候选来源；
- *   这份目录与输入框 `ModelPicker` **共用同一份 store**（同一次刷新，两处同步）。
- *
- * 登录 / 登出在「供应商」页签（本页不碰凭证）。
+ * 口径：
+ * - **我的模型**（本应用偏好，localStorage；`src/lib/myModels.ts`）是「小范围」的唯一开关：
+ *   挑过之后，本页**模型角色**与**失败转移目标**的候选只列这些（`candidateModels`）；
+ *   一个都没挑时列全部可用模型（不挡新人）。**不写 omp 的 `enabledModels`**——omp 终端里
+ *   `/model` 的可选范围不受影响。挑选入口 = 供应商行的「挑选模型」弹窗（V12c 起不再有
+ *   平铺的「可用模型」目录——目录在弹窗里按供应商列出，带搜索过滤）。
+ * - 模型角色写 omp 全局配置（`omp config set modelRoles`，record 整表读写 + 回读），未配置的
+ *   角色按 omp 自己的回退规则解析，本页不复制那套规则；角色值可带 `:思考档` 后缀，
+ *   档位候选按该模型声明的档裁剪。
+ * - 失败转移链（`retry.fallbackChains`）与角色同层，口径见 `FallbackChains.tsx`。
+ * - 供应商（登录型 + 自定义）合并成一个「添加供应商」弹窗：登录型走 `omp auth-broker`
+ *   （凭证进 omp 凭证库），自定义写 `<agentDir>/models.yml`——见 `ProvidersSection.tsx`。
  */
-
 export function ModelsPanel() {
  const t = useText();
- const { models, set, favoriteModels, setFavoriteModels } = useApp();
+ const { models, set, myModels, setMyModels } = useApp();
  const [roles, setRoles] = useState<ModelRolesInfo | null>(null);
  const [chains, setChains] = useState<FallbackChainsInfo | null>(null);
  const [err, setErr] = useState<string | null>(null);
@@ -91,13 +93,12 @@ export function ModelsPanel() {
   return [...builtin, ...rest];
  }, [roles]);
 
- /** 常用模型（按挑选顺序解析，含已不可用项——设置页要列出来给人清理）。 */
- const entries = useMemo(
-  () => favoriteEntries(favoriteModels, models?.models ?? []),
-  [favoriteModels, models],
- );
- const toggleFavoriteModel = (selector: string) =>
-  setFavoriteModels(toggleFavorite(favoriteModels, selector));
+ /** 目录数组：每次渲染新数组会让下面 useMemo 的依赖失效——按 `models` 记忆。 */
+ const catalog = useMemo(() => models?.models ?? [], [models]);
+ /** 模型选择器的候选（「小范围」的唯一实现点）：我的模型非空 → 只列挑过的；空 → 全部。 */
+ const candidates = useMemo(() => candidateModels(catalog, myModels), [catalog, myModels]);
+ /** 我的模型（按挑选顺序解析，含已不可用项——设置页要列出来给人清理）。 */
+ const entries = useMemo(() => myModelEntries(myModels, catalog), [myModels, catalog]);
 
  return (
   <>
@@ -107,7 +108,48 @@ export function ModelsPanel() {
     </p>
    )}
 
-   {/* 模型角色：把 omp 的 modelRoles 读写给用户 */}
+   {/* 我的模型：本应用偏好；挑过之后下面角色 / 转移的候选只列这些 */}
+   <section aria-label={t.myModelsSection} className="rounded-md border border-border bg-surface p-3.5">
+    <div className="flex items-center gap-2">
+     <Star size={14} aria-hidden className="text-muted" />
+     <h2 className="text-sm font-medium">{t.myModelsSection}</h2>
+     {entries.length > 0 && (
+      <span className="text-[13px] text-muted">{fmt(t.myModelsCount, String(entries.length))}</span>
+     )}
+     {entries.length > 0 && (
+      <button
+       onClick={() => setMyModels([])}
+       className="ml-auto cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+      >
+       {t.myModelsClear}
+      </button>
+     )}
+    </div>
+    <p className="mt-1.5 text-[13px] text-faint">{t.myModelsHint}</p>
+    <div className="mt-2">
+     {entries.length === 0 ? (
+      <p className="py-2 text-[13px] text-muted">{t.myModelsEmpty}</p>
+     ) : (
+      entries.map(({ selector, model }) => (
+       <div key={selector} className="flex items-center gap-2 border-t border-border-soft py-2 first:border-t-0">
+        <StarToggle on name={model?.name ?? selector} onClick={() => setMyModels(toggleMyModel(myModels, selector))} />
+        <span className="min-w-0 flex-1 truncate text-[13px]">{model?.name ?? selector}</span>
+        {model && <span className="shrink-0 font-mono text-xs text-muted">{selector}</span>}
+        {!model && (
+         <span className="shrink-0 rounded border border-warn/40 bg-warn/5 px-1.5 py-0.5 text-xs text-warn">
+          {t.myModelsUnavailable}
+         </span>
+        )}
+       </div>
+      ))
+     )}
+    </div>
+   </section>
+
+   {/* 供应商：添加（登录型 API key / OAuth + 自定义 models.yml）+ 按供应商挑选模型 */}
+   <ProvidersSection />
+
+   {/* 模型角色：把 omp 的 modelRoles 读写给用户（候选 = 我的模型 或 全部） */}
    <section aria-label={t.rolesSection} className="rounded-md border border-border bg-surface p-3.5">
     <div className="flex items-center gap-2">
      <Sliders size={14} aria-hidden className="text-muted" />
@@ -139,7 +181,7 @@ export function ModelsPanel() {
         role={role}
         label={roleLabel(role, t)}
         current={roles.roles[role] ?? null}
-        models={models?.models ?? []}
+        models={candidates}
         onSave={saveRole}
        />
       ))
@@ -150,53 +192,12 @@ export function ModelsPanel() {
    {/* 失败转移：omp retry.fallbackChains（模型请求失败时由备用模型接手）+ 两个配套开关 */}
    <FallbackChainsSection
     info={chains}
-    models={models?.models ?? []}
+    models={candidates}
     roles={roleKeys}
     busy={busy}
     onSaved={setChains}
     onRefresh={() => void refreshAll()}
    />
-
-   {/* 常用模型：本应用偏好（localStorage），挑中的模型才出现在输入框的模型选择器里 */}
-   <section aria-label={t.favoritesSection} className="rounded-md border border-border bg-surface p-3.5">
-    <div className="flex items-center gap-2">
-     <Star size={14} aria-hidden className="text-muted" />
-     <h2 className="text-sm font-medium">{t.favoritesSection}</h2>
-    </div>
-    <p className="mt-1.5 text-[13px] text-faint">{t.favoritesHint}</p>
-    <div className="mt-2">
-     {entries.length === 0 ? (
-      <p className="py-2 text-[13px] text-muted">{t.favoritesEmpty}</p>
-     ) : (
-      entries.map(({ selector, model }) => (
-       <div key={selector} className="flex items-center gap-2 border-t border-border-soft py-2 first:border-t-0">
-        <StarToggle on name={model?.name ?? selector} onClick={() => toggleFavoriteModel(selector)} />
-        <span className="min-w-0 flex-1 truncate text-[13px]">{model?.name ?? selector}</span>
-        {model && <span className="shrink-0 font-mono text-xs text-muted">{selector}</span>}
-        {!model && (
-         <span className="shrink-0 rounded border border-warn/40 bg-warn/5 px-1.5 py-0.5 text-xs text-warn">
-          {t.favoriteUnavailable}
-         </span>
-        )}
-       </div>
-      ))
-     )}
-    </div>
-   </section>
-
-   {/* 可用模型：只读目录（这些就是能分配给角色的候选） */}
-   <section aria-label={t.modelsSection} className="rounded-md border border-border bg-surface p-3.5">
-    <div className="flex items-center gap-2">
-     <Layers size={14} aria-hidden className="text-muted" />
-     <h2 className="text-sm font-medium">{t.modelsSection}</h2>
-    </div>
-    <CatalogSection
-     models={models?.models ?? []}
-     favorites={favoriteModels}
-     onToggleFavorite={toggleFavoriteModel}
-     onRefresh={() => void refreshAll()}
-    />
-   </section>
   </>
  );
 }
@@ -311,11 +312,10 @@ function RoleRow({
       onClick={() => void setLevel(null)}
       aria-pressed={level === null}
       title={t.roleLevelDefaultHint}
-      className={`cursor-pointer rounded-md border px-2 py-0.5 text-[12px] transition-colors duration-100 ${
-       level === null
-        ? "border-accent/50 bg-active text-foreground"
-        : "border-border text-muted hover:bg-hover hover:text-foreground"
-      }`}
+      className={`cursor-pointer rounded-md border px-2 py-0.5 text-[12px] transition-colors duration-100 ${level === null
+       ? "border-accent/50 bg-active text-foreground"
+       : "border-border text-muted hover:bg-hover hover:text-foreground"
+       }`}
      >
       {t.roleLevelDefault}
      </button>
@@ -324,11 +324,10 @@ function RoleRow({
        key={lv}
        onClick={() => void setLevel(lv)}
        aria-pressed={level === lv}
-       className={`cursor-pointer rounded-md border px-2 py-0.5 font-mono text-[12px] transition-colors duration-100 ${
-        level === lv
-         ? "border-accent/50 bg-active text-foreground"
-         : "border-border text-muted hover:bg-hover hover:text-foreground"
-       }`}
+       className={`cursor-pointer rounded-md border px-2 py-0.5 font-mono text-[12px] transition-colors duration-100 ${level === lv
+        ? "border-accent/50 bg-active text-foreground"
+        : "border-border text-muted hover:bg-hover hover:text-foreground"
+        }`}
       >
        {lv}
       </button>
@@ -342,134 +341,5 @@ function RoleRow({
     </div>
    )}
   </div>
- );
-}
-
-/** 只读模型目录：按供应商分组折叠（这些就是能分配给角色的候选）；行尾星标挑选常用模型。顶部过滤框按名 / selector 收窄，命中组一律展开。 */
-function CatalogSection({
- models,
- favorites,
- onToggleFavorite,
- onRefresh,
-}: {
- models: ModelInfo[];
- favorites: string[];
- onToggleFavorite: (selector: string) => void;
- onRefresh: () => void;
-}) {
- const t = useText();
- const [openProvider, setOpenProvider] = useState<string | null>(null);
- const [q, setQ] = useState("");
- const query = q.trim().toLowerCase();
- const list = useMemo(
-  () => (query ? models.filter((m) => `${m.provider}/${m.id} ${m.name}`.toLowerCase().includes(query)) : models),
-  [models, query],
- );
- const groups = useMemo(() => {
-  const m = new Map<string, ModelInfo[]>();
-  for (const x of list) {
-   const g = m.get(x.provider) ?? [];
-   g.push(x);
-   m.set(x.provider, g);
-  }
-  return [...m].sort((a, b) => a[0].localeCompare(b[0]));
- }, [list]);
-
- return (
-  <>
-   <div className="mt-1.5 flex items-center gap-2">
-    <span className="text-[13px] text-faint">
-     {models.length === 0
-      ? t.modelsEmpty
-      : query
-       ? fmt(t.modelsFilteredHint, list.length, groups.length)
-       : fmt(t.modelsHint, models.length, groups.length)}
-    </span>
-    <button
-     onClick={onRefresh}
-     className="ml-auto flex cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover"
-     aria-label={t.refreshModels}
-    >
-     <Refresh size={12} aria-hidden />
-     {t.refresh}
-    </button>
-   </div>
-   <input
-    value={q}
-    onChange={(e) => setQ(e.target.value)}
-    placeholder={t.searchModelPlaceholder}
-    aria-label={t.searchModelLabel}
-    className="mt-1.5 w-full rounded-md border border-border bg-background px-2 py-1 text-[13px] outline-none"
-   />
-   <div className="mt-1">
-    {groups.map(([provider, ms]) => {
-     const open = query !== "" || openProvider === provider;
-     const head = (
-      <>
-       {open ? (
-        <ChevronDown size={12} aria-hidden className="shrink-0 text-muted" />
-       ) : (
-        <ChevronRight size={12} aria-hidden className="shrink-0 text-muted" />
-       )}
-       <span className="font-mono text-xs">{provider}</span>
-       <span className="ml-auto font-mono text-xs text-muted">{ms.length}</span>
-      </>
-     );
-     return (
-      <div key={provider} className="border-t border-border-soft first:border-t-0">
-       {query !== "" ? (
-        /* 过滤态：命中组一律展开，组头退化为静态行（此时折叠没有意义，也不该点了没反应） */
-        <div className="flex w-full items-center gap-1.5 py-1.5 text-left text-[13px]">{head}</div>
-       ) : (
-        <button
-         onClick={() => setOpenProvider(open ? null : provider)}
-         className="flex w-full cursor-pointer items-center gap-1.5 py-1.5 text-left text-[13px] transition-colors duration-100 hover:text-foreground"
-         aria-expanded={open}
-         aria-label={open ? t.catalogCollapse : t.catalogExpand}
-        >
-         {head}
-        </button>
-       )}
-       {open && (
-        <div className="pb-1.5">
-         {ms.map((m) => (
-          <div key={m.selector} className="flex items-center gap-2 py-0.5 pl-4 text-[13px]">
-           <span className="truncate">{m.name}</span>
-           <span className="ml-auto flex shrink-0 gap-1.5 font-mono text-muted">
-            {m.contextWindow ? <span>{fmtContextWindow(m.contextWindow)}</span> : null}
-            {m.input?.includes("image") ? <span>{t.imageCap}</span> : null}
-           </span>
-           <StarToggle
-            on={favorites.includes(m.selector)}
-            name={m.name}
-            onClick={() => onToggleFavorite(m.selector)}
-           />
-          </div>
-         ))}
-        </div>
-       )}
-      </div>
-     );
-    })}
-   </div>
-   {query !== "" && groups.length === 0 && (
-    <div className="p-2 text-[13px] text-muted">{t.noModelMatch}</div>
-   )}
-  </>
- );
-}
-
-/** 常用模型星标：目录行与常用列表共用（on = 已在常用里；再点一次即移出）。 */
-function StarToggle({ on, name, onClick }: { on: boolean; name: string; onClick: () => void }) {
- const t = useText();
- return (
-  <button
-   onClick={onClick}
-   aria-pressed={on}
-   aria-label={fmt(on ? t.favoriteRemoveAria : t.favoriteAddAria, name)}
-   className="shrink-0 cursor-pointer rounded p-0.5 transition-colors duration-100 hover:bg-hover"
-  >
-   <Star size={13} weight={on ? "Filled" : "Outline"} aria-hidden className={on ? "text-accent" : "text-muted"} />
-  </button>
  );
 }

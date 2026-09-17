@@ -3,9 +3,8 @@ import { Archive, ChevronRight, FolderError, Loader, Refresh, Trash2, Undo } fro
 import { api } from "@shared/api";
 import { useApp } from "../stores/app";
 import { groupSessionsByProject } from "../lib/sessions";
-import { pruneDeletedSessions, runSessionBatch } from "../lib/sessionBatch";
-import { loadSessions } from "../lib/sessionList";
-import { openSessionWithHistory } from "../lib/sessionOpen";
+import { runSessionBatch } from "../lib/sessionBatch";
+import { resumeSessionInTerminal } from "../lib/workspaces";
 import { fmt } from "../lib/locale";
 import { useText } from "../lib/useText";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -61,12 +60,7 @@ export function ArchivedSessions() {
   setError(null);
   try {
    const res = await runSessionBatch(kind, ids);
-   if (kind === "delete") {
-    pruneDeletedSessions(ids.filter((id) => !res.failed.some((f) => f.id === id)));
-   }
-   // 本页 + 左栏一起刷新：恢复的会话要立刻回到项目分组里
    setReloadKey((k) => k + 1);
-   await loadSessions();
    if (res.failed.length > 0) {
     const detail = res.failed.map((f) => f.message || f.id).join("；");
     const tpl = kind === "delete" ? t.archivedPartialDelete : t.archivedPartialRestore;
@@ -74,6 +68,26 @@ export function ArchivedSessions() {
    }
   } catch (e) {
    setError(e instanceof Error ? e.message : kind === "delete" ? t.archivedDelete : t.archivedRestore);
+  } finally {
+   setBusy(false);
+  }
+ };
+
+ /** 恢复并在终端里继续（V11）：取消归档 + 新终端 `omp --resume`；
+  *  V11 没有只读回放渲染器，归档会话的「继续」只能回到终端。 */
+ const resumeInTerminal = async (s: SessionView) => {
+  setBusy(true);
+  setError(null);
+  try {
+   const res = await runSessionBatch("unarchive", [s.id]);
+   if (res.failed.length > 0) {
+    setError(fmt(t.archivedPartialRestore, res.failed.map((f) => f.message || f.id).join("；")));
+    return;
+   }
+   resumeSessionInTerminal({ id: s.id, cwd: s.cwd, title: s.title, projectId: s.projectId });
+   setReloadKey((k) => k + 1);
+  } catch (e) {
+   setError(e instanceof Error ? e.message : t.archivedRestore);
   } finally {
    setBusy(false);
   }
@@ -174,7 +188,7 @@ export function ArchivedSessions() {
           {b.rows.map((s) => (
            <div key={s.id} className="flex h-8 min-w-0 items-center gap-2 rounded-lg px-2 transition-colors duration-100 hover:bg-hover/60">
             <button
-             onClick={() => void openSessionWithHistory(s.id)}
+             onClick={() => void resumeInTerminal(s)}
              className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
              aria-label={s.title}
              title={t.archivedOpenHint}

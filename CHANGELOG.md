@@ -4,7 +4,34 @@
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-17
+
+首个公开发布：oh-my-pi 的极简桌面壳——**终端工作区形态**（左侧项目 / 分支树 + 右侧 omp 终端标签页）。
+0.1.0 里程碑（2026-09-15，聊天界面形态）的纪要在文末，其界面相关功能已在 V11 重构中退场。
+
 ### 变更
+
+- **供应商与自定义模型合并成「添加供应商」，挑选模型与添加流程都走**弹窗**，「可用模型」目录退场（V12c）**。「模型」页里原来的「供应商」区块（OAuth 登录 + 挑选）与「自定义模型」区块（models.yml）合成**一个**区块：列表只列已添加的（已配置的登录型供应商 + models.yml 里的块，覆盖型照旧只读），新增统一从「添加供应商」进——**弹窗**第一步是一个**带计数的可搜索提供商选择器**（`omp auth-broker list` 全量 73 家；名称 / id 子串匹配、**已配置的排前面**），**首项固定「自定义」**：选「自定义」进原有的 models.yml 保真编辑表单；选提供商则立即启动 `omp auth-broker login`，上游输出原样透传（API key 直接粘进输入框提交——实测 deepseek 等会真实校验 key；OAuth 型给浏览器链接），**登录成功后就地列出该提供商的模型**（带搜索过滤），星标即加入「我的模型」。
+  - **弹窗化 + 过滤**：行上的「挑选模型」与「添加供应商」/「编辑」都是 `fixed` 全屏遮罩 + 居中卡片的模态（新组件 `DialogShell.tsx`；Esc / 点遮罩 / 右上角关闭）——此前一律行内展开，是因为设置页的 tab 内容区是滚动容器、`absolute` 浮层会被裁掉；`fixed` 不受裁剪，几十个模型 / 73 家提供商配搜索框才用得起来。挑选弹窗与「添加成功后就地挑」共用同一份列表组件（`ProviderModelsList`）：搜索按 id / 名称过滤、**「全选 / 清空」作用于当前过滤结果**、计数 = 已挑 / 全部。
+  - **「可用模型」区块删除**：平铺目录与「我的模型」的星标入口都退场（按用户口径），挑模型现在只在弹窗里（按供应商列出）；「我的模型」区块的空态 / 说明文案随之更新。
+  - 结构：新增 `ProviderPicker.tsx`（搜索选择器）、`CustomProviderEditForm.tsx`（从 `CustomProviders.tsx` 抽出的表单，去掉自带的标题与外框——标题归弹窗）、`DialogShell.tsx`、`ProviderModelsDialog.tsx`；`ProvidersSection.tsx` 重写为「已添加列表 + 两个弹窗」；`CustomProviders.tsx` 删除。登录快照按 `provider` 过滤——刚选完、事件未到时不会被上一次登录的旧快照渲染成「登录失败 / 已添加」。
+  - 字典：删 `providerNotConfigured` / `customSection` / `customHint` / `customRefresh` / `customAdd` / `customEmpty` / `customLoadFailed` / `modelsSection` / `modelsHint` / `modelsFilteredHint` / `modelsEmpty` / `catalogCollapse` / `catalogExpand` / `searchModelPlaceholder` / `searchModelLabel` / `imageCap` / `providersPickHint` / `refreshModels` / `loginOk`（19 键），新增 `providersAdd*` / `providersEmptyAll` / `providersPickTitle` / `providersPickSearch` / `providersPickCount`（13 键）× 2 语言。
+  - **omp 侧零改动**（后端零改动、命令契约不变）：登录仍走 `omp auth-broker`、自定义仍写 `models.yml`、星标仍只进本应用 localStorage——不写 `enabledModels`，终端里 `/model` 的可选范围不受影响。
+  - 验证：`pnpm check` 全绿（66 单测 + `e2e:ipc` 43 命令双向一致）；界面核对（静态构建 + 注入 IPC mock）：页区块只剩「我的模型 / 供应商 / 模型角色 / 失败转移」（无「可用模型」）、挑选弹窗（标题「挑选 X 的模型」、计数「已挑 1 / 3」、搜 `coder` → 1 行、**过滤态全选只加 `opencode-go/qwen3-coder`**、Esc 关闭）、添加弹窗（标题「选择提供商」、计数「20 个提供商」、已配置三家置顶、首项「自定义」）、自定义表单在同一弹窗内换标题（「新的自定义供应商」→ 取消回选择器）、凭据流程（标题「添加 DeepSeek」→ `start_provider_login` → URL / 上游输出 → 提交 key → `done.ok` 刷新目录 → 内联挑选「已挑 1 / 2」→ 「完成」关弹窗）、列表（3 个已配置登录型 + 自定义 `my-gw` + 覆盖型 `deepseek` 只读）、自定义保存的写出文本逐字节核对（原注释与既有块保留、新块 `auth: none` 追加末尾）、失败态显示上游 401 原文、英文界面无中文残留（`Pick a provider` / `Pick models from X` / `1 of 3 picked`）、深浅两套截图。
+
+- **设置页合并为五页签：「供应商」页签并进「模型」页签，模型相关的四块合成一条动线（V12b）**。原「供应商」页签（OAuth 登录）、「模型」页签里的可用模型目录与常用模型、以及自定义模型，现在按使用顺序排进**同一个页签**：**我的模型（挑选结果）→ 供应商（登录 + 按计划「挑选模型」）→ 自定义模型 → 模型角色 → 失败转移 → 可用模型目录**。「供应商」页签删除，设置页 6 → 5 页签。
+  - **「常用模型」升级为「我的模型」**（`src/lib/favoriteModels.ts` → `src/lib/myModels.ts`；localStorage 键 `omp.favoriteModels.v1` 不变——升级不丢已挑的模型）：语义从「输入框（已退场）的收藏」变为**所有模型选择器的候选范围**——挑过之后，模型角色与失败转移目标的候选**只列挑过的**（`candidateModels` 是「小范围」的唯一实现点），一个都没挑时列全部（不挡新人）。**只写本应用 localStorage，不碰 omp 的 `enabledModels`**——实测 `enabledModels` 才是 omp 侧的模型白名单（TUI `/model` 只列白名单内、`[]` = 不限制），本批明确不动它。
+  - **供应商行新增「挑选模型」**：展开该计划（opencode / commandcode…）在模型目录里的全部模型，星标即加入 / 移出「我的模型」，带「全选 / 清空」与计数——「添加计划时直接选我需要的几个，之后配置模型权限只在小范围里选」。
+  - `ProvidersPanel.tsx` → `ProvidersSection.tsx`（去掉页签身份，作为「模型」页里的区块）；`StarToggle` 抽成共享组件（`src/components/settings/StarToggle.tsx`，目录 / 挑选面板 / 我的模型列表共用）；字典删 `tabProviders` 与 `favorites*`（6 键）、新增 `myModels*` / `providersPick*`（11 键）× 2 语言。
+  - 验证：`pnpm check` 全绿（66 项单测，其中 `myModels.test.ts` 6 项覆盖批量增删 / 候选收窄 / 空语义）；界面核对（注入 IPC mock）：页签列表无「供应商」、六区块顺序正确、挑选面板（3 个模型 + 计数）、全选 →「我的模型」3 个且 localStorage 内容正确、角色选择器候选收窄到该计划的 3 个、清空 → 候选回到两组 5 个、目录星标 → 收窄到 1 个。
+
+- **终端工作区重构（V11，颠覆性变更）：右侧从「聊天界面」换成 omp 终端标签页，左栏从「会话列表」换成项目 / 分支树**。聊天渲染（消息流 / 审批卡 / 工具行 / 输入框 / 模型选择器 / 上下文条……）与 RPC 驱动（`omp --mode rpc-ui` 长驻会话、`runtime.rs`）整体退场——这些职责全部回到 omp 自己的 TUI 里执行。壳侧保留并继续负责：项目与工作区管理、会话的列表 / 归档 / 删除、设置页六个页签、omp 诊断与应用更新。
+  - **右侧 = PTY 里的 omp TUI**：xterm.js（`@xterm/xterm` + `addon-fit`）↔ `portable-pty` ↔ `omp --cwd <dir>`。输出经 **Tauri Channel** 直推（高频字节流不走事件系统），Rust 侧做**增量 UTF-8 解码**（保留跨读块的不完整多字节序列，中文 / emoji 不撕裂；坏字节按 8 字节上限 lossy 兜底防卡死）。`TERM=xterm-256color` + `COLORTERM=truecolor`；`PATH` 取登录 shell 的值（GUI 启动的 .app 只有 launchd 的贫瘠 PATH，终端里的 omp 会找不到 git / node）。omp 的 OSC 0/2 标题更新 tab 名。标签栏支持多终端、`＋` 新建、`⌘T` / `⌘W` / `⌘1..9`；关闭运行中的终端走二次确认（防误杀进行中的 agent），退出后给「omp 已退出」浮层（异常退出才带退出码）+ 重启 / 关闭。终端配色从 CSS token（`--term-*` 两套皮肤）运行时读取喂给 xterm，深浅切换跟随 `<html class="dark">`。
+  - **左栏 = 项目 → 工作区（主目录 + git worktree）**：工作区真相 = `git worktree list --porcelain`（手工 `git worktree add` 的也在），创建走 **`omp worktree add`**（借用 clone-first 与 `~/.omp/wt` 管理目录约定），路径固定 `~/.omp/wt/<repo>-<branch-slug>`。项目行悬浮槽位 = 会话弹窗（Clock）与新建 worktree（Nodes，输入过滤本地分支 + 「新建分支」项）。点击工作区行 = 打开 / 聚焦该目录的终端（已有则聚焦，没有则新建）。
+  - **会话收进弹窗**：项目行「会话」入口弹出该项目（含全部 worktree）的会话列表——点击行 = 新终端 `omp --resume <id>` 接着聊；行内「归档 / 恢复」直发（写覆盖层）；「删除」二次确认（真删 jsonl）。设置 ›「已归档对话」保留，其「打开」动作从「只读回放」改为**「恢复并在终端里继续」**（归档 → unarchive → 新终端 resume）。**会话归属扩展到 worktree**：`owner_project` 的匹配集 = 项目路径 ∪ 其 worktree 路径（`ownership_scope`），worktree 里跑的会话归到项目，不再掉「未归属」；使用统计与记忆页同一条口径。
+  - **退场的代码**：`runtime.rs`（RPC 会话进程）、`quota.rs`（用量限额）、`context.rs`（上下文容量）、前端 `components/thread|composer|pickers/*` 与 `lib/{viewmsg,mergeEvents,useSessionEvents,toolLine,mentions,attachments,slashCommands,fileKind,thinking…}` 等约 30 个文件。IPC 契约从 60 个命令收敛到 **41 个**（`e2e:ipc` 自检改为「ipc.ts ↔ main.rs ↔ 实现」**双向**核对，`api.ts` 不再写裸命令名字符串）。前端单测 192 → 45 项（删掉的全是聊天渲染链路的），Rust 单测 89 → 79 项（删 RPC 链路的、新增 PTY / worktree / 归属的）。
+  - **审批档回归通用设置**：原输入框 `PermissionBadge` 的 `tools.approvalMode` 入口随聊天 UI 退场，该键补进设置 › 通用白名单（工具组，三档：每次询问 / 写入时询问 / 全部自动通过），是它现在唯一的图形入口。
+  - **验证**：`pnpm check` 全绿（typecheck + lint + 45 单测 + `e2e:ipc`）；`cargo test` 79 项全绿，含 `pty.rs` 的**真实 PTY 回环**（`/bin/sh` 写读回环 + kill 收尾 + `#[ignore]` 的真实 omp TUI 冒烟）；`git_info` 的 worktree 解析含真实仓库端到端。界面以「vite 页面 + 注入 IPC mock（含 Channel 协议）」核对全流程：工作区树渲染、点工作区开终端、xterm 渲染 PTY 输出（fit 实测 124×41）、多 tab 切换、退出浮层 + 重启、`⌘T` / `⌘W`（运行中确认 / 已退出直关）、会话弹窗列表与归档角标、深浅两套皮肤截图。**真机窗口（Tauri WebView）未做交互级验证**——本机屏幕录制 / 辅助功能权限不可用，PTY 与 omp TUI 的真实链路由 Rust 侧集成测试覆盖（详见 `docs/v11-schedule.md` 完成口径）。
 
 - **omp 子进程改用 `--mode rpc-ui`：解锁 `ask` 工具**。此前跑 `--mode rpc`（工具面 11 个）；`rpc-ui` 是上游为「有 UI 的宿主」出的 RPC 变体（`hasUI=true`），多挂 `ask`——模型能主动向用户提问（多步选择 / 自由输入），提问帧就是普通 `extension_ui_request{method:"select", options, optionDetails}`，`UiRequestCard` + `respond_ui` 的现有实现直接接住（实测：回包后 agent 正常走完一轮）。改动是一行 spawn 参数（`runtime.rs` 的 `SpawnOpts::args`）+ 1 项单测；实测对比与帧形状见 `docs/rpc-memo.md` §1。
 - **updater 签名密钥已生成、公钥已配置**：`pnpm tauri signer generate -w ~/.tauri/omp-mini.key`（无密码）生成的公钥已填入 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`，release 工作流的守卫不再拦。**私钥全文需写入仓库 Secrets `TAURI_SIGNING_PRIVATE_KEY`**（见 README「应用内更新」）——未上传前打 tag 会构建失败（签不出 updater 产物）。
@@ -18,6 +45,11 @@
 
 ### 新增
 
+- **自定义模型接入（设置 ›「供应商」）：把 omp 的 `models.yml` 搬进界面**。自建端点 / OpenAI 兼容网关 / 本地推理服务现在能可视化接入——此前只能手改 `<agentDir>/models.yml`（omp 侧**没有任何 CLI 写入口**：`omp models` 只有 ls / find / refresh，`omp config` 只管 `config.yml`，写文件是唯一路径）。新组件 `src/components/settings/CustomProviders.tsx` + 数据层 `src/lib/customModels.ts`（18 项单测）+ 后端 `src-tauri/src/models_config.rs`（`read_models_config` / `write_models_config` 两个命令，11 项单测；`Switch` 抽成共享组件 `src/components/settings/Switch.tsx`）。
+  - **保真编辑**（前端 `yaml` 包，新依赖已同步 `THIRD-PARTY-NOTICES.md`）：只改被编辑的节点——用户的注释、格式、界面之外的字段（`headers` / `compat` / `modelOverrides` / `cost`…）原样保留；零修改往返逐字节一致（`toString({ flowCollectionPadding: false, lineWidth: 0 })`——默认选项会把 `[text, image]` 重排成 `[ text, image ]`）。**覆盖型块（只有 `modelOverrides` 之类、没有 `models` 列表）界面只读**：界面表达不了那些覆盖语义，编辑等于丢字段（列表里以「覆盖内置 · 手工维护」徽章区分）。
+  - **写入四道闸**（后端）：hash 乐观锁（文件被界面之外改过即拒绝写入，提示重新加载）→ **预校验**（把候选文本写进临时 agentDir 跑一次 `omp models`，stderr 出现 `Failed to load config file models` 就**不落盘**——实测坏配置会让整份文件的自定义 provider 全部失效，而 `omp models` 退出码仍是 0）→ 备份（`$APPDATA/omp-mini/backups/`，按名保留最近 10 份）→ 原子写（同目录 tmp + rename）。
+  - **上游事实（omp 18.2.2 实测，见 `docs/v12-schedule.md`）**：`models.yml` 优先，`models.yaml` 仅在前者缺失时生效（两文件并存时 yaml 被整体忽略）；空文件 / 只有注释同样非法（`Schema error: root: must be an object`），删光所有自定义项后留 `providers: {}`；自定义 provider 的 `apiKey` 对 `openai-completions` 自动注入 `Authorization: Bearer`（实测无需 `authHeader`）；`cost` 块要么省略、要么四字段齐全（`input` / `output` / `cacheRead` / `cacheWrite` 缺一即 schema 错误）。
+  - **验证**：`pnpm check` 全绿（typecheck + lint + 63 项单测 + `e2e:ipc` 43 命令 × 双向一致）；`cargo test` 全绿（lib 75 + bin 86，含 11 项新模块单测与 `#[ignore]` 的真实 omp 预校验集成测试）。界面核对（静态构建 + 注入 IPC mock 驱动）：列表渲染与覆盖型只读、添加 / 编辑 / 删除三次写入的文本逐字节核对（注释与未知字段保留、`apiKey` ↔ `auth: none` 互斥、`input: [text, image]` 保持 flow 风格）、删除确认态、英文界面无漏译。**真机端到端**：把界面产出的文件落到隔离 agentDir，`omp models` 收录该 provider 且 stderr 无告警，`omp -p --model <自定义模型>` 对本地假端点真实对话返回 `pong`（`auth: none` 未注入 Authorization、端点收到的模型名正确）。
 - **输入框 `/` 命令补全：打 `/` 弹出 omp 自己的命令面**。此前 `/` 只是「本地命令直发」的暗号——omp 有哪些命令全靠记。现在输入 `/` 弹出补全面板（数据来自 omp 的 `available_commands_update`，本机 omp 18.2.1 实测 **52 条**：builtin 41 / skill 7 / extension 1 / custom 2 / file 1），可搜索、可键盘导航、选中即补全。新组件 `src/components/composer/SlashMenu.tsx` + 数据层 `src/lib/slashCommands.ts`（16 项单测），字典新增 5 键 × 2 语言。
   - **后端零改动**：omp 在 spawn 握手期就推 `available_commands_update`（实测早于 `negotiate` 回包），后端 `runtime.rs` 早已把它缓存进 `SessionMeta.commands` 并透传；`get_session_runtime` 返回整个 `SessionMeta`，前端 `syncSessionRuntime` 在「订阅建立」与 `open_session` 返回后各补拉一次——命令面本来就已经躺在 store 的 `currentRuntime.commands` 里，只是没人读。本次只补了「会话开着时命令面又变了」这一路：`useSessionEvents` 消费该帧时**只替换 `commands` 字段**（不整块覆盖 `currentRuntime`——那会抹掉同时推来的模型 / 档位 / 用量），`frameToViewMsgs` 里也加了静默分支，它不再落进「未知帧告警」。
   - **技能不另扫目录**：命令面里 `skill:<名>`（`source:"skill"`）就是技能（omp 的 `skills.enableSkillCommands`），自己扫 `~/.agents/skills/` 既要复刻 omp 的加载优先级（native 100 → 插件 90 → claude 80 → agents/codex 70 → opencode 55）又必然重复。**子智能体（`~/.omp/agent/agents/*.md`）不做**——RPC 命令面里没有它们，`/agents` hub 是终端 TUI 专属，列出来就是点了没用的假入口。
@@ -207,7 +239,9 @@
 - 修掉模型/思考档两处「看着生效、实际没生效」的老问题：点选模型只改了前端 store、从未下发 `set_model`（omp 侧模型其实没切）；打开会话从不回填 omp 真值（界面显示的模型与档位可能与 omp 实际不一致）。同时把两个选择器改为响应式取值（此前选完按钮文字不更新）。
 - **「计划 / 目标」的说明改准**（会话能力面板两行 + 设置 › 通用两行）：此前记的「`goal` 连配置项都没有」有误——18.2.1 实测 `omp config list --json` 里有 `goal.enabled` / `goal.statusInFooter` / `goal.continuationModes`（默认 `["interactive"]`），只是都只影响 omp 自己的 TUI；`plan.defaultOnStartup` 同理（**只被 TUI 启动流程消费**：上游只在 `InteractiveMode.init` 里读它，print 模式还专门打印「此模式下忽略，headless 用 `--plan-yolo`」，RPC 根本不查）。因此设置 › 通用的 `plan.enabled` / `goal.enabled` 两行加了「仅 TUI 生效」标注（`SettingSpec.tuiOnly`）——这两个功能总闸对壳侧会话没有可观测效果（goal 的隐藏工具只在 goal 模式激活时挂载，而 RPC 进不去 goal 模式，实测 `get_state.dumpTools` 的 11 个工具里没有 `goal`），面板里也不再建议「改 `plan.defaultOnStartup` 来默认进入计划模式」。顺带查明：`--plan-yolo` 启动参数在 RPC 下**真实有效**（会话进只读 plan 模式、计划由 omp 自动批准后切 `@smol` 角色继续实现），但**没有人工审批环节、只能启动时决定**——本期不采用（2026-09-16 决定：等上游给 RPC 加模式切换命令）；上游 ACP 那条线已有 Plan 模式的现成实现（`session/set_mode` + `setPlanModeState` + `setPlanProposalHandler`），依据与实测过程记入 `docs/rpc-memo.md` §1。
 
-## [0.1.0] - 2026-09-15
+---
+
+## [0.1.0-milestone] - 2026-09-15 · 内部里程碑（未公开发布，聊天界面形态）
 
 首个可用版本：oh-my-pi 的极简桌面壳（Tauri v2 + React）。
 

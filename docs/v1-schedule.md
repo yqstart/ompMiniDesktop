@@ -1,5 +1,9 @@
 # ompMiniDesktop V1 功能排期（可直接开工版）
 
+> **历史存档（V11 起）**：本文档描述 V1–V10 的「聊天界面」形态；现行形态是终端工作区
+> （见 `docs/v11-schedule.md`）。文中涉及聊天渲染 / RPC 驱动的部分已不再对应当前代码。
+
+
 > 基线：`docs/v1-design.md`（冻结稿）、`docs/rpc-memo.md`（Phase 0 实测）、`design-system/MASTER.md`（设计真相）
 > 技术栈：Tauri v2 + React + TS + Tailwind v4 + Zustand，包管理 pnpm
 > 范围：V1 只做最小单元——添加项目、移除项目、新建会话、归档会话、删除会话、切换模型、切换思考等级、agent 输出渲染、权限。设置只留入口。不做自动化、插件管理。

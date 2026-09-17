@@ -331,7 +331,9 @@ pub async fn list_memories(state: State<'_, AppState>) -> Result<Vec<MemoryProje
         let ov = state.overlay.lock().await;
         ov.projects.iter().map(|p| (p.id.clone(), p.path.clone())).collect()
     };
-    Ok(list_memories_in(&agent.join("memories"), &projects))
+    // 归属匹配集含 worktree：omp 在 worktree 里跑出来的记忆目录也归到所属项目
+    let scope = crate::commands::ownership_scope(&projects).await;
+    Ok(list_memories_in(&agent.join("memories"), &scope))
 }
 
 /// 读单个记忆文件的正文（超上限截断并标记）。

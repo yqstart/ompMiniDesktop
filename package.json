@@ -24,23 +24,24 @@
     "test:watch": "vitest",
     "lint": "eslint src scripts --max-warnings 0",
     "e2e:ipc": "node scripts/e2e-ipc-selfcheck.mjs",
-    "e2e:rpc": "node scripts/e2e-rpc.mjs",
-    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm e2e:ipc && pnpm e2e:rpc",
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm e2e:ipc",
     "icon": "node scripts/generate-icons.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.2",
-    "@tauri-apps/plugin-notification": "^2.4.0",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.11.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
     "rehype-highlight": "^7.0.2",
     "reicon-react": "^1.2.5",
     "remark-gfm": "^4.0.1",
+    "yaml": "^2.9.1",
     "zustand": "^5.0.5"
   },
   "devDependencies": {

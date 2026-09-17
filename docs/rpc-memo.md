@@ -1,5 +1,10 @@
 # omp RPC 驱动协议备忘（Phase 0 spike 实测结论）
 
+> **历史存档（V11 起）**：本文档描述 V1–V10 的「聊天界面」形态；现行形态是终端工作区
+> （见 `docs/v11-schedule.md`）。文中涉及聊天渲染 / RPC 驱动的部分已不再对应当前代码，
+> 其余（设置页各页签、语言/皮肤、发版等）仍然有效。
+
+
 > 日期：2026-09-15 | omp 实测版本：18.1.22（`/opt/homebrew/bin/omp`）| 权威上游文档：[rpc.md](https://raw.githubusercontent.com/can1357/oh-my-pi/main/docs/rpc.md)（fork `can1357/oh-my-pi`，主仓 `ldx/oh-my-pi` 同协议）
 > 本备忘只记录**实测验证过**的结论，未实测的一律标注。V1 设计依据见 `docs/v1-design.md`。
 

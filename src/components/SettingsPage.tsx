@@ -9,11 +9,10 @@ import { ArchivedSessions } from "./ArchivedSessions";
 import { GeneralSettingsPanel } from "./settings/GeneralSettingsPanel";
 import { MemoryPanel } from "./settings/MemoryPanel";
 import { ModelsPanel } from "./settings/ModelsPanel";
-import { ProvidersPanel } from "./settings/ProvidersPanel";
 import { UsagePanel } from "./settings/UsagePanel";
 
 /** 设置页分页签；顺序即界面顺序。 */
-const TABS = ["general", "providers", "models", "memories", "usage", "archived"] as const;
+const TABS = ["general", "models", "memories", "usage", "archived"] as const;
 
 export function SettingsPage() {
   const { health, set, update } = useApp();
@@ -62,10 +61,11 @@ export function SettingsPage() {
     <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-4 overflow-hidden px-4 pt-6 pb-6">
       <h1 className="shrink-0 text-[17px] font-semibold tracking-tight">{t.title}</h1>
       <p className="shrink-0 text-[13px] text-muted">{t.subtitle}</p>
-      {/* 分页签：设置页六块——通用（本应用诊断 / 更新；界面语言与皮肤是纯展示层偏好，
-          入口在左栏底部「设置」行，这里不重复放）、供应商（omp 登录登出）、
-          模型（omp 的模型角色与可用模型目录）、记忆（omp 项目记忆的查看 / 删除）、
-          使用统计（会话 jsonl 的用量聚合，只读）、已归档对话（归档管理面，归档会话不在左栏出现）。 */}
+      {/* 分页签：设置页五块——通用（本应用诊断 / 更新；界面语言与皮肤是纯展示层偏好，
+          入口在左栏底部「设置」行，这里不重复放）、模型（**omp 模型相关唯一管理面**：我的模型 /
+          供应商登录与挑选 / 自定义模型 / 模型角色 / 失败转移 / 可用模型目录）、记忆（omp 项目记忆的
+          查看 / 删除）、使用统计（会话 jsonl 的用量聚合，只读）、已归档对话（归档管理面，
+          归档会话不在左栏出现）。 */}
       <div role="tablist" aria-label={t.title} className="flex shrink-0 gap-1 border-b border-border">
         {TABS.map((k) => (
           <button
@@ -78,15 +78,13 @@ export function SettingsPage() {
           >
             {k === "general"
               ? t.tabGeneral
-              : k === "providers"
-                ? t.tabProviders
-                : k === "models"
-                  ? t.tabModels
-                  : k === "memories"
-                    ? t.tabMemories
-                    : k === "usage"
-                      ? t.tabUsage
-                      : t.tabArchived}
+              : k === "models"
+                ? t.tabModels
+                : k === "memories"
+                  ? t.tabMemories
+                  : k === "usage"
+                    ? t.tabUsage
+                    : t.tabArchived}
           </button>
         ))}
       </div>
@@ -94,8 +92,6 @@ export function SettingsPage() {
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-1">
         {tab === "archived" ? (
           <ArchivedSessions />
-        ) : tab === "providers" ? (
-          <ProvidersPanel />
         ) : tab === "models" ? (
           <ModelsPanel />
         ) : tab === "memories" ? (

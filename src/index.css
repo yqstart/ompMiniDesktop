@@ -30,6 +30,29 @@
      悬浮与选中同源，选中靠更实的填充 + 左侧细条拉开层次。 */
  --hover: color-mix(in srgb, var(--accent) 15%, transparent);
  --active: color-mix(in srgb, var(--accent) 22%, transparent);
+ /* ---- 终端 16 色（V11，xterm.js）----
+    xterm 的 theme 只吃具体颜色、不吃 CSS 变量，所以由 `lib/termTheme.ts` 在运行时
+    把这里读出来喂给它——色值仍集中在 CSS（组件禁止写死色值）。
+    语义对齐应用 token：红=danger、绿=ok、黄=warn、蓝=accent，灰阶取四层亮度体系。 */
+ --term-background: var(--background);
+ --term-foreground: var(--foreground);
+ --term-cursor: var(--accent);
+ --term-black: #3a4145;
+ --term-red: #dc2626;
+ --term-green: #047857;
+ --term-yellow: #b45309;
+ --term-blue: #4f46e5;
+ --term-magenta: #9333ea;
+ --term-cyan: #0e7490;
+ --term-white: #626c74;
+ --term-bright-black: #626c74;
+ --term-bright-red: #ef4444;
+ --term-bright-green: #059669;
+ --term-bright-yellow: #d97706;
+ --term-bright-blue: #6366f1;
+ --term-bright-magenta: #a855f7;
+ --term-bright-cyan: #0891b2;
+ --term-bright-white: #1e2226;
 }
 
 /* 深色：侧栏取主色 `#222628`（比消息流亮一档），应用底退到 `#1B1F21`，
@@ -51,6 +74,26 @@
  --code: #15181a;
  --hover: color-mix(in srgb, var(--accent) 15%, transparent);
  --active: color-mix(in srgb, var(--accent) 22%, transparent);
+ /* 终端 16 色（深色档；见 :root 的同名块注释） */
+ --term-background: var(--background);
+ --term-foreground: var(--foreground);
+ --term-cursor: var(--accent);
+ --term-black: #3a4145;
+ --term-red: #f87171;
+ --term-green: #34d399;
+ --term-yellow: #fbbf24;
+ --term-blue: #818cf8;
+ --term-magenta: #c084fc;
+ --term-cyan: #22d3ee;
+ --term-white: #b0b7bc;
+ --term-bright-black: #8e969b;
+ --term-bright-red: #fca5a5;
+ --term-bright-green: #6ee7b7;
+ --term-bright-yellow: #fcd34d;
+ --term-bright-blue: #a5b4fc;
+ --term-bright-magenta: #d8b4fe;
+ --term-bright-cyan: #67e8f9;
+ --term-bright-white: #e9ecee;
 }
 
 @theme inline {

@@ -698,8 +698,10 @@ pub async fn get_usage_stats(
         let ov = state.overlay.lock().await;
         ov.projects.iter().map(|p| (p.id.clone(), p.path.clone())).collect()
     };
+    // 归属匹配集含 worktree（与左栏会话列表同一口径）：worktree 里产生的用量归到项目
+    let scope = crate::commands::ownership_scope(&projects).await;
     let days = days.map(|d| d.clamp(1, 3650));
-    Ok(scan_usage_in(&agent.join("sessions"), &projects, days, Local::now()))
+    Ok(scan_usage_in(&agent.join("sessions"), &scope, days, Local::now()))
 }
 
 #[cfg(test)]
