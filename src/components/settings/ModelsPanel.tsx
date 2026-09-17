@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader, Refresh, Sliders, Star } from "reicon-react";
 import { api } from "@shared/api";
 import type { FallbackChainsInfo, ModelInfo, ModelRolesInfo } from "@shared/types";
@@ -43,28 +43,31 @@ export function ModelsPanel() {
  const [chains, setChains] = useState<FallbackChainsInfo | null>(null);
  const [err, setErr] = useState<string | null>(null);
  const [busy, setBusy] = useState(false);
+ const requestSeq = useRef(0);
+ const rolesRevision = useRef(0);
+ const chainsRevision = useRef(0);
+ const roleWriting = useRef(false);
+ const [savingRole, setSavingRole] = useState(false);
 
- /** 拉角色表 + 失败转移链 + 模型目录；`force` 时强制刷新目录。
-  *  写成 promise 链（而不是在 effect 里同步调用）——state 只在回调里更新，
-  *  符合 react-hooks 对「effect 内同步 setState 会级联渲染」的约束。 */
- const load = useCallback(
-  (force: boolean) =>
-   Promise.allSettled([
-    api.getModelRoles().then((r) => setRoles(r)),
-    api.getFallbackChains().then((c) => setChains(c)),
-    (force ? api.refreshModels() : api.getModels()).then((c) => set({ models: c })),
-   ]).then((res) => {
-    const bad = res.find((r) => r.status === "rejected");
-    setErr(
-     bad && bad.status === "rejected"
-      ? bad.reason instanceof Error
-       ? bad.reason.message
-       : t.modelsLoadFailed
-      : null,
-    );
-   }),
-  [set, t.modelsLoadFailed],
- );
+ /** 重读只接纳最新请求；写入后的真值不能被更早发出的读请求覆盖。 */
+ const load = useCallback(async (force: boolean) => {
+  const seq = ++requestSeq.current;
+  const roleVersion = rolesRevision.current;
+  const chainVersion = chainsRevision.current;
+  const res = await Promise.allSettled([
+   api.getModelRoles(),
+   api.getFallbackChains(),
+   force ? api.refreshModels() : api.getModels(),
+  ]);
+  if (seq !== requestSeq.current) return;
+  if (res[0].status === "fulfilled" && roleVersion === rolesRevision.current && !roleWriting.current) setRoles(res[0].value);
+  if (res[1].status === "fulfilled" && chainVersion === chainsRevision.current) setChains(res[1].value);
+  if (res[2].status === "fulfilled") set({ models: res[2].value });
+  const bad = res.find((r) => r.status === "rejected");
+  setErr(bad?.status === "rejected"
+   ? bad.reason instanceof Error ? bad.reason.message : String(bad.reason || t.modelsLoadFailed)
+   : res[2].status === "fulfilled" ? res[2].value.error ?? null : null);
+ }, [set, t.modelsLoadFailed]);
 
  // 挂载时拉一次；**每次设置标签重新激活**（从终端标签切回来）都重读——omp 侧（TUI / CLI）
  // 改过的模型角色与转移链，切回设置页就该看到，不该要求用户先点「刷新」或重开设置标签。
@@ -72,16 +75,25 @@ export function ModelsPanel() {
  useEffect(() => {
   if (!settingsTabActive) return;
   void load(!models);
+  return () => { requestSeq.current += 1; };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在挂载与激活态翻转时重读
  }, [settingsTabActive]);
 
  /** 角色编辑：后端写整表并回读，返回的就是写入后的真相。 */
  const saveRole = async (role: string, selector: string | null) => {
+  if (roleWriting.current) return;
+  roleWriting.current = true;
+  rolesRevision.current += 1;
+  setSavingRole(true);
   setErr(null);
   try {
    setRoles(await api.setModelRole(role, selector));
   } catch (e) {
-   setErr(e instanceof Error ? e.message : t.roleSetFailed);
+   setErr(e instanceof Error ? e.message : String(e || t.roleSetFailed));
+  } finally {
+   rolesRevision.current += 1;
+   roleWriting.current = false;
+   setSavingRole(false);
   }
  };
 
@@ -190,6 +202,8 @@ export function ModelsPanel() {
         label={roleLabel(role, t)}
         current={roles.roles[role] ?? null}
         models={candidates}
+        catalog={catalog}
+        disabled={savingRole}
         onSave={saveRole}
        />
       ))
@@ -201,9 +215,10 @@ export function ModelsPanel() {
    <FallbackChainsSection
     info={chains}
     models={candidates}
+    catalog={catalog}
     roles={roleKeys}
     busy={busy}
-    onSaved={setChains}
+    onSaved={(info) => { chainsRevision.current += 1; setChains(info); }}
     onRefresh={() => void refreshAll()}
    />
   </>
@@ -217,12 +232,16 @@ function RoleRow({
  label,
  current,
  models,
+ catalog,
+ disabled,
  onSave,
 }: {
  role: string;
  label: string;
  current: string | null;
  models: ModelInfo[];
+ catalog: ModelInfo[];
+ disabled: boolean;
  onSave: (role: string, selector: string | null) => Promise<void>;
 }) {
  const t = useText();
@@ -236,7 +255,7 @@ function RoleRow({
  const { base, level } = splitSelector(current ?? "");
  // 档位候选按该模型声明的档裁剪；目录里查不到（自定义 / 角色别名）退回全集——不挡用户，
  // 非法档 omp 自己会忽略，但界面不给一个必然无效的窄集合
- const model = models.find((m) => m.selector === base);
+ const model = catalog.find((m) => m.selector === base);
  const levels = model ? thinkingLevelsOf(model.thinking) : [...THINKING_ORDER];
  // 明确不支持思考的模型（可用档只有 off）不显示档位按钮，免得点开只有「默认 / off」两项
  const canLevel = current !== null && levels.length > 1;
@@ -280,8 +299,8 @@ function RoleRow({
     </div>
     {canLevel && (
      <button
-      onClick={() => setLevelOpen((v) => !v)}
-      disabled={saving}
+      onClick={() => { setOpen(false); setLevelOpen((v) => !v); }}
+      disabled={saving || disabled}
       className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
       aria-label={fmt(t.roleLevelAria, label)}
       aria-expanded={levelOpen}
@@ -291,8 +310,8 @@ function RoleRow({
      </button>
     )}
     <button
-     onClick={() => setOpen((v) => !v)}
-     disabled={saving}
+     onClick={() => { setLevelOpen(false); setOpen((v) => !v); }}
+     disabled={saving || disabled}
      className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
      aria-label={fmt(t.rolePick + " {0}", label)}
      aria-expanded={open}
@@ -302,7 +321,7 @@ function RoleRow({
     {current && (
      <button
       onClick={() => void clear()}
-      disabled={saving}
+      disabled={saving || disabled}
       className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-50"
       aria-label={fmt(t.roleClear + " {0}", label)}
      >
@@ -345,7 +364,7 @@ function RoleRow({
 
    {open && (
     <div ref={ref} className="mt-2 rounded-md border border-border bg-background p-2">
-     <ModelPickList models={models} onPick={(m) => void pick(m)} />
+     <ModelPickList models={models} selected={base} onPick={(m) => void pick(m)} />
     </div>
    )}
   </div>

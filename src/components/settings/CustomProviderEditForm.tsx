@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, Loader, Plus, Trash2 } from "reicon-react";
 import { useText } from "../../lib/useText";
 import {
  apiOptionsFor,
  isDuplicateProviderId,
  isValidProviderId,
+ isValidBaseUrl,
+ isValidModelLimit,
  providerFormComplete,
  type CustomModelForm,
  type CustomProviderForm,
@@ -41,12 +43,20 @@ export function CustomProviderEditForm({
 }) {
  const t = useText();
  const [apiOpen, setApiOpen] = useState(false);
+ const fieldId = useId();
+ const errorRef = useRef<HTMLParagraphElement>(null);
+ useEffect(() => {
+  if (error) errorRef.current?.focus();
+ }, [error]);
  const idTrim = form.id.trim();
  /** 名称格式错（空串 = 还没填，归入「必填项没填完」）：给专门提示，不然用户只看到笼统的「没填完」。 */
  const invalidId = idTrim !== "" && !isValidProviderId(idTrim);
  const dupId = isDuplicateProviderId(form, existingIds);
+ const invalidUrl = form.baseUrl.trim() !== "" && !isValidBaseUrl(form.baseUrl);
+ const modelIds = form.models.map((m) => m.id.trim());
+ const duplicateModel = modelIds.some((id, i) => id !== "" && modelIds.indexOf(id) !== i);
  const complete = providerFormComplete(form) && !dupId;
- const hint = invalidId ? t.customFormIdInvalid : dupId ? t.customFormDupId : t.customFormIncomplete;
+ const hint = invalidId ? t.customFormIdInvalid : dupId ? t.customFormDupId : invalidUrl ? t.customFormBaseUrlInvalid : duplicateModel ? t.customModelDuplicate : t.customFormIncomplete;
 
  const setModel = (i: number, next: Partial<CustomModelForm>) => {
   const models = form.models.map((m, j) => (j === i ? { ...m, ...next } : m));
@@ -54,10 +64,10 @@ export function CustomProviderEditForm({
  };
 
  const inputCls =
-  "min-w-0 w-full rounded-md border border-border bg-surface px-3 py-2 text-[13px] transition-colors duration-100 focus:border-accent";
+  "min-w-0 w-full rounded-md border border-border bg-surface px-3 py-2 text-[13px] transition-colors duration-100 focus:border-accent aria-invalid:border-danger disabled:opacity-60";
 
  return (
-  <>
+  <fieldset disabled={busy} aria-busy={busy} className="min-w-0">
    <div className="grid min-w-0 gap-4 sm:grid-cols-2">
     <label className="flex min-w-0 flex-col gap-2 text-[13px]">
      <span className="shrink-0 text-muted">{t.customFormName}</span>
@@ -66,9 +76,11 @@ export function CustomProviderEditForm({
       onChange={(e) => onChange({ ...form, id: e.target.value })}
       placeholder="my-gateway"
       title={t.customFormNameHint}
-      aria-invalid={invalidId}
+      aria-invalid={invalidId || dupId}
+      aria-describedby={invalidId || dupId ? `${fieldId}-name-error` : undefined}
       className={`${inputCls} font-mono`}
      />
+     {(invalidId || dupId) && <span id={`${fieldId}-name-error`} className="text-xs text-danger">{invalidId ? t.customFormIdInvalid : t.customFormDupId}</span>}
     </label>
     <label className="flex min-w-0 flex-col gap-2 text-[13px]">
      <span className="shrink-0 text-muted">{t.customFormBaseUrl}</span>
@@ -76,10 +88,14 @@ export function CustomProviderEditForm({
       value={form.baseUrl}
       onChange={(e) => onChange({ ...form, baseUrl: e.target.value })}
       placeholder="https://gw.example.com/v1"
+      aria-invalid={invalidUrl}
+      aria-describedby={invalidUrl ? `${fieldId}-url-error` : undefined}
       className={`${inputCls} font-mono`}
      />
+     {invalidUrl && <span id={`${fieldId}-url-error`} className="text-xs text-danger">{t.customFormBaseUrlInvalid}</span>}
     </label>
    </div>
+   {form.originalId && idTrim !== form.originalId && <p className="mt-2 text-xs text-warn">{t.customFormRenameHint}</p>}
 
    <div className="mt-4 grid min-w-0 gap-4 sm:grid-cols-2">
     <div className="flex min-w-0 flex-col gap-2 text-[13px]">
@@ -87,6 +103,7 @@ export function CustomProviderEditForm({
      <button
       onClick={() => setApiOpen((v) => !v)}
       aria-expanded={apiOpen}
+      aria-label={t.customFormApi}
       className="flex min-h-9 min-w-0 cursor-pointer items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 font-mono text-[12px] transition-colors duration-100 hover:bg-hover"
      >
       <span className="min-w-0 flex-1 truncate">{form.api}</span>
@@ -98,6 +115,9 @@ export function CustomProviderEditForm({
      <span className="shrink-0 text-muted">{t.customFormAuthKey}</span>
      <input
       value={form.apiKey}
+      type="password"
+      autoComplete="off"
+      spellCheck={false}
       onChange={(e) => onChange({ ...form, apiKey: e.target.value })}
       placeholder="MY_GW_KEY"
       title={t.customFormApiKeyHint}
@@ -127,7 +147,11 @@ export function CustomProviderEditForm({
 
    <div className="mt-6 border-t border-border-soft pt-4">
     <div className="text-[13px] font-semibold">{t.customFormModels}</div>
-    {form.models.map((m, i) => (
+    {form.models.map((m, i) => {
+     const duplicate = m.id.trim() !== "" && modelIds.some((id, j) => j !== i && id === m.id.trim());
+     const invalidContext = !isValidModelLimit(m.contextWindow);
+     const invalidMaxTokens = !isValidModelLimit(m.maxTokens);
+     return (
      <div key={i} className="mt-3 rounded-lg border border-border-soft bg-background p-3 sm:p-4">
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
        <input
@@ -135,6 +159,8 @@ export function CustomProviderEditForm({
         onChange={(e) => setModel(i, { id: e.target.value })}
         placeholder="model-id"
         aria-label={t.customModelId}
+        aria-invalid={duplicate || !m.id.trim()}
+        aria-describedby={duplicate || !m.id.trim() ? `${fieldId}-model-${i}-error` : undefined}
         className={`${inputCls} col-span-2 font-mono sm:col-span-1`}
        />
        <input
@@ -154,6 +180,7 @@ export function CustomProviderEditForm({
         <Trash2 size={11} aria-hidden />
        </button>
       </div>
+      {(duplicate || !m.id.trim()) && <p id={`${fieldId}-model-${i}-error`} className="mt-2 text-xs text-danger">{duplicate ? t.customModelDuplicate : t.customFormRequired}</p>}
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-3 text-[12px]">
        <label className="flex items-center gap-1.5">
         <span className="text-muted">{t.customModelContext}</span>
@@ -163,6 +190,8 @@ export function CustomProviderEditForm({
          inputMode="numeric"
          placeholder="128000"
          aria-label={t.customModelContext}
+         aria-invalid={invalidContext}
+         aria-describedby={invalidContext ? `${fieldId}-model-${i}-limits` : undefined}
          className="w-24 rounded-md border border-border bg-surface px-2 py-1.5 text-right font-mono focus:border-accent"
         />
        </label>
@@ -174,12 +203,14 @@ export function CustomProviderEditForm({
          inputMode="numeric"
          placeholder="8192"
          aria-label={t.customModelMaxTokens}
+         aria-invalid={invalidMaxTokens}
+         aria-describedby={invalidMaxTokens ? `${fieldId}-model-${i}-limits` : undefined}
          className="w-24 rounded-md border border-border bg-surface px-2 py-1.5 text-right font-mono focus:border-accent"
         />
        </label>
        <label className="flex items-center gap-1.5">
         <span className="text-muted">{t.customModelReasoning}</span>
-        <Switch on={m.reasoning} disabled={false} label={t.customModelReasoning} onToggle={() => setModel(i, { reasoning: !m.reasoning })} />
+        <Switch on={m.reasoning} disabled={busy} label={t.customModelReasoning} onToggle={() => setModel(i, { reasoning: !m.reasoning })} />
        </label>
        <div className="flex items-center gap-1.5">
         <span className="text-muted">{t.customModelInput}</span>
@@ -194,6 +225,7 @@ export function CustomProviderEditForm({
             })
            }
            aria-pressed={on}
+           disabled={on && m.input.length === 1}
            className={`cursor-pointer rounded border px-1.5 py-0.5 transition-colors duration-100 hover:bg-hover ${on ? "border-accent/60 text-accent" : "border-border text-muted"
             }`}
           >
@@ -203,8 +235,10 @@ export function CustomProviderEditForm({
         })}
        </div>
       </div>
+      {(invalidContext || invalidMaxTokens) && <p id={`${fieldId}-model-${i}-limits`} className="mt-2 text-xs text-danger">{t.customModelLimitInvalid}</p>}
      </div>
-    ))}
+     );
+    })}
     <button
      onClick={() =>
       onChange({
@@ -220,7 +254,7 @@ export function CustomProviderEditForm({
    </div>
 
    {error && (
-    <p role="alert" className="mt-3 font-mono text-xs whitespace-pre-wrap break-all text-danger">
+    <p ref={errorRef} role="alert" tabIndex={-1} className="mt-3 font-mono text-xs whitespace-pre-wrap break-all text-danger">
      {error}
     </p>
    )}
@@ -244,6 +278,6 @@ export function CustomProviderEditForm({
     {!complete && <span className="text-[11px] text-warn">{hint}</span>}
     <span className="basis-full text-[11px] leading-relaxed text-faint">{t.customSaveHint}</span>
    </div>
-  </>
+  </fieldset>
  );
 }

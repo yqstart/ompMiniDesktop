@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Clock, X } from "reicon-react";
 import { api } from "@shared/api";
 import type { ProjectView, SessionView } from "@shared/types";
@@ -7,6 +7,7 @@ import { resumeSessionInTerminal } from "../../lib/workspaces";
 import { useText } from "../../lib/useText";
 import { TEXT, fmt } from "../../lib/locale";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { useDialogFocus } from "../../lib/useDropdown";
 
 /**
  * 项目会话弹窗（V11）：列一个项目（含其 worktree）的全部会话。
@@ -28,6 +29,9 @@ export function SessionPopup({
  const [error, setError] = useState<string | null>(null);
  const [deleteTarget, setDeleteTarget] = useState<SessionView | null>(null);
  const [busyId, setBusyId] = useState<string | null>(null);
+ const cardRef = useRef<HTMLDivElement>(null);
+ const actionRef = useRef(false);
+ useDialogFocus(cardRef, true, onClose);
 
  useEffect(() => {
   let alive = true;
@@ -46,13 +50,6 @@ export function SessionPopup({
   };
  }, [project]);
 
- useEffect(() => {
-  const onKey = (e: KeyboardEvent) => {
-   if (e.key === "Escape") onClose();
-  };
-  document.addEventListener("keydown", onKey);
-  return () => document.removeEventListener("keydown", onKey);
- }, [onClose]);
 
  const refresh = async () => {
   try {
@@ -64,6 +61,8 @@ export function SessionPopup({
  };
 
  const runAction = async (id: string, act: () => Promise<string | null>) => {
+  if (actionRef.current) return;
+  actionRef.current = true;
   setBusyId(id);
   setError(null);
   try {
@@ -73,6 +72,7 @@ export function SessionPopup({
   } catch (e) {
    setError(e instanceof Error ? e.message : String(e));
   } finally {
+   actionRef.current = false;
    setBusyId(null);
   }
  };
@@ -84,12 +84,14 @@ export function SessionPopup({
   });
 
  const doDelete = async () => {
-  if (!deleteTarget) return;
-  await runAction(deleteTarget.id, async () => {
-   const res = await api.deleteSessions([deleteTarget.id]);
+  const target = deleteTarget;
+  if (!target || actionRef.current) return;
+  // 与归档页一致：确认即收起；异步完成不能再关闭用户后来打开的确认。
+  setDeleteTarget(null);
+  await runAction(target.id, async () => {
+   const res = await api.deleteSessions([target.id]);
    return res.failed.length > 0 ? res.failed[0].message || null : null;
   });
-  setDeleteTarget(null);
  };
 
  return (
@@ -99,6 +101,8 @@ export function SessionPopup({
     onClick={onClose}
    >
     <div
+     ref={cardRef}
+     tabIndex={-1}
      role="dialog"
      aria-modal="true"
      aria-label={fmt(t.sessTitleOf, project.name)}
@@ -114,15 +118,16 @@ export function SessionPopup({
        <div className="mt-1 truncate font-mono text-[11px] text-faint" title={project.path}>{project.path}</div>
       </div>
       <button
+       type="button"
        onClick={onClose}
        className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
        aria-label={t.close}
       >
-       <X size={14} />
+       <X size={14} aria-hidden />
       </button>
      </div>
      {error && (
-      <div className="mx-4 mt-3 shrink-0 rounded-md border border-danger/20 bg-danger/10 px-3 py-2 text-[13px] leading-relaxed text-danger">
+      <div role="alert" className="mx-4 mt-3 shrink-0 rounded-md border border-danger/20 bg-danger/10 px-3 py-2 text-[13px] leading-relaxed text-danger">
        {error}
       </div>
      )}
@@ -141,7 +146,7 @@ export function SessionPopup({
           resumeSessionInTerminal({ id: s.id, cwd: s.cwd, title: s.title, projectId: s.projectId });
           onClose();
          }}
-         disabled={s.corrupt || busyId === s.id}
+         disabled={s.corrupt || busyId !== null}
          title={t.sessResumeHint}
          className="min-w-0 flex-1 cursor-pointer rounded-sm text-left disabled:cursor-default disabled:opacity-50"
         >
@@ -162,14 +167,14 @@ export function SessionPopup({
         <span className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100">
          <button
           onClick={() => void toggleArchive(s)}
-          disabled={busyId === s.id}
+          disabled={busyId !== null}
           className="min-h-7 cursor-pointer rounded-md border border-border px-2 text-[11px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
          >
           {s.archived ? t.archivedRestore : t.sessArchive}
          </button>
          <button
           onClick={() => setDeleteTarget(s)}
-          disabled={busyId === s.id}
+          disabled={busyId !== null}
           className="min-h-7 cursor-pointer rounded-md border border-border px-2 text-[11px] text-muted transition-colors duration-100 hover:border-danger/40 hover:bg-danger/10 hover:text-danger disabled:opacity-40"
          >
           {t.delete}

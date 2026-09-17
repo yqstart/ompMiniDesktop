@@ -47,11 +47,12 @@ describe("ConfirmDialog 焦点", () => {
   act(() => {
    root.render(<ConfirmDialog {...confirmProps} onCancel={() => { }} onConfirm={() => { }} />);
   });
-  act(() => outside.focus());
+  const confirm = container.querySelectorAll("button")[1];
+  act(() => confirm.focus());
   act(() => {
    root.render(<ConfirmDialog {...confirmProps} onCancel={() => { }} onConfirm={() => { }} />);
   });
-  expect(document.activeElement).toBe(outside);
+  expect(document.activeElement).toBe(confirm);
  });
 
  it("Esc 触发重渲染后的最新 onCancel", () => {
@@ -64,9 +65,24 @@ describe("ConfirmDialog 焦点", () => {
    root.render(<ConfirmDialog {...confirmProps} onCancel={second} onConfirm={() => { }} />);
   });
   act(() => {
-   document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+   document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
   });
   expect(second).toHaveBeenCalledTimes(1);
   expect(first).not.toHaveBeenCalled();
+ });
+
+ it("关闭后恢复触发焦点，但不抢走已移到其它面板的焦点", () => {
+  act(() => outside.focus());
+  act(() => root.render(<ConfirmDialog {...confirmProps} onCancel={() => { }} onConfirm={() => { }} />));
+  act(() => root.render(<ConfirmDialog {...confirmProps} open={false} onCancel={() => { }} onConfirm={() => { }} />));
+  expect(document.activeElement).toBe(outside);
+
+  act(() => root.render(<ConfirmDialog {...confirmProps} onCancel={() => { }} onConfirm={() => { }} />));
+  const other = document.createElement("button");
+  document.body.append(other);
+  act(() => other.focus());
+  act(() => root.render(<ConfirmDialog {...confirmProps} open={false} onCancel={() => { }} onConfirm={() => { }} />));
+  expect(document.activeElement).toBe(other);
+  other.remove();
  });
 });

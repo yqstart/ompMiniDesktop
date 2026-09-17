@@ -4,7 +4,7 @@ import { checkForUpdate, getAppVersion, openUpdateDialog } from "../lib/appUpdat
 import { pickOmpExecutable, refreshOmpHealth } from "../lib/ompDiag";
 import { fmt } from "../lib/locale";
 import { useText } from "../lib/useText";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArchivedSessions } from "./ArchivedSessions";
 import { GeneralSettingsPanel } from "./settings/GeneralSettingsPanel";
 import { MemoryPanel } from "./settings/MemoryPanel";
@@ -22,6 +22,25 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
   const [diagError, setDiagError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState<(typeof TABS)[number]>("general");
+  const pageRef = useRef<HTMLDivElement>(null);
+  const lastFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const page = pageRef.current;
+    if (!page) return;
+    const active = document.activeElement;
+    if (!visible) {
+      if (active instanceof HTMLElement && page.contains(active)) active.blur();
+      return;
+    }
+    if (page.contains(active) || active?.closest('[role="dialog"][aria-modal="true"]')) return;
+    const previous = lastFocusRef.current;
+    const target = previous?.isConnected && !previous.matches(":disabled")
+      ? previous
+      : page.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]')
+        ?? page.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    target?.focus({ preventScroll: true });
+  }, [visible]);
 
   useEffect(() => {
     void getAppVersion().then(setVersion);
@@ -61,6 +80,12 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
   // 设置标签面板：切到终端标签只隐藏（页签选择、滚动位置都保留），关闭标签才卸载
   return (
     <div
+      ref={pageRef}
+      inert={!visible}
+      aria-hidden={!visible}
+      onFocusCapture={(event) => {
+        if (event.target instanceof HTMLElement) lastFocusRef.current = event.target;
+      }}
       className={
         visible
           ? "@container/settings mx-auto flex min-h-0 min-w-0 w-full max-w-6xl flex-1 gap-3 overflow-hidden p-3 sm:gap-5 sm:p-5"
@@ -84,6 +109,21 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
           aria-orientation="vertical"
           aria-label={t.title}
           className="flex flex-col gap-1 rounded-xl bg-sidebar p-1"
+          onKeyDown={(event) => {
+            if (event.altKey || event.ctrlKey || event.metaKey || event.nativeEvent.isComposing) return;
+            const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+            const index = tabs.indexOf(event.target as HTMLButtonElement);
+            if (index < 0) return;
+            const next = event.key === "Home" ? 0
+              : event.key === "End" ? tabs.length - 1
+                : event.key === "ArrowDown" ? (index + 1) % tabs.length
+                  : event.key === "ArrowUp" ? (index - 1 + tabs.length) % tabs.length
+                    : null;
+            if (next === null) return;
+            event.preventDefault();
+            tabs[next].focus();
+            tabs[next].click();
+          }}
         >
           {TABS.map((k) => {
             const Icon = TAB_ICONS[k];
@@ -93,6 +133,7 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
                 key={k}
                 id={`settings-tab-${k}`}
                 role="tab"
+                tabIndex={tab === k ? 0 : -1}
                 aria-selected={tab === k}
                 aria-controls="settings-panel"
                 title={label}
@@ -113,6 +154,7 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
       <div
         id="settings-panel"
         role="tabpanel"
+        tabIndex={0}
         aria-labelledby={`settings-tab-${tab}`}
         className="@container/panel flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto pb-1 [overflow-wrap:anywhere] [scrollbar-gutter:stable]"
       >

@@ -31,6 +31,7 @@
 use serde::Serialize;
 use std::collections::HashSet;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{Emitter, Manager};
@@ -46,6 +47,8 @@ pub const PROVIDER_LOGIN_EVENT: &str = "omp-provider://login";
 const CLI_TIMEOUT: Duration = Duration::from_secs(30);
 /// 登录输出窗口：只保留尾部若干行，界面是「最近发生了什么」，不是完整日志。
 const LOGIN_LINES_MAX: usize = 40;
+/// 与 PTY 的 spawn 序号同口径：同一家供应商重新登录也必须是不同会话。
+static LOGIN_SEQ: AtomicU64 = AtomicU64::new(1);
 
 // ---------- 供应商清单 ----------
 
@@ -74,7 +77,11 @@ pub fn parse_providers(out: &str) -> Vec<(String, String)> {
                     if id.is_empty() {
                         return None;
                     }
-                    let name = p.get("name").and_then(|x| x.as_str()).unwrap_or(&id).to_string();
+                    let name = p
+                        .get("name")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or(&id)
+                        .to_string();
                     Some((id, name))
                 })
                 .collect()
@@ -104,6 +111,8 @@ pub fn configured_set(catalog: &serde_json::Value) -> HashSet<String> {
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginStatus {
+    #[serde(skip)]
+    seq: u64,
     /// 正在登录的供应商 id；从未登录过为空串。
     pub provider: String,
     pub running: bool,
@@ -125,7 +134,7 @@ pub struct LoginDone {
 
 /// 登录子进程句柄（同一时刻只允许一个登录在跑）。
 pub struct LoginSession {
-    pub provider: String,
+    seq: u64,
     /// 需要用户回答上游提问时（如「选端点 / 粘贴 API key」）写这里。
     pub stdin: Arc<Mutex<ChildStdin>>,
     /// 取消信号（`send(())` = 杀掉子进程）。
@@ -153,7 +162,9 @@ impl LoginParser {
                 return None;
             }
             self.expect_url = false;
-            return Some(LoginEvent::Url { url: text.to_string() });
+            return Some(LoginEvent::Url {
+                url: text.to_string(),
+            });
         }
         if text == "Open this URL in your browser:" {
             self.expect_url = true;
@@ -162,7 +173,9 @@ impl LoginParser {
         if text.is_empty() {
             return None;
         }
-        Some(LoginEvent::Line { text: text.to_string() })
+        Some(LoginEvent::Line {
+            text: text.to_string(),
+        })
     }
 }
 
@@ -172,13 +185,35 @@ pub enum LoginEvent {
     Line { text: String },
 }
 
-async fn push_status(app: &tauri::AppHandle, status: &Arc<Mutex<LoginStatus>>, f: impl FnOnce(&mut LoginStatus)) {
-    let payload = {
-        let mut s = status.lock().await;
-        f(&mut s);
-        s.clone()
-    };
-    let _ = app.emit(PROVIDER_LOGIN_EVENT, payload);
+fn update_login_status(
+    status: &mut LoginStatus,
+    seq: u64,
+    update: impl FnOnce(&mut LoginStatus),
+) -> bool {
+    if status.seq != seq {
+        return false;
+    }
+    update(status);
+    true
+}
+
+async fn push_status(
+    app: &tauri::AppHandle,
+    status: &Arc<Mutex<LoginStatus>>,
+    seq: u64,
+    update: impl FnOnce(&mut LoginStatus),
+) {
+    let mut status = status.lock().await;
+    if update_login_status(&mut status, seq, update) {
+        // 发事件也在锁内：旧快照不能在新会话的初始快照之后才发出去。
+        let _ = app.emit(PROVIDER_LOGIN_EVENT, status.clone());
+    }
+}
+
+fn clear_login_session(slot: &mut Option<LoginSession>, seq: u64) {
+    if slot.as_ref().map(|session| session.seq) == Some(seq) {
+        *slot = None;
+    }
 }
 
 fn push_line(status: &mut LoginStatus, text: String) {
@@ -194,7 +229,7 @@ fn push_line(status: &mut LoginStatus, text: String) {
 fn start_login_pump(
     app: tauri::AppHandle,
     mut child: Child,
-    provider: String,
+    seq: u64,
     session_slot: Arc<Mutex<Option<LoginSession>>>,
     status: Arc<Mutex<LoginStatus>>,
     cancel_rx: oneshot::Receiver<()>,
@@ -217,10 +252,10 @@ fn start_login_pump(
                 line = stdout.next_line() => match line {
                     Ok(Some(l)) => match parser.feed(&l) {
                         Some(LoginEvent::Url { url }) => {
-                            push_status(&app, &status, |s| { s.url = Some(url); }).await;
+                            push_status(&app, &status, seq, |s| { s.url = Some(url); }).await;
                         }
                         Some(LoginEvent::Line { text }) => {
-                            push_status(&app, &status, |s| push_line(s, text)).await;
+                            push_status(&app, &status, seq, |s| push_line(s, text)).await;
                         }
                         None => {}
                     },
@@ -251,16 +286,18 @@ fn start_login_pump(
         } else {
             Some(err_tail.join("\n"))
         };
-        push_status(&app, &status, |s| {
+        push_status(&app, &status, seq, |s| {
             s.running = false;
-            s.done = Some(LoginDone { ok, cancelled, message });
+            s.done = Some(LoginDone {
+                ok,
+                cancelled,
+                message,
+            });
         })
         .await;
-        // 释放槽位（只有仍指向本次登录时才清，避免误杀后来者）
+        // 只释放本次 spawn 的槽位；供应商 id 相同也不代表同一次登录。
         let mut slot = session_slot.lock().await;
-        if slot.as_ref().map(|s| s.provider.as_str()) == Some(provider.as_str()) {
-            *slot = None;
-        }
+        clear_login_session(&mut slot, seq);
         drop(slot);
         // 成功了：模型目录变了（多了一个供应商的模型），清缓存让下次拉新鲜的
         if ok {
@@ -285,8 +322,9 @@ pub struct ModelRolesInfo {
 }
 
 /// 内置角色（上游 `config/model-roles.ts` 的 `MODEL_ROLE_IDS`）。
-pub const BUILTIN_ROLES: [&str; 9] =
-    ["default", "smol", "slow", "vision", "plan", "commit", "tiny", "task", "advisor"];
+pub const BUILTIN_ROLES: [&str; 9] = [
+    "default", "smol", "slow", "vision", "plan", "commit", "tiny", "task", "advisor",
+];
 
 /// 角色名合法性：非空、无空白与控制字符（写回 JSON 时会被转义，但脏名字进 config.yml 没意义）。
 pub fn validate_role_name(role: &str) -> Result<(), String> {
@@ -396,7 +434,11 @@ pub fn validate_chain_key(key: &str) -> Result<(), String> {
 /// 在链表上应用一次编辑（纯函数，单测覆盖）：
 /// `Some(非空)` = 设置 / 覆盖；`None` 或过滤后为空 = 删除该键（空链没有意义）。
 /// **顺序原样保留**（omp 按序尝试备用模型，排序会改变语义）。
-pub fn apply_chain_edit(chains: &mut ChainMap, key: &str, fallbacks: Option<&[String]>) -> Result<(), String> {
+pub fn apply_chain_edit(
+    chains: &mut ChainMap,
+    key: &str,
+    fallbacks: Option<&[String]>,
+) -> Result<(), String> {
     validate_chain_key(key)?;
     let items: Vec<String> = match fallbacks {
         Some(list) => {
@@ -455,7 +497,11 @@ pub(crate) async fn run_omp_in(
             let err = String::from_utf8_lossy(&o.stderr);
             let lines: Vec<&str> = err.lines().filter(|l| !l.trim().is_empty()).collect();
             let tail = lines[lines.len().saturating_sub(4)..].join("\n");
-            Err(if tail.trim().is_empty() { format!("omp 退出码 {}", o.status) } else { tail })
+            Err(if tail.trim().is_empty() {
+                format!("omp 退出码 {}", o.status)
+            } else {
+                tail
+            })
         }
         Ok(Err(e)) => Err(e.to_string()),
         Err(_) => Err("omp 命令超时".into()),
@@ -466,14 +512,19 @@ pub(crate) async fn run_omp_in(
 /// 的预校验也要跑 omp 子进程，错误文案与这里保持一致。
 pub(crate) fn omp_bin(state: &tauri::State<'_, AppState>) -> Result<String, CmdError> {
     crate::commands::discover_omp_path(state).ok_or_else(|| {
-        cmd_err("OMP_MISSING", "未找到 omp，无法管理供应商".into(), Some("请先在设置 › 通用里指定 omp 路径".into()))
+        cmd_err(
+            "OMP_MISSING",
+            "未找到 omp，无法管理供应商".into(),
+            Some("请先在设置 › 通用里指定 omp 路径".into()),
+        )
     })
 }
 
 /// 读 `omp config get <key> --json` 的 `value` 字段。
 async fn config_get(bin: &str, key: &str) -> Result<serde_json::Value, String> {
     let out = run_omp(bin, &["config", "get", key, "--json"]).await?;
-    let v: serde_json::Value = serde_json::from_str(out.trim()).map_err(|e| format!("配置解析失败：{e}"))?;
+    let v: serde_json::Value =
+        serde_json::from_str(out.trim()).map_err(|e| format!("配置解析失败：{e}"))?;
     Ok(v.get("value").cloned().unwrap_or(serde_json::Value::Null))
 }
 
@@ -481,19 +532,29 @@ async fn config_get(bin: &str, key: &str) -> Result<serde_json::Value, String> {
 /// （实测：同键在 `<cwd>/.omp/config.yml` 有覆盖时读到项目值），而模型页写的是**全局层**
 /// ——读也钉在 agentDir，才与写入同层，不会出现「界面显示项目覆盖值、改的是全局」的错位。
 /// 写不需要钉（实测 `omp config set` 任何 cwd 下都只写全局 agentDir 的 config.yml）。
-async fn config_get_global(state: &tauri::State<'_, AppState>, bin: &str, key: &str) -> Result<serde_json::Value, String> {
+async fn config_get_global(
+    state: &tauri::State<'_, AppState>,
+    bin: &str,
+    key: &str,
+) -> Result<serde_json::Value, String> {
     let dir = state.agent_dir.lock().await.clone();
     let out = run_omp_in(Some(&dir), bin, &["config", "get", key, "--json"]).await?;
-    let v: serde_json::Value = serde_json::from_str(out.trim()).map_err(|e| format!("配置解析失败：{e}"))?;
+    let v: serde_json::Value =
+        serde_json::from_str(out.trim()).map_err(|e| format!("配置解析失败：{e}"))?;
     Ok(v.get("value").cloned().unwrap_or(serde_json::Value::Null))
 }
 
 /// 读 retry 组里与转移链有关的三个键（读命令与两个写命令的回读共用）。
 /// `chains` 读失败要冒泡：不能兜底成空表——界面拿空表编辑后写回会把用户的链清空。
 /// 两个开关读不到就按 omp 自己的默认值显示（新 agentDir 下 `config get` 也返回默认值）。
-async fn read_retry_info(state: &tauri::State<'_, AppState>, bin: &str) -> Result<FallbackChainsInfo, String> {
+async fn read_retry_info(
+    state: &tauri::State<'_, AppState>,
+    bin: &str,
+) -> Result<FallbackChainsInfo, String> {
     let chains = config_get_global(state, bin, "retry.fallbackChains").await?;
-    let model_fallback = config_get_global(state, bin, "retry.modelFallback").await.unwrap_or(serde_json::Value::Null);
+    let model_fallback = config_get_global(state, bin, "retry.modelFallback")
+        .await
+        .unwrap_or(serde_json::Value::Null);
     let revert = config_get_global(state, bin, "retry.fallbackRevertPolicy")
         .await
         .unwrap_or(serde_json::Value::Null);
@@ -508,11 +569,19 @@ async fn read_retry_info(state: &tauri::State<'_, AppState>, bin: &str) -> Resul
 
 /// 供应商清单：`omp auth-broker list --json` 的全量 OAuth 供应商 + 当前已配置标记。
 #[tauri::command]
-pub async fn list_providers(state: tauri::State<'_, AppState>) -> Result<Vec<ProviderView>, CmdError> {
+pub async fn list_providers(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<ProviderView>, CmdError> {
     let bin = omp_bin(&state)?;
     let out = run_omp(&bin, &["auth-broker", "list", "--json"])
         .await
-        .map_err(|e| cmd_err("PROVIDER_LIST_FAILED", format!("读取供应商清单失败：{e}"), None))?;
+        .map_err(|e| {
+            cmd_err(
+                "PROVIDER_LIST_FAILED",
+                format!("读取供应商清单失败：{e}"),
+                None,
+            )
+        })?;
     let base = parse_providers(&out);
     if base.is_empty() {
         return Err(cmd_err(
@@ -531,7 +600,8 @@ pub async fn list_providers(state: tauri::State<'_, AppState>) -> Result<Vec<Pro
                     "models": v.get("models").cloned().unwrap_or(serde_json::Value::Array(vec![])),
                     "fetchedAt": chrono::Utc::now().timestamp_millis(),
                 });
-                *state.models_cache.lock().await = Some((chrono::Utc::now().timestamp_millis(), catalog));
+                *state.models_cache.lock().await =
+                    Some((chrono::Utc::now().timestamp_millis(), catalog));
                 configured_set(&v)
             }
             Err(_) => HashSet::new(),
@@ -540,13 +610,19 @@ pub async fn list_providers(state: tauri::State<'_, AppState>) -> Result<Vec<Pro
     };
     Ok(base
         .into_iter()
-        .map(|(id, name)| ProviderView { configured: configured.contains(&id), id, name })
+        .map(|(id, name)| ProviderView {
+            configured: configured.contains(&id),
+            id,
+            name,
+        })
         .collect())
 }
 
 /// 当前（或最近一次）登录的进度快照——切走设置页再回来时用它补齐中间的输出。
 #[tauri::command]
-pub async fn get_provider_login(state: tauri::State<'_, AppState>) -> Result<LoginStatus, CmdError> {
+pub async fn get_provider_login(
+    state: tauri::State<'_, AppState>,
+) -> Result<LoginStatus, CmdError> {
     Ok(state.login_status.lock().await.clone())
 }
 
@@ -561,39 +637,66 @@ pub async fn start_provider_login(
     let bin = omp_bin(&state)?;
     let provider = provider_id.trim().to_string();
     if provider.is_empty() {
-        return Err(cmd_err("PROVIDER_ID_EMPTY", "供应商 id 不能为空".into(), None));
+        return Err(cmd_err(
+            "PROVIDER_ID_EMPTY",
+            "供应商 id 不能为空".into(),
+            None,
+        ));
     }
-    // 同一时刻只允许一个登录：先取消旧的（旧流程的收尾逻辑不会误清新槽位，见 pump 里比对 provider）
-    if let Some(old) = state.login.lock().await.take() {
+    // 启动、替换和取消共用槽位锁；并发启动不能越过彼此的初始化。
+    let mut slot = state.login.lock().await;
+    if let Some(old) = slot.take() {
         if let Some(tx) = old.cancel {
             let _ = tx.send(());
         }
     }
-    let mut child = tokio::process::Command::new(&bin)
+    let seq = LOGIN_SEQ.fetch_add(1, Ordering::Relaxed);
+    {
+        let mut status = state.login_status.lock().await;
+        *status = LoginStatus {
+            seq,
+            provider: provider.clone(),
+            running: true,
+            ..Default::default()
+        };
+    }
+    let spawned = tokio::process::Command::new(&bin)
         .args(["auth-broker", "login", &provider])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| cmd_err("LOGIN_SPAWN_FAILED", format!("启动登录失败：{e}"), None))?;
+        .spawn();
+    let mut child = match spawned {
+        Ok(child) => child,
+        Err(error) => {
+            let message = format!("启动登录失败：{error}");
+            push_status(&app, &state.login_status, seq, |status| {
+                status.running = false;
+                status.done = Some(LoginDone {
+                    ok: false,
+                    cancelled: false,
+                    message: Some(message.clone()),
+                });
+            })
+            .await;
+            return Err(cmd_err("LOGIN_SPAWN_FAILED", message, None));
+        }
+    };
     let stdin = child.stdin.take().expect("stdin piped");
     let (cancel_tx, cancel_rx) = oneshot::channel();
-    *state.login.lock().await = Some(LoginSession {
-        provider: provider.clone(),
+    *slot = Some(LoginSession {
+        seq,
         stdin: Arc::new(Mutex::new(stdin)),
         cancel: Some(cancel_tx),
     });
-    // 状态先复位再交给 pump：界面从"开始登录"的空白态起
-    {
-        let mut s = state.login_status.lock().await;
-        *s = LoginStatus { provider: provider.clone(), running: true, url: None, lines: vec![], done: None };
-    }
-    push_status(&app, &state.login_status, |_| {}).await;
+    // 初始化事件与后续 pump 更新都按 spawn 身份隔离。
+    push_status(&app, &state.login_status, seq, |_| {}).await;
+    drop(slot);
     start_login_pump(
         app,
         child,
-        provider,
+        seq,
         state.login.clone(),
         state.login_status.clone(),
         cancel_rx,
@@ -603,10 +706,17 @@ pub async fn start_provider_login(
 
 /// 回答上游提问（如「选端点 / 粘贴 API key」）：把一行文本写进登录子进程的 stdin。
 #[tauri::command]
-pub async fn provider_login_input(state: tauri::State<'_, AppState>, text: String) -> Result<(), CmdError> {
+pub async fn provider_login_input(
+    state: tauri::State<'_, AppState>,
+    text: String,
+) -> Result<(), CmdError> {
     let session = state.login.lock().await;
     let Some(s) = session.as_ref() else {
-        return Err(cmd_err("LOGIN_NOT_RUNNING", "当前没有进行中的登录".into(), None));
+        return Err(cmd_err(
+            "LOGIN_NOT_RUNNING",
+            "当前没有进行中的登录".into(),
+            None,
+        ));
     };
     let mut stdin = s.stdin.lock().await;
     stdin
@@ -633,17 +743,28 @@ pub async fn cancel_provider_login(state: tauri::State<'_, AppState>) -> Result<
             }
             Ok(())
         }
-        None => Err(cmd_err("LOGIN_NOT_RUNNING", "当前没有进行中的登录".into(), None)),
+        None => Err(cmd_err(
+            "LOGIN_NOT_RUNNING",
+            "当前没有进行中的登录".into(),
+            None,
+        )),
     }
 }
 
 /// 登出：`omp auth-broker logout <providerId>`（删除该供应商在 omp 凭证库里的全部凭证）。
 #[tauri::command]
-pub async fn logout_provider(state: tauri::State<'_, AppState>, provider_id: String) -> Result<(), CmdError> {
+pub async fn logout_provider(
+    state: tauri::State<'_, AppState>,
+    provider_id: String,
+) -> Result<(), CmdError> {
     let bin = omp_bin(&state)?;
     let provider = provider_id.trim().to_string();
     if provider.is_empty() {
-        return Err(cmd_err("PROVIDER_ID_EMPTY", "供应商 id 不能为空".into(), None));
+        return Err(cmd_err(
+            "PROVIDER_ID_EMPTY",
+            "供应商 id 不能为空".into(),
+            None,
+        ));
     }
     run_omp(&bin, &["auth-broker", "logout", &provider])
         .await
@@ -655,12 +776,16 @@ pub async fn logout_provider(state: tauri::State<'_, AppState>, provider_id: Str
 
 /// 模型角色表（`modelRoles`）+ 保存位置（`modelRoleStorage`）。
 #[tauri::command]
-pub async fn get_model_roles(state: tauri::State<'_, AppState>) -> Result<ModelRolesInfo, CmdError> {
+pub async fn get_model_roles(
+    state: tauri::State<'_, AppState>,
+) -> Result<ModelRolesInfo, CmdError> {
     let bin = omp_bin(&state)?;
     let roles = config_get(&bin, "modelRoles")
         .await
         .map_err(|e| cmd_err("ROLES_READ_FAILED", e, None))?;
-    let storage = config_get(&bin, "modelRoleStorage").await.unwrap_or(serde_json::Value::Null);
+    let storage = config_get(&bin, "modelRoleStorage")
+        .await
+        .unwrap_or(serde_json::Value::Null);
     let roles = roles.as_object().cloned().unwrap_or_default();
     Ok(ModelRolesInfo {
         roles,
@@ -697,7 +822,9 @@ pub async fn set_model_role(
         .as_object()
         .cloned()
         .unwrap_or_default();
-    let storage = config_get(&bin, "modelRoleStorage").await.unwrap_or(serde_json::Value::Null);
+    let storage = config_get(&bin, "modelRoleStorage")
+        .await
+        .unwrap_or(serde_json::Value::Null);
     Ok(ModelRolesInfo {
         roles,
         storage: storage.as_str().unwrap_or("global").to_string(),
@@ -707,7 +834,9 @@ pub async fn set_model_role(
 
 /// 失败转移链表（`retry.fallbackChains`）+ 两个配套开关——模型请求失败时由哪个模型接手。
 #[tauri::command]
-pub async fn get_fallback_chains(state: tauri::State<'_, AppState>) -> Result<FallbackChainsInfo, CmdError> {
+pub async fn get_fallback_chains(
+    state: tauri::State<'_, AppState>,
+) -> Result<FallbackChainsInfo, CmdError> {
     let bin = omp_bin(&state)?;
     read_retry_info(&state, &bin)
         .await
@@ -760,10 +889,24 @@ pub async fn set_retry_options(
     let flag = if model_fallback { "true" } else { "false" };
     run_omp(&bin, &["config", "set", "retry.modelFallback", flag])
         .await
-        .map_err(|e| cmd_err("RETRY_WRITE_FAILED", format!("写入失败转移开关失败：{e}"), None))?;
-    run_omp(&bin, &["config", "set", "retry.fallbackRevertPolicy", &revert_policy])
-        .await
-        .map_err(|e| cmd_err("RETRY_WRITE_FAILED", format!("写入回归策略失败：{e}"), None))?;
+        .map_err(|e| {
+            cmd_err(
+                "RETRY_WRITE_FAILED",
+                format!("写入失败转移开关失败：{e}"),
+                None,
+            )
+        })?;
+    run_omp(
+        &bin,
+        &[
+            "config",
+            "set",
+            "retry.fallbackRevertPolicy",
+            &revert_policy,
+        ],
+    )
+    .await
+    .map_err(|e| cmd_err("RETRY_WRITE_FAILED", format!("写入回归策略失败：{e}"), None))?;
     read_retry_info(&state, &bin)
         .await
         .map_err(|e| cmd_err("RETRY_READ_FAILED", e, None))
@@ -779,13 +922,22 @@ mod tests {
         assert_eq!(
             parse_providers(out),
             vec![
-                ("anthropic".to_string(), "Anthropic (Claude Pro/Max)".to_string()),
+                (
+                    "anthropic".to_string(),
+                    "Anthropic (Claude Pro/Max)".to_string()
+                ),
                 ("zai".to_string(), "Z.AI".to_string()),
             ]
         );
         // 缺 name 用 id 兜底；缺 id 的条目丢弃
-        assert_eq!(parse_providers(r#"[{"id":"kimi"}]"#), vec![("kimi".to_string(), "kimi".to_string())]);
-        assert_eq!(parse_providers(r#"[{"name":"x"},{"id":"a"}]"#), vec![("a".to_string(), "a".to_string())]);
+        assert_eq!(
+            parse_providers(r#"[{"id":"kimi"}]"#),
+            vec![("kimi".to_string(), "kimi".to_string())]
+        );
+        assert_eq!(
+            parse_providers(r#"[{"name":"x"},{"id":"a"}]"#),
+            vec![("a".to_string(), "a".to_string())]
+        );
     }
 
     #[test]
@@ -812,13 +964,89 @@ mod tests {
     }
 
     #[test]
+    fn stale_login_output_and_completion_do_not_replace_current_snapshot() {
+        // 供应商相同，但已经是第二次登录；旧 URL / 输出 / 结束通知都必须忽略。
+        let mut status = LoginStatus {
+            seq: 2,
+            provider: "same-provider".into(),
+            running: true,
+            url: Some("https://example.com/new-login".into()),
+            lines: vec!["new prompt".into()],
+            done: None,
+        };
+        let before = serde_json::to_value(&status).unwrap();
+        update_login_status(&mut status, 1, |status| {
+            status.url = Some("https://example.com/old-login".into());
+            push_line(status, "old prompt".into());
+        });
+        update_login_status(&mut status, 1, |status| {
+            status.running = false;
+            status.done = Some(LoginDone {
+                ok: false,
+                cancelled: true,
+                message: None,
+            });
+        });
+        assert_eq!(serde_json::to_value(&status).unwrap(), before);
+
+        update_login_status(&mut status, 2, |status| {
+            push_line(status, "current response".into())
+        });
+        assert_eq!(status.lines, vec!["new prompt", "current response"]);
+        update_login_status(&mut status, 2, |status| {
+            status.running = false;
+            status.done = Some(LoginDone {
+                ok: true,
+                cancelled: false,
+                message: None,
+            });
+        });
+        assert!(!status.running);
+        assert!(status.done.unwrap().ok);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stale_login_cleanup_keeps_new_session_input_usable() {
+        // 只启动本地回显进程；不运行 omp、不读凭证、不联网。
+        let mut child = tokio::process::Command::new("/bin/sh")
+            .args(["-c", "IFS= read -r line; printf '%s\\n' \"$line\""])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut slot = Some(LoginSession {
+            seq: 2,
+            stdin: Arc::new(Mutex::new(child.stdin.take().unwrap())),
+            cancel: None,
+        });
+        clear_login_session(&mut slot, 1);
+        {
+            let session = slot.as_ref().expect("旧会话收尾不能清掉新会话");
+            let mut stdin = session.stdin.lock().await;
+            stdin.write_all(b"current input\n").await.unwrap();
+            stdin.flush().await.unwrap();
+        }
+        let output = tokio::time::timeout(Duration::from_secs(5), child.wait_with_output())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(output.stdout, b"current input\n");
+        clear_login_session(&mut slot, 2);
+        assert!(slot.is_none());
+    }
+
+    #[test]
     fn login_parser_extracts_url_after_prompt() {
         let mut p = LoginParser::default();
         // 上游先打一个空行，再打提示行，再打 URL
         assert!(p.feed("").is_none());
         assert!(p.feed("Open this URL in your browser:").is_none());
         match p.feed("https://claude.ai/oauth/authorize?code=1") {
-            Some(LoginEvent::Url { url }) => assert_eq!(url, "https://claude.ai/oauth/authorize?code=1"),
+            Some(LoginEvent::Url { url }) => {
+                assert_eq!(url, "https://claude.ai/oauth/authorize?code=1")
+            }
             _ => panic!("URL 行应识别为 Url 事件"),
         }
         // 之后的普通行透传
@@ -888,10 +1116,18 @@ mod tests {
     #[test]
     fn role_edit_serializes_to_record_json() {
         let mut roles = serde_json::Map::new();
-        apply_role_edit(&mut roles, "default", Some("commandcode/meta/muse-spark-1.3-contributor:xhigh")).unwrap();
+        apply_role_edit(
+            &mut roles,
+            "default",
+            Some("commandcode/meta/muse-spark-1.3-contributor:xhigh"),
+        )
+        .unwrap();
         let json = serde_json::to_string(&serde_json::Value::Object(roles)).unwrap();
         // selector 里的 `/` 与 `:` 必须原样保留（provider/modelId:level 的既有形态）
-        assert_eq!(json, r#"{"default":"commandcode/meta/muse-spark-1.3-contributor:xhigh"}"#);
+        assert_eq!(
+            json,
+            r#"{"default":"commandcode/meta/muse-spark-1.3-contributor:xhigh"}"#
+        );
     }
 
     #[test]
@@ -903,7 +1139,10 @@ mod tests {
         });
         let m = parse_chains(&v);
         assert_eq!(m["default"], vec!["openai/gpt-4o-mini", "google/*"]);
-        assert_eq!(m["opencode-go/muse-spark-1.3-contributor"], vec!["opencode-go/deepseek-v4.1-flash"]);
+        assert_eq!(
+            m["opencode-go/muse-spark-1.3-contributor"],
+            vec!["opencode-go/deepseek-v4.1-flash"]
+        );
         assert_eq!(m.len(), 2);
     }
 
@@ -926,7 +1165,12 @@ mod tests {
         apply_chain_edit(&mut m, "default", Some(&["a/b".to_string()])).unwrap();
         assert_eq!(m["default"], vec!["a/b"]);
         // 覆盖同一个键
-        apply_chain_edit(&mut m, "default", Some(&["c/d".to_string(), "e/f".to_string()])).unwrap();
+        apply_chain_edit(
+            &mut m,
+            "default",
+            Some(&["c/d".to_string(), "e/f".to_string()]),
+        )
+        .unwrap();
         assert_eq!(m["default"], vec!["c/d", "e/f"]);
         // 删除：None / 空数组 / 全是空项等价，且不影响其他键
         apply_chain_edit(&mut m, "smol", Some(&["g/h".to_string()])).unwrap();
@@ -961,10 +1205,18 @@ mod tests {
     #[test]
     fn chain_edit_serializes_to_record_json() {
         let mut m = ChainMap::new();
-        apply_chain_edit(&mut m, "opencode-go/*", Some(&["anthropic/claude-sonnet-5:max".to_string()])).unwrap();
+        apply_chain_edit(
+            &mut m,
+            "opencode-go/*",
+            Some(&["anthropic/claude-sonnet-5:max".to_string()]),
+        )
+        .unwrap();
         let json = serde_json::to_string(&m).unwrap();
         // 通配键的 `*`、条目里的 `/` 与 `:` 必须原样保留（omp 的既有形态）
-        assert_eq!(json, r#"{"opencode-go/*":["anthropic/claude-sonnet-5:max"]}"#);
+        assert_eq!(
+            json,
+            r#"{"opencode-go/*":["anthropic/claude-sonnet-5:max"]}"#
+        );
     }
 
     #[test]
@@ -975,6 +1227,9 @@ mod tests {
         }
         assert_eq!(s.lines.len(), LOGIN_LINES_MAX);
         assert_eq!(s.lines.first().unwrap(), "line 5");
-        assert_eq!(s.lines.last().unwrap(), &format!("line {}", LOGIN_LINES_MAX + 4));
+        assert_eq!(
+            s.lines.last().unwrap(),
+            &format!("line {}", LOGIN_LINES_MAX + 4)
+        );
     }
 }

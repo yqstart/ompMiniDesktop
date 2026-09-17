@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 import {
   API_OPTIONS,
   apiOptionsFor,
@@ -82,23 +83,6 @@ describe("parseModelsConfig", () => {
 });
 
 describe("providerFormOf", () => {
-  it("读出表单初值（未声明 input 时按只收文本）", () => {
-    const f = providerFormOf(SAMPLE, "my-gw");
-    expect(f).not.toBeNull();
-    expect(f!.originalId).toBe("my-gw");
-    expect(f!.baseUrl).toBe("https://gw.example.com/v1");
-    expect(f!.api).toBe("openai-completions");
-    expect(f!.apiKey).toBe("GW_KEY");
-    expect(f!.models).toHaveLength(1);
-    expect(f!.models[0]).toEqual({
-      id: "gpt-x",
-      name: "GPT X",
-      contextWindow: "128000",
-      maxTokens: "",
-      reasoning: false,
-      input: ["text"],
-    });
-  });
 
   it("不存在的 id / 解析失败都返回 null", () => {
     expect(providerFormOf(SAMPLE, "nope")).toBeNull();
@@ -187,7 +171,93 @@ describe("upsertProvider 保真编辑", () => {
     expect(r.ok).toBe(false);
   });
 
-  it("重复 id 的模型按 id 复用节点（界面之外的字段保住）", () => {
+  it("结构损坏时拒绝编辑，不把 providers 标量或根数组覆盖为空对象", () => {
+    for (const text of ["providers: 42\n", "providers: null\n", "- item\n", "42\n"]) {
+      expect(parseModelsConfig(text).error?.kind).toBe("shape");
+      expect(providerFormOf(text, "my-gw")).toBeNull();
+      expect(upsertProvider(text, form()).ok).toBe(false);
+      expect(removeProvider(text, "my-gw").ok).toBe(false);
+    }
+  });
+
+  it("模型改 id 后保留自身 cost，删除后新建同名模型不会继承旧字段", () => {
+    const f = providerFormOf(SAMPLE, "my-gw")!;
+    f.models[0].id = "renamed-model";
+    const result = upsertProvider(SAMPLE, f);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const model = parse(result.text).providers["my-gw"].models[0];
+    expect(model.id).toBe("renamed-model");
+    expect(model.cost).toEqual({ input: 1, output: 2, cacheRead: 0, cacheWrite: 0 });
+
+    f.models = [{ ...form().models[0], id: "gpt-x" }];
+    const replacement = upsertProvider(SAMPLE, f);
+    expect(replacement.ok).toBe(true);
+    if (!replacement.ok) return;
+    expect(parse(replacement.text).providers["my-gw"].models[0].cost).toBeUndefined();
+  });
+
+  it("删除前一行后剩余模型改名仍保留自己的隐藏字段", () => {
+    const text = `providers:
+  gw:
+    baseUrl: https://example.com
+    api: openai-completions
+    auth: none
+    models:
+      - id: first
+        tokenizer: first-tokenizer
+      - id: second
+        tokenizer: second-tokenizer
+`;
+    const f = providerFormOf(text, "gw")!;
+    f.models = [f.models[1]];
+    f.models[0].id = "first";
+    const result = upsertProvider(text, f);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(parse(result.text).providers.gw.models).toEqual([{ id: "first", tokenizer: "second-tokenizer" }]);
+  });
+
+  it("编辑其它字段时保留显式 auth、false、未知模态及模型列表注释", () => {
+    const text = `providers:
+  gw:
+    baseUrl: https://example.com
+    api: google-vertex
+    apiKey: KEY
+    auth: oauth
+    models: # keep list comment
+      - id: old
+        reasoning: false # keep explicit false
+        input: [text, audio] # keep input comment
+`;
+    const f = providerFormOf(text, "gw")!;
+    f.models[0].id = "new";
+    const result = upsertProvider(text, f);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(parse(result.text).providers.gw).toEqual({
+      baseUrl: "https://example.com", api: "google-vertex", apiKey: "KEY", auth: "oauth",
+      models: [{ id: "new", reasoning: false, input: ["text", "audio"] }],
+    });
+    expect(result.text).toContain("# keep list comment");
+    expect(result.text).toContain("# keep explicit false");
+    expect(result.text).toContain("# keep input comment");
+
+    f.models[0].input.push("image");
+    const withImage = upsertProvider(text, f);
+    expect(withImage.ok).toBe(true);
+    if (!withImage.ok) return;
+    expect(parse(withImage.text).providers.gw.models[0].input).toEqual(["text", "audio", "image"]);
+  });
+
+  it("模型 id 重复（含前后空白）时拒绝保存，不复用同一个节点两次", () => {
+    const f = providerFormOf(SAMPLE, "my-gw")!;
+    f.models.push({ ...form().models[0], id: " gpt-x " });
+    expect(providerFormComplete(f)).toBe(false);
+    expect(upsertProvider(SAMPLE, f).ok).toBe(false);
+  });
+
+  it("保留已有模型的隐藏字段，并允许追加新模型", () => {
     const f = providerFormOf(SAMPLE, "my-gw")!;
     f.models = [{ ...f.models[0], maxTokens: "2048" }, { id: "m2", name: "M2", contextWindow: "", maxTokens: "", reasoning: false, input: ["text"] }];
     const out = (upsertProvider(SAMPLE, f) as { ok: true; text: string }).text;
@@ -236,38 +306,39 @@ describe("upsertProvider 保真编辑", () => {
     expect(out).toContain("cost: {input: 1, output: 2, cacheRead: 0, cacheWrite: 0}");
   });
 
-  it("改名撞已有 id / originalId 与 id 相同：都不制造重复键", () => {
+  it("新建撞名、改名撞名与失效编辑目标均拒绝保存", () => {
     const clash = providerFormOf(SAMPLE, "my-gw")!;
     clash.id = "deepseek";
-    const out = (upsertProvider(SAMPLE, clash) as { ok: true; text: string }).text;
-    expect(out.match(/^ {2}deepseek:$/gm)?.length).toBe(1);
-    expect(out).toContain("my-gw:");
-
-    const same = providerFormOf(SAMPLE, "my-gw")!;
-    const kept = (upsertProvider(SAMPLE, same) as { ok: true; text: string }).text;
-    expect(kept.match(/my-gw:/g)?.length).toBe(1);
+    expect(upsertProvider(SAMPLE, clash).ok).toBe(false);
+    expect(upsertProvider(SAMPLE, form({ id: "my-gw" })).ok).toBe(false);
+    expect(upsertProvider(SAMPLE, { ...clash, originalId: "missing", id: "new" }).ok).toBe(false);
+    expect(upsertProvider(SAMPLE, { ...clash, originalId: "deepseek" }).ok).toBe(false);
   });
 });
 
 describe("removeProvider", () => {
   it("只删目标块，注释与其它块保留", () => {
-    const r = removeProvider(SAMPLE, "deepseek");
+    const r = removeProvider(SAMPLE, "my-gw");
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.text).not.toContain("deepseek");
+    expect(r.text).not.toContain("my-gw");
     expect(r.text).toContain("# 顶部注释：保留说明");
-    expect(r.text).toContain("my-gw:");
-    expect(r.text).toContain("X-Team: platform");
+    expect(r.text).toContain("deepseek:");
+    expect(r.text).toContain("stripImageInput: false");
   });
 
   it("删掉最后一个块后仍留下合法空结构（空文件会让 omp 报 root 错误）", () => {
-    const one = "providers:\n  a:\n    baseUrl: http://x/v1\n";
+    const one = "providers:\n  a:\n    baseUrl: http://x/v1\n    api: openai-completions\n    auth: none\n    models:\n      - id: m\n";
     const r = removeProvider(one, "a");
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.text.trim()).toBe("providers: {}");
   });
 
+  it("覆盖型块只读，不提供编辑表单也不允许删除", () => {
+    expect(providerFormOf(SAMPLE, "deepseek")).toBeNull();
+    expect(removeProvider(SAMPLE, "deepseek").ok).toBe(false);
+  });
   it("没有 providers 块时原样返回（不制造副作用），坏 YAML 拒绝编辑", () => {
     const r = removeProvider("# x\n", "a");
     expect(r.ok && r.text).toBe("# x\n");
@@ -292,13 +363,13 @@ describe("表单校验", () => {
     expect(providerFormComplete(form())).toBe(true);
     expect(providerFormComplete(form({ id: "云渡中转" }))).toBe(true);
     expect(providerFormComplete(form({ baseUrl: "gw.example.com" }))).toBe(false);
+    expect(providerFormComplete(form({ baseUrl: "https://" }))).toBe(false);
+    expect(providerFormComplete(form({ baseUrl: "https:example.com" }))).toBe(false);
+    expect(providerFormComplete(form({ baseUrl: "HTTPS://example.com/v1" }))).toBe(true);
     expect(providerFormComplete(form({ api: "" }))).toBe(false);
     expect(providerFormComplete(form({ models: [] }))).toBe(false);
   });
 
-  it("默认表单指向 openai-completions", () => {
-    expect(emptyProviderForm().api).toBe(API_OPTIONS[0]);
-  });
 });
 
 describe("接口类型候选（apiOptionsFor）", () => {

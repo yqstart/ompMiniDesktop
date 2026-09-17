@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useId, useRef } from "react";
 import { useText } from "../lib/useText";
+import { useDialogFocus } from "../lib/useDropdown";
 
 /**
  * 通用二次确认浮层（MASTER §8 的 `ConfirmDialog`）。
@@ -29,23 +30,10 @@ export function ConfirmDialog({
  onCancel: () => void;
 }) {
  const cancelRef = useRef<HTMLButtonElement>(null);
+ const cardRef = useRef<HTMLDivElement>(null);
+ const detailId = useId();
  const t = useText();
- /** 最新 `onCancel` 的引用：调用方传的都是内联箭头函数，若放进下面 effect 的依赖，
-  *  打开期间的每次重渲染都会重跑 `focus()`，把焦点抢回「取消」按钮（与 DialogShell 同款坑）。 */
- const onCancelRef = useRef(onCancel);
- useEffect(() => {
-  onCancelRef.current = onCancel;
- });
-
- useEffect(() => {
-  if (!open) return;
-  cancelRef.current?.focus();
-  const onKey = (e: KeyboardEvent) => {
-   if (e.key === "Escape") onCancelRef.current();
-  };
-  document.addEventListener("keydown", onKey);
-  return () => document.removeEventListener("keydown", onKey);
- }, [open]);
+ useDialogFocus(cardRef, open, onCancel, cancelRef);
 
  if (!open) return null;
  return (
@@ -54,16 +42,20 @@ export function ConfirmDialog({
    onClick={onCancel}
   >
    <div
+    ref={cardRef}
+    tabIndex={-1}
     role="dialog"
     aria-modal="true"
     aria-label={title}
+    aria-describedby={detail ? detailId : undefined}
     className="w-full max-w-sm rounded-xl border border-border bg-elevated p-6 shadow-dialog"
     onClick={(e) => e.stopPropagation()}
    >
     <div className="text-[17px] font-semibold tracking-tight">{title}</div>
-    {detail && <div className="mt-3 text-[13px] leading-6 text-muted">{detail}</div>}
+    {detail && <div id={detailId} className="mt-3 text-[13px] leading-6 text-muted">{detail}</div>}
     <div className="mt-6 flex justify-end gap-2 border-t border-border-soft pt-4">
      <button
+      type="button"
       ref={cancelRef}
       onClick={onCancel}
       className="cursor-pointer rounded-md border border-border px-3.5 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover"
@@ -71,6 +63,7 @@ export function ConfirmDialog({
       {cancelLabel ?? t.cancel}
      </button>
      <button
+      type="button"
       onClick={onConfirm}
       className={`cursor-pointer rounded-md border px-3.5 py-1.5 text-[13px] font-medium transition-colors duration-100 ${danger ? "border-danger/25 bg-danger/10 text-danger hover:bg-danger/15" : "border-transparent bg-accent text-accent-foreground hover:opacity-90"
        }`}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ArrowUpRightSquare, Check, Copy, Key, Loader, Plus, Refresh, Trash2 } from "reicon-react";
@@ -60,72 +60,100 @@ export function ProvidersSection() {
  const [formErr, setFormErr] = useState<string | null>(null);
  /** 自定义行的删除确认目标（行内确认：设置页是可滚动容器，浮层会被裁掉）。 */
  const [pendingRemove, setPendingRemove] = useState<string | null>(null);
+ const busyRef = useRef(false);
+ const loadVersion = useRef(0);
+ const editingFile = useRef<ModelsConfigFile | null>(null);
+ const recoverLogin = useRef(true);
+ const loginStart = useRef<Promise<void> | null>(null);
+ const closingRef = useRef(false);
+ const [startingLogin, setStartingLogin] = useState(false);
+ const [closing, setClosing] = useState(false);
 
- /** 拉供应商清单 + models.yml + 模型目录（「已配置」标记、挑选面板与登录成功后的刷新都靠目录）。
-  *  写成 promise 链（而不是在 effect 里同步调用）——state 只在回调里更新，
-  *  符合 react-hooks 对「effect 内同步 setState 会级联渲染」的约束。 */
- const load = useCallback(
-  (force: boolean) =>
-   Promise.allSettled([
-    api.listProviders().then((list) => setProviders(list)),
-    api.readModelsConfig().then((f) => setFile(f)),
-    (force ? api.refreshModels() : api.getModels()).then((c) => set({ models: c })),
-   ]).then((res) => {
-    const bad = res.find((r) => r.status === "rejected");
-    setErr(
-     bad && bad.status === "rejected"
-      ? bad.reason instanceof Error
-       ? bad.reason.message
-       : t.providerLoadFailed
-      : null,
-    );
-   }),
-  [set, t.providerLoadFailed],
- );
+ /** 拉供应商清单、配置与目录；较早请求的结果不能覆盖更新后的快照。 */
+ const load = useCallback((force: boolean) => {
+  const version = ++loadVersion.current;
+  return Promise.allSettled([
+   api.listProviders(),
+   api.readModelsConfig(),
+   force ? api.refreshModels() : api.getModels(),
+  ]).then((results) => {
+   if (version !== loadVersion.current) return;
+   const [providerResult, fileResult, modelResult] = results;
+   if (providerResult.status === "fulfilled") setProviders(providerResult.value);
+   if (fileResult.status === "fulfilled") setFile(fileResult.value);
+   if (modelResult.status === "fulfilled") set({ models: modelResult.value });
+   const bad = results.find((r) => r.status === "rejected");
+   setErr(bad?.status === "rejected" ? bad.reason instanceof Error ? bad.reason.message : t.providerLoadFailed : null);
+  });
+ }, [set, t.providerLoadFailed]);
 
  useEffect(() => {
   void load(!models);
-  void api
-   .getProviderLogin()
-   .then((s) => {
-    setLogin(s);
-    // 切走设置页再回来：把未走完的登录恢复到面板里（不然它就成了看不见的后台进程）
-    if (s.running && s.provider) {
-     setAddOpen(true);
-     setAddPick(s.provider);
-    }
-   })
-   .catch(() => { });
   // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅挂载时拉一次
  }, []);
 
  // 登录进度：后端推的是**全量快照**（不是增量），这里直接覆盖即可
  useEffect(() => {
+  let active = true;
   const un = listen<ProviderLoginStatus>(IPC.providerLogin, (e) => {
+   if (!active) return;
+   if (recoverLogin.current) {
+    recoverLogin.current = false;
+    if (e.payload.running && e.payload.provider) {
+     setAddOpen(true);
+     setAddPick(e.payload.provider);
+    }
+   }
    setLogin(e.payload);
-   // 成功了：凭证变了 → 供应商状态与模型目录都要重取（后端也已作废目录缓存）
    if (e.payload.done?.ok) void load(true);
   });
+  // 先订阅再取快照；迟到的初始快照不能覆盖用户刚启动的新流程。
+  void un.then(async () => {
+   if (!active) return;
+   if (!recoverLogin.current) return;
+   const status = await api.getProviderLogin();
+   if (!active || !recoverLogin.current) return;
+   recoverLogin.current = false;
+   setLogin(status);
+   if (status.running && status.provider) {
+    setAddOpen(true);
+    setAddPick(status.provider);
+   }
+  }).catch((e: unknown) => {
+   if (active) setErr(e instanceof Error ? e.message : t.loginFailed);
+  });
   return () => {
-   void un.then((f) => f());
+   active = false;
+   void un.then((dispose) => dispose()).catch(() => { });
   };
- }, [load]);
+ }, [load, t.loginFailed]);
 
  /** 发起 `auth-broker login`：上游先打印取 key 的说明 / 授权链接，用户在面板里回答提问。 */
- const startLogin = async (id: string) => {
+ const startLogin = (id: string) => {
+  if (loginStart.current || closingRef.current) return;
+  recoverLogin.current = false;
   setErr(null);
-  try {
-   await api.startProviderLogin(id);
-  } catch (e) {
-   setErr(e instanceof Error ? e.message : t.loginFailed);
-  }
+  setFormErr(null);
+  setStartingLogin(true);
+  setLogin({ provider: id, running: true, url: null, lines: [], done: null });
+  const request = api.startProviderLogin(id).catch((e: unknown) => {
+   setLogin({ provider: id, running: false, url: null, lines: [], done: { ok: false, cancelled: false, message: e instanceof Error ? e.message : t.loginFailed } });
+  }).finally(() => {
+   loginStart.current = null;
+   setStartingLogin(false);
+  });
+  loginStart.current = request;
  };
 
  /** 添加面板：选完提供商立即开始流程（自定义 → 表单；其余 → 凭据卡）。 */
  const pickProvider = (id: string) => {
+  if (busyRef.current || closingRef.current) return;
+  recoverLogin.current = false;
   setFormErr(null);
   setPendingRemove(null);
   if (id === PICK_CUSTOM) {
+   if (!file) return;
+   editingFile.current = file;
    setEditing(emptyProviderForm());
    return;
   }
@@ -135,6 +163,8 @@ export function ProvidersSection() {
 
  /** 打开添加面板（未选提供商）。 */
  const openAdd = () => {
+  if (busyRef.current || closingRef.current) return;
+  recoverLogin.current = false;
   setFormErr(null);
   setPendingRemove(null);
   setPicking(null);
@@ -145,21 +175,35 @@ export function ProvidersSection() {
 
  /** 关闭面板；`cancelLogin` 时顺手终止还在跑的登录子进程（关闭 = 放弃这次添加）。 */
  const closeAdd = async (cancelLogin: boolean) => {
+  if (busyRef.current || closingRef.current) return;
+  closingRef.current = true;
+  setClosing(true);
+  recoverLogin.current = false;
+  if (cancelLogin && addPick) {
+   // 关闭可能发生在首次快照之前：等启动命令落定后再取消，避免遗留后台登录。
+   await loginStart.current;
+   try {
+    const current = await api.getProviderLogin();
+    if (current.running && current.provider === addPick) await api.cancelProviderLogin();
+   } catch (e) {
+    setFormErr(e instanceof Error ? e.message : t.opFailed);
+    closingRef.current = false;
+    setClosing(false);
+    return;
+   }
+  }
   setAddOpen(false);
   setAddPick(null);
   setEditing(null);
+  editingFile.current = null;
   setFormErr(null);
-  if (cancelLogin && login?.running) {
-   try {
-    await api.cancelProviderLogin();
-   } catch {
-    // 已经结束了：忽略（状态由事件流收敛）
-   }
-  }
+  closingRef.current = false;
+  setClosing(false);
  };
 
  /** 行上的「登录」：重新走一遍该供应商的凭据流程（更新 key / 重新授权）。 */
  const relogin = (id: string) => {
+  if (busyRef.current || closingRef.current) return;
   setFormErr(null);
   setPendingRemove(null);
   setPicking(null);
@@ -170,9 +214,11 @@ export function ProvidersSection() {
  };
 
  const beginEdit = (id: string) => {
-  if (!file) return;
+  if (!file || busyRef.current || closingRef.current) return;
   const form = providerFormOf(file.text, id);
   if (!form) return;
+  editingFile.current = file;
+  recoverLogin.current = false;
   setFormErr(null);
   setPendingRemove(null);
   setPicking(null);
@@ -183,41 +229,47 @@ export function ProvidersSection() {
 
  /** 保存自定义供应商：表单 → 保真编辑 → 后端预校验 + 落盘（失败时原文件不动）。 */
  const saveCustom = async () => {
-  if (!editing || !file) return;
+  const source = editingFile.current;
+  if (!editing || !source || busyRef.current) return;
   if (!providerFormComplete(editing)) {
    setFormErr(t.customFormIncomplete);
    return;
   }
   // 改名撞已有 id（编辑保留原名不算）——挡在写盘前
-  if (isDuplicateProviderId(editing, parseModelsConfig(file.text).providers.map((p) => p.id))) {
+  if (isDuplicateProviderId(editing, parseModelsConfig(source.text).providers.map((p) => p.id))) {
    setFormErr(t.customFormDupId);
    return;
   }
-  const edited = upsertProvider(file.text, editing);
+  const edited = upsertProvider(source.text, editing);
   if (!edited.ok) {
    setFormErr(edited.error);
    return;
   }
+  busyRef.current = true;
+  loadVersion.current += 1;
   setBusy(true);
   setFormErr(null);
   try {
-   const next = await api.writeModelsConfig(edited.text, file.hash);
+   const next = await api.writeModelsConfig(edited.text, source.hash);
    setFile(next);
    setEditing(null);
+   editingFile.current = null;
    setAddOpen(false);
    setAddPick(null);
    // 写入已通过 omp 预校验——目录里立刻能看到（有凭证或免钥时）
-   const catalog = await api.refreshModels();
-   set({ models: catalog });
+   await load(true);
   } catch (e) {
    setFormErr(e instanceof Error ? e.message : t.opFailed);
   } finally {
+   busyRef.current = false;
    setBusy(false);
   }
  };
 
  const doRemove = async (id: string) => {
-  if (!file) return;
+  if (!file || busyRef.current) return;
+  busyRef.current = true;
+  loadVersion.current += 1;
   setPendingRemove(null);
   setBusy(true);
   setErr(null);
@@ -229,19 +281,22 @@ export function ProvidersSection() {
    }
    const next = await api.writeModelsConfig(edited.text, file.hash);
    setFile(next);
-   const catalog = await api.refreshModels();
-   set({ models: catalog });
+   await load(true);
   } catch (e) {
    setErr(e instanceof Error ? e.message : t.opFailed);
   } finally {
+   busyRef.current = false;
    setBusy(false);
   }
  };
 
  const doLogout = async () => {
+  if (busyRef.current) return;
   const p = pendingLogout;
   setPendingLogout(null);
   if (!p) return;
+  busyRef.current = true;
+  loadVersion.current += 1;
   setBusy(true);
   setErr(null);
   try {
@@ -250,11 +305,13 @@ export function ProvidersSection() {
   } catch (e) {
    setErr(e instanceof Error ? e.message : t.opFailed);
   } finally {
+   busyRef.current = false;
    setBusy(false);
   }
  };
 
  const refreshAll = async () => {
+  if (busyRef.current || refreshing) return;
   setRefreshing(true);
   setErr(null);
   try {
@@ -323,12 +380,14 @@ export function ProvidersSection() {
           <span className="shrink-0 text-[13px] text-ok">{t.providerConfigured}</span>
           <button
            onClick={() => setPicking(p)}
+           disabled={busy || closing}
            className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover"
           >
            {t.providersPick}
           </button>
           <button
            onClick={() => relogin(p.id)}
+           disabled={busy || closing}
            className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover"
            aria-label={fmt(t.providerLogin + " {0}", p.id)}
           >
@@ -336,6 +395,7 @@ export function ProvidersSection() {
           </button>
           <button
            onClick={() => setPendingLogout(p)}
+           disabled={busy || closing}
            className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
            aria-label={fmt(t.providerLogout + " {0}", p.id)}
           >
@@ -349,7 +409,7 @@ export function ProvidersSection() {
          key={v.id}
          view={v}
          activeCount={catalog.filter((m) => m.provider === v.id).length}
-         busy={busy}
+         busy={busy || closing}
          pending={pendingRemove === v.id}
          editing={editing?.originalId === v.id}
          onEdit={() => beginEdit(v.id)}
@@ -375,7 +435,7 @@ export function ProvidersSection() {
 
     <button
      onClick={openAdd}
-     disabled={providers === null || !!parsed.error}
+     disabled={providers === null || !file || !!parsed.error || busy || closing}
      className="mt-4 flex min-h-9 cursor-pointer items-center gap-2 rounded-md bg-active px-3 py-2 text-[13px] font-medium text-accent transition-colors duration-100 hover:bg-hover disabled:opacity-50"
     >
      <Plus size={12} aria-hidden />
@@ -409,16 +469,22 @@ export function ProvidersSection() {
      onClose={() => void closeAdd(true)}
      width={editing ? "max-w-2xl" : "max-w-xl"}
     >
+     {!editing && formErr && <p role="alert" className="mb-3 text-xs text-danger">{formErr}</p>}
      {editing ? (
       <CustomProviderEditForm
        form={editing}
        busy={busy}
        error={formErr}
        existingIds={parsed.providers.map((p) => p.id)}
-       onChange={setEditing}
+       onChange={(next) => { setEditing(next); setFormErr(null); }}
        onCancel={() => {
-        setEditing(null);
-        setFormErr(null);
+        if (editing.originalId) {
+         void closeAdd(false);
+        } else {
+         setEditing(null);
+         editingFile.current = null;
+         setFormErr(null);
+        }
        }}
        onSave={() => void saveCustom()}
       />
@@ -426,13 +492,17 @@ export function ProvidersSection() {
       <ProviderPicker providers={providers ?? []} onPick={pickProvider} />
      ) : (
       <LoginFlow
+       key={addPick}
        providerId={addPick}
        providerName={pickedProvider?.name ?? null}
        status={activeLogin}
+       starting={startingLogin}
+       closing={closing}
        catalog={catalog}
        myModels={myModels}
        onModelsChange={setMyModels}
-       onClose={() => void closeAdd(!!activeLogin?.running)}
+       onClose={() => void closeAdd(true)}
+       onRetry={() => startLogin(addPick)}
       />
      )}
     </DialogShell>
@@ -554,23 +624,34 @@ function LoginFlow({
  providerId,
  providerName,
  status,
+ starting,
+ closing,
  catalog,
  myModels,
  onModelsChange,
  onClose,
+ onRetry,
 }: {
  providerId: string;
  providerName: string | null;
  /** 事件还没到时为 null（刚点完，正等第一次快照）——按「进行中」显示。 */
  status: ProviderLoginStatus | null;
+ starting: boolean;
+ closing: boolean;
  catalog: ModelInfo[];
  myModels: string[];
  onModelsChange: (next: string[]) => void;
  onClose: () => void;
+ onRetry: () => void;
 }) {
  const t = useText();
  const [text, setText] = useState("");
  const [copied, setCopied] = useState(false);
+ const [sending, setSending] = useState(false);
+ const sendingRef = useRef(false);
+ const [actionError, setActionError] = useState<string | null>(null);
+ const copyTimer = useRef<number | undefined>(undefined);
+ useEffect(() => () => window.clearTimeout(copyTimer.current), []);
  const running = status?.running ?? true;
  const done = status?.done ?? null;
  const ok = !!done?.ok;
@@ -578,26 +659,34 @@ function LoginFlow({
  const copyUrl = async () => {
   if (!status?.url) return;
   try {
+   setActionError(null);
    await navigator.clipboard.writeText(status.url);
    setCopied(true);
-   window.setTimeout(() => setCopied(false), 1500);
+   window.clearTimeout(copyTimer.current);
+   copyTimer.current = window.setTimeout(() => setCopied(false), 1500);
   } catch {
-   // 复制失败不阻断流程：URL 就在屏幕上，可以手动选中
+   setActionError(t.copyFailed);
   }
  };
 
  const send = async () => {
-  const v = text.trim();
-  if (!v) return;
+  if (!running || starting || closing || sendingRef.current) return;
+  sendingRef.current = true;
+  setSending(true);
+  setActionError(null);
   try {
-   await api.providerLoginInput(v);
+   // 本地免钥端点允许空行；不要吞掉上游合法的「回车继续」。
+   await api.providerLoginInput(text.trim());
    setText("");
-  } catch {
-   // 子进程已结束：状态由事件流收敛，不再打扰用户
+  } catch (e) {
+   setActionError(e instanceof Error ? e.message : t.opFailed);
+  } finally {
+   sendingRef.current = false;
+   setSending(false);
   }
  };
 
- const title = ok
+ const title = closing ? t.loginCancelling : starting ? t.loginStarting : ok
   ? fmt(t.providersAddAdded, providerName ?? providerId)
   : running
    ? t.loginWaiting
@@ -619,21 +708,24 @@ function LoginFlow({
     <span className="ml-auto min-w-0 break-all font-mono text-xs text-muted">{providerId}</span>
     <button
      onClick={onClose}
+     disabled={closing}
      className="shrink-0 cursor-pointer rounded border border-border px-2 py-0.5 text-[12px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
     >
      {running ? t.cancel : ok ? t.providersAddDone : t.close}
     </button>
+    {!running && !ok && !starting && <button disabled={closing} onClick={() => { setText(""); setActionError(null); onRetry(); }} className="cursor-pointer rounded border border-border px-2 py-0.5 text-[12px] hover:bg-hover disabled:opacity-50">{t.retry}</button>}
    </div>
 
    {status?.done?.message && (
-    <p className="mt-2 font-mono text-xs break-words text-danger">{status.done.message}</p>
+    <p role="alert" className="mt-2 font-mono text-xs break-words text-danger">{status.done.message}</p>
    )}
+   {actionError && <p role="alert" className="mt-2 text-xs break-words text-danger">{actionError}</p>}
 
    {status?.url && (
     <div className="mt-3 flex flex-wrap items-start gap-2">
      <code className="min-w-0 basis-full font-mono text-xs break-all text-muted">{status.url}</code>
      <button
-      onClick={() => void openUrl(status.url!)}
+      onClick={() => { setActionError(null); void openUrl(status.url!).catch((e: unknown) => setActionError(e instanceof Error ? e.message : t.opFailed)); }}
       className="flex shrink-0 cursor-pointer items-center gap-1 rounded-md border border-border px-2 py-1 text-[13px] transition-colors duration-100 hover:bg-hover"
       aria-label={t.loginOpenBrowser}
      >
@@ -672,6 +764,10 @@ function LoginFlow({
      >
       <input
        value={text}
+       type="password"
+       autoComplete="off"
+       spellCheck={false}
+       disabled={starting || closing || sending}
        onChange={(e) => setText(e.target.value)}
        placeholder={t.loginInputHint}
        aria-label={t.loginSend}
@@ -679,6 +775,7 @@ function LoginFlow({
       />
       <button
        type="submit"
+       disabled={starting || closing || sending}
        className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover"
       >
        {t.loginSend}

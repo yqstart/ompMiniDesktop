@@ -3,6 +3,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { api } from "@shared/api";
+import type { ModelInfo, ModelRolesInfo } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { ModelsPanel } from "./ModelsPanel";
 
@@ -15,6 +17,8 @@ const CR = { slow: "y/gpt-5.6-astra:auto:medium" };
 const h = vi.hoisted(() => ({
  roleCalls: 0,
  roles: { slow: "y/gpt-5.6-astra:auto:medium" } as Record<string, string>,
+ models: [] as ModelInfo[],
+ chains: {} as Record<string, string[]>,
 }));
 
 vi.mock("@shared/api", () => ({
@@ -27,9 +31,10 @@ vi.mock("@shared/api", () => ({
     builtin: ["default", "smol", "slow", "vision", "plan", "commit", "tiny", "task", "advisor"],
    };
   }),
-  getFallbackChains: vi.fn(async () => ({ chains: {}, modelFallback: true, revertPolicy: "cooldown-expiry" })),
-  getModels: vi.fn(async () => ({ models: [], fetchedAt: 0 })),
-  refreshModels: vi.fn(async () => ({ models: [], fetchedAt: 0 })),
+  getFallbackChains: vi.fn(async () => ({ chains: h.chains, modelFallback: true, revertPolicy: "cooldown-expiry" })),
+  getModels: vi.fn(async () => ({ models: h.models, fetchedAt: 0 })),
+  refreshModels: vi.fn(async () => ({ models: h.models, fetchedAt: 0 })),
+  setRetryOptions: vi.fn(async (modelFallback: boolean, revertPolicy: string) => ({ chains: h.chains, modelFallback, revertPolicy })),
   listProviders: vi.fn(async () => []),
   readModelsConfig: vi.fn(async () => ({ path: "/tmp/models.yml", exists: false, text: "", hash: "" })),
   getProviderLogin: vi.fn(async () => ({ provider: "", running: false, url: null, lines: [], done: null })),
@@ -48,7 +53,9 @@ let root: Root;
 beforeEach(() => {
  h.roleCalls = 0;
  h.roles = { ...CR };
- useApp.setState({ settingsTabActive: true, models: null });
+ h.models = [];
+ h.chains = {};
+ useApp.setState({ settingsTabActive: true, models: null, myModels: [], locale: "zh-CN" });
  container = document.createElement("div");
  document.body.append(container);
  root = createRoot(container);
@@ -95,5 +102,56 @@ describe("ModelsPanel 的 omp 侧识别", () => {
   });
   await flush();
   expect(h.roleCalls).toBe(0);
+ });
+
+ it("已配置但未星标的角色仍按完整目录判断思考能力", async () => {
+  h.models = [
+   { provider: "demo", id: "plain", selector: "demo/plain", name: "Plain", contextWindow: 1000, maxTokens: 100, reasoning: false, thinking: [], input: ["text"] },
+   { provider: "demo", id: "reason", selector: "demo/reason", name: "Reason", contextWindow: 1000, maxTokens: 100, reasoning: true, thinking: ["low", "high"], input: ["text"] },
+  ];
+  h.roles = { default: "demo/plain" };
+  useApp.setState({ myModels: ["demo/reason"] });
+  act(() => root.render(<ModelsPanel />));
+  await flush();
+  expect(container.querySelector('[aria-label="设置 默认 的思考档位"]')).toBeNull();
+  act(() => (container.querySelector('[aria-label="选择 默认"]') as HTMLButtonElement).click());
+  expect(container.querySelector('[title="demo/reason"]')).not.toBeNull();
+  expect(container.querySelector('[title="demo/plain"]')).toBeNull();
+ });
+
+ it("较早的角色读取晚返回时不能覆盖重新激活后的配置", async () => {
+  // 项目目标为 ES2021，没有 Promise.withResolvers。
+  let finish!: (value: ModelRolesInfo) => void;
+  vi.mocked(api.getModelRoles).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  act(() => root.render(<ModelsPanel />));
+  await flush();
+  h.roles = { slow: "demo/current" };
+  act(() => useApp.setState({ settingsTabActive: false }));
+  act(() => useApp.setState({ settingsTabActive: true }));
+  await flush();
+  await act(async () => finish({ roles: { slow: "demo/stale" }, storage: "global", builtin: ["slow"] }));
+  await flush();
+  expect(container.textContent).toContain("demo/current");
+  expect(container.textContent).not.toContain("demo/stale");
+ });
+
+ it("新建转移链排除已配置模型，切换总开关不丢失草稿", async () => {
+  h.models = ["first", "second"].map((id) => ({ provider: "demo", id, selector: `demo/${id}`, name: id, contextWindow: 1000, maxTokens: 100, reasoning: false, thinking: [], input: ["text"] }));
+  h.chains = { "demo/first": ["demo/second"] };
+  act(() => root.render(<ModelsPanel />));
+  await flush();
+  const section = container.querySelector('[aria-label="失败转移"]')!;
+  const clickText = (text: string) => act(() => [...section.querySelectorAll("button")].find((b) => b.textContent?.trim() === text)!.click());
+  clickText("添加转移链");
+  act(() => (section.querySelector('fieldset [role="radio"][aria-checked="false"]') as HTMLButtonElement).click());
+  expect(section.querySelector('[title="demo/first"]')).toBeNull();
+  act(() => (section.querySelector('[title="demo/second"]') as HTMLButtonElement).click());
+  clickText("添加目标");
+  act(() => (section.querySelector('[title="demo/first"]') as HTMLButtonElement).click());
+  act(() => (section.querySelector('[role="switch"]') as HTMLButtonElement).click());
+  await flush();
+  expect(section.querySelector("fieldset")?.textContent).toContain("demo/second");
+  expect(section.querySelector("fieldset")?.textContent).toContain("demo/first");
+  expect([...section.querySelectorAll("button")].find((b) => b.textContent?.trim() === "创建")?.disabled).toBe(false);
  });
 });

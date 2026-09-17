@@ -30,7 +30,9 @@ export function ProviderModelsList({
  const query = q.trim().toLowerCase();
  const shown = query ? models.filter((m) => `${m.id} ${m.name}`.toLowerCase().includes(query)) : models;
  const shownSelectors = shown.map((m) => m.selector);
- const picked = models.filter((m) => myModels.includes(m.selector)).length;
+ const selected = new Set(myModels);
+ const shownPicked = shown.filter((m) => selected.has(m.selector)).length;
+ const picked = models.filter((m) => selected.has(m.selector)).length;
 
  return (
   <>
@@ -43,19 +45,20 @@ export function ProviderModelsList({
    />
    <div className="mt-3 flex flex-wrap items-center gap-2">
     <span className="text-[11px] text-faint">{fmt(t.providersPickCount, String(picked), String(models.length))}</span>
+    {query && <span className="text-[11px] text-faint">{fmt(t.providersPickMatches, String(shown.length))}</span>}
     <button
      onClick={() => onChange(addManyMyModels(myModels, shownSelectors))}
-     disabled={shownSelectors.length === 0}
+     disabled={shownPicked === shownSelectors.length}
      className="ml-auto cursor-pointer rounded border border-border px-2 py-0.5 text-[12px] transition-colors duration-100 hover:bg-hover disabled:opacity-40"
     >
-     {t.providersPickAll}
+     {query ? t.providersPickFilteredAll : t.providersPickAll}
     </button>
     <button
      onClick={() => onChange(removeManyMyModels(myModels, shownSelectors))}
-     disabled={shownSelectors.length === 0}
+     disabled={shownPicked === 0}
      className="cursor-pointer rounded border border-border px-2 py-0.5 text-[12px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
     >
-     {t.providersPickNone}
+     {query ? t.providersPickFilteredNone : t.providersPickNone}
     </button>
    </div>
    {models.length === 0 ? (
@@ -69,7 +72,7 @@ export function ProviderModelsList({
        key={m.selector}
        className="flex flex-wrap items-center gap-2 border-t border-border-soft py-3 text-[13px] first:border-t-0"
       >
-       <StarToggle on={myModels.includes(m.selector)} name={m.name} onClick={() => onChange(toggleMyModel(myModels, m.selector))} />
+       <StarToggle on={selected.has(m.selector)} name={m.name} onClick={() => onChange(toggleMyModel(myModels, m.selector))} />
        <span className="min-w-0 flex-1 truncate">{m.name}</span>
        <span className="min-w-0 basis-full pl-9 font-mono text-[11px] break-all text-faint sm:ml-auto sm:max-w-[50%] sm:basis-auto sm:pl-0">{m.selector}</span>
       </div>

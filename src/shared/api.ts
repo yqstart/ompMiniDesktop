@@ -7,7 +7,17 @@ import type { FallbackChainsInfo, GitInfo, HealthInfo, MemoryFileContent, Memory
  * 命令名与 `src-tauri` 注册名保持一致；失败统一抛 Error(message)。
  */
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
- return invoke<T>(cmd, args);
+ try {
+  return await invoke<T>(cmd, args);
+ } catch (error) {
+  if (error instanceof Error) throw error;
+  // Tauri 把 Rust CmdError 序列化为普通对象；先归一，界面才能显示真实诊断而非笼统失败。
+  if (typeof error === "object" && error !== null && "message" in error && typeof error.message === "string") {
+   const hint = "hint" in error && typeof error.hint === "string" ? error.hint : "";
+   throw Object.assign(new Error(hint ? `${error.message}\n${hint}` : error.message), { cause: error });
+  }
+  throw Object.assign(new Error(String(error)), { cause: error });
+ }
 }
 
 export const api = {
@@ -51,7 +61,7 @@ export const api = {
   * 输出经 **Channel** 直推（高频字节流不走事件系统）；输入 / 尺寸 / 关闭走一次命令。
   */
  ptySpawn: (opts: PtySpawnOpts, onEvent: Channel<PtyEvent>) =>
-  invoke<void>(IPC.ptySpawn, { opts, onEvent }),
+  call<void>(IPC.ptySpawn, { opts, onEvent }),
  ptyWrite: (id: string, data: string) => call<void>(IPC.ptyWrite, { id, data }),
  ptyResize: (id: string, cols: number, rows: number) =>
   call<void>(IPC.ptyResize, { id, cols, rows }),

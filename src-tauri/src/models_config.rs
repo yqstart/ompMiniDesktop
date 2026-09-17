@@ -87,7 +87,9 @@ pub fn hash_text(s: &str) -> String {
 /// 提取失败行 + 其后的连续缩进行（schema 明细列表），前面的 Warning 行不含诊断信息、丢弃。
 pub fn parse_models_config_error(stderr: &str) -> Option<String> {
     let lines: Vec<&str> = stderr.lines().collect();
-    let start = lines.iter().position(|l| l.contains("Failed to load config file models"))?;
+    let start = lines
+        .iter()
+        .position(|l| l.contains("Failed to load config file models"))?;
     let mut out: Vec<&str> = vec![lines[start].trim_end()];
     for l in &lines[start + 1..] {
         if l.trim().is_empty() || !(l.starts_with(' ') || l.starts_with('\t')) {
@@ -119,7 +121,8 @@ fn view(path: &Path, exists: bool, text: String) -> ModelsConfigFile {
 pub fn check_hash(current_text: &str, expect: Option<&str>) -> Result<(), String> {
     match expect {
         Some(e) if hash_text(current_text) != e => Err(
-            "配置文件在界面之外被修改过（可能你手改过 models.yml）——请先重新加载，再应用改动".into(),
+            "配置文件在界面之外被修改过（可能你手改过 models.yml）——请先重新加载，再应用改动"
+                .into(),
         ),
         _ => Ok(()),
     }
@@ -151,7 +154,9 @@ async fn validate_text(bin: &str, file_name: &str, text: &str) -> Result<Option<
     let _ = std::fs::remove_dir_all(&dir);
 
     match out {
-        Ok(Ok(o)) => Ok(parse_models_config_error(&String::from_utf8_lossy(&o.stderr))),
+        Ok(Ok(o)) => Ok(parse_models_config_error(&String::from_utf8_lossy(
+            &o.stderr,
+        ))),
         Ok(Err(e)) => Err(format!("校验配置失败（omp 启动不了）：{e}")),
         Err(_) => Err("校验配置超时".into()),
     }
@@ -163,9 +168,15 @@ pub fn backup_file(path: &Path, backup_dir: &Path) -> Result<Option<PathBuf>, St
         return Ok(None);
     }
     std::fs::create_dir_all(backup_dir).map_err(|e| format!("创建备份目录失败：{e}"))?;
-    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("models");
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("models");
     let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("yml");
-    let name = format!("{stem}-{}.{ext}", chrono::Local::now().format("%Y%m%d-%H%M%S%3f"));
+    let name = format!(
+        "{stem}-{}.{ext}",
+        chrono::Local::now().format("%Y%m%d-%H%M%S%3f")
+    );
     let dst = backup_dir.join(name);
     std::fs::copy(path, &dst).map_err(|e| format!("备份失败：{e}"))?;
     prune_backups(backup_dir, stem, ext, BACKUPS_KEEP);
@@ -195,7 +206,10 @@ fn write_atomic(path: &Path, text: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败：{e}"))?;
     }
-    let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
     let tmp = path.with_file_name(format!("{name}.tmp"));
     std::fs::write(&tmp, text).map_err(|e| format!("写入临时文件失败：{e}"))?;
     std::fs::rename(&tmp, path).map_err(|e| format!("替换配置失败：{e}"))
@@ -232,17 +246,34 @@ pub async fn write_models_config(
     }
     let bin = crate::providers::omp_bin(&state)?;
     let agent = state.agent_dir.lock().await.clone();
-    let path = models_path(&agent);
+    write_config(
+        &bin,
+        &agent,
+        state.overlay_path.parent(),
+        &text,
+        expect_hash.as_deref(),
+    )
+    .await
+}
+
+/// 文件事务与 Tauri 状态解耦，便于用隔离目录验证预校验期间的外部编辑。
+async fn write_config(
+    bin: &str,
+    agent: &Path,
+    backup_root: Option<&Path>,
+    text: &str,
+    expect_hash: Option<&str>,
+) -> Result<ModelsConfigFile, CmdError> {
+    let path = models_path(agent);
     let (_, current) = read_file(&path).map_err(|e| cmd_err("MODELS_READ_FAILED", e, None))?;
-    if let Err(e) = check_hash(&current, expect_hash.as_deref()) {
+    if let Err(e) = check_hash(&current, expect_hash) {
         return Err(cmd_err("MODELS_CONFLICT", e, Some("重新加载后再试".into())));
     }
-
     let file_name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "models.yml".into());
-    match validate_text(&bin, &file_name, &text).await {
+    match validate_text(bin, &file_name, text).await {
         Ok(None) => {}
         Ok(Some(msg)) => {
             return Err(cmd_err(
@@ -251,15 +282,27 @@ pub async fn write_models_config(
                 Some("修正标出的错误后重新保存".into()),
             ))
         }
-        Err(e) => return Err(cmd_err("MODELS_VALIDATE_FAILED", e, Some("稍后重试".into()))),
+        Err(e) => {
+            return Err(cmd_err(
+                "MODELS_VALIDATE_FAILED",
+                e,
+                Some("稍后重试".into()),
+            ))
+        }
     }
-
-    // 备份是尽力而为：失败只损失一次 undo 机会，不该阻断用户的写入。
-    if let Some(dir) = state.overlay_path.parent() {
+    // 预校验可能持续 60 秒；期间外部编辑或文件优先级切换也必须拒绝。
+    let (_, latest) = read_file(&path).map_err(|e| cmd_err("MODELS_READ_FAILED", e, None))?;
+    if models_path(agent) != path || latest != current {
+        return Err(cmd_err(
+            "MODELS_CONFLICT",
+            "配置文件在预校验期间被修改过（未写入）".into(),
+            Some("重新加载后再试".into()),
+        ));
+    }
+    if let Some(dir) = backup_root {
         let _ = backup_file(&path, &dir.join("backups"));
     }
-    write_atomic(&path, &text).map_err(|e| cmd_err("MODELS_WRITE_FAILED", e, None))?;
-
+    write_atomic(&path, text).map_err(|e| cmd_err("MODELS_WRITE_FAILED", e, None))?;
     let (exists, written) = read_file(&path).map_err(|e| cmd_err("MODELS_READ_FAILED", e, None))?;
     Ok(view(&path, exists, written))
 }
@@ -269,7 +312,8 @@ mod tests {
     use super::*;
 
     fn tmp(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("omp-mini-mc-test-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("omp-mini-mc-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -354,7 +398,11 @@ mod tests {
         // 预置 12 份旧备份 + 真实备份一次 = 13 → 应裁剪到 BACKUPS_KEEP
         std::fs::create_dir_all(&backups).unwrap();
         for i in 0..12 {
-            std::fs::write(backups.join(format!("models-2025010{i}-000000000.{i:02}.yml")), "x").unwrap();
+            std::fs::write(
+                backups.join(format!("models-2025010{i}-000000000.{i:02}.yml")),
+                "x",
+            )
+            .unwrap();
         }
         let dst = backup_file(&file, &backups).unwrap().unwrap();
         assert!(dst.exists());
@@ -368,7 +416,9 @@ mod tests {
     #[test]
     fn backup_returns_none_for_missing_file() {
         let dir = tmp("backup-missing");
-        assert!(backup_file(&dir.join("nope.yml"), &dir.join("backups")).unwrap().is_none());
+        assert!(backup_file(&dir.join("nope.yml"), &dir.join("backups"))
+            .unwrap()
+            .is_none());
     }
 
     // ---------- 原子写 ----------
@@ -383,6 +433,48 @@ mod tests {
         assert!(!dir.join("models.yml.tmp").exists());
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn validation_cannot_overwrite_external_edits_or_priority_switches() {
+        use std::os::unix::fs::PermissionsExt;
+        for switch_path in [false, true] {
+            let dir = tmp(if switch_path {
+                "priority-conflict"
+            } else {
+                "validation-conflict"
+            });
+            let original = dir.join(if switch_path {
+                "models.yaml"
+            } else {
+                "models.yml"
+            });
+            let current = "providers: {}\n";
+            std::fs::write(&original, current).unwrap();
+            let bin = dir.join("omp-probe");
+            // 假 omp 在预校验阶段模拟外部写入，不读取用户配置或发起网络请求。
+            std::fs::write(&bin, "#!/bin/sh\nprintf 'providers: {external: {}}\\n' > \"$(dirname \"$0\")/models.yml\"\n").unwrap();
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let result = write_config(
+                bin.to_str().unwrap(),
+                &dir,
+                Some(&dir),
+                "providers: {candidate: {}}\n",
+                Some(&hash_text(current)),
+            )
+            .await;
+            assert_eq!(result.unwrap_err().code, "MODELS_CONFLICT");
+            assert_eq!(
+                std::fs::read_to_string(dir.join("models.yml")).unwrap(),
+                "providers: {external: {}}\n"
+            );
+            if switch_path {
+                assert_eq!(std::fs::read_to_string(original).unwrap(), current);
+            }
+            assert!(!dir.join("backups").exists());
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
     // ---------- 预校验（真实 omp，慢：cargo test -- --ignored） ----------
 
     /// 预校验必须真的让 omp 说话：好配置放行、坏配置与空文件都被识别出来。
@@ -390,13 +482,28 @@ mod tests {
     #[ignore]
     async fn real_omp_validation_gates_bad_configs() {
         let good = "providers:\n  probe:\n    baseUrl: http://127.0.0.1:9999/v1\n    auth: none\n    api: openai-completions\n    models:\n      - id: m\n        name: M\n";
-        assert!(validate_text("omp", "models.yml", good).await.unwrap().is_none(), "合法配置应放行");
+        assert!(
+            validate_text("omp", "models.yml", good)
+                .await
+                .unwrap()
+                .is_none(),
+            "合法配置应放行"
+        );
 
         let bad = "providers:\n  probe:\n    models:\n      - id: broken\n";
-        let err = validate_text("omp", "models.yml", bad).await.unwrap().unwrap();
+        let err = validate_text("omp", "models.yml", bad)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(err.contains("baseUrl"), "缺 baseUrl 应被 omp 拒绝：{err}");
 
         let empty = "";
-        assert!(validate_text("omp", "models.yml", empty).await.unwrap().is_some(), "空文件非法");
+        assert!(
+            validate_text("omp", "models.yml", empty)
+                .await
+                .unwrap()
+                .is_some(),
+            "空文件非法"
+        );
     }
 }

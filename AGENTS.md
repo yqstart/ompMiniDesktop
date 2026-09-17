@@ -76,7 +76,7 @@ locale.ts        # 全界面中英字典（~300 键）+ 语言偏好三档 + 解
 theme.ts         # 皮肤三档归一 + localStorage + resolveTheme + applyTheme（含单测）
 termTheme.ts     # 终端配色：从 CSS `--term-*` 读值喂给 xterm（组件不写死色值）
 useText.ts       # 组件取文案的唯一入口
-useDropdown.ts   # 单开下拉容器（点外部 / Esc 关闭）
+useDropdown.ts   # 下拉与共用 useDialogFocus：最上层 Esc、Tab 圈定、焦点恢复、隐藏面板隔离
 workspaces.ts    # 工作区逻辑：loadWorkspaces（唯一刷新入口）/ 显示名 / 点工作区开终端 / ＋ 新建 / resume 到终端
 projects.ts      # 添加项目（pickAndAddProject 唯一实现）
 sessions.ts      # 会话按项目分组（归档页用；含单测）
@@ -101,6 +101,10 @@ appUpdate.ts     # 应用内更新状态机
 - **设置是标签栏里的单例标签**：左栏底部「设置」入口打开 / 聚焦（`openSettingsTab`），标签的 `×` 或 ⌘W 关闭（`closeSettingsTab`，回到上次的终端标签；关闭最后一个终端标签时若设置标签开着则自动切过去）。设置页五个页签仍是全 app 唯一改 omp 状态的地方（除本应用偏好）：通用（`omp config` 白名单 **41 项**——V11 把 `tools.approvalMode` 收回本页）/ **模型**（V12b 起为唯一模型管理面；V12c 把「供应商」与「自定义模型」并成**一个区块 + 两个弹窗**：**供应商在最上方** → 我的模型（挑选结果）→ `modelRoles` → `retry.fallbackChains`；「添加供应商」弹窗 = 可搜索的提供商选择器 → API key / OAuth 走 `auth-broker login`，首项「自定义」写 models.yml（自定义表单：**名称可改**——改键保位置与原注释，支持中文（omp 实测无字符集约束，只挡空白与 `/` 等歧义字符）；接口类型只给 `openai-completions` / `anthropic-messages` 两档，既有文件里的其它 `api` 值原样列出保留；**认证只有 API Key**，留空 = `auth: none`）；「挑选模型」弹窗 = 该供应商的模型星标；平铺的「可用模型」目录已删除；**从终端标签切回设置标签会重读 omp 的角色 / 转移链**——omp TUI 里改完即识别，模型目录走 `get_models` 的 5 分钟缓存不额外重拉）/ 记忆（只删不写）/ 使用统计（只读）/ 已归档对话（覆盖层 + 删文件）。读写口径与实测结论见 `docs/v8-schedule.md` / `docs/v9-schedule.md`（仍然有效）。
 - **「我的模型」= 模型选择器的候选范围**（V12b；`lib/myModels.ts`，localStorage 键沿用 `omp.favoriteModels.v1`）：我挑过的 selector 非空时，`candidateModels` 让模型角色 / 失败转移目标的候选只列这些；空 = 全部可用模型（不挡新人）。**不写 omp 的 `enabledModels`**——实测那才是 omp 侧 TUI `/model` 的白名单（`[]` = 不限制），本应用明确不动它（`docs/v12-schedule.md` §6）。
 - **自定义模型（V12；V12c 起入口在「供应商」区块的添加面板里，选择器首项「自定义」）直接写 `<agentDir>/models.yml`**——omp 没有 CLI 写入口（`omp models` 只有 ls / find / refresh，`omp config` 只管 `config.yml`），写文件是唯一路径；这是壳侧唯一直接写 omp 配置文件的例外。前端 `lib/customModels.ts`（`yaml` 包）做**保真编辑**：只改被编辑的节点，注释 / 格式 / 界面之外的字段（`headers` / `compat` / `modelOverrides` / `cost`…）原样保留；**覆盖型块（无 `models` 的覆盖字段块）界面只读**。后端 `models_config.rs` 四道闸：hash 乐观锁（外部改过即拒写）→ 预校验（临时 agentDir 跑一次 `omp models` 读 stderr，坏配置**不落盘**）→ 备份（`$APPDATA/omp-mini/backups/`，保留 10 份）→ 原子写。文件发现规则与 schema 细节见 `docs/v12-schedule.md`。
+- **模型编辑安全**：编辑表单固定读取时的文本/hash，模型条目按 `originalIndex` 复用原 YAML 节点（改模型 id 仍保留 cost 等隐藏字段）；新建/改名撞供应商、重复模型 id、异常结构及覆盖型块均拒写。保存期间禁用表单且不允许误关；预校验后再次检查文件内容与生效路径。YAML 序列化保留字段和注释内容，但部分集合行尾注释可能换到下一行，不承诺任意输入逐字节不变。
+- **模型候选不等于模型能力目录**：角色与转移目标只从「我的模型」挑选，但当前模型的思考档始终用完整目录判断。新建转移链不能复用已有键；修改启用开关/回归策略不清空编辑草稿，保存时锁定草稿。角色读取以最新请求为准，旧读请求不得覆盖写回结果。
+- **IPC 错误归一**：`shared/api.ts` 的 `call` 将 Rust `CmdError.message/hint` 与字符串错误转成带原始 cause 的 `Error`；PTY spawn 同样通过该入口。回归在 `shared/api.test.ts`，组件不各自猜错误形状。
+- **登录会话隔离**：`providers.rs` 每次 spawn 分配内部序号；状态更新、事件发送与清槽只接受对应会话，不能仅按 provider id 判断（同一家快速重开也不同）。前端启动中关闭等待启动结果后取消，错误可见且可重试。
 - **覆盖层**（`$APPDATA/omp-mini/overlay.json`）职责不变：项目列表 / 归档标记 / 备注 / `ompPath`。`sessionApproval` 是 V1 遗留字段（读旧文件时保持形状，新写入停止）。
 
 ## 前端约定（血泪规则）

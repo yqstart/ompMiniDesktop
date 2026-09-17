@@ -38,11 +38,13 @@ const MANAGED_PROVIDER_KEYS = new Set(["baseUrl", "api", "apiKey", "auth", "mode
 /** 一个模型条目的表单值（数字用字符串承载，空串 = 不写该字段）。 */
 export type CustomModelForm = {
  id: string;
+ /** 编辑前的模型位置；删除、改名或交换 id 后仍复用各自原节点。 */
+ originalIndex?: number;
  name: string;
  contextWindow: string;
  maxTokens: string;
  reasoning: boolean;
- /** 输入模态；`[]` 与 `["text"]` 都按「只收文本」处理（不写 `input` 键 = omp 默认）。 */
+ /** 保留文件里的所有模态；界面只切换 text / image。 */
  input: string[];
 };
 
@@ -126,10 +128,21 @@ function newSeq(doc: Document): YAMLSeq {
  return node;
 }
 
+function invalidShape(doc: Document): boolean {
+ if (doc.contents == null) return false;
+ if (!isMap(doc.contents)) return true;
+ return doc.has("providers") && !isMap(doc.get("providers", true));
+}
+
+function editableModels(node: unknown): node is YAMLSeq<YAMLMap> {
+ return isSeq(node) && node.items.length > 0 && node.items.every(isMap);
+}
+
 /** 解析当前文本里的全部供应商（含只读的覆盖型）。 */
 export function parseModelsConfig(text: string): ModelsConfigParse {
  const parsed = readDoc(text);
  if ("error" in parsed) return { providers: [], error: { kind: "yaml", message: parsed.error } };
+ if (invalidShape(parsed.doc)) return { providers: [], error: { kind: "shape" } };
  const providersNode = parsed.doc.get("providers", true);
  if (providersNode == null) return { providers: [], error: null };
  if (!isMap(providersNode)) return { providers: [], error: { kind: "shape" } };
@@ -155,6 +168,7 @@ export function parseModelsConfig(text: string): ModelsConfigParse {
   }
   const modelsNode = value.get("models", true);
   const modelCount = isSeq(modelsNode) ? modelsNode.items.length : 0;
+  if (modelCount > 0 && !editableModels(modelsNode)) return { providers: [], error: { kind: "shape" } };
   const extraKeys = value.items
    .map((i) => str(i.key))
    .filter((k) => k && !MANAGED_PROVIDER_KEYS.has(k));
@@ -183,35 +197,35 @@ export function emptyProviderForm(): CustomProviderForm {
  return { id: "", baseUrl: "", api: API_OPTIONS[0], apiKey: "", models: [emptyModel()] };
 }
 
-function modelFormOf(m: YAMLMap): CustomModelForm {
+function modelFormOf(m: YAMLMap, originalIndex?: number): CustomModelForm {
  const inputNode = m.get("input", true);
- const input = isSeq(inputNode)
-  ? inputNode.items.map((i) => str(i)).filter((x) => x === "text" || x === "image")
-  : ["text"];
+ const input = isSeq(inputNode) ? inputNode.items.map((i) => str(i)) : ["text"];
  return {
   id: str(m.get("id", true)),
+  originalIndex,
   name: str(m.get("name", true)),
   contextWindow: str(m.get("contextWindow", true)),
   maxTokens: str(m.get("maxTokens", true)),
   reasoning: boolOf(m.get("reasoning", true)),
-  input: input.length > 0 ? input : ["text"],
+  input,
  };
 }
 
 /** 读某个供应商的编辑表单；不存在（或块不是对象）时返回 null。 */
 export function providerFormOf(text: string, id: string): CustomProviderForm | null {
  const parsed = readDoc(text);
- if ("error" in parsed) return null;
+ if ("error" in parsed || invalidShape(parsed.doc)) return null;
  const node = parsed.doc.getIn(["providers", id], true);
  if (!isMap(node)) return null;
  const modelsNode = node.get("models", true);
+ if (!editableModels(modelsNode)) return null;
  return {
   id,
   originalId: id,
   baseUrl: str(node.get("baseUrl", true)),
   api: str(node.get("api", true)) || API_OPTIONS[0],
   apiKey: str(node.get("apiKey", true)),
-  models: isSeq(modelsNode) ? modelsNode.items.filter(isMap).map(modelFormOf) : [],
+  models: modelsNode.items.map((m, i) => modelFormOf(m, i)),
  };
 }
 
@@ -225,6 +239,17 @@ export function isValidProviderId(id: string): boolean {
  return /^[\p{L}\p{N}][\p{L}\p{N}._-]*$/u.test(id);
 }
 
+export function isValidBaseUrl(value: string): boolean {
+ const trimmed = value.trim();
+ if (!/^https?:\/\//i.test(trimmed)) return false;
+ try {
+  const url = new URL(trimmed);
+  return (url.protocol === "http:" || url.protocol === "https:") && !!url.hostname;
+ } catch {
+  return false;
+ }
+}
+
 /** 正整数（空串 = 不填，返回 null；非法返回 undefined）。 */
 function positiveInt(raw: string): number | null | undefined {
  const t = raw.trim();
@@ -234,12 +259,16 @@ function positiveInt(raw: string): number | null | undefined {
  return Number.isSafeInteger(n) && n > 0 ? n : undefined;
 }
 
+export function isValidModelLimit(value: string): boolean {
+ return positiveInt(value) !== undefined;
+}
+
 /** 模型表单是否完整（id 必填；数字字段要么空、要么正整数）。 */
 export function modelFormComplete(m: CustomModelForm): boolean {
  return (
   m.id.trim() !== "" &&
-  positiveInt(m.contextWindow) !== undefined &&
-  positiveInt(m.maxTokens) !== undefined
+  isValidModelLimit(m.contextWindow) &&
+  isValidModelLimit(m.maxTokens)
  );
 }
 
@@ -247,10 +276,10 @@ export function modelFormComplete(m: CustomModelForm): boolean {
 export function providerFormComplete(f: CustomProviderForm): boolean {
  return (
   isValidProviderId(f.id.trim()) &&
-  f.baseUrl.trim() !== "" &&
-  /^https?:\/\//.test(f.baseUrl.trim()) &&
+  isValidBaseUrl(f.baseUrl) &&
   f.api.trim() !== "" &&
   f.models.length > 0 &&
+  new Set(f.models.map((m) => m.id.trim())).size === f.models.length &&
   f.models.every(modelFormComplete)
  );
 }
@@ -287,35 +316,29 @@ function setField(doc: Document, node: YAMLMap, key: string, value: string | num
 }
 
 function applyModelForm(doc: Document, node: YAMLMap, f: CustomModelForm): void {
- setField(doc, node, "id", f.id.trim());
- setField(doc, node, "name", f.name.trim() || null);
- setField(doc, node, "contextWindow", positiveInt(f.contextWindow) ?? null);
- setField(doc, node, "maxTokens", positiveInt(f.maxTokens) ?? null);
- // 关 = 删键（交给 omp 默认），不是写 false——false 会显式声明「不支持推理」
- setField(doc, node, "reasoning", f.reasoning ? true : null);
- // 只收文本是默认形态：不写 input 键（少一行 diff），含图片才显式声明
- const input = f.input.filter((x) => x === "text" || x === "image");
- const writesInput = input.includes("image");
- setField(doc, node, "input", writesInput ? input : null);
+ const previous = modelFormOf(node);
+ if (f.id !== previous.id) setField(doc, node, "id", f.id.trim());
+ if (f.name !== previous.name) setField(doc, node, "name", f.name.trim() || null);
+ if (f.contextWindow !== previous.contextWindow) setField(doc, node, "contextWindow", positiveInt(f.contextWindow) ?? null);
+ if (f.maxTokens !== previous.maxTokens) setField(doc, node, "maxTokens", positiveInt(f.maxTokens) ?? null);
+ // 未改动的显式 false / 默认模态也原样保留；用户关闭推理时仍交给 omp 默认。
+ if (f.reasoning !== previous.reasoning) setField(doc, node, "reasoning", f.reasoning ? true : null);
+ if (f.input.length !== previous.input.length || f.input.some((v, i) => v !== previous.input[i])) {
+  const isDefault = f.input.length === 0 || (f.input.length === 1 && f.input[0] === "text");
+  setField(doc, node, "input", isDefault ? null : f.input);
+ }
 }
 
-/** 按 id 复用已有模型节点（保住 `cost` / `compat` 等界面之外写的字段），再拼成新数组。 */
+/** 按原位置复用模型节点；新条目不继承已删除同名模型的隐藏字段。 */
 function buildModelsSeq(doc: Document, current: unknown, forms: CustomModelForm[]): YAMLSeq {
- const byId = new Map<string, YAMLMap>();
- if (isSeq(current)) {
-  for (const item of current.items) {
-   if (!isMap(item)) continue;
-   const id = str(item.get("id", true));
-   if (id && !byId.has(id)) byId.set(id, item);
-  }
- }
- const items = forms.map((f) => {
-  const node = byId.get(f.id.trim()) ?? (newMap(doc));
+ const seq = isSeq(current) ? current : newSeq(doc);
+ const originalItems = seq.items;
+ seq.items = forms.map((f) => {
+  const original = f.originalIndex !== undefined ? originalItems[f.originalIndex] : undefined;
+  const node = isMap(original) ? original : newMap(doc);
   applyModelForm(doc, node, f);
   return node;
  });
- const seq = newSeq(doc);
- seq.items = items;
  return seq;
 }
 
@@ -323,17 +346,22 @@ function buildModelsSeq(doc: Document, current: unknown, forms: CustomModelForm[
  * 新增 / 更新一个自定义供应商（返回新文本，原文本不动）。
  * 已有块里界面不管理的键与模型级字段原样保留；`apiKey` 与 `auth: none` 互斥。
  * 表单带 `originalId` 且与 `id` 不同 = **改名**：YAML 键就地替换（块的位置与键上的注释保留）。
- * 目标键已被别的块占用（界面已拦，这里兜底）时不改名，按原名更新——绝不制造重复键。
+ * 新建撞名、改名撞名或原节点已消失时拒绝编辑，绝不覆盖别的块。
  */
 export function upsertProvider(text: string, form: CustomProviderForm): EditResult {
  const parsed = readDoc(text);
  if ("error" in parsed) return { ok: false, error: parsed.error };
+ if (invalidShape(parsed.doc)) return { ok: false, error: "Invalid models config structure" };
+ if (!providerFormComplete(form)) return { ok: false, error: "Incomplete or duplicate model fields" };
  const doc = parsed.doc;
  const providers = ensureProviders(doc);
 
  const id = form.id.trim();
  const from = (form.originalId ?? "").trim();
- if (from && from !== id && !providers.items.some((p) => str(p.key) === id)) {
+ if (id !== from && providers.has(id)) return { ok: false, error: "Provider name already exists" };
+ const source: unknown = from ? providers.get(from, true) : undefined;
+ if (from && (!isMap(source) || !editableModels(source.get("models", true)))) return { ok: false, error: "Provider is missing or read-only" };
+ if (from && from !== id) {
   const pair = providers.items.find((p) => str(p.key) === from);
   if (pair && isScalar(pair.key)) pair.key.value = id;
  }
@@ -346,17 +374,18 @@ export function upsertProvider(text: string, form: CustomProviderForm): EditResu
   providers.set(id, node);
  }
 
- setField(doc, node, "baseUrl", form.baseUrl.trim() || null);
- setField(doc, node, "api", form.api.trim() || null);
- const apiKey = form.apiKey.trim();
- if (apiKey) {
-  setField(doc, node, "apiKey", apiKey);
-  node.delete("auth");
- } else {
-  node.delete("apiKey");
-  setField(doc, node, "auth", "none");
+ if (form.baseUrl !== str(node.get("baseUrl", true))) setField(doc, node, "baseUrl", form.baseUrl.trim() || null);
+ if (form.api !== (str(node.get("api", true)) || API_OPTIONS[0]) || !from) setField(doc, node, "api", form.api.trim() || null);
+ if (form.apiKey !== str(node.get("apiKey", true)) || !from) {
+  const apiKey = form.apiKey.trim();
+  if (apiKey) {
+   setField(doc, node, "apiKey", apiKey);
+   if (str(node.get("auth", true)) === "none") node.delete("auth");
+  } else {
+   node.delete("apiKey");
+   setField(doc, node, "auth", "none");
+  }
  }
-
  node.set("models", buildModelsSeq(doc, node.get("models", true), form.models));
  return { ok: true, text: serialize(doc) };
 }
@@ -365,9 +394,12 @@ export function upsertProvider(text: string, form: CustomProviderForm): EditResu
 export function removeProvider(text: string, id: string): EditResult {
  const parsed = readDoc(text);
  if ("error" in parsed) return { ok: false, error: parsed.error };
+ if (invalidShape(parsed.doc)) return { ok: false, error: "Invalid models config structure" };
  const doc = parsed.doc;
  const providers = doc.get("providers", true);
  if (!isMap(providers)) return { ok: true, text };
+ const current: unknown = providers.get(id, true);
+ if (providers.has(id) && (!isMap(current) || !editableModels(current.get("models", true)))) return { ok: false, error: "Provider is read-only" };
  providers.delete(id);
  return { ok: true, text: serialize(doc) };
 }
