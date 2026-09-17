@@ -812,7 +812,12 @@ mod tests {
         .to_string();
         let msg = parse_message_line(&old).expect("老数据也要认");
         assert_eq!(msg.usage.unwrap().total, 26, "totalTokens 缺失时按四段之和");
-        assert_eq!(msg.ts_ms, ts(2026, 9, 16, 9), "退回顶层 ISO 时间戳");
+        // 退回的是顶层 ISO 串本身：断言该 UTC 时刻的毫秒值，**不能**用本地时区构造的
+        // `ts(…)`（CI 跑在 UTC、开发机在 UTC+8，那样断言会随机器差 8 小时）
+        let iso_ms = DateTime::parse_from_rfc3339("2026-09-16T01:00:00.000Z")
+            .unwrap()
+            .timestamp_millis();
+        assert_eq!(msg.ts_ms, iso_ms, "退回顶层 ISO 时间戳");
 
         // 非 assistant / 非 message / 无时间的行一律不认
         assert!(parse_message_line(&line_user(ts(2026, 9, 16, 9))).is_none());
