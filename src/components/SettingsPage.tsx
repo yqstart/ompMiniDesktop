@@ -1,4 +1,4 @@
-import { Archive, ChartBar, Check, Copy, FolderError, Key, Loader, Notebook, Refresh, Settings, Sliders } from "reicon-react";
+import { Archive, ChartBar, Check, Copy, FolderError, Key, Loader, Notebook, Refresh, Sliders } from "reicon-react";
 import { useApp } from "../stores/app";
 import { checkForUpdate, getAppVersion, openUpdateDialog } from "../lib/appUpdate";
 import { pickOmpExecutable, refreshOmpHealth } from "../lib/ompDiag";
@@ -38,7 +38,7 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
     const target = previous?.isConnected && !previous.matches(":disabled")
       ? previous
       : page.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]')
-        ?? page.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+      ?? page.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
     target?.focus({ preventScroll: true });
   }, [visible]);
 
@@ -92,18 +92,14 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
           : "hidden"
       }
     >
-      {/* 左栏：标题 + 竖向菜单。设置是标签栏里的标签——关闭走标签栏的 × / ⌘W
+      {/* 左栏：竖向菜单（无标题行，菜单从顶端开始）。设置是标签栏里的标签——关闭走标签栏的 × / ⌘W
           （`closeSettingsTab`，回到上次的终端标签），页内不放第二个关闭入口。
           五个入口：通用（本应用诊断 / 更新；
           界面语言与皮肤是纯展示层偏好，入口在左栏底部「设置」行，这里不重复放）、模型
           （**omp 模型相关唯一管理面**：供应商 / 我的模型 / 模型角色 / 失败转移）、
           记忆（omp 项目记忆的查看 / 删除）、使用统计（会话 jsonl 的
           用量聚合，只读）、已归档对话（归档管理面，归档会话不在左栏出现）。 */}
-      <nav aria-label={t.title} className="flex w-11 shrink-0 flex-col gap-3 @min-[640px]/settings:w-44">
-        <h1 className="flex h-11 items-center gap-2.5 px-3 text-[17px] font-semibold tracking-tight">
-          <Settings size={18} className="shrink-0 text-muted" aria-hidden />
-          <span className="sr-only @min-[640px]/settings:not-sr-only">{t.title}</span>
-        </h1>
+      <nav aria-label={t.title} className="flex w-11 shrink-0 flex-col @min-[640px]/settings:w-44">
         <div
           role="tablist"
           aria-orientation="vertical"

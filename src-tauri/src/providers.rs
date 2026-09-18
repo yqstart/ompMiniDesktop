@@ -26,6 +26,11 @@
 //! 而 `omp config set` 任何 cwd 下都只写全局 agentDir 的 config.yml——只有读也钉在 agentDir，
 //! 显示的才是用户正在改的那一层。
 //!
+//! **Ctrl+P 快速切换环（`cycleOrder`）**是同页的第三个键：array 型，**整数组覆盖写**
+//! （不是读-改-写）；与角色共用 `roles_edit` 锁——两次 `omp config set` 并发写在同一份
+//! config.yml 上会互相覆盖。核对的键名：`cycleOrder`（读回是 `{key, value, type:"array"}`，
+//! 实测空数组与中文角色名都能写）。
+//!
 //! 纯逻辑（解析、合并、校验）都在文末单测里锁着，进程调用只负责喂字符串。
 
 use serde::Serialize;
@@ -358,6 +363,45 @@ pub fn apply_role_edit(
         }
     }
     Ok(())
+}
+
+// ---------- 快速切换环（cycleOrder） ----------
+
+/// omp `cycleOrder`（Ctrl+P / Shift+Ctrl+P 的轮换序）：条目是**角色 id**，不是模型 selector。
+///
+/// 上游语义（`getRoleModelCycle`，18.2.4 二进制核对）：环里的角色逐个按 `modelRoles`
+/// 解析模型，未配置模型 / 没有可用凭证的角色**直接跳过**（`default` 角色例外——回退当前
+/// 模型）；环空 = Ctrl+P 不切换任何模型。匹配规则全在 omp 里，壳侧只做整数组读写。
+///
+/// 解析容错照 `parse_chains` 的精神：值不是数组就按空环；非字符串条目丢弃；
+/// 名字合法性走 `validate_role_name`（空白 / 控制字符的名字进 config.yml 没意义）；
+/// **重复保序去重**——同一个角色在环里出现两次没有语义。
+pub fn parse_cycle_order(v: &serde_json::Value) -> Vec<String> {
+    let items: Vec<String> = v
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    normalize_cycle_order(&items)
+}
+
+/// 写前归一（读路径也走它）：丢弃非法名字、保序去重。
+/// 界面只会从候选里选，这里防的是手写 / 并发产生的脏值——写进 config.yml 的必须是干净的角色名。
+pub fn normalize_cycle_order(items: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for s in items {
+        if validate_role_name(s).is_err() {
+            continue;
+        }
+        if seen.insert(s.clone()) {
+            out.push(s.clone());
+        }
+    }
+    out
 }
 
 // ---------- 失败转移链（retry.fallbackChains） ----------
@@ -832,6 +876,41 @@ pub async fn set_model_role(
     })
 }
 
+/// Ctrl+P 快速切换环（`cycleOrder`）：条目是角色 id，顺序即轮换顺序。
+#[tauri::command]
+pub async fn get_cycle_order(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<String>, CmdError> {
+    let bin = omp_bin(&state)?;
+    let v = config_get_global(&state, &bin, "cycleOrder")
+        .await
+        .map_err(|e| cmd_err("CYCLE_READ_FAILED", e, None))?;
+    Ok(parse_cycle_order(&v))
+}
+
+/// 整表写回环：array 键直接覆盖写（不是「读-改-写」），空数组 = 清空环。
+///
+/// 与 `set_model_role` 共用 `roles_edit` 锁——两者都是对同一份 config.yml 的
+/// `omp config set`，串行化避免两次写入并发互相覆盖；写完回读一次确认。
+#[tauri::command]
+pub async fn set_cycle_order(
+    state: tauri::State<'_, AppState>,
+    order: Vec<String>,
+) -> Result<Vec<String>, CmdError> {
+    let bin = omp_bin(&state)?;
+    let _guard = state.roles_edit.lock().await;
+    let json = serde_json::to_string(&normalize_cycle_order(&order))
+        .map_err(|e| cmd_err("CYCLE_WRITE_FAILED", format!("切换环序列化失败：{e}"), None))?;
+    run_omp(&bin, &["config", "set", "cycleOrder", &json])
+        .await
+        .map_err(|e| cmd_err("CYCLE_WRITE_FAILED", format!("写入切换环失败：{e}"), None))?;
+    // 回读：写入被 omp 静默丢弃时，界面不该显示一个其实没生效的环
+    let v = config_get_global(&state, &bin, "cycleOrder")
+        .await
+        .map_err(|e| cmd_err("CYCLE_READ_FAILED", e, None))?;
+    Ok(parse_cycle_order(&v))
+}
+
 /// 失败转移链表（`retry.fallbackChains`）+ 两个配套开关——模型请求失败时由哪个模型接手。
 #[tauri::command]
 pub async fn get_fallback_chains(
@@ -1128,6 +1207,41 @@ mod tests {
             json,
             r#"{"default":"commandcode/meta/muse-spark-1.3-contributor:xhigh"}"#
         );
+    }
+
+    #[test]
+    fn cycle_order_parses_leniently_and_dedupes() {
+        assert_eq!(
+            parse_cycle_order(&serde_json::json!(["default", "smol", "slow"])),
+            vec!["default", "smol", "slow"]
+        );
+        // 非数组 / 标量 → 空环（容错，不 panic）
+        assert!(parse_cycle_order(&serde_json::json!(null)).is_empty());
+        assert!(parse_cycle_order(&serde_json::json!("default")).is_empty());
+        // 非字符串 / 空串 / 纯空白 / 带空白或控制字符的名字丢弃；重复保序去重
+        let v = serde_json::json!([
+            "default", 42, "", "   ", " smol ", "smol", "a\nb", "slow", "default"
+        ]);
+        assert_eq!(parse_cycle_order(&v), vec!["default", "smol", "slow"]);
+    }
+
+    #[test]
+    fn cycle_order_write_normalizes_to_json_array() {
+        // 写路径同样的归一（丢弃 + 保序去重）
+        let out = normalize_cycle_order(&[
+            "default".into(),
+            "default".into(),
+            " mycrole".into(),
+            "smol".into(),
+        ]);
+        assert_eq!(out, vec!["default", "smol"]);
+        // 自定义角色名原样保留；序列化是 JSON 数组字符串（omp 只认整数组）
+        let json =
+            serde_json::to_string(&normalize_cycle_order(&["my-role_2".into(), "default".into()]))
+                .unwrap();
+        assert_eq!(json, r#"["my-role_2","default"]"#);
+        // 空数组 = 合法的「清空环」（不能写 null）
+        assert_eq!(serde_json::to_string(&normalize_cycle_order(&[])).unwrap(), "[]");
     }
 
     #[test]

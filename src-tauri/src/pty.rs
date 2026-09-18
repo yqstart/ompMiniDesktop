@@ -63,7 +63,7 @@ fn terminate(pid: Option<u32>, killer: &mut dyn ChildKiller) {
 }
 
 /// SIGKILL 进程组（负 pid）；组不存在（不是组长）时退回单进程。
-fn force_kill_group(pid: u32) {
+pub(crate) fn force_kill_group(pid: u32) {
     #[cfg(unix)]
     unsafe {
         if libc::kill(-(pid as i32), libc::SIGKILL) != 0 {
@@ -180,7 +180,7 @@ static LOGIN_PATH: LazyLock<Option<String>> = LazyLock::new(|| {
     (!path.is_empty()).then_some(path)
 });
 
-fn login_path() -> Option<&'static str> {
+pub(crate) fn login_path() -> Option<&'static str> {
     LOGIN_PATH.as_deref()
 }
 

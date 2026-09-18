@@ -1,10 +1,11 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChartBar, Loader, Refresh } from "reicon-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
-import type { UsageDayRow, UsageStats } from "@shared/types";
+import { heatLevel, heatThresholds, monthTicks } from "../../lib/usageHeat";
+import type { UsageDayRow, UsageHeatRow, UsageStats } from "@shared/types";
 
 /** 统计范围：与 ZCode 的「使用统计」同档（今日 / 近 7 日 / 近 30 日 / 全部）。 */
 type RangeKey = "today" | "7d" | "30d" | "all";
@@ -87,6 +88,102 @@ function DayBar({ row, max, label }: { row: UsageDayRow; max: number; label: str
   );
 }
 
+/** 热力图体格：11px 方格 + 2px 缝隙（53 列 ≈ 690px，窄容器横向滚动）；0 档空格 + 4 档 accent 由浅到深。 */
+const HEAT_CELL = 11;
+const HEAT_GAP = 2;
+const HEAT_WEEKDAY_WIDTH = 28;
+const HEAT_LEVEL_CLASS = ["bg-active", "bg-accent/20", "bg-accent/45", "bg-accent/70", "bg-accent"];
+
+/**
+ * 每日用量热力图（GitHub 贡献图口径）：一列一周（周日在最上）、一行一个星期，颜色越重用量越多。
+ * 数据是后端给的最近 53 周（**不随范围切换**），这里只摆格子、分档与读数。
+ * 悬停格子时读数在标题行右侧（与每日趋势同款），格子的 title 也带同一条读数。
+ */
+function Heatmap({ cells, numLocale }: { cells: UsageHeatRow[]; numLocale: string }) {
+  const t = useText();
+  const [hover, setHover] = useState<number | null>(null);
+  const thresholds = useMemo(() => heatThresholds(cells.map((c) => c.total)), [cells]);
+  const months = useMemo(() => monthTicks(cells, numLocale), [cells, numLocale]);
+  // 2024-01-01 是周一：Mon / Wed / Fri 落在第 1 / 3 / 5 行，其余行留空
+  const fmtWeekday = new Intl.DateTimeFormat(numLocale, { weekday: "short", timeZone: "UTC" });
+  const weekdays = Array.from({ length: 7 }, (_, r) =>
+    r === 1 || r === 3 || r === 5 ? fmtWeekday.format(Date.UTC(2024, 0, r)) : "",
+  );
+  const cols = Math.ceil(cells.length / 7);
+  const hovered = hover === null ? undefined : cells[hover];
+
+  return (
+    <>
+      <div className="flex flex-wrap items-baseline gap-2">
+        <h3 className="text-[13px] font-medium">{t.usageHeatTitle}</h3>
+        <span className="text-[11px] text-faint">{t.usageHeatNote}</span>
+        <span className="ml-auto font-mono text-[11px] text-faint">
+          {hovered
+            ? fmt(t.usageDayTotal, hovered.date, fmtTokens(hovered.total, numLocale), hovered.calls)
+            : ""}
+        </span>
+      </div>
+      <div className="mt-3 overflow-x-auto" onMouseLeave={() => setHover(null)}>
+        <div role="img" aria-label={t.usageHeatTitle} className="w-max">
+          <div
+            className="grid"
+            style={{
+              marginLeft: HEAT_WEEKDAY_WIDTH + HEAT_GAP,
+              gridTemplateColumns: `repeat(${cols}, ${HEAT_CELL}px)`,
+              gap: HEAT_GAP,
+            }}
+          >
+            {Array.from({ length: cols }, (_, c) => (
+              <span key={c} className="whitespace-nowrap text-[10px] leading-3 text-faint">
+                {months.find((m) => m.col === c)?.label ?? ""}
+              </span>
+            ))}
+          </div>
+          <div className="mt-1 flex" style={{ gap: HEAT_GAP }}>
+            <div
+              className="grid shrink-0"
+              style={{ width: HEAT_WEEKDAY_WIDTH, gridTemplateRows: `repeat(7, ${HEAT_CELL}px)`, gap: HEAT_GAP }}
+            >
+              {weekdays.map((label, r) => (
+                <span key={r} className="text-right text-[10px] leading-[11px] text-faint">
+                  {label}
+                </span>
+              ))}
+            </div>
+            <div
+              className="grid"
+              style={{ gridTemplateRows: `repeat(7, ${HEAT_CELL}px)`, gridAutoFlow: "column", gap: HEAT_GAP }}
+            >
+              {cells.map((c, i) => (
+                <div
+                  key={c.date}
+                  title={fmt(t.usageDayTotal, c.date, fmtTokens(c.total, numLocale), c.calls)}
+                  onMouseEnter={() => setHover(i)}
+                  className={`rounded-xs ${HEAT_LEVEL_CLASS[heatLevel(c.total, thresholds)]} ${
+                    hover === i ? "ring-1 ring-foreground/40" : ""
+                  }`}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <span className="font-mono text-[11px] text-faint">
+          {cells.length > 1 ? `${cells[0].date} → ${cells[cells.length - 1].date}` : ""}
+        </span>
+        <span className="flex items-center gap-1 text-[11px] text-faint">
+          {t.usageHeatLess}
+          {HEAT_LEVEL_CLASS.map((cls) => (
+            <span key={cls} className={`h-2.5 w-2.5 rounded-xs ${cls}`} aria-hidden />
+          ))}
+          {t.usageHeatMore}
+        </span>
+      </div>
+    </>
+  );
+}
+
 /**
  * 设置 ›「使用统计」：把 omp 本地会话记录里的用量聚合成一页只读统计。
  *
@@ -152,9 +249,6 @@ export function UsagePanel() {
   const byDay = data?.byDay ?? [];
   const maxDay = Math.max(...byDay.map((d) => d.total), 1);
   const maxModel = Math.max(...(data?.byModel ?? []).map((m) => m.total), 1);
-  const maxTool = Math.max(...(data?.byTool ?? []).map((x) => x.count), 1);
-  const maxHour = Math.max(...(data?.byHour ?? []).map((x) => x.tokens), 1);
-  const maxProject = Math.max(...(data?.byProject ?? []).map((x) => x.total), 1);
   const hovered = hover !== null ? byDay[hover] : undefined;
   const readout = hovered
     ? fmt(t.usageDayTotal, hovered.date, fmtTokens(hovered.total, numLocale), hovered.calls)
@@ -244,7 +338,7 @@ export function UsagePanel() {
             <Tile
               label={t.usageToolCalls}
               value={totals.toolCalls.toLocaleString(numLocale)}
-              sub={fmt(t.usageToolKinds, data.byTool.length)}
+              sub={fmt(t.usageToolKinds, totals.toolKinds)}
             />
             <Tile
               label={t.usageCacheHit}
@@ -279,6 +373,11 @@ export function UsagePanel() {
               value={fmtTokens(totals.avgDailyTokens, numLocale)}
               sub={t.usageAvgDailySub}
             />
+          </div>
+
+          {/* 每日用量热力图：最近 53 周的日历（不随范围切换），悬停读数 */}
+          <div className="mt-6 rounded-lg border border-border-soft p-3">
+            <Heatmap cells={data.heat} numLocale={numLocale} />
           </div>
 
           {/* 每日趋势：补零天的堆叠柱，悬停读数 */}
@@ -366,89 +465,6 @@ export function UsagePanel() {
             )}
           </div>
 
-          {/* 工具调用分布 + 时段分布：宽屏并排，窄屏各自成行 */}
-          <div className="mt-6 grid min-w-0 gap-6 @min-[600px]/panel:grid-cols-2">
-            <div>
-              <h3 className="text-[13px] font-medium">{t.usageByTool}</h3>
-              {data.byTool.length === 0 ? (
-                <p className="mt-1.5 text-[13px] text-faint">{t.usageByToolEmpty}</p>
-              ) : (
-                <div className="mt-1 space-y-px">
-                  {data.byTool.map((row) => (
-                    <div
-                      key={row.name}
-                      className="flex min-h-9 min-w-0 items-center gap-2 rounded-md px-2 transition-colors duration-100 hover:bg-hover"
-                    >
-                      <span className="min-w-0 flex-1 truncate font-mono text-[12px]" title={row.name}>
-                        {row.name}
-                      </span>
-                      <ShareBar ratio={row.count / maxTool} />
-                      <span className="w-10 shrink-0 text-right font-mono text-[11px] text-faint">
-                        {row.count}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div>
-              <h3 className="text-[13px] font-medium">{t.usageByHour}</h3>
-              <div className="mt-1 flex h-24 items-end gap-px" role="img" aria-label={t.usageByHour}>
-                {data.byHour.map((h) => (
-                  <div
-                    key={h.hour}
-                    title={`${String(h.hour).padStart(2, "0")}:00 · ${fmtTokens(h.tokens, numLocale)} tokens · ${fmt(t.usageColCalls, h.calls)}`}
-                    className="flex h-full min-w-0 flex-1 flex-col justify-end rounded-sm hover:bg-hover"
-                  >
-                    <span
-                      className={`block w-full rounded-sm ${totals.peakHour === h.hour ? "bg-accent" : "bg-accent/30"}`}
-                      style={{ height: `${(h.tokens / maxHour) * 100}%`, minHeight: h.tokens > 0 ? 2 : 0 }}
-                    />
-                  </div>
-                ))}
-              </div>
-              <div className="mt-1 flex justify-between font-mono text-[11px] text-faint">
-                <span>00</span>
-                <span>06</span>
-                <span>12</span>
-                <span>18</span>
-                <span>23</span>
-              </div>
-            </div>
-          </div>
-
-          {/* 按项目 */}
-          <div className="mt-6">
-            <h3 className="text-[13px] font-medium">{t.usageByProject}</h3>
-            <div className="mt-1 space-y-px">
-              {data.byProject.map((p, i) => (
-                <div
-                  key={`${p.projectId ?? p.path ?? "orphan"}/${i}`}
-                  className="flex min-h-11 min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2 py-2 transition-colors duration-100 hover:bg-hover"
-                >
-                  <span className="min-w-0 basis-full truncate text-[13px] @min-[600px]/panel:max-w-[30%] @min-[600px]/panel:basis-auto" title={p.name}>
-                    {p.name || t.usageUnowned}
-                  </span>
-                  <span
-                    className="min-w-0 basis-full truncate font-mono text-[11px] text-faint @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0"
-                    title={p.path ?? undefined}
-                  >
-                    {p.path ?? ""}
-                  </span>
-                  <ShareBar ratio={p.total / maxProject} />
-                  <span className="min-w-0 font-mono text-[11px] text-faint @min-[600px]/panel:w-24 @min-[600px]/panel:text-right">
-                    {fmt(t.usageColSessions, p.sessions)}
-                  </span>
-                  <span className="min-w-0 font-mono text-[12px] tabular-nums @min-[600px]/panel:w-20 @min-[600px]/panel:text-right">
-                    {fmtTokens(p.total, numLocale)}
-                  </span>
-                  <span className="min-w-0 font-mono text-[11px] text-faint @min-[600px]/panel:w-16 @min-[600px]/panel:text-right">
-                    {fmtCost(p.cost)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
         </>
       )}
     </section>

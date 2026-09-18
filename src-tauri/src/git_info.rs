@@ -91,7 +91,7 @@ pub fn parse_short_sha(out: &str) -> Option<String> {
 }
 
 /// 跑一条 git 子命令：失败返回 stderr 文本（调用方决定是降级还是当作正常分支缺失）。
-async fn run_git(git: &str, dir: &str, args: &[&str]) -> Result<String, String> {
+pub(crate) async fn run_git(git: &str, dir: &str, args: &[&str]) -> Result<String, String> {
     let fut = tokio::process::Command::new(git)
         .arg("-C")
         .arg(dir)

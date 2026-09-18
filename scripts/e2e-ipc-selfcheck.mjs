@@ -23,7 +23,7 @@ const read = (rel) => fs.readFileSync(path.join(root, rel), "utf8");
 const ipc = read("src/shared/ipc.ts");
 const api = read("src/shared/api.ts");
 const mainRs = read("src-tauri/src/main.rs");
-const rsFiles = ["commands/mod.rs", "providers.rs", "memories.rs", "usage.rs", "settings.rs", "pty.rs", "models_config.rs"]
+const rsFiles = ["commands/mod.rs", "providers.rs", "memories.rs", "usage.rs", "settings.rs", "pty.rs", "models_config.rs", "git_commit.rs"]
  .map((f) => read(`src-tauri/src/${f}`));
 const providersRs = rsFiles[1];
 

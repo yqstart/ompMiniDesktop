@@ -20,6 +20,11 @@ export const IPC = {
   // 工作区（V11 左栏树）：项目 → 主目录 + git worktree
   listWorkspaces: "list_workspaces",
   createWorktree: "create_worktree",
+  // 工作区「提交并推送」（V14）：omp commit 的壳侧封装（两段式：提交 → 推送）
+  getWorkspaceGitState: "get_workspace_git_state",
+  startCommitPush: "start_commit_push",
+  pushCommits: "push_commits",
+  cancelCommitPush: "cancel_commit_push",
   // 终端 PTY（V11）：per-终端 omp TUI 进程
   ptySpawn: "pty_spawn",
   ptyWrite: "pty_write",
@@ -34,6 +39,9 @@ export const IPC = {
   logoutProvider: "logout_provider",
   getModelRoles: "get_model_roles",
   setModelRole: "set_model_role",
+  // 快速切换环（设置 › 模型）：Ctrl+P 轮换序 cycleOrder（array 键，整组覆盖写）
+  getCycleOrder: "get_cycle_order",
+  setCycleOrder: "set_cycle_order",
   // 失败转移链（设置 › 模型）：retry.fallbackChains 的读写与两个配套开关
   getFallbackChains: "get_fallback_chains",
   setFallbackChain: "set_fallback_chain",

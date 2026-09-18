@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
-import type { FallbackChainsInfo, GitInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, Overlay, ProjectView, ProviderLoginStatus, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, UsageStats, WorkspaceView } from "./types";
+import type { CommitEvent, FallbackChainsInfo, GitInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, Overlay, ProjectView, ProviderLoginStatus, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -57,6 +57,20 @@ export const api = {
  createWorktree: (projectId: string, branch: string, newBranch: boolean) =>
   call<WorkspaceView>(IPC.createWorktree, { projectId, branch, newBranch }),
  /**
+  * 工作区「提交并推送」（V14）：底部是 `omp commit`（AI 生成提交信息 + changelog 维护 + push）。
+  *
+  * 两段式：`startCommitPush` 预检后自己选路（有改动 → 提交；仅有未推送提交 → 推送快路径）；
+  * `pushCommits` 是第二段（也用于推送失败后的重试）。输出经 **Channel** 流式直推
+  * （`{type:"line"|"phase"|"exit"}`），同 PTY 的口径——高频行流不进事件系统。
+  */
+ getWorkspaceGitState: (paths: string[]) =>
+  call<WorkspaceGitState[]>(IPC.getWorkspaceGitState, { paths }),
+ startCommitPush: (cwd: string, onEvent: Channel<CommitEvent>) =>
+  call<void>(IPC.startCommitPush, { cwd, onEvent }),
+ pushCommits: (cwd: string, onEvent: Channel<CommitEvent>) =>
+  call<void>(IPC.pushCommits, { cwd, onEvent }),
+ cancelCommitPush: (cwd: string) => call<void>(IPC.cancelCommitPush, { cwd }),
+ /**
   * 终端 PTY（V11）：每个终端 = 一个 `omp` TUI 进程跑在 PTY 里。
   * 输出经 **Channel** 直推（高频字节流不走事件系统）；输入 / 尺寸 / 关闭走一次命令。
   */
@@ -84,6 +98,13 @@ export const api = {
  /** 改一个角色；`selector = null` 删除该角色（未配置 = 按 omp 回退规则解析）。 */
  setModelRole: (role: string, selector: string | null) =>
   call<ModelRolesInfo>(IPC.setModelRole, { role, selector }),
+ /**
+  * Ctrl+P 快速切换环（omp `cycleOrder`）：条目是角色 id（不是模型 selector），
+  * 顺序即 omp 里 Ctrl+P / Shift+Ctrl+P 的轮换顺序；空数组 = 不切换任何模型。
+  * 写是整数组覆盖（array 键直接写），返回**回读**的真值。
+  */
+ getCycleOrder: () => call<string[]>(IPC.getCycleOrder),
+ setCycleOrder: (order: string[]) => call<string[]>(IPC.setCycleOrder, { order }),
  /**
   * 失败转移链（设置 › 模型）：omp `retry.fallbackChains` 的读写与两个配套开关
   * （`retry.modelFallback` / `retry.fallbackRevertPolicy`），写的是 omp 全局配置。

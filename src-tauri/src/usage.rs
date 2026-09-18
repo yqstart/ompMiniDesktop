@@ -7,8 +7,6 @@
 //!   （`input` 是**未缓存**输入，缓存读 / 写单独成项）。
 //! - `message.timestamp` 是**毫秒数字**（不是 ISO 串）；`message.duration`（毫秒）是这次请求的模型耗时。
 //! - 工具调用在 `message.content` 的 `{type:"toolCall", name}` 块里——按请求计数，不需要再读 custom 行。
-//! - 会话 cwd 在 jsonl 的 `session` 行（实测在文件第 2 行附近，**不在首行**），归属项目仍走
-//!   [`owner_project`]（与左栏 / 归档面同一条规则），所以统计的「按项目」与界面分组一致。
 //! - `cost` 是 omp 按模型定价算出的美元值；本地模型 / 无定价时恒为 0（界面据此整块隐藏费用展示）。
 //!
 //! 扫描是**全量**的：时间范围内的每一条 assistant 消息都要计入，所以不能像列表那样只看文件头尾。
@@ -16,16 +14,19 @@
 //! `truncated` 置 true（**宁可说「可能不全」，不假装统计完了**）。行级预筛（先看原始行里有没有
 //! `"usage"` / `"toolCall"` 再解析 JSON）让真实目录（29MB）的整轮扫描保持在百毫秒级。
 //!
-//! 纯逻辑（行解析、按日 / 模型 / 工具 / 时段聚合、范围过滤、连续天数、补零天）与真实文件行为
-//! （扫描临时目录、预算截断、缺失目录）都有单测。
+//! 每日热力图（GitHub 贡献图口径）**独立于范围窗口**：它固定看最近 [`HEAT_WEEKS`] 周并按周日对齐，
+//! 所以「今日」范围也能看到一整年的日历，而每日趋势 / 总览仍只按所选范围聚合。
+//!
+//! 纯逻辑（行解析、按日 / 模型 / 时段聚合、范围过滤、连续天数、补零天、热力图窗口）与真实文件
+//! 行为（扫描临时目录、预算截断、缺失目录）都有单测。
 
-use chrono::{DateTime, Days, Local, NaiveDate};
+use chrono::{DateTime, Datelike, Days, Local, NaiveDate};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tauri::State;
 
-use crate::commands::{owner_project, AppState, CmdError};
+use crate::commands::{AppState, CmdError};
 
 /// 扫描文件数上限（按 mtime 取最近的一批，旧的先放弃）。
 const SCAN_MAX_FILES: usize = 3000;
@@ -33,12 +34,10 @@ const SCAN_MAX_FILES: usize = 3000;
 const SCAN_MAX_BYTES: u64 = 256 * 1024 * 1024;
 /// 墙钟时间上限（毫秒）。
 const SCAN_MAX_MS: u64 = 5000;
-/// 「按工具」最多返回多少项（长尾折叠，前端只需 Top N）。
-const TOOLS_MAX: usize = 20;
 /// 每日趋势最多补多少天（一年以上历史只画最近这一段，避免柱子密到不可读）。
 const CHART_MAX_DAYS: usize = 120;
-/// 读会话 cwd 时只看文件头这么多字节（`session` 行就在开头几行）。
-const META_HEAD_BYTES: u64 = 32 * 1024;
+/// 热力图窗口周数（GitHub 贡献图同款 53 列，最后一列 = 本周）。
+const HEAT_WEEKS: u64 = 53;
 
 // ---------- 视图类型 ----------
 
@@ -93,36 +92,15 @@ pub struct UsageModelRow {
     pub bucket: UsageBucket,
 }
 
-/// 一个项目的量（归属规则与左栏一致；未归属的 `projectId` 为 null）。
+/// 热力图的一格（`date` = 本地日期；没跑的日子补零，日历才成网格）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UsageProjectRow {
-    pub project_id: Option<String>,
-    /// 会话 cwd（读不到为 null）。
-    pub path: Option<String>,
-    /// 展示名：命中覆盖层项目取项目名，否则路径末段；都没有为空串（前端兜「未归属」）。
-    pub name: String,
-    pub sessions: u64,
-    pub calls: u64,
+pub struct UsageHeatRow {
+    pub date: String,
+    /// 当日 token 合计。
     pub total: u64,
-    pub cost: f64,
-}
-
-/// 一个工具的调用次数。
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UsageToolRow {
-    pub name: String,
-    pub count: u64,
-}
-
-/// 一个本地小时的量（0–23）。
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UsageHourRow {
-    pub hour: u32,
+    /// 当日请求数。
     pub calls: u64,
-    pub tokens: u64,
 }
 
 /// 用量最多的模型（`share` = 占全部 token 的比例，0–1）。
@@ -145,6 +123,8 @@ pub struct UsageTotals {
     /// 有请求的会话数。
     pub sessions: u64,
     pub tool_calls: u64,
+    /// 工具种类数（按名字去重）。
+    pub tool_kinds: u64,
     /// 模型耗时合计（毫秒，omp `duration` 原值累加）。
     pub duration_ms: u64,
     /// 范围内有请求的天数。
@@ -170,12 +150,10 @@ pub struct UsageStats {
     pub totals: UsageTotals,
     /// 每日趋势（按日期升序、**补零天**，最多 `chartDays` 天）。
     pub by_day: Vec<UsageDayRow>,
+    /// 热力图（最近 `HEAT_WEEKS` 周：周日对齐、逐日补零、到今天为止；**不随范围裁剪**）。
+    pub heat: Vec<UsageHeatRow>,
     pub by_model: Vec<UsageModelRow>,
-    pub by_project: Vec<UsageProjectRow>,
-    pub by_tool: Vec<UsageToolRow>,
-    pub by_hour: Vec<UsageHourRow>,
     pub scanned_files: usize,
-    pub scanned_sessions: usize,
     /// 因预算提前收手（文件数 / 字节 / 时间任一），统计可能不全。
     pub truncated: bool,
     /// 本次范围天数（null = 全部）。
@@ -296,43 +274,7 @@ fn local_hour(ms: i64) -> Option<u32> {
     Some(dt.with_timezone(&Local).format("%H").to_string().parse().ok()?)
 }
 
-// ---------- 会话头（cwd / id） ----------
-
-/// 读 jsonl 头部，取 `session` 行的 `(id, cwd)`。
-///
-/// 会话行不在首行（实测前面还有一条 `title` 行），所以按行扫前 [`META_HEAD_BYTES`]：
-/// 只读这一小段，避免为拿一个 cwd 去读整个几十 MB 的文件。
-pub fn read_session_meta(path: &Path) -> Option<(String, String)> {
-    use std::io::{BufRead, BufReader, Read};
-    let f = std::fs::File::open(path).ok()?;
-    let mut head = Vec::new();
-    f.take(META_HEAD_BYTES).read_to_end(&mut head).ok()?;
-    for line in BufReader::new(&head[..]).lines() {
-        let Ok(line) = line else { break };
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
-        if v.get("type").and_then(|t| t.as_str()) == Some("session") {
-            return Some((
-                v.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string(),
-                v.get("cwd").and_then(|c| c.as_str()).unwrap_or("").to_string(),
-            ));
-        }
-    }
-    None
-}
-
 // ---------- 扫描 ----------
-
-/// 一个项目分组的聚合中间态（`key` = 项目 id，未归属时是 cwd 本身）。
-#[derive(Debug, Default)]
-struct ProjectAgg {
-    sessions: HashSet<String>,
-    calls: u64,
-    total: u64,
-    cost: f64,
-    name: String,
-    path: Option<String>,
-    project_id: Option<String>,
-}
 
 /// 扫描预算（单测用来把预算压到极小以验证截断）。
 #[derive(Debug, Clone, Copy)]
@@ -348,20 +290,14 @@ impl Default for Budget {
     }
 }
 
-/// 扫 `sessions/` 下全部 jsonl，按 `days`（None = 全部）过滤后聚合。
+/// 扫 `sessions/` 下全部 jsonl，按 `days`（None = 全部）过滤后聚合（热力图走独立的一年窗口）。
 /// 不碰 tauri，可在临时目录上做真实行为测试。
-pub fn scan_usage_in(
-    root: &Path,
-    projects: &[(String, String)],
-    days: Option<u32>,
-    now: DateTime<Local>,
-) -> UsageStats {
-    scan_usage_with(root, projects, days, now, Budget::default())
+pub fn scan_usage_in(root: &Path, days: Option<u32>, now: DateTime<Local>) -> UsageStats {
+    scan_usage_with(root, days, now, Budget::default())
 }
 
 fn scan_usage_with(
     root: &Path,
-    projects: &[(String, String)],
     days: Option<u32>,
     now: DateTime<Local>,
     budget: Budget,
@@ -375,6 +311,8 @@ fn scan_usage_with(
         ),
         None => None,
     };
+    // 热力图窗口起点：最近 53 周的周日。范围再窄也要把这一年的日粒度算全
+    let heat_from = heat_window_start(today).format("%Y-%m-%d").to_string();
 
     let mut files: Vec<(std::time::SystemTime, PathBuf)> = vec![];
     if let Ok(rd) = std::fs::read_dir(root) {
@@ -400,11 +338,11 @@ fn scan_usage_with(
 
     let mut totals = UsageTotals::default();
     let mut by_day: BTreeMap<String, UsageBucket> = BTreeMap::new();
+    let mut by_heat: BTreeMap<String, (u64, u64)> = BTreeMap::new();
     let mut by_model: HashMap<(String, String), UsageBucket> = HashMap::new();
-    let mut by_tool: HashMap<String, u64> = HashMap::new();
+    let mut tool_kinds: HashSet<String> = HashSet::new();
     let mut by_hour: Vec<(u64, u64)> = vec![(0, 0); 24];
-    let mut sessions: HashSet<String> = HashSet::new();
-    let mut by_project: HashMap<String, ProjectAgg> = HashMap::new();
+    let mut sessions = 0u64;
 
     for (_mtime, path) in files.into_iter().take(budget.max_files) {
         if bytes_read >= budget.max_bytes || started.elapsed().as_millis() as u64 >= budget.max_ms {
@@ -413,8 +351,8 @@ fn scan_usage_with(
         }
         let Ok(file) = std::fs::File::open(&path) else { continue };
         scanned_files += 1;
-        // 会话归属只在真有命中行的文件上取一次头（懒加载，预算用在刀刃上）
-        let mut group: Option<String> = None;
+        // 会话计数是文件级的：第一次命中统计行时记一次
+        let mut counted = false;
         let reader = std::io::BufReader::new(file);
         for line in std::io::BufRead::lines(reader) {
             let Ok(line) = line else { break };
@@ -429,18 +367,25 @@ fn scan_usage_with(
             }
             let Some(msg) = parse_message_line(&line) else { continue };
             let Some(date) = local_date(msg.ts_ms) else { continue };
+            // 热力图在范围裁剪之前聚合：它固定看最近一年，不随上方范围切换
+            if date.as_str() >= heat_from.as_str() {
+                if let Some(u) = msg.usage.as_ref() {
+                    let cell = by_heat.entry(date.clone()).or_insert((0, 0));
+                    cell.0 += u.total;
+                    cell.1 += 1;
+                }
+            }
             if let Some(c) = &cutoff {
                 if &date < c {
                     continue;
                 }
             }
-            if group.is_none() {
-                group = Some(register_session(&path, projects, &mut sessions, &mut by_project));
+            if !counted {
+                counted = true;
+                sessions += 1;
             }
             totals.tool_calls += msg.tools.len() as u64;
-            for t in &msg.tools {
-                *by_tool.entry(t.clone()).or_insert(0) += 1;
-            }
+            tool_kinds.extend(msg.tools.iter().cloned());
             totals.duration_ms += msg.duration_ms;
             let Some(u) = msg.usage else { continue };
             totals.bucket.add(&u);
@@ -449,11 +394,6 @@ fn scan_usage_with(
                 .entry((msg.provider.clone(), msg.model.clone()))
                 .or_default()
                 .add(&u);
-            if let Some(g) = group.as_ref().and_then(|k| by_project.get_mut(k)) {
-                g.calls += 1;
-                g.total += u.total;
-                g.cost += u.cost;
-            }
             if let Some(h) = local_hour(msg.ts_ms) {
                 let slot = &mut by_hour[h as usize];
                 slot.0 += 1;
@@ -467,6 +407,7 @@ fn scan_usage_with(
     }
 
     let day_rows = fill_days(&by_day, days, today);
+    let heat_rows = fill_heat(&by_heat, today);
     let models = model_rows(by_model);
     let top_model = models
         .first()
@@ -477,67 +418,19 @@ fn scan_usage_with(
             tokens: r.bucket.total,
             share: r.bucket.total as f64 / totals.bucket.total.max(1) as f64,
         });
-    let mut totals = finish_totals(totals, &by_day, &by_hour, sessions.len() as u64, today);
+    totals.tool_kinds = tool_kinds.len() as u64;
+    let mut totals = finish_totals(totals, &by_day, &by_hour, sessions, today);
     totals.top_model = top_model;
     UsageStats {
         totals,
         chart_days: day_rows.len(),
         by_day: day_rows,
+        heat: heat_rows,
         by_model: models,
-        by_project: project_rows(by_project),
-        by_hour: hour_rows(&by_hour),
-        by_tool: tool_rows(by_tool),
         scanned_files,
-        scanned_sessions: sessions.len(),
         truncated,
         range_days: days,
     }
-}
-
-/// 第一次在某个文件里命中统计行时登记它的会话与项目分组（返回分组键）。
-fn register_session(
-    path: &Path,
-    projects: &[(String, String)],
-    sessions: &mut HashSet<String>,
-    by_project: &mut HashMap<String, ProjectAgg>,
-) -> String {
-    let meta = read_session_meta(path);
-    let sid = meta
-        .as_ref()
-        .map(|m| m.0.clone())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| {
-            path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown").to_string()
-        });
-    sessions.insert(sid.clone());
-    let cwd = meta.as_ref().map(|m| m.1.clone()).filter(|c| !c.is_empty());
-    let pid = cwd.as_deref().and_then(|c| owner_project(projects, c));
-    let key = pid.clone().unwrap_or_else(|| cwd.clone().unwrap_or_default());
-    let entry = by_project.entry(key.clone()).or_insert_with(|| ProjectAgg {
-        name: project_name(projects, pid.as_deref(), cwd.as_deref()),
-        project_id: pid.clone(),
-        path: cwd.clone(),
-        ..Default::default()
-    });
-    entry.sessions.insert(sid);
-    key
-}
-
-/// 项目展示名：命中覆盖层项目 → 项目名（路径末段）；否则 cwd 末段；都没有空串。
-fn project_name(projects: &[(String, String)], pid: Option<&str>, cwd: Option<&str>) -> String {
-    if let Some(id) = pid {
-        if let Some((_, path)) = projects.iter().find(|(p, _)| p == id) {
-            return base_name(path);
-        }
-    }
-    cwd.map(base_name).unwrap_or_default()
-}
-
-fn base_name(path: &str) -> String {
-    Path::new(path)
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| path.to_string())
 }
 
 fn model_rows(by_model: HashMap<(String, String), UsageBucket>) -> Vec<UsageModelRow> {
@@ -551,43 +444,23 @@ fn model_rows(by_model: HashMap<(String, String), UsageBucket>) -> Vec<UsageMode
     rows
 }
 
-fn project_rows(by_project: HashMap<String, ProjectAgg>) -> Vec<UsageProjectRow> {
-    let mut rows: Vec<UsageProjectRow> = by_project
-        .into_values()
-        .map(|g| UsageProjectRow {
-            project_id: g.project_id,
-            path: g.path,
-            name: g.name,
-            sessions: g.sessions.len() as u64,
-            calls: g.calls,
-            total: g.total,
-            cost: g.cost,
-        })
-        .collect();
-    rows.sort_by(|a, b| b.total.cmp(&a.total).then_with(|| a.name.cmp(&b.name)));
-    rows
+/// 热力图窗口起点：最近 [`HEAT_WEEKS`] 周的周日（最后一列 = 本周，今天的格子落在它自己那一行）。
+fn heat_window_start(today: NaiveDate) -> NaiveDate {
+    let offset = today.weekday().num_days_from_sunday() as u64;
+    today - Days::new((HEAT_WEEKS - 1) * 7 + offset)
 }
 
-fn tool_rows(by_tool: HashMap<String, u64>) -> Vec<UsageToolRow> {
-    let mut rows: Vec<UsageToolRow> = by_tool
-        .into_iter()
-        .map(|(name, count)| UsageToolRow { name, count })
-        .collect();
-    rows.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.name.cmp(&b.name)));
-    rows.truncate(TOOLS_MAX);
-    rows
-}
-
-fn hour_rows(by_hour: &[(u64, u64)]) -> Vec<UsageHourRow> {
-    by_hour
-        .iter()
-        .enumerate()
-        .map(|(h, (calls, tokens))| UsageHourRow {
-            hour: h as u32,
-            calls: *calls,
-            tokens: *tokens,
-        })
-        .collect()
+/// 热力图：从窗口起点到今天**逐日补零**（没跑的日子也要有格子，日历才成网格）。
+fn fill_heat(by_heat: &BTreeMap<String, (u64, u64)>, today: NaiveDate) -> Vec<UsageHeatRow> {
+    let mut out = vec![];
+    let mut cur = heat_window_start(today);
+    while cur <= today {
+        let key = cur.format("%Y-%m-%d").to_string();
+        let (total, calls) = by_heat.get(&key).copied().unwrap_or((0, 0));
+        out.push(UsageHeatRow { date: key, total, calls });
+        cur = cur + Days::new(1);
+    }
+    out
 }
 
 /// 每日趋势：范围内**补零天**（没跑的日子也要有柱子，趋势才连续）；
@@ -687,21 +560,15 @@ fn current_streak(days: &[NaiveDate], today: NaiveDate) -> u64 {
 
 // ---------- 命令 ----------
 
-/// 使用统计：扫会话 jsonl 聚合用量（范围可选：1 / 7 / 30 天，null = 全部）。
+/// 使用统计：扫会话 jsonl 聚合用量（范围可选：1 / 7 / 30 天，null = 全部；热力图固定最近 53 周）。
 #[tauri::command]
 pub async fn get_usage_stats(
     state: State<'_, AppState>,
     days: Option<u32>,
 ) -> Result<UsageStats, CmdError> {
     let agent = state.agent_dir.lock().await.clone();
-    let projects: Vec<(String, String)> = {
-        let ov = state.overlay.lock().await;
-        ov.projects.iter().map(|p| (p.id.clone(), p.path.clone())).collect()
-    };
-    // 归属匹配集含 worktree（与左栏会话列表同一口径）：worktree 里产生的用量归到项目
-    let scope = crate::commands::ownership_scope(&projects).await;
     let days = days.map(|d| d.clamp(1, 3650));
-    Ok(scan_usage_in(&agent.join("sessions"), &scope, days, Local::now()))
+    Ok(scan_usage_in(&agent.join("sessions"), days, Local::now()))
 }
 
 #[cfg(test)]
@@ -781,10 +648,6 @@ mod tests {
         std::fs::write(dir.join(file), lines.join("\n") + "\n").unwrap();
     }
 
-    fn projects(list: &[(&str, &str)]) -> Vec<(String, String)> {
-        list.iter().map(|(id, p)| (id.to_string(), p.to_string())).collect()
-    }
-
     // ---------- 行解析 ----------
 
     #[test]
@@ -828,22 +691,6 @@ mod tests {
         assert!(parse_message_line(&no_ts).is_none(), "没有时间就无法归档到某一天");
     }
 
-    #[test]
-    fn session_meta_reads_cwd_from_head_after_title_line() {
-        let root = tmp_root("meta");
-        let f = root.join("a.jsonl");
-        std::fs::write(
-            &f,
-            format!("{}\n{}\n", line_title(), line_session("sid-1", "/tmp/proj")),
-        )
-        .unwrap();
-        assert_eq!(read_session_meta(&f), Some(("sid-1".to_string(), "/tmp/proj".to_string())));
-        // 没有 session 行的文件（损坏 / 空）不报错，交给调用方兜文件名
-        std::fs::write(root.join("b.jsonl"), "无关行\n").unwrap();
-        assert_eq!(read_session_meta(&root.join("b.jsonl")), None);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
     // ---------- 聚合 ----------
 
     #[test]
@@ -872,9 +719,9 @@ mod tests {
                 line_assistant(ts(2026, 9, 15, 10), "openai", "gpt-5", Some(usage_json(50, 10, 0)), &[]),
             ],
         );
-        let stats = scan_usage_with(&root, &[], None, now(), Budget::default());
+        let stats = scan_usage_with(&root, None, now(), Budget::default());
         assert_eq!(stats.scanned_files, 2);
-        assert_eq!(stats.scanned_sessions, 2);
+        assert_eq!(stats.totals.sessions, 2, "命中统计行的会话文件各计一次");
         assert!(!stats.truncated);
         assert_eq!(stats.totals.bucket.input, 350);
         assert_eq!(stats.totals.bucket.output, 60);
@@ -889,16 +736,10 @@ mod tests {
         assert_eq!(stats.by_model[0].model, "sonnet");
         assert_eq!(stats.by_model[0].bucket.calls, 2);
         assert_eq!(stats.by_model[0].bucket.total, 650);
-        // 工具按次数倒序
-        assert_eq!(stats.by_tool[0].name, "read");
-        assert_eq!(stats.by_tool[0].count, 2);
-        assert_eq!(stats.by_tool.len(), 3);
-        // 时段：按带 usage 的请求计数（没有 usage 的消息不进时段分布）
-        assert_eq!(stats.by_hour[15].calls, 1);
-        assert_eq!(stats.by_hour[9].calls, 1);
-        let hour_calls: u64 = stats.by_hour.iter().map(|h| h.calls).sum();
-        assert_eq!(hour_calls, stats.totals.bucket.calls, "时段分布的请求数应与总请求数一致");
-        assert_eq!(stats.totals.peak_hour, Some(9), "9 点 420 token 多于 15 点的 230");
+        // 工具种类去重（read / bash / grep）
+        assert_eq!(stats.totals.tool_kinds, 3);
+        // 峰值时段按带 usage 的请求算：9 点的 420 token 多于 15 点的 230
+        assert_eq!(stats.totals.peak_hour, Some(9));
         assert_eq!(stats.totals.peak_hour_tokens, 420);
         // 每日趋势补到今天（9-15 起两天）
         assert_eq!(stats.by_day.len(), 2);
@@ -907,6 +748,13 @@ mod tests {
         assert_eq!(stats.by_day[1].bucket.total, 650);
         assert_eq!(stats.chart_days, 2);
         assert_eq!(stats.range_days, None);
+        // 热力图：53 周窗口从周日开始、补零到今天（2026-09-16 是周三 → 368 格）
+        assert_eq!(stats.heat[0].date, "2025-09-14");
+        assert_eq!(stats.heat.len(), 365 + 3);
+        assert_eq!(stats.heat.last().unwrap().date, "2026-09-16");
+        assert_eq!(stats.heat.last().unwrap().total, 650);
+        assert_eq!(stats.heat.last().unwrap().calls, 2);
+        assert_eq!(stats.heat[stats.heat.len() - 2].total, 60, "昨天 50+10");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -926,7 +774,7 @@ mod tests {
                 line_assistant(ts(2026, 9, 6, 8), "anthropic", "sonnet", Some(usage_json(9999, 0, 0)), &[]),
             ],
         );
-        let stats = scan_usage_with(&root, &[], Some(7), now(), Budget::default());
+        let stats = scan_usage_with(&root, Some(7), now(), Budget::default());
         assert_eq!(stats.totals.bucket.total, 1100, "窗口外的 9999 不能计入");
         assert_eq!(stats.totals.bucket.calls, 2);
         assert_eq!(stats.by_day.len(), 7, "近 7 日要补满 7 天");
@@ -934,16 +782,52 @@ mod tests {
         assert_eq!(stats.by_day.last().unwrap().date, "2026-09-16");
         assert_eq!(stats.totals.active_days, 2);
         assert_eq!(stats.range_days, Some(7));
+        // 热力图不随范围裁剪：10 天前的 9999 也要留在日历里
+        let old = stats.heat.iter().find(|h| h.date == "2026-09-06").expect("日历覆盖到 10 天前");
+        assert_eq!(old.total, 9999);
 
         // 「今日」= 只有今天
-        let today = scan_usage_with(&root, &[], Some(1), now(), Budget::default());
+        let today = scan_usage_with(&root, Some(1), now(), Budget::default());
         assert_eq!(today.totals.bucket.total, 1000);
         assert_eq!(today.by_day.len(), 1);
 
         // 全部：含窗口外，趋势仍只画最近 CHART_MAX_DAYS 天
-        let all = scan_usage_with(&root, &[], None, now(), Budget::default());
+        let all = scan_usage_with(&root, None, now(), Budget::default());
         assert_eq!(all.totals.bucket.total, 11099);
         assert_eq!(all.by_day.len(), 11, "9-06 到 9-16 共 11 天");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn heat_window_is_one_year_from_sunday_and_range_independent() {
+        let root = tmp_root("heat");
+        write_session(
+            &root,
+            "--tmp-demo--",
+            "s1.jsonl",
+            &[
+                line_session("sid-1", "/tmp/demo"),
+                // 窗口外的旧数据：日历里没有，但「全部」范围仍计入总览
+                line_assistant(ts(2025, 9, 1, 8), "anthropic", "sonnet", Some(usage_json(7777, 0, 0)), &[]),
+                // 一年内、远在 7 日窗口外：日历要留着
+                line_assistant(ts(2026, 1, 5, 8), "anthropic", "sonnet", Some(usage_json(120, 0, 0)), &[]),
+                line_assistant(ts(2026, 9, 16, 8), "anthropic", "sonnet", Some(usage_json(10, 0, 0)), &[]),
+            ],
+        );
+        let week = scan_usage_with(&root, Some(7), now(), Budget::default());
+        assert_eq!(week.totals.bucket.total, 10, "总览仍只看 7 日窗口");
+        let jan = week.heat.iter().find(|h| h.date == "2026-01-05").expect("日历覆盖一年");
+        assert_eq!(jan.total, 120, "热力图不随范围裁剪");
+        assert!(week.heat.iter().all(|h| h.date != "2025-09-01"), "一年前的旧数据不进日历");
+        // 周日对齐：53 列的列首都是周日（最后一块可能不满 7 格）
+        for (i, chunk) in week.heat.chunks(7).enumerate() {
+            let d = NaiveDate::parse_from_str(&chunk[0].date, "%Y-%m-%d").unwrap();
+            assert_eq!(d.weekday().num_days_from_sunday(), 0, "第 {} 列的列首应是周日", i + 1);
+        }
+        assert_eq!(week.heat.chunks(7).count(), HEAT_WEEKS as usize);
+
+        let all = scan_usage_with(&root, None, now(), Budget::default());
+        assert_eq!(all.totals.bucket.total, 7777 + 120 + 10, "全部范围不受日历窗口影响");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -963,7 +847,7 @@ mod tests {
                 line_assistant(ts(2026, 9, 11, 9), "openai", "gpt-5", Some(usage_json(100, 10, 0)), &[]),
             ],
         );
-        let stats = scan_usage_with(&root, &[], None, now(), Budget::default());
+        let stats = scan_usage_with(&root, None, now(), Budget::default());
         let t = &stats.totals;
         assert_eq!(t.active_days, 4);
         assert_eq!(t.current_streak, 3, "今天 / 昨天 / 前天连成 3 天");
@@ -975,52 +859,6 @@ mod tests {
         assert_eq!(top.model, "sonnet");
         assert_eq!(top.tokens, 410 + 110, "sonnet 两次请求的 token 合计");
         assert!((top.share - top.tokens as f64 / t.bucket.total as f64).abs() < 1e-9);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn project_rows_use_cwd_attribution_and_group_unowned() {
-        let root = tmp_root("project");
-        write_session(
-            &root,
-            "--tmp-demo--",
-            "s1.jsonl",
-            &[
-                line_session("sid-1", "/tmp/demo/sub"),
-                line_assistant(ts(2026, 9, 16, 9), "anthropic", "sonnet", Some(usage_json(100, 0, 0)), &[]),
-            ],
-        );
-        write_session(
-            &root,
-            "--tmp-demo--",
-            "s2.jsonl",
-            &[
-                line_session("sid-2", "/tmp/demo"),
-                line_assistant(ts(2026, 9, 16, 10), "anthropic", "sonnet", Some(usage_json(300, 0, 0)), &[]),
-            ],
-        );
-        write_session(
-            &root,
-            "--tmp-elsewhere--",
-            "s3.jsonl",
-            &[
-                // 没有 cwd（会话行缺失）→ 未归属
-                line_assistant(ts(2026, 9, 16, 11), "anthropic", "sonnet", Some(usage_json(50, 0, 0)), &[]),
-            ],
-        );
-        let ps = projects(&[("p-demo", "/tmp/demo")]);
-        let stats = scan_usage_with(&root, &ps, None, now(), Budget::default());
-        assert_eq!(stats.by_project.len(), 2, "命中项目 + 未归属，共两组");
-        let demo = stats.by_project.iter().find(|r| r.project_id.is_some()).unwrap();
-        assert_eq!(demo.project_id.as_deref(), Some("p-demo"));
-        assert_eq!(demo.name, "demo", "展示名取项目路径末段");
-        assert_eq!(demo.sessions, 2, "子目录会话也算同一项目");
-        assert_eq!(demo.total, 400);
-        assert_eq!(demo.calls, 2);
-        let orphan = stats.by_project.iter().find(|r| r.project_id.is_none()).unwrap();
-        assert_eq!(orphan.path, None);
-        assert_eq!(orphan.name, "", "没有 cwd 就没有展示名，由前端兜「未归属」");
-        assert_eq!(orphan.sessions, 1);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1040,34 +878,16 @@ mod tests {
                 ],
             );
         }
-        let cut = scan_usage_with(
-            &root,
-            &[],
-            None,
-            now(),
-            Budget { max_files: 1, ..Budget::default() },
-        );
+        let cut = scan_usage_with(&root, None, now(), Budget { max_files: 1, ..Budget::default() });
         assert!(cut.truncated, "文件数超预算要明说可能不全");
         assert_eq!(cut.scanned_files, 1);
         assert_eq!(cut.totals.bucket.calls, 1);
 
-        let tiny_bytes = scan_usage_with(
-            &root,
-            &[],
-            None,
-            now(),
-            Budget { max_bytes: 1, ..Budget::default() },
-        );
+        let tiny_bytes = scan_usage_with(&root, None, now(), Budget { max_bytes: 1, ..Budget::default() });
         assert!(tiny_bytes.truncated);
         assert_eq!(tiny_bytes.totals.bucket.calls, 0, "预算到点即停，不硬扫");
 
-        let no_time = scan_usage_with(
-            &root,
-            &[],
-            None,
-            now(),
-            Budget { max_ms: 0, ..Budget::default() },
-        );
+        let no_time = scan_usage_with(&root, None, now(), Budget { max_ms: 0, ..Budget::default() });
         assert!(no_time.truncated, "时间预算到点也要说可能不全");
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1086,20 +906,17 @@ mod tests {
                 line_assistant(ts(2026, 9, 16, 9), "anthropic", "sonnet", Some(usage_json(10, 5, 0)), &[]),
             ],
         );
-        let stats = scan_usage_with(&root, &[], None, now(), Budget::default());
+        let stats = scan_usage_with(&root, None, now(), Budget::default());
         assert_eq!(stats.totals.bucket.calls, 1, "坏行跳过，好行照算");
         assert_eq!(stats.totals.bucket.total, 15);
         // sessions 目录不存在：返回空统计而不是报错
-        let empty = scan_usage_with(
-            Path::new("/tmp/omp-usage-definitely-missing"),
-            &[],
-            None,
-            now(),
-            Budget::default(),
-        );
+        let empty = scan_usage_with(Path::new("/tmp/omp-usage-definitely-missing"), None, now(), Budget::default());
         assert_eq!(empty.totals.bucket.calls, 0);
         assert_eq!(empty.scanned_files, 0);
         assert!(empty.by_day.is_empty(), "没有数据就不补零天");
+        // 热力图即使一条数据都没有，也给出完整日历（全零格）
+        assert_eq!(empty.heat.last().unwrap().date, "2026-09-16");
+        assert!(empty.heat.iter().all(|h| h.total == 0 && h.calls == 0));
         assert_eq!(empty.totals.cache_hit_rate, None);
         assert_eq!(empty.totals.current_streak, 0);
         assert!(empty.totals.top_model.is_none());
@@ -1117,7 +934,7 @@ mod tests {
         );
         std::fs::write(root.join("--tmp-demo--/.s1.jsonl.lock.os"), "lock").unwrap();
         std::fs::write(root.join("--tmp-demo--/notes.txt"), "非 jsonl").unwrap();
-        let stats = scan_usage_with(&root, &[], None, now(), Budget::default());
+        let stats = scan_usage_with(&root, None, now(), Budget::default());
         assert_eq!(stats.scanned_files, 1, "只扫 .jsonl");
         assert_eq!(stats.totals.bucket.calls, 1);
         let _ = std::fs::remove_dir_all(&root);
@@ -1133,11 +950,11 @@ mod tests {
         }
         let agent = crate::session_scan::resolve_agent_dir(None);
         let started = std::time::Instant::now();
-        let stats = scan_usage_in(&agent.join("sessions"), &[], None, Local::now());
+        let stats = scan_usage_in(&agent.join("sessions"), None, Local::now());
         println!(
             "扫描 {} 个文件 / {} 个会话，耗时 {}ms，truncated={}；token 合计 {}（输入 {} / 输出 {} / 缓存读 {}），请求 {}，工具 {}，费用 ${:.4}，最常用模型 {:?}",
             stats.scanned_files,
-            stats.scanned_sessions,
+            stats.totals.sessions,
             started.elapsed().as_millis(),
             stats.truncated,
             stats.totals.bucket.total,

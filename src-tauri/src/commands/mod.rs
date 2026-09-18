@@ -26,6 +26,9 @@ pub struct AppState {
     pub models_edit: Mutex<()>,
     /// V11 终端工作区：per-终端 `omp` TUI 进程表（PTY，见 `pty.rs`）。
     pub pty: crate::pty::PtyMap,
+    /// V14 工作区「提交并推送」：cwd → 任务句柄（同一工作区拒绝重入，不同工作区可并行，
+    /// 见 `git_commit.rs`）。
+    pub commit_tasks: crate::git_commit::CommitMap,
 }
 
 #[derive(Debug, Serialize)]
@@ -948,6 +951,7 @@ pub fn load_state(app: &AppHandle) -> AppState {
         retry_edit: Mutex::new(()),
         models_edit: Mutex::new(()),
         pty: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
+        commit_tasks: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
     }
 }
 

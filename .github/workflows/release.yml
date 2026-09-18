@@ -19,11 +19,22 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # 发版前守卫：签名没配好、版本号与 tag 不一致时直接失败，别产出一个"装不上更新"的 release。
+  # 发版前守卫：仓库可见性、签名、版本号与 tag 不一致时直接失败，别产出一个"装不上更新"的 release。
   guard:
-    name: Guard (签名 / 版本一致性)
+    name: Guard (可见性 / 签名 / 版本一致性)
     runs-on: ubuntu-latest
     steps:
+      # 私有仓库会让应用内更新静默失效：updater 匿名拉 latest.json，GitHub 对匿名一律 404。本步不需要 checkout。
+      - name: 仓库必须公开（updater 匿名拉取 latest.json）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VIS=$(gh api "repos/${GITHUB_REPOSITORY}" --jq .visibility)
+          if [ "$VIS" != "public" ]; then
+            echo "::error::仓库当前为 ${VIS}。updater 匿名拉取 releases/latest/download/latest.json 时会被 GitHub 以 404 拒绝（应用内报 Could not fetch a valid release JSON from the remote）。请改回 public 再发版。"
+            exit 1
+          fi
+
       - uses: actions/checkout@v5
 
       - name: updater pubkey 必须已配置

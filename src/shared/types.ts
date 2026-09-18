@@ -226,21 +226,8 @@ export type UsageDayRow = UsageBucket & { date: string };
 /** 一个模型的量（provider / model 原样来自 jsonl；都为空串时界面显示「未知模型」）。 */
 export type UsageModelRow = UsageBucket & { provider: string; model: string };
 
-/** 一个项目的量（归属规则与左栏一致；未归属时 `projectId` 为 null、`name` 为空串）。 */
-export type UsageProjectRow = {
- projectId: string | null;
- path: string | null;
- name: string;
- sessions: number;
- calls: number;
- total: number;
- cost: number;
-};
-
-export type UsageToolRow = { name: string; count: number };
-
-/** 一个本地小时的量（0–23；`calls` 与总数一致——没有 usage 的消息不进时段分布）。 */
-export type UsageHourRow = { hour: number; calls: number; tokens: number };
+/** 热力图的一格（`date` = 本地日期；没跑的日子补零，格子才连成日历）。 */
+export type UsageHeatRow = { date: string; total: number; calls: number };
 
 /** 用量最多的模型（`share` = 占全部 token 的比例，0–1）。 */
 export type UsageTopModel = { provider: string; model: string; tokens: number; share: number };
@@ -250,6 +237,8 @@ export type UsageTotals = UsageBucket & {
  /** 有请求的会话数。 */
  sessions: number;
  toolCalls: number;
+ /** 工具种类数（按名字去重）。 */
+ toolKinds: number;
  /** 模型耗时合计（毫秒）。 */
  durationMs: number;
  activeDays: number;
@@ -268,12 +257,10 @@ export type UsageTotals = UsageBucket & {
 export type UsageStats = {
  totals: UsageTotals;
  byDay: UsageDayRow[];
+ /** 热力图：最近 53 周（周日对齐、逐日补零、到今天为止），**不随 `rangeDays` 裁剪**。 */
+ heat: UsageHeatRow[];
  byModel: UsageModelRow[];
- byProject: UsageProjectRow[];
- byTool: UsageToolRow[];
- byHour: UsageHourRow[];
  scannedFiles: number;
- scannedSessions: number;
  truncated: boolean;
  /** 本次范围天数（null = 全部）。 */
  rangeDays: number | null;
@@ -319,8 +306,83 @@ export type WorkspaceView = {
  missing: boolean;
 };
 
+// ---------- 工作区「提交并推送」（V14） ----------
+
+/**
+ * 工作区 git 快照（行徽章用）：`git status --porcelain -b` 的只读投影。
+ * 刷新时机见 `lib/commitTasks.ts`（启动 / 任务结束 / 窗口可见 / 终端转就绪），不轮询；
+ * 点击按钮时的**后端预检**才是最终裁决。
+ */
+export type WorkspaceGitState = {
+ path: string;
+ isRepo: boolean;
+ /** 有未提交改动（含未跟踪文件——与 `omp commit` 的 `add -A` 语义对齐）。 */
+ dirty: boolean;
+ /** 本地领先上游的提交数（无上游 / detached 时为 0）。 */
+ ahead: number;
+ /** 本地落后上游的提交数（无上游 / detached 时为 0）。 */
+ behind: number;
+ upstream: string | null;
+ /** 上游分支已在远程被删除（`[gone]`）：upstream 名仍在，但没有可比较的远程分支。 */
+ upstreamGone: boolean;
+};
+
+/** 提交任务阶段（与 Rust `git_commit::CommitPhase` 同构）。 */
+export type CommitPhase =
+ | "checking"
+ | "committing"
+ | "pushing"
+ | "committed"
+ | "pushed"
+ | "noop"
+ | "failed"
+ | "canceled";
+
+/** 一次提交（短 sha + 摘要）；split 场景一次任务可能多条。 */
+export type CommitEntry = {
+ sha: string;
+ subject: string;
+};
+
+/** 任务终态与结果（与 Rust `git_commit::CommitOutcome` 同构）。 */
+export type CommitOutcome = {
+ phase: CommitPhase;
+ /** 本次任务新建的提交（失败时也可能非空——部分成功）。 */
+ commits: CommitEntry[];
+ error: string | null;
+ hint: string | null;
+};
+
+/** git_commit → 前端事件（与 Rust `git_commit::CommitEvent` 同构，tag 为 `type`）。 */
+export type CommitEvent =
+ | { type: "line"; text: string }
+ | { type: "phase"; phase: CommitPhase }
+ | { type: "exit"; outcome: CommitOutcome };
+
+/**
+ * 前端任务视图（store 里按 cwd 存）：`log` 是流式累积的已去 ANSI 行（有上限，保尾），
+ * `outcome` 只在结束后有；运行中关闭浮层 = 转后台（任务继续，行徽章指示）。
+ */
+export type CommitTaskView = {
+ cwd: string;
+ phase: CommitPhase;
+ log: string[];
+ commits: CommitEntry[];
+ error: string | null;
+ hint: string | null;
+ startedAt: number;
+};
+
 /** 终端进程状态：运行中 / 已退出（退出码供展示）。 */
 export type TerminalStatus = "running" | "exited";
+
+/**
+ * 终端标签上 π 的展示状态（颜色由它决定）：
+ * `working` / `attention` / `ready` 来自 omp 的 OSC 标题（见 `lib/termTitle.ts`），
+ * `exited` / `failed` 是进程结局（正常退出 / 异常退出或启动失败），
+ * `unknown` = 还没有可判断的信息（刚打开、`tui.titleState` 关掉等）。
+ */
+export type TermTabState = "working" | "attention" | "ready" | "unknown" | "exited" | "failed";
 
 /**
  * 打开中的终端（前端模型）。PTY 进程本身在后端 `pty` 进程表里；
@@ -334,8 +396,10 @@ export type TerminalView = {
  cwd: string;
  /** 工作区显示名（项目 · 分支）；OSC 标题到达前 tab 用它。 */
  label: string;
- /** 实际 tab 标题（omp 发 OSC 0/2 后更新）。 */
+ /** tab 上显示的**会话名**（OSC 标题 `π <状态> <会话名>` 解析后的名字；解析不出就用 label）。 */
  title: string;
+ /** 标签 π 的状态（标题状态 + 进程结局，见 `lib/termTitle.ts`）；π 的颜色由它决定。 */
+ state: TermTabState;
  status: TerminalStatus;
  exitCode: number | null;
  /** 恢复的历史会话（spawn 时透传 `--resume <id>` 前缀）；null = 新会话。 */

@@ -58,7 +58,7 @@ export function TerminalPane({ term, active }: { term: TerminalView; active: boo
   const dataSub = x.onData((d) => {
    void api.ptyWrite(term.id, d).catch(() => { });
   });
-  // OSC 0/2 标题（omp TUI 会发「π > 会话名」）→ tab 标题
+  // OSC 0/2 标题（omp TUI 发「π <状态> 会话名」）→ store 解析出展示名与 π 的状态
   const titleSub = x.onTitleChange((title) => useApp.getState().setTerminalTitle(term.id, title));
   // 皮肤切换（<html class="dark">）→ 跟 token 换色
   const mo = new MutationObserver(() => {
@@ -109,7 +109,7 @@ export function TerminalPane({ term, active }: { term: TerminalView; active: boo
     // 数据层展示文本取「当次调用」的语言（与既有口径一致），不进 effect 依赖
     const txt = TEXT[useApp.getState().locale];
     termRef.current?.write(`\r\n\x1b[31m${txt.termStartFailed}: ${String(err)}\x1b[0m\r\n`);
-    useApp.getState().setTerminalStatus(term.id, "exited", null);
+    useApp.getState().failTerminal(term.id);
    }
   })();
   return () => {

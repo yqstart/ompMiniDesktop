@@ -1,9 +1,10 @@
 import { create } from "zustand";
-import type { HealthInfo, ModelCatalog, ProjectView, TerminalStatus, TerminalView, UpdateState, WorkspaceView } from "@shared/types";
+import type { CommitOutcome, CommitTaskView, HealthInfo, ModelCatalog, ProjectView, TerminalStatus, TerminalView, UpdateState, WorkspaceGitState, WorkspaceView } from "@shared/types";
 import type { Locale, LocaleMode } from "../lib/locale";
 import { loadLocaleMode, resolveLocale, saveLocaleMode, systemLang } from "../lib/locale";
 import { applyTheme, loadTheme, saveTheme, type ThemeMode } from "../lib/theme";
 import { loadMyModels, saveMyModels } from "../lib/myModels";
+import { parseTermTitle } from "../lib/termTitle";
 
 type AppState = {
  health: HealthInfo | null;
@@ -61,9 +62,15 @@ type AppState = {
  focusTerminal: (id: string) => void;
  closeTerminal: (id: string) => void;
  setTerminalStatus: (id: string, status: TerminalStatus, code: number | null) => void;
- /** OSC 0/2 到达时更新 tab 标题（omp TUI 会带会话名发）。 */
+ /**
+  * OSC 0/2 标题到达时更新 tab：解析 `π <状态> <会话名>`（`lib/termTitle.ts`），
+  * 落展示名（会话名）与 π 的状态。标题帧率很高（工作态转轮每 80ms 一帧），
+  * 解析后只有「名字或状态真的变了」才写 store。
+  */
  setTerminalTitle: (id: string, title: string) => void;
- /** 重启已退出的终端：`spawnSeq + 1` 触发 TerminalPane 重新 spawn。 */
+ /** 启动失败（omp 缺失 / cwd 不存在等）：进程没起来，π 直接落失败态。 */
+ failTerminal: (id: string) => void;
+ /** 重启已退出的终端：`spawnSeq + 1` 触发 TerminalPane 重新 spawn；状态回落未知（新进程还没开口）。 */
  restartTerminal: (id: string) => void;
  /** 项目被移除时解除终端的归属（tab 与进程保留，继续可用）。 */
  detachTerminalProject: (projectId: string) => void;
@@ -73,6 +80,30 @@ type AppState = {
  requestCloseTerminal: (id: string) => void;
  confirmCloseTerminal: () => void;
  cancelCloseTerminal: () => void;
+
+ // ---------- V14 工作区「提交并推送」（omp commit 集成，见 lib/commitTasks.ts） ----------
+
+ /**
+  * 工作区 git 快照（行徽章）：有改动小点 / 待推送 `BranchUp` / 非仓库降级。
+  * 刷新时机（启动 / 任务结束 / 窗口可见 / 终端转就绪）在 `App` 与 `lib/commitTasks.ts`；
+  * 不轮询——点按钮时的后端预检是最终裁决。
+  */
+ workspaceGitStates: Record<string, WorkspaceGitState>;
+ setWorkspaceGitStates: (states: WorkspaceGitState[]) => void;
+ /**
+  * 提交任务（按 cwd 存）：运行中关闭浮层 = 转后台（任务继续，行徽章指示）；
+  * 失败任务保留到「重试 / 新任务 / 用户清除」，成功任务在关闭浮层时清除（git 快照接管）。
+  */
+ commitTasks: Record<string, CommitTaskView>;
+ /** 浮层当前查看的任务（cwd）；null = 浮层关着（任务本身不受影响）。 */
+ activeCommitCwd: string | null;
+ setCommitTask: (task: CommitTaskView) => void;
+ patchCommitTask: (cwd: string, patch: Partial<CommitTaskView>) => void;
+ appendCommitLog: (cwd: string, line: string) => void;
+ finishCommitTask: (cwd: string, outcome: CommitOutcome) => void;
+ /** 清除任务记录（浮层关闭时对非运行中的任务调用；见 `lib/commitTasks.ts` 的 `closeCommitPanel`）。 */
+ dropCommitTask: (cwd: string) => void;
+ setActiveCommitCwd: (cwd: string | null) => void;
 };
 
 /**
@@ -87,6 +118,9 @@ export const SIDEBAR_MIN = 292;
 export const SIDEBAR_MAX = 480;
 /** 默认宽度 = 下限：默认就取「底部行刚好完整」的宽度，内容区拿到最多的横向空间。 */
 export const SIDEBAR_DEFAULT = SIDEBAR_MIN;
+
+/** 提交任务日志行数上限（保尾）：异常输出不撑爆 store；与后端的错误摘要上限（TAIL_MAX）不是一回事。 */
+const COMMIT_LOG_MAX = 1000;
 
 /** 启动时的语言偏好（模块加载时读一次，供 store 初始化解析出实际语言）。 */
 const INITIAL_LOCALE_MODE = loadLocaleMode();
@@ -166,6 +200,7 @@ export const useApp = create<AppState>((set, get) => ({
    cwd,
    label,
    title: label,
+   state: "unknown",
    status: "running",
    exitCode: null,
    resume,
@@ -203,19 +238,39 @@ export const useApp = create<AppState>((set, get) => ({
   }),
  setTerminalStatus: (id, status, code) =>
   set((s) => ({
-   terminals: s.terminals.map((t) => (t.id === id ? { ...t, status, exitCode: code } : t)),
+   terminals: s.terminals.map((t) =>
+    t.id === id
+     ? {
+      ...t,
+      status,
+      exitCode: code,
+      // 进程结局直接落定 π：正常退出（0 / 信号收尾）绿、异常退出红；回到运行中则回落未知
+      state: status === "exited" ? (code == null || code === 0 ? "exited" : "failed") : "unknown",
+     }
+     : t,
+   ),
   })),
  setTerminalTitle: (id, title) =>
   set((s) => {
    const t = s.terminals.find((x) => x.id === id);
-   // 只换真正变化的标题：OSC 会在每个 turn 反复发，白白触发整表更新
-   if (!t || t.title === title || !title.trim()) return {};
-   return { terminals: s.terminals.map((x) => (x.id === id ? { ...x, title } : x)) };
+   // 已退出 / 启动失败的不再接收标题：收尾阶段可能还有缓冲输出，别把终态改回去
+   if (!t || t.status !== "running" || !title.trim()) return {};
+   const { phase, label } = parseTermTitle(title);
+   // 标题没带会话名（`π ⠋`）时保留上一次的展示名（store 保证初始值是工作区名，不是空）
+   const nextTitle = label || t.title;
+   if (t.title === nextTitle && t.state === phase) return {};
+   return { terminals: s.terminals.map((x) => (x.id === id ? { ...x, title: nextTitle, state: phase } : x)) };
   }),
+ failTerminal: (id) =>
+  set((s) => ({
+   terminals: s.terminals.map((t) =>
+    t.id === id ? { ...t, status: "exited", exitCode: null, state: "failed" } : t,
+   ),
+  })),
  restartTerminal: (id) =>
   set((s) => ({
    terminals: s.terminals.map((t) =>
-    t.id === id ? { ...t, status: "running", exitCode: null, spawnSeq: t.spawnSeq + 1 } : t,
+    t.id === id ? { ...t, status: "running", exitCode: null, spawnSeq: t.spawnSeq + 1, state: "unknown" } : t,
    ),
   })),
  detachTerminalProject: (projectId) =>
@@ -238,4 +293,59 @@ export const useApp = create<AppState>((set, get) => ({
   set({ closingTerminalId: null });
  },
  cancelCloseTerminal: () => set({ closingTerminalId: null }),
+
+ // ---------- V14 工作区「提交并推送」 ----------
+
+ workspaceGitStates: {},
+ setWorkspaceGitStates: (states) =>
+  set((s) => {
+   const next = { ...s.workspaceGitStates };
+   for (const st of states) next[st.path] = st;
+   return { workspaceGitStates: next };
+  }),
+ commitTasks: {},
+ activeCommitCwd: null,
+ setCommitTask: (task) => set((s) => ({ commitTasks: { ...s.commitTasks, [task.cwd]: task } })),
+ patchCommitTask: (cwd, patch) =>
+  set((s) => {
+   const t = s.commitTasks[cwd];
+   if (!t) return {};
+   return { commitTasks: { ...s.commitTasks, [cwd]: { ...t, ...patch } } };
+  }),
+ appendCommitLog: (cwd, line) =>
+  set((s) => {
+   const t = s.commitTasks[cwd];
+   if (!t) return {};
+   const log =
+    t.log.length >= COMMIT_LOG_MAX
+     ? [...t.log.slice(t.log.length - COMMIT_LOG_MAX + 1), line]
+     : [...t.log, line];
+   return { commitTasks: { ...s.commitTasks, [cwd]: { ...t, log } } };
+  }),
+ finishCommitTask: (cwd, outcome) =>
+  set((s) => {
+   const t = s.commitTasks[cwd];
+   if (!t) return {};
+   // 浮层关着时任务结束：**失败保留**（行徽章亮起，等用户查看），其余终态即清
+   // （「待推送 / 已推送」由 git 快照的行徽章接管，不清会让行上失去入口）。
+   if (s.activeCommitCwd !== cwd && outcome.phase !== "failed") {
+    const next = { ...s.commitTasks };
+    delete next[cwd];
+    return { commitTasks: next };
+   }
+   return {
+    commitTasks: {
+     ...s.commitTasks,
+     [cwd]: { ...t, phase: outcome.phase, commits: outcome.commits, error: outcome.error, hint: outcome.hint },
+    },
+   };
+  }),
+ dropCommitTask: (cwd) =>
+  set((s) => {
+   if (!s.commitTasks[cwd]) return {};
+   const next = { ...s.commitTasks };
+   delete next[cwd];
+   return { commitTasks: next };
+  }),
+ setActiveCommitCwd: (cwd) => set({ activeCommitCwd: cwd }),
 }));

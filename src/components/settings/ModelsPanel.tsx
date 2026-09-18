@@ -10,6 +10,7 @@ import { roleLabel } from "../../lib/roleNames";
 import { thinkingLevelsOf, THINKING_ORDER } from "../../lib/thinking";
 import { useText } from "../../lib/useText";
 import { useDropdown } from "../../lib/useDropdown";
+import { CycleOrderSection } from "./CycleOrderSection";
 import { FallbackChainsSection } from "./FallbackChains";
 import { ModelPickList } from "./ModelPickList";
 import { ProvidersSection } from "./ProvidersSection";
@@ -33,6 +34,8 @@ import { StarToggle } from "./StarToggle";
  *   （终端标签里的 omp 改过 `modelRoles` 后，点回设置标签即刷新）；模型目录不额外重拉——
  *   `get_models` 后端有 5 分钟缓存，页内的「刷新」按钮才走 `refresh_models` 强制重拉。
  * - 失败转移链（`retry.fallbackChains`）与角色同层，口径见 `FallbackChains.tsx`。
+ * - **快速切换环**（`cycleOrder`）决定 omp 终端里 Ctrl+P / Shift+Ctrl+P 的轮换序，
+ *   条目是角色；与角色行同款「每次操作立即写回 + 回读」，口径见 `CycleOrderSection.tsx`。
  * - 供应商（登录型 + 自定义）合并成一个「添加供应商」弹窗：登录型走 `omp auth-broker`
  *   （凭证进 omp 凭证库），自定义写 `<agentDir>/models.yml`——见 `ProvidersSection.tsx`。
  */
@@ -41,32 +44,39 @@ export function ModelsPanel() {
  const { models, set, myModels, setMyModels, settingsTabActive } = useApp();
  const [roles, setRoles] = useState<ModelRolesInfo | null>(null);
  const [chains, setChains] = useState<FallbackChainsInfo | null>(null);
+ const [cycleOrder, setCycleOrder] = useState<string[] | null>(null);
  const [err, setErr] = useState<string | null>(null);
  const [busy, setBusy] = useState(false);
  const requestSeq = useRef(0);
  const rolesRevision = useRef(0);
  const chainsRevision = useRef(0);
+ const cycleRevision = useRef(0);
  const roleWriting = useRef(false);
+ const cycleWriting = useRef(false);
  const [savingRole, setSavingRole] = useState(false);
+ const [savingCycle, setSavingCycle] = useState(false);
 
  /** 重读只接纳最新请求；写入后的真值不能被更早发出的读请求覆盖。 */
  const load = useCallback(async (force: boolean) => {
   const seq = ++requestSeq.current;
   const roleVersion = rolesRevision.current;
   const chainVersion = chainsRevision.current;
+  const cycleVersion = cycleRevision.current;
   const res = await Promise.allSettled([
    api.getModelRoles(),
    api.getFallbackChains(),
+   api.getCycleOrder(),
    force ? api.refreshModels() : api.getModels(),
   ]);
   if (seq !== requestSeq.current) return;
   if (res[0].status === "fulfilled" && roleVersion === rolesRevision.current && !roleWriting.current) setRoles(res[0].value);
   if (res[1].status === "fulfilled" && chainVersion === chainsRevision.current) setChains(res[1].value);
-  if (res[2].status === "fulfilled") set({ models: res[2].value });
+  if (res[2].status === "fulfilled" && cycleVersion === cycleRevision.current && !cycleWriting.current) setCycleOrder(res[2].value);
+  if (res[3].status === "fulfilled") set({ models: res[3].value });
   const bad = res.find((r) => r.status === "rejected");
   setErr(bad?.status === "rejected"
    ? bad.reason instanceof Error ? bad.reason.message : String(bad.reason || t.modelsLoadFailed)
-   : res[2].status === "fulfilled" ? res[2].value.error ?? null : null);
+   : res[3].status === "fulfilled" ? res[3].value.error ?? null : null);
  }, [set, t.modelsLoadFailed]);
 
  // 挂载时拉一次；**每次设置标签重新激活**（从终端标签切回来）都重读——omp 侧（TUI / CLI）
@@ -94,6 +104,24 @@ export function ModelsPanel() {
    rolesRevision.current += 1;
    roleWriting.current = false;
    setSavingRole(false);
+  }
+ };
+
+ /** 快速切换环编辑：整组写回并回读（与角色同款——写入后的真值不能被更早发出的读覆盖）。 */
+ const saveCycleOrder = async (order: string[]) => {
+  if (cycleWriting.current) return;
+  cycleWriting.current = true;
+  cycleRevision.current += 1;
+  setSavingCycle(true);
+  setErr(null);
+  try {
+   setCycleOrder(await api.setCycleOrder(order));
+  } catch (e) {
+   setErr(e instanceof Error ? e.message : String(e || t.cycleWriteFailed));
+  } finally {
+   cycleRevision.current += 1;
+   cycleWriting.current = false;
+   setSavingCycle(false);
   }
  };
 
@@ -210,6 +238,17 @@ export function ModelsPanel() {
      )}
     </div>
    </section>
+
+   {/* 快速切换环：omp cycleOrder——Ctrl+P / Shift+Ctrl+P 的轮换序（条目是角色） */}
+   <CycleOrderSection
+    order={cycleOrder}
+    roles={roleKeys}
+    selectors={roles?.roles ?? {}}
+    busy={busy}
+    saving={savingCycle}
+    onSave={saveCycleOrder}
+    onRefresh={() => void refreshAll()}
+   />
 
    {/* 失败转移：omp retry.fallbackChains（模型请求失败时由备用模型接手）+ 两个配套开关 */}
    <FallbackChainsSection

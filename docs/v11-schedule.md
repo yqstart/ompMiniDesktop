@@ -230,6 +230,13 @@ worktree 里产生的会话归到所属项目，不再落「未归属」。
 - 模型设置的数据安全、错误恢复与验证详见 `docs/v12-schedule.md` §8。前端 97 测试、IPC 43 命令与生产构建通过；后端 166 通过、5 项慢测试跳过。
 - 隔离浏览器复验终端切设置：隐藏期间写入的 `DURING-SETTINGS` / `STILL-RUNNING` 返回后可见，切换前后 `pty_kill` 计数不变；不宣称原生 WebView 实测。
 
+### 6.5 终端标签的 π 状态标（2026-09-18）
+
+- **标签 = π 状态标 + 会话名**：去掉终端图标，标签的 π **颜色即 omp 的运行状态**——工作中 `accent` + `animate-pulse`、等待确认 `warn`、等待输入 / 正常退出 `ok`、异常退出 / 启动失败 `danger`、未知 `faint`。状态文字进 `sr-only`（屏幕阅读器）并作为 π 的悬停提示。
+- **上游口径（omp 18.2.4 二进制实测核对）**：标题模块（`tui.titleState` 默认开）按 `π <分隔符> <会话名>` 组合——工作态转轮每 80ms 换一帧（`tui.titleSpinner` 四套：braille / pulse / dots / line；WSL / win32 为静态 `:`），`!` = agent 在等你（审批 / `ask` 工具挂起，`R6("attention")`），`>` = 轮到你；关掉 `tui.titleState` 是 `π: <会话名>`（无状态）。另一条可选通道 `terminal.showProgress`（OSC 9;4，**默认 false**）只表达「在跑」，信息量少于标题，未采用。
+- **结构**：新增 `lib/termTitle.ts`（纯函数 + 5 项单测）解析标题成 `{phase, label}`；`TerminalView` 增 `state: TermTabState`、`title` 语义收成「展示用会话名」；`setTerminalTitle` 在 store 边界解析（转轮换帧不再触发整表更新）、`setTerminalStatus` 由退出码落 `exited` / `failed`、新增 `failTerminal`（spawn 失败落红）；`TerminalTabs` 换成 π；字典新增 `termState*` 5 键 × 2 语言。
+- **验证**（`pnpm dev` + 注入 IPC mock，经 xterm 真实解析 OSC 0 字节驱动）：刚 spawn = faint / 无文字 → `π ⠋ 会话甲` = accent + `animate-pulse` + Working → 转轮换帧不抖动 → `π ! 会话甲` = warn + Waiting for confirmation → `π > 会话甲` = ok + Ready for input → `π: 会话甲` = faint 且名字仍剥前缀 → `exit 0` = ok + Exited（此后标题不再改状态）→ 第二终端 `exit 3` = danger + Failed → spawn 抛错 = danger + 终端内「Failed to start」；5 个终端同屏深浅两套皮肤截图核对（14px 状态标在 32px 标签内不溢出 `fits=true`）；`prefers-reduced-motion: reduce` 下呼吸动画被全局规则钳到 0.01ms / 1 次。`pnpm check` 全绿（103 单测）。
+
 ## 7. 明确不做（用户已确认）
 
 - 编辑器 / 文件树 / diff 审查 / 浏览器 / SSH / 移动端 / PR 集成（Orca 的「复杂」部分）。

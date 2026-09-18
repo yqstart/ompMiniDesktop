@@ -173,24 +173,22 @@ body {
  background: transparent;
 }
 
-/* 主消息流：滚动但不显示滚动条（滚轮/触控/键盘/程序化滚动照常工作）。
+/* 滚动但不显示滚动条（滚轮/触控/键盘/程序化滚动照常工作）：标签栏等横向溢出处用。
    注意：WebKit（含 Tauri 的 WKWebView）里仅 `::-webkit-scrollbar { display:none }` 可靠，
    `scrollbar-width: none` 是 Firefox 专用，在 WKWebView 下无效——之前只靠后者所以没生效。 */
-.thread-scroll {
- overflow-y: scroll;
+.no-scrollbar {
  scrollbar-width: none;
  -ms-overflow-style: none;
- overscroll-behavior: contain;
 }
 
-.thread-scroll::-webkit-scrollbar {
+.no-scrollbar::-webkit-scrollbar {
  width: 0 !important;
  height: 0 !important;
  display: none !important;
 }
 
-.thread-scroll::-webkit-scrollbar-thumb,
-.thread-scroll::-webkit-scrollbar-track {
+.no-scrollbar::-webkit-scrollbar-thumb,
+.no-scrollbar::-webkit-scrollbar-track {
  display: none !important;
  background: transparent !important;
 }

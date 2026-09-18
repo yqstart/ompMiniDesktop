@@ -19,6 +19,7 @@ const h = vi.hoisted(() => ({
  roles: { slow: "y/gpt-5.6-astra:auto:medium" } as Record<string, string>,
  models: [] as ModelInfo[],
  chains: {} as Record<string, string[]>,
+ cycleOrder: [] as string[],
 }));
 
 vi.mock("@shared/api", () => ({
@@ -32,6 +33,11 @@ vi.mock("@shared/api", () => ({
    };
   }),
   getFallbackChains: vi.fn(async () => ({ chains: h.chains, modelFallback: true, revertPolicy: "cooldown-expiry" })),
+  getCycleOrder: vi.fn(async () => [...h.cycleOrder]),
+  setCycleOrder: vi.fn(async (order: string[]) => {
+   h.cycleOrder = order;
+   return [...order];
+  }),
   getModels: vi.fn(async () => ({ models: h.models, fetchedAt: 0 })),
   refreshModels: vi.fn(async () => ({ models: h.models, fetchedAt: 0 })),
   setRetryOptions: vi.fn(async (modelFallback: boolean, revertPolicy: string) => ({ chains: h.chains, modelFallback, revertPolicy })),
@@ -55,6 +61,7 @@ beforeEach(() => {
  h.roles = { ...CR };
  h.models = [];
  h.chains = {};
+ h.cycleOrder = [];
  useApp.setState({ settingsTabActive: true, models: null, myModels: [], locale: "zh-CN" });
  container = document.createElement("div");
  document.body.append(container);
@@ -133,6 +140,38 @@ describe("ModelsPanel 的 omp 侧识别", () => {
   await flush();
   expect(container.textContent).toContain("demo/current");
   expect(container.textContent).not.toContain("demo/stale");
+ });
+
+ it("快速切换环：添加 / 上移 / 移除都按当前顺序整组写回", async () => {
+  h.cycleOrder = ["default", "smol"];
+  act(() => root.render(<ModelsPanel />));
+  await flush();
+  const section = container.querySelector('[aria-label="快速切换环"]')!;
+  expect(section.textContent).toContain("默认");
+  expect(section.textContent).toContain("快速");
+
+  const lastWrite = () => {
+   const calls = vi.mocked(api.setCycleOrder).mock.calls;
+   return calls[calls.length - 1][0];
+  };
+  const click = (label: string) =>
+   act(() => (section.querySelector(`[aria-label="${label}"]`) as HTMLButtonElement).click());
+
+  // 添加 slow（候选里点「深思」）→ 追加到末尾
+  act(() => [...section.querySelectorAll("button")].find((b) => b.textContent?.trim() === "添加角色")!.click());
+  act(() => [...section.querySelectorAll("button")].find((b) => b.textContent?.trim() === "深思")!.click());
+  await flush();
+  expect(lastWrite()).toEqual(["default", "smol", "slow"]);
+
+  // 上移 slow → 换到中间
+  click("上移 深思");
+  await flush();
+  expect(lastWrite()).toEqual(["default", "slow", "smol"]);
+
+  // 移出 default → 只剩两个
+  click("移出环 默认");
+  await flush();
+  expect(lastWrite()).toEqual(["slow", "smol"]);
  });
 
  it("新建转移链排除已配置模型，切换总开关不丢失草稿", async () => {

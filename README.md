@@ -83,6 +83,7 @@ pnpm tauri:build    # 产物见 src-tauri/target/release/bundle/
 - 触发：启动后静默检查一次（有更新在左栏「设置」入口点亮小点，不打断）；设置页「应用更新」可手动检查。
 - 行为：有更新弹「立即更新 / 稍后更新」；下载完成后可「立即重启 / 稍后重启」（稍后则下次启动生效）；稍后过的版本本轮不再弹窗。
 - 发版流程：打 `v*` tag 推送 → GitHub Actions Release 工作流多平台打包并生成 `latest.json`。
+- **仓库必须保持 public**：updater 以匿名请求拉 `releases/latest/download/latest.json`，私有仓库会被 GitHub 以 404 拒绝（应用内报 `Could not fetch a valid release JSON from the remote`）——Release 工作流的守卫 job 会挡住私有状态下的发版。
 
 > 首次正式发版前必须先配签名，否则 updater 会拒绝安装：
 > `pnpm tauri signer generate -w ~/.tauri/omp-mini.key`，把公钥填入
@@ -90,8 +91,9 @@ pnpm tauri:build    # 产物见 src-tauri/target/release/bundle/
 > 私钥全文写入仓库 Settings → Secrets → `TAURI_SIGNING_PRIVATE_KEY`
 >（生成时没设密码则 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 置空）。
 >
-> Release 工作流带守卫 job：`pubkey` 里还留着 `TODO` 占位、或 tag 与
-> `package.json` 版本号不一致时，发版会直接失败（见 `.github/workflows/release.yml`）。
+> Release 工作流带守卫 job：仓库不是 public、`pubkey` 里还留着 `TODO` 占位、
+> 或 tag 与 `package.json` 版本号不一致时，发版会直接失败
+>（见 `.github/workflows/release.yml`）。
 
 ---
 

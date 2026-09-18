@@ -3,14 +3,17 @@ import { useApp, SIDEBAR_MAX, SIDEBAR_MIN } from "../stores/app";
 import { applyTheme } from "../lib/theme";
 import { useText } from "../lib/useText";
 import { api } from "@shared/api";
+import type { TermTabState } from "@shared/types";
 import { WorkspaceSidebar } from "../components/sidebar/WorkspaceSidebar";
 import { TerminalView } from "../components/terminal/TerminalView";
 import { TerminalTabs } from "../components/terminal/TerminalTabs";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { CommitTaskPanel } from "../components/git/CommitTaskPanel";
 import { HealthBanner } from "../components/HealthBanner";
 import { SettingsPage } from "../components/SettingsPage";
 import { UpdateDialog } from "../components/update/UpdateDialog";
 import { newTerminalInActiveWorkspace } from "../lib/workspaces";
+import { refreshWorkspaceGitState, scheduleWorkspaceGitRefresh } from "../lib/commitTasks";
 import { autoCheckOnBoot } from "../lib/appUpdate";
 
 /** 皮肤落 class（浅色 token 是 `:root` 默认、深色挂在 `.dark`，见 src/index.css）。
@@ -38,6 +41,44 @@ function useLocale() {
   window.addEventListener("languagechange", apply);
   return () => window.removeEventListener("languagechange", apply);
  }, [localeMode, setLocaleMode]);
+}
+
+/**
+ * V14：工作区 git 快照的刷新时机（不轮询）——启动 / 工作区清单变化 / 窗口转可见 /
+ * 终端刚干完活（π 由工作态转就绪或等待确认，防抖 2s）。任务结束后的单点刷新在
+ * `lib/commitTasks.ts` 里；点按钮时的**后端预检**才是最终裁决。
+ */
+function useWorkspaceGitRefresh() {
+ const workspaces = useApp((s) => s.workspaces);
+ const terminals = useApp((s) => s.terminals);
+ const prevStates = useRef<Map<string, TermTabState>>(new Map());
+
+ useEffect(() => {
+  void refreshWorkspaceGitState(workspaces.map((w) => w.path));
+ }, [workspaces]);
+
+ useEffect(() => {
+  const onVisible = () => {
+   if (!document.hidden) void refreshWorkspaceGitState();
+  };
+  document.addEventListener("visibilitychange", onVisible);
+  return () => document.removeEventListener("visibilitychange", onVisible);
+ }, []);
+
+ useEffect(() => {
+  let woke = false;
+  const seen = new Set<string>();
+  for (const term of terminals) {
+   seen.add(term.id);
+   const prev = prevStates.current.get(term.id);
+   if (prev === "working" && (term.state === "ready" || term.state === "attention")) woke = true;
+   prevStates.current.set(term.id, term.state);
+  }
+  for (const id of [...prevStates.current.keys()]) {
+   if (!seen.has(id)) prevStates.current.delete(id);
+  }
+  if (woke) scheduleWorkspaceGitRefresh();
+ }, [terminals]);
 }
 
 /** 终端快捷键（V11）：⌘T 新建 / ⌘W 关闭当前 / ⌘1..9 切标签（非 mac 平台用 Ctrl）。 */
@@ -169,6 +210,7 @@ export function App() {
  useTheme();
  useLocale();
  useTerminalHotkeys();
+ useWorkspaceGitRefresh();
 
  useEffect(() => {
   // 启动静默检查更新（有更新点亮设置入口的小点，不打断）
@@ -241,6 +283,7 @@ export function App() {
      onCancel={() => useApp.getState().cancelCloseTerminal()}
     />
    </main>
+   <CommitTaskPanel />
    {updateDialogOpen && <UpdateDialog />}
   </div>
  );
