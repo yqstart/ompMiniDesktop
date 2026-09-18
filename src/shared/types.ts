@@ -200,72 +200,44 @@ export type MemoryFileContent = {
 
 /**
  * 使用统计（设置 ›「使用统计」）：omp 会话 jsonl 里 assistant 消息 `usage` 的聚合。
- * 数字与派生指标（命中率 / 连续天数 / 峰值时段 / 最常用模型）一律由后端算好，
- * 前端只做格式化与可视化。
+ * 页面只展示三项指标——tokens 用量、Cache 命中率、活跃天数；数字与派生指标
+ * （命中率 / 活跃天数 / 连续天数）一律由后端算好，前端只做格式化。
  *
  * 口径要点（`src-tauri/src/usage.rs` 与本类型的注释必须一致）：
  * - `total` = omp 的 `totalTokens` 累加（= `input + output + cacheRead + cacheWrite`），
- *   `input` 是**未缓存**输入；`reasoning` 是 `output` 的子集，不参与 `total`；
- * - `cost` 是 omp 按模型定价给的美元值（本地模型 / 无定价时为 0）；
- * - `calls` 是带 usage 的 assistant 消息条数（= 模型请求数）。
+ *   `input` 是**未缓存**输入；
+ * - `calls` 是带 usage 的 assistant 消息条数（= 模型请求数，前端据此判断有无用量）。
  */
 export type UsageBucket = {
  input: number;
  output: number;
  cacheRead: number;
  cacheWrite: number;
- reasoning: number;
  total: number;
- cost: number;
  calls: number;
 };
 
-/** 一天的量（`date` = 本地日期 `YYYY-MM-DD`；范围内没跑的日子也会补零，趋势才连续）。 */
-export type UsageDayRow = UsageBucket & { date: string };
-
-/** 一个模型的量（provider / model 原样来自 jsonl；都为空串时界面显示「未知模型」）。 */
-export type UsageModelRow = UsageBucket & { provider: string; model: string };
-
-/** 热力图的一格（`date` = 本地日期；没跑的日子补零，格子才连成日历）。 */
-export type UsageHeatRow = { date: string; total: number; calls: number };
-
-/** 用量最多的模型（`share` = 占全部 token 的比例，0–1）。 */
-export type UsageTopModel = { provider: string; model: string; tokens: number; share: number };
-
 /** 范围总览（派生指标全部后端算好）。 */
 export type UsageTotals = UsageBucket & {
- /** 有请求的会话数。 */
- sessions: number;
- toolCalls: number;
- /** 工具种类数（按名字去重）。 */
- toolKinds: number;
- /** 模型耗时合计（毫秒）。 */
- durationMs: number;
+ /** 范围内有请求的天数。 */
  activeDays: number;
  /** 连续活跃天数（今天还没跑但昨天跑了不算断签）。 */
  currentStreak: number;
  longestStreak: number;
  /** 缓存命中率 = cacheRead / (input + cacheRead)；无分母时为 null。 */
  cacheHitRate: number | null;
- avgDailyTokens: number;
- peakHour: number | null;
- peakHourTokens: number;
- topModel: UsageTopModel | null;
 };
+
+/** 热力图的一格（`date` = 本地日期；没跑的日子补零，日历才成网格）。 */
+export type UsageHeatRow = { date: string; total: number };
 
 /** 使用统计整体回包（`truncated` = 因扫描预算提前收手，统计可能不全）。 */
 export type UsageStats = {
  totals: UsageTotals;
- byDay: UsageDayRow[];
- /** 热力图：最近 53 周（周日对齐、逐日补零、到今天为止），**不随 `rangeDays` 裁剪**。 */
+ /** 热力图：最近 53 周（周日对齐、逐日补零、到今天为止），**不随 `days` 裁剪**。 */
  heat: UsageHeatRow[];
- byModel: UsageModelRow[];
  scannedFiles: number;
  truncated: boolean;
- /** 本次范围天数（null = 全部）。 */
- rangeDays: number | null;
- /** 每日趋势实际覆盖的天数（后端最多补 120 天）。 */
- chartDays: number;
 };
 
 /** 应用更新状态（Tauri updater，直接面向 GitHub Release latest.json）。 */

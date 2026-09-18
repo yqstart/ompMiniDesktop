@@ -1,70 +1,67 @@
 import { describe, expect, it } from "vitest";
 import type { UsageHeatRow } from "@shared/types";
-import { heatLevel, heatThresholds, monthTicks } from "./usageHeat";
+import { heatLevel, heatThresholds, heatValues, monthTicks } from "./usageHeat";
 
 /** 从 `start`（周日）起造一段连续日历，只关心日期。 */
 function calendar(start: string, days: number): UsageHeatRow[] {
   const [y, m, d] = start.split("-").map(Number);
   const base = Date.UTC(y, m - 1, d);
-  return Array.from({ length: days }, (_, i) => {
-    const date = new Date(base + i * 86_400_000).toISOString().slice(0, 10);
-    return { date, total: 0, calls: 0 };
-  });
+  return Array.from({ length: days }, (_, i) => ({
+    date: new Date(base + i * 86_400_000).toISOString().slice(0, 10),
+    total: 0,
+  }));
 }
 
-describe("热力图分档", () => {
-  it("没用量永远是 0 档", () => {
+describe("色档（GitHub 四分位口径）", () => {
+  it("0 直接落 0 档，任何阈值都一样", () => {
     expect(heatLevel(0, [1, 2, 3])).toBe(0);
     expect(heatLevel(0, heatThresholds([]))).toBe(0);
   });
 
-  it("按非零值的四分位分档（边界归入较浅一档）", () => {
-    // 非零值 [1,2,3,4] → 阈值 p25=1 / p50=2 / p75=3
+  it("阈值边界归入较浅一档", () => {
     const t = heatThresholds([0, 1, 2, 3, 4]);
-    expect(t).toEqual([1, 2, 3]);
     expect([1, 2, 3, 4, 5].map((v) => heatLevel(v, t))).toEqual([1, 2, 3, 4, 4]);
   });
 
-  it("零值不参与分位（长期空窗不拉低阈值）", () => {
-    // 100 天里只有 4 天有量：阈值仍由这 4 天决定
+  it("分位按非零值取：大量零日不把阈值拉到 0", () => {
     const t = heatThresholds([...Array(96).fill(0), 10, 20, 30, 40]);
-    expect(t).toEqual([10, 20, 30]);
+    expect(heatLevel(10, t)).toBe(1);
+    expect(heatLevel(20, t)).toBe(2);
     expect(heatLevel(40, t)).toBe(4);
   });
 
-  it("全部为零时没有参照：空格仍是 0 档，正数落最浅一档", () => {
+  it("整年没有用量时任何正数都落最浅一档", () => {
     const t = heatThresholds([0, 0, 0]);
-    expect(heatLevel(0, t)).toBe(0);
+    expect(t).toEqual([Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY]);
     expect(heatLevel(1, t)).toBe(1);
-  });
-
-  it("只有一个非零值时没有区分度，落在最浅一档", () => {
-    const t = heatThresholds([0, 5, 0]);
-    expect(heatLevel(5, t)).toBe(1);
   });
 });
 
-describe("热力图月份刻度", () => {
-  it("月份标注在包含 1 号的那一列（53 周窗口）", () => {
-    // 2025-09-14 是周日：9 月的第一周不在窗口里，第一个标签是 10 月（09-28 那列含 10-01）
-    const ticks = monthTicks(calendar("2025-09-14", 368), "en-US");
-    expect(ticks[0]).toEqual({ col: 2, label: "Oct" });
-    // 最后一个标签是 2026-09（08-30 那列含 09-01）
-    expect(ticks.at(-1)).toEqual({ col: 50, label: "Sep" });
-    // 每个月只标一次（Oct 2025 与 Oct 2026 不会同时出现在一年窗口里）
-    expect(new Set(ticks.map((t) => t.label)).size).toBe(ticks.length);
+describe("三档取值", () => {
+  it("每日 = 当天；每周 = 整周合计（同列同值）；累计 = 窗口起点到当天", () => {
+    // 2026-09-06 是周日：前 7 格一周、后 4 格是不满一周的尾列
+    const cells = calendar("2026-09-06", 11).map((c, i) => ({ ...c, total: i + 1 }));
+    expect(heatValues(cells, "day")).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    expect(heatValues(cells, "week")).toEqual([28, 28, 28, 28, 28, 28, 28, 38, 38, 38, 38]);
+    expect(heatValues(cells, "cumulative")).toEqual([1, 3, 6, 10, 15, 21, 28, 36, 45, 55, 66]);
   });
 
-  it("窗口起点落在月中时，起点列不标（那个月的第一周不在日历里）", () => {
-    // 2025-09-28 起一周：那一列含 10-01，标的是 Oct（不是 Sep）
-    expect(monthTicks(calendar("2025-09-28", 7), "en-US")).toEqual([{ col: 0, label: "Oct" }]);
-    // 2025-09-21 起一周：整周都在 9 月且不含 1 号 → 没有标签
-    expect(monthTicks(calendar("2025-09-21", 7), "en-US")).toEqual([]);
+  it("三档长度都与格子对齐（不丢格、不补格）", () => {
+    const cells = calendar("2025-09-14", 368);
+    for (const mode of ["day", "week", "cumulative"] as const) {
+      expect(heatValues(cells, mode).length, mode).toBe(cells.length);
+    }
   });
+});
 
-  it("标签跟随界面语言", () => {
-    const [tick] = monthTicks(calendar("2025-09-28", 7), "zh-CN");
-    expect(tick.col).toBe(0);
-    expect(tick.label).toMatch(/10/);
+describe("月份刻度", () => {
+  it("在包含 1 号（或跨月）的列标月份，起点所在的月中那一列不标", () => {
+    const cells = calendar("2025-09-14", 368); // 周日 → 2026-09-16（周三）
+    const ticks = monthTicks(cells, "zh-CN");
+    expect(ticks.map((t) => t.label)).toEqual([
+      "10月", "11月", "12月", "1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月",
+    ]);
+    // 10 月从 2025-09-28 那一列（第 3 列）开始：窗口起点在 9 月中，那一列不标 9 月
+    expect(ticks[0].col).toBe(2);
   });
 });

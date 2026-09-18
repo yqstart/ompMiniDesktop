@@ -4,10 +4,12 @@
 
 ## [Unreleased]
 
-### 修复
+### Added
+- **「使用统计」新增「Token 活动」热力图**：右「每日 / 每周 / 累计」三档只换格子取值口径（当天 / 整周合计 / 窗口起点到当天），最近 53 周周日对齐、逐日补零，切换不发请求。
 
-- 应用内更新下载报 `Download request failed with status: 403 Forbidden`：tauri-action 生成的 `latest.json` 里是 `api.github.com` 资产 API 链接（匿名限流 60 次/小时/出口 IP，共享代理节点极易耗尽；检查更新走 `github.com` 网页域故不受影响）。Release 工作流新增 `fixup` job，用 `scripts/fixup-latest-json.mjs` 把资产 URL 统一改写为 `releases/download` 公开直链；v0.3.0 的存量 `latest.json` 已用同一脚本修补。
-
+### Changed
+- **「使用统计」收敛为三项指标**：默认展示「今日」，只留 tokens 用量 / Cache 命中率 / 活跃天数三张卡；费用 / 请求数 / 工具调用 / 最常用模型 / 峰值时段 / 日均与每日趋势 / 按模型一并移除（后端对应聚合同步删除）。
+- 终端不再显示滚动条（xterm 6 自绘滚动条是 DOM overlay，全局隐藏）。滚动照常：滚轮、键盘与回看缓冲区不受影响。
 ## [0.3.0] - 2026-09-18
 
 ### 新增

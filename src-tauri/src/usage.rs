@@ -1,28 +1,28 @@
-//! 使用统计（Usage）：把 omp 本地会话记录里的 token / 费用 / 工具调用聚合成设置页的统计面。
+//! 使用统计（Usage）：把 omp 本地会话记录里的 token 用量聚合成设置页的三项指标
+//! （tokens 用量 / Cache 命中率 / 活跃天数）。
 //!
 //! 上游事实（omp 18.x 实测，明细见 `docs/v5-schedule.md`）：
 //! - 用量真值只在 jsonl 的 **assistant 消息**里：`message.usage` =
-//!   `{input, output, cacheRead, cacheWrite, totalTokens, reasoningTokens, cost{input,output,cacheRead,cacheWrite,total}}`，
-//!   且实测逐条满足 `totalTokens = input + output + cacheRead + cacheWrite`
+//!   `{input, output, cacheRead, cacheWrite, totalTokens, …}`，且实测逐条满足
+//!   `totalTokens = input + output + cacheRead + cacheWrite`
 //!   （`input` 是**未缓存**输入，缓存读 / 写单独成项）。
-//! - `message.timestamp` 是**毫秒数字**（不是 ISO 串）；`message.duration`（毫秒）是这次请求的模型耗时。
-//! - 工具调用在 `message.content` 的 `{type:"toolCall", name}` 块里——按请求计数，不需要再读 custom 行。
-//! - `cost` 是 omp 按模型定价算出的美元值；本地模型 / 无定价时恒为 0（界面据此整块隐藏费用展示）。
+//! - `message.timestamp` 是**毫秒数字**（不是 ISO 串）。
 //!
 //! 扫描是**全量**的：时间范围内的每一条 assistant 消息都要计入，所以不能像列表那样只看文件头尾。
 //! 保护手段与 `search_sessions` 同款——文件数 / 字节 / 墙钟三道预算，任何一道到点即停并把
 //! `truncated` 置 true（**宁可说「可能不全」，不假装统计完了**）。行级预筛（先看原始行里有没有
-//! `"usage"` / `"toolCall"` 再解析 JSON）让真实目录（29MB）的整轮扫描保持在百毫秒级。
+//! `"usage"` 再解析 JSON）让真实目录（29MB）的整轮扫描保持在百毫秒级。
+//!
+//! 纯逻辑（行解析、按日聚合、范围过滤、连续天数、热力图窗口）与真实文件行为（扫描临时目录、
+//! 预算截断、缺失目录）都有单测。
 //!
 //! 每日热力图（GitHub 贡献图口径）**独立于范围窗口**：它固定看最近 [`HEAT_WEEKS`] 周并按周日对齐，
-//! 所以「今日」范围也能看到一整年的日历，而每日趋势 / 总览仍只按所选范围聚合。
-//!
-//! 纯逻辑（行解析、按日 / 模型 / 时段聚合、范围过滤、连续天数、补零天、热力图窗口）与真实文件
-//! 行为（扫描临时目录、预算截断、缺失目录）都有单测。
+//! 所以「今日」范围也能看到一整年日历，而三项指标仍只按所选范围聚合——界面上的「每日 / 每周 /
+//! 累计」三档只是对同一份逐日数据换取值，不是三次扫描。
 
 use chrono::{DateTime, Datelike, Days, Local, NaiveDate};
 use serde::Serialize;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use tauri::State;
 
@@ -34,14 +34,12 @@ const SCAN_MAX_FILES: usize = 3000;
 const SCAN_MAX_BYTES: u64 = 256 * 1024 * 1024;
 /// 墙钟时间上限（毫秒）。
 const SCAN_MAX_MS: u64 = 5000;
-/// 每日趋势最多补多少天（一年以上历史只画最近这一段，避免柱子密到不可读）。
-const CHART_MAX_DAYS: usize = 120;
 /// 热力图窗口周数（GitHub 贡献图同款 53 列，最后一列 = 本周）。
 const HEAT_WEEKS: u64 = 53;
 
 // ---------- 视图类型 ----------
 
-/// 一组用量数字（总量 / 单日 / 单模型共用同一形状，前端一套渲染）。
+/// 一组用量数字（范围总览）。
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageBucket {
@@ -50,12 +48,8 @@ pub struct UsageBucket {
     pub output: u64,
     pub cache_read: u64,
     pub cache_write: u64,
-    /// 推理 token（是 `output` 的子集，只作展示，不参与 `total`）。
-    pub reasoning: u64,
     /// omp 的 `totalTokens` 累加（= input + output + cacheRead + cacheWrite）。
     pub total: u64,
-    /// 费用（美元）；omp 没给定价时为 0。
-    pub cost: f64,
     /// 请求数（带 usage 的 assistant 消息条数）。
     pub calls: u64,
 }
@@ -66,30 +60,26 @@ impl UsageBucket {
         self.output += u.output;
         self.cache_read += u.cache_read;
         self.cache_write += u.cache_write;
-        self.reasoning += u.reasoning;
         self.total += u.total;
-        self.cost += u.cost;
         self.calls += 1;
     }
 }
 
-/// 一天的量（`date` = 本地日期 `YYYY-MM-DD`）。
-#[derive(Debug, Clone, Serialize)]
+/// 范围总览。派生指标（命中率 / 活跃天数 / 连续天数）一律在**后端**算好——
+/// 前端只做格式化，不自算统计（与 `omp-state` 同一条口径）。
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UsageDayRow {
-    pub date: String,
+pub struct UsageTotals {
     #[serde(flatten)]
     pub bucket: UsageBucket,
-}
-
-/// 一个模型的量（`provider` / `model` 原样来自 jsonl）。
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UsageModelRow {
-    pub provider: String,
-    pub model: String,
-    #[serde(flatten)]
-    pub bucket: UsageBucket,
+    /// 范围内有请求的天数。
+    pub active_days: u64,
+    /// 连续活跃天数（今天还没跑但昨天跑了不断签，GitHub 口径）。
+    pub current_streak: u64,
+    /// 范围内最长连续活跃天数。
+    pub longest_streak: u64,
+    /// 缓存命中率 = cacheRead / (input + cacheRead)；分母为 0 时 null。
+    pub cache_hit_rate: Option<f64>,
 }
 
 /// 热力图的一格（`date` = 本地日期；没跑的日子补零，日历才成网格）。
@@ -99,67 +89,18 @@ pub struct UsageHeatRow {
     pub date: String,
     /// 当日 token 合计。
     pub total: u64,
-    /// 当日请求数。
-    pub calls: u64,
 }
 
-/// 用量最多的模型（`share` = 占全部 token 的比例，0–1）。
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UsageTopModel {
-    pub provider: String,
-    pub model: String,
-    pub tokens: u64,
-    pub share: f64,
-}
-
-/// 范围总览。派生指标（命中率 / 活跃天数 / 连续天数 / 日均 / 峰值时段 / 最常用模型）
-/// 一律在**后端**算好——前端只做格式化，不自算统计（与 `omp-state` 同一条口径）。
-#[derive(Debug, Clone, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UsageTotals {
-    #[serde(flatten)]
-    pub bucket: UsageBucket,
-    /// 有请求的会话数。
-    pub sessions: u64,
-    pub tool_calls: u64,
-    /// 工具种类数（按名字去重）。
-    pub tool_kinds: u64,
-    /// 模型耗时合计（毫秒，omp `duration` 原值累加）。
-    pub duration_ms: u64,
-    /// 范围内有请求的天数。
-    pub active_days: u64,
-    /// 连续活跃天数（今天还没跑但昨天跑了不断签，GitHub 口径）。
-    pub current_streak: u64,
-    /// 范围内最长连续活跃天数。
-    pub longest_streak: u64,
-    /// 缓存命中率 = cacheRead / (input + cacheRead)；分母为 0 时 null。
-    pub cache_hit_rate: Option<f64>,
-    /// 日均 token（按活跃天数摊）。
-    pub avg_daily_tokens: u64,
-    /// token 最多的本地小时（0–23）；范围内无数据时 null。
-    pub peak_hour: Option<u32>,
-    pub peak_hour_tokens: u64,
-    pub top_model: Option<UsageTopModel>,
-}
-
-/// 使用统计整体回包。
+/// 使用统计整体回包（`truncated` = 因扫描预算提前收手，统计可能不全）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageStats {
     pub totals: UsageTotals,
-    /// 每日趋势（按日期升序、**补零天**，最多 `chartDays` 天）。
-    pub by_day: Vec<UsageDayRow>,
-    /// 热力图（最近 `HEAT_WEEKS` 周：周日对齐、逐日补零、到今天为止；**不随范围裁剪**）。
+    /// 热力图：最近 53 周（周日对齐、逐日补零、到今天为止），**不随 `days` 裁剪**。
     pub heat: Vec<UsageHeatRow>,
-    pub by_model: Vec<UsageModelRow>,
+    /// 实际扫描的会话文件数。
     pub scanned_files: usize,
-    /// 因预算提前收手（文件数 / 字节 / 时间任一），统计可能不全。
     pub truncated: bool,
-    /// 本次范围天数（null = 全部）。
-    pub range_days: Option<u32>,
-    /// 每日趋势实际覆盖的天数（`by_day.len()`，前端文案用它）。
-    pub chart_days: usize,
 }
 
 // ---------- 行解析（纯函数，可测） ----------
@@ -171,33 +112,20 @@ pub struct MsgUsage {
     pub output: u64,
     pub cache_read: u64,
     pub cache_write: u64,
-    pub reasoning: u64,
     pub total: u64,
-    pub cost: f64,
 }
 
 /// 一行 jsonl 里我们关心的东西。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedMsg {
-    /// 消息时间（毫秒）。
+    /// `message.timestamp`（毫秒数字）。
     pub ts_ms: i64,
-    /// 模型来源（jsonl 原值；缺失为空串，聚合时归入「未知模型」组）。
-    pub provider: String,
-    pub model: String,
-    /// 有 usage 才有（没有 usage 的 assistant 消息只贡献工具计数）。
+    /// 没有 usage 的 assistant 行（如纯工具结果回复）为 None——它不进统计。
     pub usage: Option<MsgUsage>,
-    /// 本条消息里的工具调用名（按顺序）。
-    pub tools: Vec<String>,
-    /// 模型耗时（毫秒，`message.duration`）。
-    pub duration_ms: u64,
 }
 
 fn u64_of(v: Option<&serde_json::Value>) -> u64 {
     v.and_then(|x| x.as_u64()).unwrap_or(0)
-}
-
-fn f64_of(v: Option<&serde_json::Value>) -> f64 {
-    v.and_then(|x| x.as_f64()).unwrap_or(0.0)
 }
 
 /// 从 `message.usage` 取用量；**没有 `totalTokens` 的老数据**按四段之和兜底
@@ -211,15 +139,7 @@ pub fn parse_usage(v: &serde_json::Value) -> MsgUsage {
         Some(t) if t > 0 => t,
         _ => input + output + cache_read + cache_write,
     };
-    MsgUsage {
-        input,
-        output,
-        cache_read,
-        cache_write,
-        reasoning: u64_of(v.get("reasoningTokens")),
-        total,
-        cost: f64_of(v.get("cost").and_then(|c| c.get("total"))),
-    }
+    MsgUsage { input, output, cache_read, cache_write, total }
 }
 
 /// 解析一行 jsonl：只认 `type == "message"` 的 assistant 行。
@@ -243,35 +163,13 @@ pub fn parse_message_line(line: &str) -> Option<ParsedMsg> {
                 .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
                 .map(|d| d.timestamp_millis())
         })?;
-    let mut tools = vec![];
-    if let Some(blocks) = m.get("content").and_then(|c| c.as_array()) {
-        for b in blocks {
-            if b.get("type").and_then(|t| t.as_str()) == Some("toolCall") {
-                if let Some(n) = b.get("name").and_then(|n| n.as_str()) {
-                    tools.push(n.to_string());
-                }
-            }
-        }
-    }
-    Some(ParsedMsg {
-        ts_ms,
-        provider: m.get("provider").and_then(|p| p.as_str()).unwrap_or("").to_string(),
-        model: m.get("model").and_then(|p| p.as_str()).unwrap_or("").to_string(),
-        usage: m.get("usage").map(parse_usage),
-        tools,
-        duration_ms: u64_of(m.get("duration")),
-    })
+    Some(ParsedMsg { ts_ms, usage: m.get("usage").map(parse_usage) })
 }
 
 /// 本地日期（`YYYY-MM-DD`）——按用户所在时区归档，与界面上的「今天」一致。
 fn local_date(ms: i64) -> Option<String> {
     let dt = DateTime::from_timestamp_millis(ms)?;
     Some(dt.with_timezone(&Local).format("%Y-%m-%d").to_string())
-}
-
-fn local_hour(ms: i64) -> Option<u32> {
-    let dt = DateTime::from_timestamp_millis(ms)?;
-    Some(dt.with_timezone(&Local).format("%H").to_string().parse().ok()?)
 }
 
 // ---------- 扫描 ----------
@@ -290,7 +188,7 @@ impl Default for Budget {
     }
 }
 
-/// 扫 `sessions/` 下全部 jsonl，按 `days`（None = 全部）过滤后聚合（热力图走独立的一年窗口）。
+/// 扫 `sessions/` 下全部 jsonl，按 `days`（None = 全部）过滤后聚合。
 /// 不碰 tauri，可在临时目录上做真实行为测试。
 pub fn scan_usage_in(root: &Path, days: Option<u32>, now: DateTime<Local>) -> UsageStats {
     scan_usage_with(root, days, now, Budget::default())
@@ -338,11 +236,7 @@ fn scan_usage_with(
 
     let mut totals = UsageTotals::default();
     let mut by_day: BTreeMap<String, UsageBucket> = BTreeMap::new();
-    let mut by_heat: BTreeMap<String, (u64, u64)> = BTreeMap::new();
-    let mut by_model: HashMap<(String, String), UsageBucket> = HashMap::new();
-    let mut tool_kinds: HashSet<String> = HashSet::new();
-    let mut by_hour: Vec<(u64, u64)> = vec![(0, 0); 24];
-    let mut sessions = 0u64;
+    let mut by_heat: BTreeMap<String, u64> = BTreeMap::new();
 
     for (_mtime, path) in files.into_iter().take(budget.max_files) {
         if bytes_read >= budget.max_bytes || started.elapsed().as_millis() as u64 >= budget.max_ms {
@@ -351,8 +245,6 @@ fn scan_usage_with(
         }
         let Ok(file) = std::fs::File::open(&path) else { continue };
         scanned_files += 1;
-        // 会话计数是文件级的：第一次命中统计行时记一次
-        let mut counted = false;
         let reader = std::io::BufReader::new(file);
         for line in std::io::BufRead::lines(reader) {
             let Ok(line) = line else { break };
@@ -362,7 +254,7 @@ fn scan_usage_with(
                 break;
             }
             // 行级预筛：绝大多数行（用户消息 / 工具结果 / 标题变更）连解析都不用做
-            if !line.contains("\"usage\"") && !line.contains("\"toolCall\"") {
+            if !line.contains("\"usage\"") {
                 continue;
             }
             let Some(msg) = parse_message_line(&line) else { continue };
@@ -370,9 +262,7 @@ fn scan_usage_with(
             // 热力图在范围裁剪之前聚合：它固定看最近一年，不随上方范围切换
             if date.as_str() >= heat_from.as_str() {
                 if let Some(u) = msg.usage.as_ref() {
-                    let cell = by_heat.entry(date.clone()).or_insert((0, 0));
-                    cell.0 += u.total;
-                    cell.1 += 1;
+                    *by_heat.entry(date.clone()).or_insert(0) += u.total;
                 }
             }
             if let Some(c) = &cutoff {
@@ -380,25 +270,9 @@ fn scan_usage_with(
                     continue;
                 }
             }
-            if !counted {
-                counted = true;
-                sessions += 1;
-            }
-            totals.tool_calls += msg.tools.len() as u64;
-            tool_kinds.extend(msg.tools.iter().cloned());
-            totals.duration_ms += msg.duration_ms;
             let Some(u) = msg.usage else { continue };
             totals.bucket.add(&u);
-            by_day.entry(date.clone()).or_default().add(&u);
-            by_model
-                .entry((msg.provider.clone(), msg.model.clone()))
-                .or_default()
-                .add(&u);
-            if let Some(h) = local_hour(msg.ts_ms) {
-                let slot = &mut by_hour[h as usize];
-                slot.0 += 1;
-                slot.1 += u.total;
-            }
+            by_day.entry(date).or_default().add(&u);
         }
         if started.elapsed().as_millis() as u64 >= budget.max_ms {
             truncated = true;
@@ -406,106 +280,20 @@ fn scan_usage_with(
         }
     }
 
-    let day_rows = fill_days(&by_day, days, today);
-    let heat_rows = fill_heat(&by_heat, today);
-    let models = model_rows(by_model);
-    let top_model = models
-        .first()
-        .filter(|r| r.bucket.total > 0)
-        .map(|r| UsageTopModel {
-            provider: r.provider.clone(),
-            model: r.model.clone(),
-            tokens: r.bucket.total,
-            share: r.bucket.total as f64 / totals.bucket.total.max(1) as f64,
-        });
-    totals.tool_kinds = tool_kinds.len() as u64;
-    let mut totals = finish_totals(totals, &by_day, &by_hour, sessions, today);
-    totals.top_model = top_model;
-    UsageStats {
-        totals,
-        chart_days: day_rows.len(),
-        by_day: day_rows,
-        heat: heat_rows,
-        by_model: models,
-        scanned_files,
-        truncated,
-        range_days: days,
-    }
+    let totals = finish_totals(totals, &by_day, today);
+    UsageStats { totals, heat: fill_heat(&by_heat, today), scanned_files, truncated }
 }
 
-fn model_rows(by_model: HashMap<(String, String), UsageBucket>) -> Vec<UsageModelRow> {
-    let mut rows: Vec<UsageModelRow> = by_model
-        .into_iter()
-        .map(|((provider, model), bucket)| UsageModelRow { provider, model, bucket })
-        .collect();
-    rows.sort_by(|a, b| {
-        b.bucket.total.cmp(&a.bucket.total).then_with(|| a.model.cmp(&b.model))
-    });
-    rows
-}
-
-/// 热力图窗口起点：最近 [`HEAT_WEEKS`] 周的周日（最后一列 = 本周，今天的格子落在它自己那一行）。
-fn heat_window_start(today: NaiveDate) -> NaiveDate {
-    let offset = today.weekday().num_days_from_sunday() as u64;
-    today - Days::new((HEAT_WEEKS - 1) * 7 + offset)
-}
-
-/// 热力图：从窗口起点到今天**逐日补零**（没跑的日子也要有格子，日历才成网格）。
-fn fill_heat(by_heat: &BTreeMap<String, (u64, u64)>, today: NaiveDate) -> Vec<UsageHeatRow> {
-    let mut out = vec![];
-    let mut cur = heat_window_start(today);
-    while cur <= today {
-        let key = cur.format("%Y-%m-%d").to_string();
-        let (total, calls) = by_heat.get(&key).copied().unwrap_or((0, 0));
-        out.push(UsageHeatRow { date: key, total, calls });
-        cur = cur + Days::new(1);
-    }
-    out
-}
-
-/// 每日趋势：范围内**补零天**（没跑的日子也要有柱子，趋势才连续）；
-/// 下界取范围起点，`all` 取最早有数据的一天；最多 [`CHART_MAX_DAYS`] 天（保留最近的一段）。
-fn fill_days(by_day: &BTreeMap<String, UsageBucket>, days: Option<u32>, today: NaiveDate) -> Vec<UsageDayRow> {
-    // 一条数据都没有（且不限范围）时不造「今天」这根空柱——空态交给前端说
-    if days.is_none() && by_day.is_empty() {
-        return vec![];
-    }
-    let mut from = match days {
-        Some(d) => today - Days::new(d.saturating_sub(1) as u64),
-        None => by_day
-            .keys()
-            .next()
-            .and_then(|k| NaiveDate::parse_from_str(k, "%Y-%m-%d").ok())
-            .unwrap_or(today),
-    };
-    let min_from = today - Days::new(CHART_MAX_DAYS as u64 - 1);
-    if from < min_from {
-        from = min_from;
-    }
-    let mut out = vec![];
-    let mut cur = from;
-    while cur <= today {
-        let key = cur.format("%Y-%m-%d").to_string();
-        let bucket = by_day.get(&key).cloned().unwrap_or_default();
-        out.push(UsageDayRow { date: key, bucket });
-        cur = cur + Days::new(1);
-    }
-    out
-}
-
-/// 收尾：从 by_day / by_hour 派生连续天数、峰值时段、命中率、日均与最常用模型。
+/// 收尾：从 by_day 派生活跃天数、连续天数与命中率。
 fn finish_totals(
     mut totals: UsageTotals,
     by_day: &BTreeMap<String, UsageBucket>,
-    by_hour: &[(u64, u64)],
-    sessions: u64,
     today: NaiveDate,
 ) -> UsageTotals {
-    totals.sessions = sessions;
+    // by_day 的每个键都来自一条带 usage 的消息，键数即活跃天数
     let active: Vec<NaiveDate> = by_day
-        .iter()
-        .filter(|(_, b)| b.calls > 0)
-        .filter_map(|(k, _)| NaiveDate::parse_from_str(k, "%Y-%m-%d").ok())
+        .keys()
+        .filter_map(|k| NaiveDate::parse_from_str(k, "%Y-%m-%d").ok())
         .collect();
     totals.active_days = active.len() as u64;
     totals.longest_streak = longest_streak(&active);
@@ -513,17 +301,6 @@ fn finish_totals(
     let denom = totals.bucket.input + totals.bucket.cache_read;
     totals.cache_hit_rate =
         if denom > 0 { Some(totals.bucket.cache_read as f64 / denom as f64) } else { None };
-    totals.avg_daily_tokens =
-        if totals.active_days > 0 { totals.bucket.total / totals.active_days } else { 0 };
-    if let Some((idx, (_, tokens))) = by_hour
-        .iter()
-        .enumerate()
-        .filter(|(_, (_, t))| *t > 0)
-        .max_by_key(|(_, (_, t))| *t)
-    {
-        totals.peak_hour = Some(idx as u32);
-        totals.peak_hour_tokens = *tokens;
-    }
     totals
 }
 
@@ -558,9 +335,30 @@ fn current_streak(days: &[NaiveDate], today: NaiveDate) -> u64 {
     n
 }
 
+// ---------- 热力图 ----------
+
+/// 热力图窗口起点：最近 [`HEAT_WEEKS`] 周的周日（最后一列 = 本周，今天的格子落在它自己那一行）。
+fn heat_window_start(today: NaiveDate) -> NaiveDate {
+    let offset = today.weekday().num_days_from_sunday() as u64;
+    today - Days::new((HEAT_WEEKS - 1) * 7 + offset)
+}
+
+/// 热力图：从窗口起点到今天**逐日补零**（没跑的日子也要有格子，日历才成网格）。
+fn fill_heat(by_heat: &BTreeMap<String, u64>, today: NaiveDate) -> Vec<UsageHeatRow> {
+    let mut out = vec![];
+    let mut cur = heat_window_start(today);
+    while cur <= today {
+        let key = cur.format("%Y-%m-%d").to_string();
+        let total = by_heat.get(&key).copied().unwrap_or(0);
+        out.push(UsageHeatRow { date: key, total });
+        cur = cur + Days::new(1);
+    }
+    out
+}
+
 // ---------- 命令 ----------
 
-/// 使用统计：扫会话 jsonl 聚合用量（范围可选：1 / 7 / 30 天，null = 全部；热力图固定最近 53 周）。
+/// 使用统计：扫会话 jsonl 聚合三项指标（范围可选：1 / 7 / 30 天，null = 全部）。
 #[tauri::command]
 pub async fn get_usage_stats(
     state: State<'_, AppState>,
@@ -612,19 +410,9 @@ mod tests {
         })
     }
 
-    fn line_assistant(
-        ts_ms: i64,
-        provider: &str,
-        model: &str,
-        usage: Option<serde_json::Value>,
-        tools: &[&str],
-    ) -> String {
-        let content: Vec<serde_json::Value> = tools
-            .iter()
-            .map(|n| serde_json::json!({"type": "toolCall", "id": "c1", "name": n, "arguments": {}}))
-            .collect();
+    fn line_assistant(ts_ms: i64, usage: Option<serde_json::Value>) -> String {
         let mut m = serde_json::json!({
-            "role": "assistant", "content": content, "provider": provider, "model": model,
+            "role": "assistant", "content": [], "provider": "anthropic", "model": "sonnet",
             "timestamp": ts_ms, "duration": 1500
         });
         if let Some(u) = usage {
@@ -651,21 +439,12 @@ mod tests {
     // ---------- 行解析 ----------
 
     #[test]
-    fn parse_line_reads_usage_tools_and_timestamp() {
-        let line = line_assistant(
-            ts(2026, 9, 16, 9),
-            "anthropic",
-            "claude-sonnet-4",
-            Some(usage_json(100, 20, 300)),
-            &["read", "edit"],
-        );
+    fn parse_line_reads_usage_and_timestamp() {
+        let line = line_assistant(ts(2026, 9, 16, 9), Some(usage_json(100, 20, 300)));
         let msg = parse_message_line(&line).expect("assistant 行应被解析");
         assert_eq!(msg.ts_ms, ts(2026, 9, 16, 9));
-        assert_eq!(msg.duration_ms, 1500);
-        assert_eq!(msg.tools, vec!["read".to_string(), "edit".to_string()]);
         let u = msg.usage.expect("有 usage");
-        assert_eq!((u.input, u.output, u.cache_read, u.total, u.reasoning), (100, 20, 300, 420, 7));
-        assert!((u.cost - 0.0031).abs() < 1e-9);
+        assert_eq!((u.input, u.output, u.cache_read, u.cache_write, u.total), (100, 20, 300, 0, 420));
 
         // 缺 totalTokens 的老数据按四段之和兜底；ISO 顶层时间戳也能兜
         let old = serde_json::json!({
@@ -682,6 +461,8 @@ mod tests {
             .timestamp_millis();
         assert_eq!(msg.ts_ms, iso_ms, "退回顶层 ISO 时间戳");
 
+        // 没有 usage 的 assistant 行认，但用量为空
+        assert!(parse_message_line(&line_assistant(ts(2026, 9, 16, 9), None)).unwrap().usage.is_none());
         // 非 assistant / 非 message / 无时间的行一律不认
         assert!(parse_message_line(&line_user(ts(2026, 9, 16, 9))).is_none());
         assert!(parse_message_line("{\"type\":\"custom\",\"customType\":\"tool_execution_start\"}").is_none());
@@ -694,7 +475,7 @@ mod tests {
     // ---------- 聚合 ----------
 
     #[test]
-    fn scan_aggregates_totals_days_models_tools_and_hours() {
+    fn scan_aggregates_totals_and_active_days() {
         let root = tmp_root("agg");
         write_session(
             &root,
@@ -704,10 +485,10 @@ mod tests {
                 line_title(),
                 line_session("sid-1", "/tmp/demo"),
                 line_user(ts(2026, 9, 16, 9)),
-                line_assistant(ts(2026, 9, 16, 9), "anthropic", "sonnet", Some(usage_json(100, 20, 300)), &["read"]),
-                line_assistant(ts(2026, 9, 16, 15), "anthropic", "sonnet", Some(usage_json(200, 30, 0)), &["bash", "read"]),
-                // 没有 usage 的 assistant 行：只贡献工具计数
-                line_assistant(ts(2026, 9, 16, 15), "anthropic", "sonnet", None, &["grep"]),
+                line_assistant(ts(2026, 9, 16, 9), Some(usage_json(100, 20, 300))),
+                line_assistant(ts(2026, 9, 16, 15), Some(usage_json(200, 30, 0))),
+                // 没有 usage 的 assistant 行：既不计请求也不计活跃
+                line_assistant(ts(2026, 9, 16, 15), None),
             ],
         );
         write_session(
@@ -716,85 +497,26 @@ mod tests {
             "s2.jsonl",
             &[
                 line_session("sid-2", "/tmp/other"),
-                line_assistant(ts(2026, 9, 15, 10), "openai", "gpt-5", Some(usage_json(50, 10, 0)), &[]),
+                line_assistant(ts(2026, 9, 15, 10), Some(usage_json(50, 10, 0))),
             ],
         );
         let stats = scan_usage_with(&root, None, now(), Budget::default());
         assert_eq!(stats.scanned_files, 2);
-        assert_eq!(stats.totals.sessions, 2, "命中统计行的会话文件各计一次");
         assert!(!stats.truncated);
         assert_eq!(stats.totals.bucket.input, 350);
         assert_eq!(stats.totals.bucket.output, 60);
         assert_eq!(stats.totals.bucket.cache_read, 300);
         assert_eq!(stats.totals.bucket.total, 710, "total = input+output+cacheRead");
         assert_eq!(stats.totals.bucket.calls, 3);
-        assert_eq!(stats.totals.tool_calls, 4, "含没有 usage 的那条消息里的工具调用");
-        assert_eq!(stats.totals.duration_ms, 6000, "4 条 assistant 消息 × 1500ms（含没有 usage 的那条）");
         assert_eq!(stats.totals.active_days, 2);
-        // 模型按 token 倒序：anthropic/sonnet 在前
-        assert_eq!(stats.by_model.len(), 2);
-        assert_eq!(stats.by_model[0].model, "sonnet");
-        assert_eq!(stats.by_model[0].bucket.calls, 2);
-        assert_eq!(stats.by_model[0].bucket.total, 650);
-        // 工具种类去重（read / bash / grep）
-        assert_eq!(stats.totals.tool_kinds, 3);
-        // 峰值时段按带 usage 的请求算：9 点的 420 token 多于 15 点的 230
-        assert_eq!(stats.totals.peak_hour, Some(9));
-        assert_eq!(stats.totals.peak_hour_tokens, 420);
-        // 每日趋势补到今天（9-15 起两天）
-        assert_eq!(stats.by_day.len(), 2);
-        assert_eq!(stats.by_day[0].date, "2026-09-15");
-        assert_eq!(stats.by_day[1].date, "2026-09-16");
-        assert_eq!(stats.by_day[1].bucket.total, 650);
-        assert_eq!(stats.chart_days, 2);
-        assert_eq!(stats.range_days, None);
+        assert_eq!(stats.totals.current_streak, 2, "今天与昨天连成 2 天");
+        assert_eq!(stats.totals.longest_streak, 2);
         // 热力图：53 周窗口从周日开始、补零到今天（2026-09-16 是周三 → 368 格）
         assert_eq!(stats.heat[0].date, "2025-09-14");
         assert_eq!(stats.heat.len(), 365 + 3);
         assert_eq!(stats.heat.last().unwrap().date, "2026-09-16");
         assert_eq!(stats.heat.last().unwrap().total, 650);
-        assert_eq!(stats.heat.last().unwrap().calls, 2);
         assert_eq!(stats.heat[stats.heat.len() - 2].total, 60, "昨天 50+10");
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn range_filter_drops_old_days_and_keeps_today_boundary() {
-        let root = tmp_root("range");
-        write_session(
-            &root,
-            "--tmp-demo--",
-            "s1.jsonl",
-            &[
-                line_session("sid-1", "/tmp/demo"),
-                line_assistant(ts(2026, 9, 16, 8), "anthropic", "sonnet", Some(usage_json(1000, 0, 0)), &[]),
-                // 昨天（近 7 日内）
-                line_assistant(ts(2026, 9, 15, 8), "anthropic", "sonnet", Some(usage_json(100, 0, 0)), &[]),
-                // 10 天前（窗口外）
-                line_assistant(ts(2026, 9, 6, 8), "anthropic", "sonnet", Some(usage_json(9999, 0, 0)), &[]),
-            ],
-        );
-        let stats = scan_usage_with(&root, Some(7), now(), Budget::default());
-        assert_eq!(stats.totals.bucket.total, 1100, "窗口外的 9999 不能计入");
-        assert_eq!(stats.totals.bucket.calls, 2);
-        assert_eq!(stats.by_day.len(), 7, "近 7 日要补满 7 天");
-        assert_eq!(stats.by_day[0].date, "2026-09-10");
-        assert_eq!(stats.by_day.last().unwrap().date, "2026-09-16");
-        assert_eq!(stats.totals.active_days, 2);
-        assert_eq!(stats.range_days, Some(7));
-        // 热力图不随范围裁剪：10 天前的 9999 也要留在日历里
-        let old = stats.heat.iter().find(|h| h.date == "2026-09-06").expect("日历覆盖到 10 天前");
-        assert_eq!(old.total, 9999);
-
-        // 「今日」= 只有今天
-        let today = scan_usage_with(&root, Some(1), now(), Budget::default());
-        assert_eq!(today.totals.bucket.total, 1000);
-        assert_eq!(today.by_day.len(), 1);
-
-        // 全部：含窗口外，趋势仍只画最近 CHART_MAX_DAYS 天
-        let all = scan_usage_with(&root, None, now(), Budget::default());
-        assert_eq!(all.totals.bucket.total, 11099);
-        assert_eq!(all.by_day.len(), 11, "9-06 到 9-16 共 11 天");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -808,10 +530,10 @@ mod tests {
             &[
                 line_session("sid-1", "/tmp/demo"),
                 // 窗口外的旧数据：日历里没有，但「全部」范围仍计入总览
-                line_assistant(ts(2025, 9, 1, 8), "anthropic", "sonnet", Some(usage_json(7777, 0, 0)), &[]),
+                line_assistant(ts(2025, 9, 1, 8), Some(usage_json(7777, 0, 0))),
                 // 一年内、远在 7 日窗口外：日历要留着
-                line_assistant(ts(2026, 1, 5, 8), "anthropic", "sonnet", Some(usage_json(120, 0, 0)), &[]),
-                line_assistant(ts(2026, 9, 16, 8), "anthropic", "sonnet", Some(usage_json(10, 0, 0)), &[]),
+                line_assistant(ts(2026, 1, 5, 8), Some(usage_json(120, 0, 0))),
+                line_assistant(ts(2026, 9, 16, 8), Some(usage_json(10, 0, 0))),
             ],
         );
         let week = scan_usage_with(&root, Some(7), now(), Budget::default());
@@ -832,7 +554,45 @@ mod tests {
     }
 
     #[test]
-    fn derived_stats_cover_cache_rate_streaks_and_top_model() {
+    fn range_filter_drops_old_days_and_keeps_today_boundary() {
+        let root = tmp_root("range");
+        write_session(
+            &root,
+            "--tmp-demo--",
+            "s1.jsonl",
+            &[
+                line_session("sid-1", "/tmp/demo"),
+                line_assistant(ts(2026, 9, 16, 8), Some(usage_json(1000, 0, 0))),
+                // 昨天（近 7 日内）
+                line_assistant(ts(2026, 9, 15, 8), Some(usage_json(100, 0, 0))),
+                // 10 天前（窗口外）
+                line_assistant(ts(2026, 9, 6, 8), Some(usage_json(9999, 0, 0))),
+            ],
+        );
+        let week = scan_usage_with(&root, Some(7), now(), Budget::default());
+        assert_eq!(week.totals.bucket.total, 1100, "窗口外的 9999 不能计入");
+        assert_eq!(week.totals.bucket.calls, 2);
+        assert_eq!(week.totals.active_days, 2);
+        assert_eq!(week.totals.current_streak, 2);
+        assert_eq!(week.totals.longest_streak, 2);
+
+        // 「今日」= 只有今天
+        let today = scan_usage_with(&root, Some(1), now(), Budget::default());
+        assert_eq!(today.totals.bucket.total, 1000);
+        assert_eq!(today.totals.bucket.calls, 1);
+        assert_eq!(today.totals.active_days, 1);
+        assert_eq!(today.totals.longest_streak, 1);
+
+        // 全部：含窗口外
+        let all = scan_usage_with(&root, None, now(), Budget::default());
+        assert_eq!(all.totals.bucket.total, 11099);
+        assert_eq!(all.totals.active_days, 3);
+        assert_eq!(all.totals.current_streak, 2, "中间断了 7 天，当前连的只有今天与昨天");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn derived_stats_cover_cache_rate_and_streaks() {
         let root = tmp_root("derived");
         write_session(
             &root,
@@ -841,10 +601,10 @@ mod tests {
             &[
                 line_session("sid-1", "/tmp/demo"),
                 // 连续三天（今天 / 昨天 / 前天）+ 五天前断一天
-                line_assistant(ts(2026, 9, 16, 9), "anthropic", "sonnet", Some(usage_json(100, 10, 300)), &[]),
-                line_assistant(ts(2026, 9, 15, 9), "anthropic", "sonnet", Some(usage_json(100, 10, 0)), &[]),
-                line_assistant(ts(2026, 9, 14, 9), "openai", "gpt-5", Some(usage_json(100, 10, 0)), &[]),
-                line_assistant(ts(2026, 9, 11, 9), "openai", "gpt-5", Some(usage_json(100, 10, 0)), &[]),
+                line_assistant(ts(2026, 9, 16, 9), Some(usage_json(100, 10, 300))),
+                line_assistant(ts(2026, 9, 15, 9), Some(usage_json(100, 10, 0))),
+                line_assistant(ts(2026, 9, 14, 9), Some(usage_json(100, 10, 0))),
+                line_assistant(ts(2026, 9, 11, 9), Some(usage_json(100, 10, 0))),
             ],
         );
         let stats = scan_usage_with(&root, None, now(), Budget::default());
@@ -854,11 +614,26 @@ mod tests {
         assert_eq!(t.longest_streak, 3);
         // 命中率 = cacheRead / (input + cacheRead) = 300 / 700
         assert!((t.cache_hit_rate.unwrap() - 300.0 / 700.0).abs() < 1e-9);
-        assert_eq!(t.avg_daily_tokens, t.bucket.total / 4);
-        let top = t.top_model.as_ref().unwrap();
-        assert_eq!(top.model, "sonnet");
-        assert_eq!(top.tokens, 410 + 110, "sonnet 两次请求的 token 合计");
-        assert!((top.share - top.tokens as f64 / t.bucket.total as f64).abs() < 1e-9);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn cache_hit_rate_is_null_without_denominator() {
+        let root = tmp_root("rate");
+        write_session(
+            &root,
+            "--tmp-demo--",
+            "s1.jsonl",
+            &[
+                line_session("sid-1", "/tmp/demo"),
+                // 只有输出 token：命中率没有分母（界面显示 —），但用量本身有效
+                line_assistant(ts(2026, 9, 16, 9), Some(usage_json(0, 50, 0))),
+            ],
+        );
+        let stats = scan_usage_with(&root, Some(1), now(), Budget::default());
+        assert_eq!(stats.totals.bucket.calls, 1);
+        assert_eq!(stats.totals.bucket.total, 50);
+        assert_eq!(stats.totals.cache_hit_rate, None);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -874,7 +649,7 @@ mod tests {
                 &format!("s{i}.jsonl"),
                 &[
                     line_session(&format!("sid-{i}"), "/tmp/demo"),
-                    line_assistant(ts(2026, 9, 16, 9), "anthropic", "sonnet", Some(usage_json(10, 0, 0)), &[]),
+                    line_assistant(ts(2026, 9, 16, 9), Some(usage_json(10, 0, 0))),
                 ],
             );
         }
@@ -903,7 +678,7 @@ mod tests {
                 "这不是 JSON".to_string(),
                 line_session("sid-1", "/tmp/demo"),
                 "{\"type\":\"message\",\"message\":{\"role\":\"assistant\",\"content\":[],\"usage\":{\"input\":9}".to_string(),
-                line_assistant(ts(2026, 9, 16, 9), "anthropic", "sonnet", Some(usage_json(10, 5, 0)), &[]),
+                line_assistant(ts(2026, 9, 16, 9), Some(usage_json(10, 5, 0))),
             ],
         );
         let stats = scan_usage_with(&root, None, now(), Budget::default());
@@ -913,13 +688,12 @@ mod tests {
         let empty = scan_usage_with(Path::new("/tmp/omp-usage-definitely-missing"), None, now(), Budget::default());
         assert_eq!(empty.totals.bucket.calls, 0);
         assert_eq!(empty.scanned_files, 0);
-        assert!(empty.by_day.is_empty(), "没有数据就不补零天");
-        // 热力图即使一条数据都没有，也给出完整日历（全零格）
-        assert_eq!(empty.heat.last().unwrap().date, "2026-09-16");
-        assert!(empty.heat.iter().all(|h| h.total == 0 && h.calls == 0));
+        assert_eq!(empty.totals.active_days, 0);
         assert_eq!(empty.totals.cache_hit_rate, None);
         assert_eq!(empty.totals.current_streak, 0);
-        assert!(empty.totals.top_model.is_none());
+        // 热力图即使一条数据都没有，也给出完整日历（全零格）
+        assert_eq!(empty.heat.last().unwrap().date, "2026-09-16");
+        assert!(empty.heat.iter().all(|h| h.total == 0));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -930,7 +704,7 @@ mod tests {
             &root,
             "--tmp-demo--",
             "s1.jsonl",
-            &[line_session("sid-1", "/tmp/demo"), line_assistant(ts(2026, 9, 16, 9), "a", "m", Some(usage_json(1, 1, 0)), &[])],
+            &[line_session("sid-1", "/tmp/demo"), line_assistant(ts(2026, 9, 16, 9), Some(usage_json(1, 1, 0)))],
         );
         std::fs::write(root.join("--tmp-demo--/.s1.jsonl.lock.os"), "lock").unwrap();
         std::fs::write(root.join("--tmp-demo--/notes.txt"), "非 jsonl").unwrap();
@@ -952,9 +726,8 @@ mod tests {
         let started = std::time::Instant::now();
         let stats = scan_usage_in(&agent.join("sessions"), None, Local::now());
         println!(
-            "扫描 {} 个文件 / {} 个会话，耗时 {}ms，truncated={}；token 合计 {}（输入 {} / 输出 {} / 缓存读 {}），请求 {}，工具 {}，费用 ${:.4}，最常用模型 {:?}",
+            "扫描 {} 个文件，耗时 {}ms，truncated={}；token 合计 {}（输入 {} / 输出 {} / 缓存读 {}），请求 {}，活跃 {} 天（连续 {} / 最长 {}），命中率 {:?}",
             stats.scanned_files,
-            stats.totals.sessions,
             started.elapsed().as_millis(),
             stats.truncated,
             stats.totals.bucket.total,
@@ -962,9 +735,10 @@ mod tests {
             stats.totals.bucket.output,
             stats.totals.bucket.cache_read,
             stats.totals.bucket.calls,
-            stats.totals.tool_calls,
-            stats.totals.bucket.cost,
-            stats.totals.top_model.as_ref().map(|m| format!("{}/{}", m.provider, m.model)),
+            stats.totals.active_days,
+            stats.totals.current_streak,
+            stats.totals.longest_streak,
+            stats.totals.cache_hit_rate,
         );
         assert!(stats.scanned_files > 0, "本机应有会话数据（没有就跑不出基准）");
     }
