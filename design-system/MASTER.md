@@ -65,7 +65,7 @@
 - 工作区：32px 行，`DiagramTree` + 等宽分支名 + worktree 徽章；选中左线、填充与加粗。主目录图标 accent，普通 worktree faint；缺失目录禁用。从属关系用弱引导线表达。
 - 右侧工作面：桌面端外沿 8px 留白、16px 圆角与轻描边；终端本身无额外 padding。48px 常驻标签栏（即便没有任何标签也保留工作区标题与新建入口），激活标签 surface 填充与细边框；窄窗左端显示项目抽屉按钮。标题截断、关闭入口和常驻 `＋` 行为不变；标签溢出时栏内横向滚动、隐藏滚动条（`.no-scrollbar`，垂直滚轮映射为横向）；终端和设置面板只切显隐，不卸载。
 - **终端标签 = π 状态标 + 会话名**（`π` 是 omp 血统；标签上不再用终端图标）：π 用 mono 14px，**颜色即 omp 的运行状态**（`lib/termTitle.ts` 从 OSC 标题读）：工作中 `accent` + `animate-pulse` 呼吸、等待确认 `warn`、等待输入与正常退出 `ok`、异常退出与启动失败 `danger`、未知 `faint`。颜色不是唯一信号——状态文字进 `sr-only`（屏幕阅读器）并作为 π 的 `title` 悬停提示；π 的呼吸动画在 `prefers-reduced-motion` 下由全局规则关掉（§5 动效）。
-- 终端面板：xterm 全尺寸铺满（`FitAddon` 跟随容器；隐藏面板不与后端同步尺寸）。omp 退出后浮层 = `bg-background/75` 遮罩 + `bg-elevated` 小卡（13px muted「omp 已退出」；异常退出显示「omp 意外退出（退出代码 N）」+「重启」accent 实心键 +「关闭」描边键）。**终端自己就是内容面**——不再套卡片、边框或内边距。
+- 终端面板：xterm 全尺寸铺满（`FitAddon` 跟随容器；隐藏面板不与后端同步尺寸），**不显示滚动条**（xterm 6 自绘 overlay，`index.css` 全局 `display:none`；滚轮/键盘/回看照常）。omp 退出后浮层 = `bg-background/75` 遮罩 + `bg-elevated` 小卡（13px muted「omp 已退出」；异常退出显示「omp 意外退出（退出代码 N）」+「重启」accent 实心键 +「关闭」描边键）。**终端自己就是内容面**——不再套卡片、边框或内边距。
 - 终端空态：64px 图标盒、等宽终端标识、24/28px 邀请式标题、限宽说明、稀释强调色新建按钮与快捷键提示；无项目时提示先添加项目。
 - 圆角：`rounded-sm` 5px / `rounded-md` 8px / `rounded-lg` 12px / `rounded-xl` 16px / `rounded-2xl` 20px。圆角全局 token 驱动，不现场定第二套。
 - 边框：默认 `border-border`；分组内的弱分隔用 `border-border-soft`。禁止 `border-border/60`、`/70` 这类透明度档现场手调。

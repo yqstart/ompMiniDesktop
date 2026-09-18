@@ -193,6 +193,14 @@ body {
  background: transparent !important;
 }
 
+/* 终端不显示滚动条（滚动照常：滚轮/键盘/scrollback/程序化滚动都走 xterm 核心，与滑块无关）。
+   xterm 6 的滚动条是自绘 DOM（`.xterm-scrollable-element > .scrollbar`，绝对定位 overlay），
+   原生 `::-webkit-scrollbar` 规则够不着；滚动时它会显形（`visible` 类），隐藏滑块即可。
+   实测：`display:none` 后滚轮与 scrollLines 照常滚动，布局不回流（scrollbar 本就 overlay 不占宽）。 */
+.xterm .xterm-scrollable-element>.scrollbar {
+ display: none !important;
+}
+
 /* 可见焦点环（MASTER §5）。输入框类由容器接管焦点样式，此处排除避免生硬外框。 */
 :where(button, a, select, [tabindex]):focus-visible {
  outline: 2px solid color-mix(in srgb, var(--accent) 75%, transparent);
