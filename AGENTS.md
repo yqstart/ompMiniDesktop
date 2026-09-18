@@ -51,7 +51,7 @@ src/
     TerminalView.tsx       # 终端面板区：全部终端面板（隐藏不销毁）+ 空态（标签栏与关闭确认归 App）
     TerminalTabs.tsx       # 标签栏（常驻）：终端标签（π 状态标 + 会话名 + 关闭）+ 设置标签（单例）+ ＋
     TerminalPane.tsx       # 单个终端：xterm 实例 + PTY 管道（Channel）+ fit/resize + 退出浮层（重启/关闭）
-  components/settings/     # GeneralSettingsPanel（通用）/ ModelsPanel（模型页壳：我的模型 / 供应商 / 角色 / 快速切换环 / 转移）/ CycleOrderSection（快速切换环：Ctrl+P 轮换序）/ ProvidersSection（供应商合并区块：已添加列表 + 两个弹窗）/ ProviderPicker（提供商搜索选择器）/ ProviderModelsDialog（挑选模型弹窗 + 列表）/ CustomProviderEditForm（models.yml 表单）/ DialogShell（设置页模态壳）/ FallbackChains / ModelPickList / MemoryPanel / UsagePanel（使用统计：tokens 用量 / Cache 命中率 / 活跃天数三张卡，默认「今日」+「Token 活动」热力图，每日 / 每周 / 累计三档）/ StarToggle + Switch（共享小件）
+  components/settings/     # GeneralSettingsPanel（通用）/ ModelsPanel（模型页壳：我的模型 / 供应商 / 角色 / 快速切换环 / 转移）/ CycleOrderSection（快速切换环：Ctrl+P 轮换序）/ ProvidersSection（供应商合并区块：已添加列表 + 两个弹窗）/ ProviderPicker（提供商搜索选择器）/ ProviderModelsDialog（挑选模型弹窗 + 列表）/ CustomProviderEditForm（models.yml 表单）/ DialogShell（设置页模态壳）/ FallbackChains / ModelPickList / MemoryPanel / UsagePanel（使用统计：tokens 用量 / Cache 命中率 / 活跃天数三张卡，默认「今日」+「Token 活动」热力图：每日 / 每周 / 累计三档、悬停浮层给按模型拆分、底部「少 ▢▢▢▢▢ 多」对照条）/ StarToggle + Switch（共享小件）
   components/update/       # UpdateDialog（App 常驻挂载，updateDialogOpen 控制；有更新的提醒在左栏设置入口小点）
   components/git/
     CommitTaskPanel.tsx    # 工作区「提交并推送」任务浮层（V14：流式日志 / 提交结果 / 取消 / 后台运行 / 推送 / 重试）
@@ -70,7 +70,7 @@ src-tauri/src/
   models_config.rs         # 设置 › 供应商 ›「自定义模型」后端：`<agentDir>/models.yml` 的读 / 写（保真文本由前端给，后端做 hash 乐观锁 + 预校验 + 备份 + 原子写；含单测）
   providers.rs             # 设置 › 供应商 / 模型后端：auth-broker login/logout + modelRoles + cycleOrder + retry.fallbackChains
   memories.rs              # 设置 › 记忆后端：列 / 读 / 删 omp 项目记忆（含单测）
-  usage.rs                 # 设置 › 使用统计后端：扫会话 jsonl 聚合 tokens 用量 / Cache 命中率 / 活跃天数 + 53 周热力图窗口（只读；含单测）
+  usage.rs                 # 设置 › 使用统计后端：扫会话 jsonl 聚合 tokens 用量 / Cache 命中率 / 活跃天数 + 53 周热力图窗口（逐日按模型拆分）（只读；含单测）
 scripts/                   # e2e-ipc-selfcheck.mjs（IPC 契约双向自检）、generate-icons.mjs、fixup-latest-json.mjs（latest.json 资产 URL → 公开直链；发版 fixup job 与存量修补共用）
 ```
 
@@ -90,7 +90,7 @@ sessions.ts      # 会话按项目分组（归档页用；含单测）
 sessionBatch.ts  # 批量归档/恢复/删除的唯一实现（BATCH_LIMIT 200 + 失败聚合）
 myModels.ts / modelSelector.ts / modelNames.ts / roleNames.ts / ompSettings.ts  # 设置页数据层（含单测；myModels = 我的模型，模型选择器的候选范围）
 customModels.ts  # 自定义模型（models.yml）保真编辑数据层（yaml 包；含单测）
-usageHeat.ts     # Token 活动热力图（GitHub 贡献图口径）的纯计算：每日 / 每周 / 累计三档取值 + 分位分档 + 月份刻度（含单测）
+usageHeat.ts     # Token 活动热力图（GitHub 贡献图口径）的纯计算：每日 / 每周 / 累计三档取值与悬停按模型拆分 `heatModels` + 分位分档 + 月份刻度（含单测）
 ompDiag.ts       # omp 自检与手动指定路径
 appUpdate.ts     # 应用内更新状态机
 ```

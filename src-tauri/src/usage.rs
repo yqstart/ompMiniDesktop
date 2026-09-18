@@ -82,13 +82,24 @@ pub struct UsageTotals {
     pub cache_hit_rate: Option<f64>,
 }
 
+/// 热力图格子里的一个模型用量（token 降序，界面按此列读数）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageHeatModel {
+    /// `model` 原样来自 jsonl；空串表示上游没给（界面显示「未知模型」）。
+    pub model: String,
+    pub total: u64,
+}
+
 /// 热力图的一格（`date` = 本地日期；没跑的日子补零，日历才成网格）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageHeatRow {
     pub date: String,
-    /// 当日 token 合计。
+    /// 当日 token 合计（= `models` 各行的和）。
     pub total: u64,
+    /// 当日按模型拆分（token 降序；没有用量的日子为空）。
+    pub models: Vec<UsageHeatModel>,
 }
 
 /// 使用统计整体回包（`truncated` = 因扫描预算提前收手，统计可能不全）。
@@ -120,6 +131,8 @@ pub struct MsgUsage {
 pub struct ParsedMsg {
     /// `message.timestamp`（毫秒数字）。
     pub ts_ms: i64,
+    /// `message.model` 原样（热力图按模型拆分读数用；缺失为空串）。
+    pub model: String,
     /// 没有 usage 的 assistant 行（如纯工具结果回复）为 None——它不进统计。
     pub usage: Option<MsgUsage>,
 }
@@ -163,7 +176,11 @@ pub fn parse_message_line(line: &str) -> Option<ParsedMsg> {
                 .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
                 .map(|d| d.timestamp_millis())
         })?;
-    Some(ParsedMsg { ts_ms, usage: m.get("usage").map(parse_usage) })
+    Some(ParsedMsg {
+        ts_ms,
+        model: m.get("model").and_then(|p| p.as_str()).unwrap_or("").to_string(),
+        usage: m.get("usage").map(parse_usage),
+    })
 }
 
 /// 本地日期（`YYYY-MM-DD`）——按用户所在时区归档，与界面上的「今天」一致。
@@ -236,7 +253,8 @@ fn scan_usage_with(
 
     let mut totals = UsageTotals::default();
     let mut by_day: BTreeMap<String, UsageBucket> = BTreeMap::new();
-    let mut by_heat: BTreeMap<String, u64> = BTreeMap::new();
+    // 热力图按「日期 → 模型 → token」存：格子的读数要按模型拆开（三项指标不用它）
+    let mut by_heat: BTreeMap<String, BTreeMap<String, u64>> = BTreeMap::new();
 
     for (_mtime, path) in files.into_iter().take(budget.max_files) {
         if bytes_read >= budget.max_bytes || started.elapsed().as_millis() as u64 >= budget.max_ms {
@@ -262,7 +280,11 @@ fn scan_usage_with(
             // 热力图在范围裁剪之前聚合：它固定看最近一年，不随上方范围切换
             if date.as_str() >= heat_from.as_str() {
                 if let Some(u) = msg.usage.as_ref() {
-                    *by_heat.entry(date.clone()).or_insert(0) += u.total;
+                    *by_heat
+                        .entry(date.clone())
+                        .or_default()
+                        .entry(msg.model.clone())
+                        .or_insert(0) += u.total;
                 }
             }
             if let Some(c) = &cutoff {
@@ -343,14 +365,23 @@ fn heat_window_start(today: NaiveDate) -> NaiveDate {
     today - Days::new((HEAT_WEEKS - 1) * 7 + offset)
 }
 
-/// 热力图：从窗口起点到今天**逐日补零**（没跑的日子也要有格子，日历才成网格）。
-fn fill_heat(by_heat: &BTreeMap<String, u64>, today: NaiveDate) -> Vec<UsageHeatRow> {
+/// 热力图：从窗口起点到今天**逐日补零**（没跑的日子也要有格子，日历才成网格），
+/// 每格的模型明细按 token 降序（界面直接照着列读数）。
+fn fill_heat(by_heat: &BTreeMap<String, BTreeMap<String, u64>>, today: NaiveDate) -> Vec<UsageHeatRow> {
+    let none = BTreeMap::new();
     let mut out = vec![];
     let mut cur = heat_window_start(today);
     while cur <= today {
         let key = cur.format("%Y-%m-%d").to_string();
-        let total = by_heat.get(&key).copied().unwrap_or(0);
-        out.push(UsageHeatRow { date: key, total });
+        let mut models: Vec<UsageHeatModel> = by_heat
+            .get(&key)
+            .unwrap_or(&none)
+            .iter()
+            .map(|(model, total)| UsageHeatModel { model: model.clone(), total: *total })
+            .collect();
+        models.sort_by(|a, b| b.total.cmp(&a.total).then_with(|| a.model.cmp(&b.model)));
+        let total = models.iter().map(|m| m.total).sum();
+        out.push(UsageHeatRow { date: key, total, models });
         cur = cur + Days::new(1);
     }
     out
@@ -443,6 +474,7 @@ mod tests {
         let line = line_assistant(ts(2026, 9, 16, 9), Some(usage_json(100, 20, 300)));
         let msg = parse_message_line(&line).expect("assistant 行应被解析");
         assert_eq!(msg.ts_ms, ts(2026, 9, 16, 9));
+        assert_eq!(msg.model, "sonnet", "模型名原样带出（热力图按模型拆读数）");
         let u = msg.usage.expect("有 usage");
         assert_eq!((u.input, u.output, u.cache_read, u.cache_write, u.total), (100, 20, 300, 0, 420));
 
@@ -550,6 +582,40 @@ mod tests {
 
         let all = scan_usage_with(&root, None, now(), Budget::default());
         assert_eq!(all.totals.bucket.total, 7777 + 120 + 10, "全部范围不受日历窗口影响");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn heat_rows_carry_per_model_breakdown() {
+        let root = tmp_root("heat-models");
+        // 同一天两个模型：格子的读数要按 token 降序列出各自用量
+        let mut gpt = serde_json::json!({
+            "role": "assistant", "content": [], "model": "gpt-5", "timestamp": ts(2026, 9, 16, 10)
+        });
+        gpt["usage"] = usage_json(10, 0, 0);
+        write_session(
+            &root,
+            "--tmp-demo--",
+            "s1.jsonl",
+            &[
+                line_session("sid-1", "/tmp/demo"),
+                line_assistant(ts(2026, 9, 16, 9), Some(usage_json(100, 20, 300))), // sonnet 420
+                serde_json::json!({"type": "message", "message": gpt}).to_string(), // gpt-5 10
+                line_assistant(ts(2026, 9, 15, 9), Some(usage_json(7, 0, 0))),      // 昨天 sonnet 7
+            ],
+        );
+        let stats = scan_usage_with(&root, Some(1), now(), Budget::default());
+        let today = stats.heat.last().unwrap();
+        assert_eq!(today.date, "2026-09-16");
+        assert_eq!(today.total, 430, "合计 = 各模型之和");
+        let models: Vec<(&str, u64)> =
+            today.models.iter().map(|m| (m.model.as_str(), m.total)).collect();
+        assert_eq!(models, vec![("sonnet", 420), ("gpt-5", 10)], "按 token 降序");
+        // 只有 sonnet 的那天不带 gpt-5；没跑的日子没有明细
+        let yesterday = &stats.heat[stats.heat.len() - 2];
+        assert_eq!(yesterday.models.len(), 1);
+        assert_eq!(yesterday.models[0].model, "sonnet");
+        assert!(stats.heat[0].models.is_empty(), "补零的格子没有模型明细");
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -5,7 +5,7 @@
  * 这里只做可视化归一，不改数字本身；「每日 / 每周 / 累计」三档只是对同一份逐日数据换取值，
  * 格子与布局完全不变（所以切换不发请求、不重扫）。
  */
-import type { UsageHeatRow } from "@shared/types";
+import type { UsageHeatModel, UsageHeatRow } from "@shared/types";
 
 /** 热力图三档口径：当天 / 该格所在整周 / 窗口起点到当天。 */
 export type HeatMode = "day" | "week" | "cumulative";
@@ -56,6 +56,33 @@ export function heatValues(cells: readonly UsageHeatRow[], mode: HeatMode): numb
  }
  let acc = 0;
  return daily.map((v) => (acc += v));
+}
+
+/**
+ * 某一格在指定档位下的按模型拆分（悬停读数的明细行）：每日 = 当天；每周 = 该格所在整周；
+ * 累计 = 窗口起点到当天（含当天）。结果按 token 降序（同值按模型名），与后端同一形状。
+ */
+export function heatModels(
+ cells: readonly UsageHeatRow[],
+ mode: HeatMode,
+ index: number,
+): UsageHeatModel[] {
+ const start = Math.floor(index / 7) * 7;
+ const rows =
+  mode === "day"
+   ? [cells[index]]
+   : mode === "week"
+    ? cells.slice(start, start + 7)
+    : cells.slice(0, index + 1);
+ const merged: UsageHeatModel[] = [];
+ for (const row of rows) {
+  for (const m of row.models) {
+   const hit = merged.find((x) => x.model === m.model);
+   if (hit) hit.total += m.total;
+   else merged.push({ ...m });
+  }
+ }
+ return merged.sort((a, b) => b.total - a.total || a.model.localeCompare(b.model));
 }
 
 /**

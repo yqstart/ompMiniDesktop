@@ -11,16 +11,27 @@ import { UsagePanel } from "./UsagePanel";
  * 使用统计页的口径：
  * - 默认按「今日」拉取（days = 1），切范围才换窗口；
  * - 总览只有三张指标卡（tokens 用量 / Cache 命中率 / 活跃天数）；
- * - 「Token 活动」热力图独立于范围，右上「每日 / 每周 / 累计」只换格子取值、不再发请求。
+ * - 「Token 活动」热力图独立于范围，右上「每日 / 每周 / 累计」只换格子取值、不再发请求；
+ *   悬停有量的格子出浮层（总数 + 该档位下的按模型拆分，0 用量不出浮层），底部是「少 ▢▢▢▢▢ 多」对照条。
  */
 
-/** 368 天（2025-09-14 周日 → 2026-09-16），最后一天给一组好认的数字。 */
+/** 368 天（2025-09-14 周日 → 2026-09-16）；最后一天给两个模型，其余只有 sonnet。 */
 function makeHeat(): UsageHeatRow[] {
  const base = Date.UTC(2025, 8, 14);
  return Array.from({ length: 368 }, (_, i) => {
   const date = new Date(base + i * 86_400_000).toISOString().slice(0, 10);
-  if (i === 367) return { date, total: 1_234_567 };
-  return { date, total: i % 5 === 0 ? 0 : 1000 * (i + 1) };
+  if (i === 367) {
+   return {
+    date,
+    total: 1_234_567,
+    models: [
+     { model: "sonnet", total: 1_000_000 },
+     { model: "gpt-5", total: 234_567 },
+    ],
+   };
+  }
+  const total = i % 5 === 0 ? 0 : 1000 * (i + 1);
+  return { date, total, models: total > 0 ? [{ model: "sonnet", total }] : [] };
  });
 }
 
@@ -92,9 +103,19 @@ const radio = (label: string): HTMLButtonElement => {
  return found;
 };
 
-const heatTitles = (): (string | null)[] => {
+const heatGrid = (): Element => {
  const grid = container.querySelector('[role="img"][aria-label^="Token 活动热力图"]');
- return [...(grid?.querySelectorAll("[title]") ?? [])].map((el) => el.getAttribute("title"));
+ if (!grid) throw new Error("找不到热力图");
+ return grid;
+};
+
+/** 悬停第 `i` 格（React 用 mouseover 合成 onMouseEnter），返回浮层文本。 */
+const hoverCell = (i: number): string => {
+ const cell = heatGrid().children[i] as HTMLElement;
+ act(() => {
+  cell.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+ });
+ return container.querySelector('[class*="pointer-events-none"]')?.textContent ?? "";
 };
 
 describe("使用统计 › 范围", () => {
@@ -148,29 +169,46 @@ describe("使用统计 › 三张指标卡", () => {
 });
 
 describe("使用统计 › Token 活动热力图", () => {
- it("按后端给的日历逐日摆格子，并标出月份刻度", async () => {
+ it("按后端给的日历逐日摆格子，标注月份刻度，底部有对照条", async () => {
   await render();
   expect(container.textContent).toContain("Token 活动");
-  const titles = heatTitles();
-  expect(titles.length).toBe(heat.length);
-  expect(titles.at(-1)).toContain("2026-09-16");
-  expect(titles.at(-1)).toContain("1.23M tokens");
+  expect(heatGrid().children.length).toBe(heat.length);
   // 窗口起点在 9 月中（那一列不标），10 月起的 12 个月份刻度都在
   expect(container.textContent).toContain("10月");
   expect(container.textContent).toContain("9月");
+  // 底部对照条：少 ▢▢▢▢▢ 多
+  expect(container.textContent).toContain("少");
+  expect(container.textContent).toContain("多");
  });
 
- it("默认「每日」；切「每周 / 累计」只换格子读数，不再发请求", async () => {
+ it("悬停格子出浮层：日期 + token 总数 + 该格的模型拆分（0 用量不出浮层）", async () => {
+  await render();
+  const tip = hoverCell(367);
+  expect(tip).toContain("2026-09-16");
+  expect(tip).toContain("1.23M tokens");
+  expect(tip).toContain("sonnet");
+  expect(tip).toContain("1.00M");
+  expect(tip).toContain("gpt-5");
+  expect(tip).toContain("234.6K");
+  // 0 用量的格子（默认每日档）不出浮层；回到有量的格子还能出来
+  expect(hoverCell(0)).toBe("");
+  expect(hoverCell(367)).toContain("1.23M tokens");
+ });
+
+ it("默认「每日」；切「每周 / 累计」只换读数，不再发请求", async () => {
   await render();
   expect(radio("每日").getAttribute("aria-checked")).toBe("true");
   expect(mock.getUsageStats).toHaveBeenCalledTimes(1);
 
   act(() => radio("每周").click());
-  // 最后一行 = 本周（09-13 周日 → 09-16 周三）的合计：365K + 0 + 367K + 1.23M
-  expect(heatTitles().at(-1)).toBe("2026-09-13 – 2026-09-16 · 1.97M tokens");
+  // 浮层换成整周范围与整周合计；模型明细按周合并后降序（sonnet 365K+367K+1M，gpt-5 234.6K）
+  const weekTip = hoverCell(367);
+  expect(weekTip).toContain("2026-09-13 – 2026-09-16");
+  expect(weekTip).toContain("1.97M tokens");
+  expect(weekTip.indexOf("sonnet")).toBeLessThan(weekTip.indexOf("gpt-5"));
 
   act(() => radio("累计").click());
-  expect(heatTitles().at(-1)).toContain("截至 2026-09-16 · 累计");
+  expect(hoverCell(367)).toContain("截至 2026-09-16");
   expect(radio("累计").getAttribute("aria-checked")).toBe("true");
   expect(mock.getUsageStats).toHaveBeenCalledTimes(1);
  });

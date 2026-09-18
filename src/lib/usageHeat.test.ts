@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UsageHeatRow } from "@shared/types";
-import { heatLevel, heatThresholds, heatValues, monthTicks } from "./usageHeat";
+import { heatLevel, heatModels, heatThresholds, heatValues, monthTicks } from "./usageHeat";
 
 /** 从 `start`（周日）起造一段连续日历，只关心日期。 */
 function calendar(start: string, days: number): UsageHeatRow[] {
@@ -9,6 +9,7 @@ function calendar(start: string, days: number): UsageHeatRow[] {
   return Array.from({ length: days }, (_, i) => ({
     date: new Date(base + i * 86_400_000).toISOString().slice(0, 10),
     total: 0,
+    models: [],
   }));
 }
 
@@ -51,6 +52,32 @@ describe("三档取值", () => {
     for (const mode of ["day", "week", "cumulative"] as const) {
       expect(heatValues(cells, mode).length, mode).toBe(cells.length);
     }
+  });
+});
+
+describe("悬停明细（按模型拆分）", () => {
+  const cells: UsageHeatRow[] = [
+    { date: "2026-09-13", total: 30, models: [{ model: "sonnet", total: 20 }, { model: "gpt-5", total: 10 }] },
+    { date: "2026-09-14", total: 5, models: [{ model: "gpt-5", total: 5 }] },
+    { date: "2026-09-15", total: 7, models: [{ model: "sonnet", total: 7 }] },
+    { date: "2026-09-16", total: 100, models: [{ model: "sonnet", total: 100 }] },
+  ];
+
+  it("每日 = 当天；每周 = 整周合并后按 token 降序；累计 = 起点到当天", () => {
+    expect(heatModels(cells, "day", 3)).toEqual([{ model: "sonnet", total: 100 }]);
+    expect(heatModels(cells, "week", 3)).toEqual([
+      { model: "sonnet", total: 127 },
+      { model: "gpt-5", total: 15 },
+    ]);
+    expect(heatModels(cells, "cumulative", 1)).toEqual([
+      { model: "sonnet", total: 20 },
+      { model: "gpt-5", total: 15 },
+    ]);
+  });
+
+  it("没有用量的格子没有明细", () => {
+    expect(heatModels(calendar("2026-09-13", 7), "day", 2)).toEqual([]);
+    expect(heatModels(calendar("2026-09-13", 7), "cumulative", 6)).toEqual([]);
   });
 });
 

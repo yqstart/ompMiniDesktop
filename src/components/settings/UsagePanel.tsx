@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChartBar, Loader, Refresh } from "reicon-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
-import { HEAT_MODES, heatLevel, heatThresholds, heatValues, monthTicks, type HeatMode } from "../../lib/usageHeat";
+import { HEAT_MODES, heatLevel, heatModels, heatThresholds, heatValues, monthTicks, type HeatMode } from "../../lib/usageHeat";
 import type { UsageHeatRow, UsageStats } from "@shared/types";
 
 /** 统计范围：与 ZCode 的「使用统计」同档（今日 / 近 7 日 / 近 30 日 / 全部）。 */
@@ -55,7 +55,10 @@ const HEAT_LEVEL_CLASS = ["bg-active", "bg-accent/20", "bg-accent/45", "bg-accen
  */
 function Heatmap({ cells, numLocale }: { cells: UsageHeatRow[]; numLocale: string }) {
  const t = useText();
+ const cardRef = useRef<HTMLElement>(null);
  const [mode, setMode] = useState<HeatMode>("day");
+ /** 悬停的格子：序号 + 光标相对卡片的坐标（浮层跟随；卡片宽度用来把浮层夹在卡内）。 */
+ const [hover, setHover] = useState<{ i: number; x: number; y: number; width: number } | null>(null);
  const values = useMemo(() => heatValues(cells, mode), [cells, mode]);
  const thresholds = useMemo(() => heatThresholds(values), [values]);
  const months = useMemo(() => monthTicks(cells, numLocale), [cells, numLocale]);
@@ -66,20 +69,34 @@ function Heatmap({ cells, numLocale }: { cells: UsageHeatRow[]; numLocale: strin
   cumulative: t.usageHeatCumulative,
  };
 
- /** 格子读数：三档各自说清这个数字是什么（原生 title，悬停即见）。 */
- const cellTitle = (i: number): string => {
-  const value = fmtTokens(values[i], numLocale);
+ /** 浮层标题：这个格子代表哪段时间（三档各自的说法）。 */
+ const cellLabel = (i: number): string => {
   if (mode === "week") {
-   const head = cells[Math.floor(i / 7) * 7].date;
-   const tail = cells[Math.min(Math.floor(i / 7) * 7 + 6, cells.length - 1)].date;
-   return fmt(t.usageHeatCellWeek, head, tail, value);
+   const start = Math.floor(i / 7) * 7;
+   return `${cells[start].date} – ${cells[Math.min(start + 6, cells.length - 1)].date}`;
   }
-  if (mode === "cumulative") return fmt(t.usageHeatCellCumulative, cells[i].date, value);
-  return fmt(t.usageHeatCellDay, cells[i].date, value);
+  if (mode === "cumulative") return fmt(t.usageHeatThrough, cells[i].date);
+  return cells[i].date;
+ };
+
+ /** 悬停的格子：0 用量的格子不出浮层（值按当前档位取，切档后自动跟着变）。 */
+ const hovered = hover && values[hover.i] > 0 ? hover : null;
+ /** 浮层明细：当前档位下该格的按模型拆分（每日 = 当天 / 每周 = 整周 / 累计 = 到当天）。 */
+ const hoveredModels = hovered ? heatModels(cells, mode, hovered.i) : [];
+ const onCellEnter = (clientX: number, clientY: number, i: number) => {
+  const card = cardRef.current;
+  if (!card) return;
+  const rect = card.getBoundingClientRect();
+  setHover({ i, x: clientX - rect.left, y: clientY - rect.top, width: rect.width });
  };
 
  return (
-  <section aria-label={t.usageHeatTitle} className="mt-6 rounded-lg border border-border-soft p-3">
+  <section
+   ref={cardRef}
+   aria-label={t.usageHeatTitle}
+   onMouseLeave={() => setHover(null)}
+   className="relative mt-6 rounded-lg border border-border-soft p-3"
+  >
    <div className="flex flex-wrap items-center gap-2">
     <h3 className="text-[13px] font-medium">{t.usageHeatTitle}</h3>
     <div role="radiogroup" aria-label={t.usageHeatModeAria} className="ml-auto flex gap-1 rounded-md bg-background p-1">
@@ -111,8 +128,8 @@ function Heatmap({ cells, numLocale }: { cells: UsageHeatRow[]; numLocale: strin
     {cells.map((c, i) => (
      <span
       key={c.date}
-      title={cellTitle(i)}
-      className={`aspect-square rounded-xs ${HEAT_LEVEL_CLASS[heatLevel(values[i], thresholds)]}`}
+      onMouseEnter={(e) => onCellEnter(e.clientX, e.clientY, i)}
+      className={`aspect-square rounded-xs ${HEAT_LEVEL_CLASS[heatLevel(values[i], thresholds)]} ${hover?.i === i ? "ring-1 ring-foreground/40" : ""}`}
      />
     ))}
    </div>
@@ -130,6 +147,39 @@ function Heatmap({ cells, numLocale }: { cells: UsageHeatRow[]; numLocale: strin
       </span>
      );
     })}
+   </div>
+   {hovered && (
+    <div
+     className={`pointer-events-none absolute z-10 w-56 rounded-md border border-border-soft bg-elevated px-3 py-2 shadow-lg ${hovered.i % 7 >= 5 ? "-translate-y-full" : ""
+      }`}
+     style={{ left: Math.max(8, Math.min(hovered.x + 12, hovered.width - 232)), top: hovered.y + (hovered.i % 7 >= 5 ? -8 : 14) }}
+    >
+     <div className="text-[11px] text-faint">{cellLabel(hovered.i)}</div>
+     <div className="mt-0.5 font-mono text-[12px]">{fmtTokens(values[hovered.i], numLocale)} tokens</div>
+     {hoveredModels.length > 0 && (
+      <div className="mt-1.5 flex flex-col gap-0.5 border-t border-border-soft pt-1.5">
+       {hoveredModels.slice(0, 6).map((m) => (
+        <div key={m.model} className="flex items-baseline justify-between gap-3">
+         <span className="min-w-0 truncate text-[11px] text-muted">{m.model || t.usageHeatUnknownModel}</span>
+         <span className="shrink-0 font-mono text-[11px]">{fmtTokens(m.total, numLocale)}</span>
+        </div>
+       ))}
+       {hoveredModels.length > 6 && (
+        <div className="text-[11px] text-faint">{fmt(t.usageHeatModelsRest, hoveredModels.length - 6)}</div>
+       )}
+      </div>
+     )}
+    </div>
+   )}
+   {/* 底部对照条：0 档空格 → 4 档 accent（与格子同一套色档，从左到右由浅到深） */}
+   <div className="mt-2 flex flex-wrap items-center justify-center gap-1.5 text-[10px] text-faint">
+    <span>{t.usageHeatLess}</span>
+    <span className="flex items-center gap-[3px]" aria-hidden>
+     {HEAT_LEVEL_CLASS.map((cls) => (
+      <span key={cls} className={`h-3 w-3 rounded-[3px] ${cls}`} />
+     ))}
+    </span>
+    <span>{t.usageHeatMore}</span>
    </div>
   </section>
  );

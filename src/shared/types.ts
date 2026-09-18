@@ -228,8 +228,11 @@ export type UsageTotals = UsageBucket & {
  cacheHitRate: number | null;
 };
 
+/** 热力图格子里的一个模型用量（后端已按 token 降序）。 */
+export type UsageHeatModel = { model: string; total: number };
+
 /** 热力图的一格（`date` = 本地日期；没跑的日子补零，日历才成网格）。 */
-export type UsageHeatRow = { date: string; total: number };
+export type UsageHeatRow = { date: string; total: number; models: UsageHeatModel[] };
 
 /** 使用统计整体回包（`truncated` = 因扫描预算提前收手，统计可能不全）。 */
 export type UsageStats = {

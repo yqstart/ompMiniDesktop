@@ -260,9 +260,11 @@ const ZH = {
  usageHeatWeek: "每周",
  usageHeatCumulative: "累计",
  usageHeatAria: "Token 活动热力图 · {0}",
- usageHeatCellDay: "{0} · {1} tokens",
- usageHeatCellWeek: "{0} – {1} · {2} tokens",
- usageHeatCellCumulative: "截至 {0} · 累计 {1} tokens",
+ usageHeatThrough: "截至 {0}",
+ usageHeatLess: "少",
+ usageHeatMore: "多",
+ usageHeatModelsRest: "另有 {0} 个模型",
+ usageHeatUnknownModel: "未知模型",
 
  // 设置 › 模型 ›「供应商」区块（合并的「添加供应商」面板：登录型凭据 + 自定义 models.yml）
  providersSection: "供应商",
@@ -757,9 +759,11 @@ const EN: Record<TextKey, string> = {
  usageHeatWeek: "Weekly",
  usageHeatCumulative: "Cumulative",
  usageHeatAria: "Token activity heatmap · {0}",
- usageHeatCellDay: "{0} · {1} tokens",
- usageHeatCellWeek: "{0} – {1} · {2} tokens",
- usageHeatCellCumulative: "through {0} · {1} tokens cumulative",
+ usageHeatThrough: "through {0}",
+ usageHeatLess: "Less",
+ usageHeatMore: "More",
+ usageHeatModelsRest: "{0} more models",
+ usageHeatUnknownModel: "Unknown model",
 
  providersSection: "Providers",
  providersHint:
