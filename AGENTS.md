@@ -71,7 +71,7 @@ src-tauri/src/
   providers.rs             # 设置 › 供应商 / 模型后端：auth-broker login/logout + modelRoles + cycleOrder + retry.fallbackChains
   memories.rs              # 设置 › 记忆后端：列 / 读 / 删 omp 项目记忆（含单测）
   usage.rs                 # 设置 › 使用统计后端：扫会话 jsonl 聚合用量 + 53 周热力图窗口（只读；含单测）
-scripts/                   # e2e-ipc-selfcheck.mjs（IPC 契约双向自检）、generate-icons.mjs
+scripts/                   # e2e-ipc-selfcheck.mjs（IPC 契约双向自检）、generate-icons.mjs、fixup-latest-json.mjs（latest.json 资产 URL → 公开直链；发版 fixup job 与存量修补共用）
 ```
 
 `lib/` 明细（V11）：
@@ -152,6 +152,7 @@ pnpm icon                   # 从 design-system/icon/omp-mini-icon.svg 重生成
 ## 发版与更新
 
 - 打 `v*` tag 推送 → `.github/workflows/release.yml` 四平台打包并生成 `latest.json` 供应用内 updater 拉取。**仓库必须保持 public**：updater 匿名拉取 `latest.json`，私有仓库会 404（工作流的守卫 job 会挡住私有状态发版）。
+- `latest.json` 的资产链接必须是公开直链：tauri-action v1 默认写 `api.github.com/.../releases/assets/<id>`（匿名限流 60 次/小时/出口 IP，应用内下载经系统代理会 403「能检查、不能下载」），发版末尾的 `fixup` job 用 `scripts/fixup-latest-json.mjs` 统一改写为 `releases/download` 直链；存量 release 也用同一脚本修补。
 - updater 需签名校验：`src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey` 已配置（私钥全文需在仓库 Secrets `TAURI_SIGNING_PRIVATE_KEY`，见 README「应用内更新」节）。
 - 升版本号发 Release 前，必须同步更新 `CHANGELOG.md`（将 Unreleased 条目归入新版本节并写明日期）。
 

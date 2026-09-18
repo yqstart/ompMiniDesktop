@@ -83,6 +83,7 @@ pnpm tauri:build    # 产物见 src-tauri/target/release/bundle/
 - 触发：启动后静默检查一次（有更新在左栏「设置」入口点亮小点，不打断）；设置页「应用更新」可手动检查。
 - 行为：有更新弹「立即更新 / 稍后更新」；下载完成后可「立即重启 / 稍后重启」（稍后则下次启动生效）；稍后过的版本本轮不再弹窗。
 - 发版流程：打 `v*` tag 推送 → GitHub Actions Release 工作流多平台打包并生成 `latest.json`。
+- **`latest.json` 里的资产链接必须是公开直链**：tauri-action v1 默认写 `api.github.com/.../releases/assets/<id>` 形式的资产 API 链接，而 REST API 域对匿名请求限流 60 次/小时/**出口 IP**——应用内下载走系统代理（reqwest 默认启用 `system-proxy`），共享节点 IP 上配额耗尽就会报 `Download request failed with status: 403 Forbidden`；检查更新走 `github.com` 网页域不受限，所以表现为「能检查、不能下载」。发布工作流的 `fixup` job 会用 `scripts/fixup-latest-json.mjs` 统一改写为 `releases/download` 直链（幂等，也已用于修补存量 release）。
 - **仓库必须保持 public**：updater 以匿名请求拉 `releases/latest/download/latest.json`，私有仓库会被 GitHub 以 404 拒绝（应用内报 `Could not fetch a valid release JSON from the remote`）——Release 工作流的守卫 job 会挡住私有状态下的发版。
 
 > 首次正式发版前必须先配签名，否则 updater 会拒绝安装：

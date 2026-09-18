@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 修复
+
+- 应用内更新下载报 `Download request failed with status: 403 Forbidden`：tauri-action 生成的 `latest.json` 里是 `api.github.com` 资产 API 链接（匿名限流 60 次/小时/出口 IP，共享代理节点极易耗尽；检查更新走 `github.com` 网页域故不受影响）。Release 工作流新增 `fixup` job，用 `scripts/fixup-latest-json.mjs` 把资产 URL 统一改写为 `releases/download` 公开直链；v0.3.0 的存量 `latest.json` 已用同一脚本修补。
+
 ## [0.3.0] - 2026-09-18
 
 ### 新增
