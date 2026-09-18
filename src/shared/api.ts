@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
-import type { CommitEvent, FallbackChainsInfo, GitInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, Overlay, ProjectView, ProviderLoginStatus, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
+import type { CommitEvent, FallbackChainsInfo, GitInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, Overlay, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -135,6 +135,12 @@ export const api = {
   * 到点即停并把 `truncated` 置 true——**只读**，不写 omp、不写覆盖层。
   */
  getUsageStats: (days: number | null) => call<UsageStats>(IPC.getUsageStats, { days }),
+ /**
+  * 供应商用量（设置 › 供应商用量）：跑 `omp usage --json` 取各已登录供应商的
+  * 滚动窗口用量（5 小时 / 每周 / 每月）——上游只有 omp 自己拿得到这些数据；
+  * 壳侧只解析、不直连任何配额 API、不碰凭证库。**只读**（不动 omp 缓存）。
+  */
+ getProviderUsage: () => call<ProviderUsage>(IPC.getProviderUsage),
  /**
   * omp 常用设置（设置 › 通用）：白名单键的**批量读**（一次 `omp config list --json`，
   * 不逐键 spawn 进程）+ 单键写 / 恢复默认。写的是 omp **全局层**

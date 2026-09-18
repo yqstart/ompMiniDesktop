@@ -97,7 +97,7 @@
 - 颜色不作唯一信号：状态同时有文字（运行中/成功/失败/等待审批）。
 - 异步内容预留占位，禁止内容跳动（content-jumping）。**滚动条也要占位**：左栏会话列表 `[scrollbar-gutter:stable]`——列表从「不满一屏」长到「有滚动条」时，内容宽度不变、横向不跳一下。
 
-## 8. 组件速查（V11 终端工作区 + 设置页五项菜单）
+## 8. 组件速查（V11 终端工作区 + 设置页六项菜单）
 
 ### 图标（Reicon）
 
@@ -123,10 +123,10 @@
 - `CommitTaskPanel`（`src/components/git/CommitTaskPanel.tsx`）= 工作区「提交并推送」任务浮层（V14，App 常驻挂载、`activeCommitCwd` 控制显隐）：标题（提交并推送 · 项目 · 分支）+ 阶段徽章（`Loader` 转 / `CheckCircle` / `AlertTriangle` / `X`）+ 流式日志（mono、后端已去 ANSI、自动滚底、上限 1000 行）+ 提交结果列表（split 场景多条）+ 错误与 hint + 底部按钮（运行中：取消 / 后台运行；committed：推送 / 关闭；failed：重试 / 关闭）。`fixed inset-0 z-30` 遮罩 + `max-w-lg` 卡（对话框层）；关闭 = **转后台**（任务继续，行徽章指示），失败记录保留到用户关闭（已阅即清）。
 - `ThemeToggle`（`src/components/ThemeToggle.tsx`）= 皮肤三档分段控件（跟随系统 / 深色 / 浅色），**只挂在左栏底部「设置」行右侧**：`role="radiogroup"` + 三个 `role="radio"`（`aria-checked`），左右方向键组内循环；选中 `bg-active`。只切 `<html class="dark">`（localStorage `omp.theme.v1`），不写 omp 配置。终端配色跟着它换（`--term-*`）。
 - `LanguageToggle`（`src/components/LanguageToggle.tsx`）= 界面语言三档分段控件（跟随系统 / 简体中文 / English），**只挂在左栏底部、`ThemeToggle` 左侧**，样式同款。语言名是自称（`LOCALE_NAMES` / `LOCALE_SHORT` 不进字典）；`system` 档实际语言由 `resolveLocale` 解析（`zh*` → 中文）。偏好存 localStorage `omp.locale.v1`。
-- `SettingsPage` = 设置标签面板，左侧五项图标导航（**无标题行，菜单从顶端开始**）+ 右侧唯一滚动内容区，宽窗 176px 导航 / 紧凑内容区 44px 图标导航（保留可访问名称与 title）；44px 导航行。五个入口与隐藏保活语义不变；组件用 `@container/settings` / `@container/panel` 随可用空间换行，不按全窗口宽度猜测面板宽度。
+- `SettingsPage` = 设置标签面板，左侧**六项**图标导航（**无标题行，菜单从顶端开始**）+ 右侧唯一滚动内容区，宽窗 176px 导航 / 紧凑内容区 44px 图标导航（保留可访问名称与 title）；44px 导航行。六个入口与隐藏保活语义不变；组件用 `@container/settings` / `@container/panel` 随可用空间换行，不按全窗口宽度猜测面板宽度。
 - `GeneralSettingsPanel`（`src/components/settings/GeneralSettingsPanel.tsx`）= 「设置 › 通用」的「omp 常用设置」：**41 个常用键**（白名单 / 分组 / 枚举取值表在 `src/lib/ompSettings.ts`；V11 起含 `tools.approvalMode`）的读写面。折叠分组 + 开关 / 行内枚举 / 数字框 + 行尾「恢复 omp 默认值」；写入乐观更新、失败回滚；整行 `title` 是上游英文说明。**V11 的 V11 键块（`s_tools_approvalMode` 等）与值标签（`svApproval*`）是动态字典键，不许被"未使用键"清理误删。**
 - `ProviderPicker` / `CustomProviderEditForm` / `ProviderModelsDialog` / `DialogShell`（`src/components/settings/`）= 「添加供应商」与「挑选模型」两个模态（V12c）：选择器（搜索 + 已配置置顶 + 首项「自定义」）、models.yml 表单（名称可改 / 接口类型两档 / 只有 API Key / 模型列表）、供应商模型星标列表（全选 / 清空作用于过滤结果）、模态壳（`fixed` 全屏遮罩 + 居中卡片，Esc / 遮罩 / × 关）。`StarToggle`（`src/components/settings/StarToggle.tsx`）= 共享挑选星标（挑选面板 / 我的模型列表共用一份）；`Switch`（`src/components/settings/Switch.tsx`）= 共享开关（通用设置行与自定义模型表单共用一份，不许各写一份）。
-- `ModelsPanel`（`src/components/settings/ModelsPanel.tsx`）= 「设置 › 模型」的页壳（V12b 起为**唯一模型管理面**，四区块顺序：**供应商 → 我的模型 → 模型角色 → 失败转移**——供应商置顶，因为「先添加供应商、再在弹窗里挑模型」是使用动线）；`ProvidersSection`（登录 / 登出 + 已添加列表 + 「添加供应商」/「挑选模型」两个弹窗）/ `FallbackChains` / `ModelPickList` / `MemoryPanel` / `ArchivedSessions` / `UsagePanel`：设置页其余区块 / 页签，口径同各自排期文档（v3 / v4 / v5 / v9 / v12 §6）。其中 `ArchivedSessions`（`src/components/ArchivedSessions.tsx`）= 「已归档对话」：标题行（计数 + 刷新）→ 口径说明 → 按项目分组（组头 = 折叠 + 名称 + 路径 + 计数 + 恢复全部 / 删除全部）→ 会话行（**点击 = 恢复并在终端里继续**（V11：unarchive + 新终端 resume；旧「只读回放」已随聊天界面退场）+ 日期 + 恢复 / 删除）。删除走 `ConfirmDialog`。数据来自 `list_archived_sessions`（不看扫描窗口）。
+- `ModelsPanel`（`src/components/settings/ModelsPanel.tsx`）= 「设置 › 模型」的页壳（V12b 起为**唯一模型管理面**，四区块顺序：**供应商 → 我的模型 → 模型角色 → 失败转移**——供应商置顶，因为「先添加供应商、再在弹窗里挑模型」是使用动线）；`ProvidersSection`（登录 / 登出 + 已添加列表 + 「添加供应商」/「挑选模型」两个弹窗）/ `FallbackChains` / `ModelPickList` / `MemoryPanel` / `ArchivedSessions` / `UsagePanel` / `ProviderUsagePanel`：设置页其余区块 / 页签，口径同各自排期文档（v3 / v4 / v5 / v9 / v12 §6 / v15）。其中 `ArchivedSessions`（`src/components/ArchivedSessions.tsx`）= 「已归档对话」：标题行（计数 + 刷新）→ 口径说明 → 按项目分组（组头 = 折叠 + 名称 + 路径 + 计数 + 恢复全部 / 删除全部）→ 会话行（**点击 = 恢复并在终端里继续**（V11：unarchive + 新终端 resume；旧「只读回放」已随聊天界面退场）+ 日期 + 恢复 / 删除）。删除走 `ConfirmDialog`。数据来自 `list_archived_sessions`（不看扫描窗口）。
 - 新增组件先查此表，禁止同义重复（如第二种 confirm 框、第二种标签栏）。
 
 ## 9. 应用图标

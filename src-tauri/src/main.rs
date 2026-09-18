@@ -1,9 +1,11 @@
 mod commands;
+mod extra_usage;
 mod git_commit;
 mod git_info;
 mod memories;
 mod models_config;
 mod overlay;
+mod provider_usage;
 mod providers;
 mod pty;
 mod session_scan;
@@ -69,6 +71,7 @@ fn main() {
             memories::delete_memory_file,
             memories::delete_memory_project,
             usage::get_usage_stats,
+            provider_usage::get_provider_usage,
             settings::get_omp_settings,
             settings::set_omp_setting,
             settings::reset_omp_setting,

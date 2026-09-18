@@ -19,6 +19,7 @@ Tauri v2 + React + TS + Tailwind v4 + Zustand，包管理 pnpm。
 |自定义模型与添加供应商（现行）|`docs/v12-schedule.md`|`models.yml` 可视化 + 合并式「添加供应商」面板（V12c）的上游实测、实现与完成口径（**改这块前先读**）|
 |快速切换环（现行）|`docs/v13-schedule.md`|`cycleOrder`（omp 终端 Ctrl+P 的轮换序）可视化的上游实测、实现与完成口径|
 |工作区提交并推送（现行）|`docs/v14-schedule.md`|左栏工作区行「提交并推送」（`omp commit` 集成，两段式：提交 → 过目信息 → 推送）的上游实测、设计与完成口径|
+|供应商用量（现行）|`docs/v15-schedule.md`|设置 ›「供应商用量」（`omp usage --json` 的滚动窗口：5 小时 / 每周 / 每月）的上游实测、设计与完成口径（含「能否自定义配置取用量」的结论）|
 |设计真相|`design-system/MASTER.md`|token、布局、交互、组件命名（改 UI 先读）|
 |应用图标|`design-system/icon/omp-mini-icon.svg`|π 字标矢量唯一源，`pnpm icon` 重新生成 `src-tauri/icons/`|
 |更新日志|`CHANGELOG.md`|Keep a Changelog 风格，发版时归入新版本节|
@@ -28,7 +29,7 @@ Tauri v2 + React + TS + Tailwind v4 + Zustand，包管理 pnpm。
 
 - 桌面壳：Tauri v2（`src-tauri/`，identifier `com.omnidesktop.mini`；窗口 `titleBarStyle: Overlay` + `hiddenTitle`，标题栏是自绘的——顶栏与左栏红绿灯占位都挂 `data-tauri-drag-region`，拖动走 `core:window` 的 `start_dragging`。**该权限不在 `core:default` 里**，必须在 `src-tauri/capabilities/default.json` 显式加 `core:window:allow-start-dragging`）
 - 前端：React 19 + TS + Vite + Tailwind v4 + Zustand（`src/`）+ `@xterm/xterm` 6（终端模拟器，DOM renderer）
-- 后端：Rust + tokio + serde/serde_json + **`portable-pty`**（PTY 进程管理）+ tauri-plugin（dialog/opener/process/updater，`main.rs` 实注册）
+- 后端：Rust + tokio + serde/serde_json + **`portable-pty`**（PTY 进程管理）+ **`reqwest`**（供应商用量的补充探针，rustls/webpki-roots）+ tauri-plugin（dialog/opener/process/updater，`main.rs` 实注册）
 - 工具链：Node 22 + pnpm 11；Rust stable（已验证 1.97）+ 本地 `@tauri-apps/cli`（`pnpm tauri:*` 走项目本地 CLI）
 - 上游运行时：`omp` 18.x（已验证 18.2.2），不随仓库分发，用户另行安装
 
@@ -38,7 +39,7 @@ Tauri v2 + React + TS + Tailwind v4 + Zustand，包管理 pnpm。
 src/
   app/App.tsx              # 顶层装配：左栏（可拖宽/窄窗抽屉）+ 标签栏（终端 + 设置）+ 面板区 + 终端关闭确认 + 全局快捷键（⌘T/⌘W/⌘1..9）
   components/health…       # HealthBanner（omp 不可用横幅）
-  components/SettingsPage.tsx        # 设置页外壳（左栏竖向菜单：通用 / 模型 / 记忆 / 使用统计 / 已归档对话 + 右侧内容区）
+  components/SettingsPage.tsx        # 设置页外壳（左栏竖向菜单：通用 / 模型 / 记忆 / 使用统计 / 供应商用量 / 已归档对话 + 右侧内容区）
   components/ArchivedSessions.tsx    # 设置 ›「已归档对话」：恢复（= 取消归档 + 终端 resume）/ 删除，行级与分组级
   components/ConfirmDialog.tsx       # 通用二次确认浮层（跨分组危险操作用它）
   components/LanguageToggle.tsx      # 界面语言三档（跟随系统 / 中 / EN），挂左栏底部「设置」行右侧
@@ -51,7 +52,7 @@ src/
     TerminalView.tsx       # 终端面板区：全部终端面板（隐藏不销毁）+ 空态（标签栏与关闭确认归 App）
     TerminalTabs.tsx       # 标签栏（常驻）：终端标签（π 状态标 + 会话名 + 关闭）+ 设置标签（单例）+ ＋
     TerminalPane.tsx       # 单个终端：xterm 实例 + PTY 管道（Channel）+ fit/resize + 退出浮层（重启/关闭）
-  components/settings/     # GeneralSettingsPanel（通用）/ ModelsPanel（模型页壳：我的模型 / 供应商 / 角色 / 快速切换环 / 转移）/ CycleOrderSection（快速切换环：Ctrl+P 轮换序）/ ProvidersSection（供应商合并区块：已添加列表 + 两个弹窗）/ ProviderPicker（提供商搜索选择器）/ ProviderModelsDialog（挑选模型弹窗 + 列表）/ CustomProviderEditForm（models.yml 表单）/ DialogShell（设置页模态壳）/ FallbackChains / ModelPickList / MemoryPanel / UsagePanel（使用统计：tokens 用量 / Cache 命中率 / 活跃天数三张卡，默认「今日」+「Token 活动」热力图：每日 / 每周 / 累计三档、悬停浮层给按模型拆分、底部「少 ▢▢▢▢▢ 多」对照条）/ StarToggle + Switch（共享小件）
+  components/settings/     # GeneralSettingsPanel（通用）/ ModelsPanel（模型页壳：我的模型 / 供应商 / 角色 / 快速切换环 / 转移）/ CycleOrderSection（快速切换环：Ctrl+P 轮换序）/ ProvidersSection（供应商合并区块：已添加列表 + 两个弹窗）/ ProviderPicker（提供商搜索选择器）/ ProviderModelsDialog（挑选模型弹窗 + 列表）/ CustomProviderEditForm（models.yml 表单）/ DialogShell（设置页模态壳）/ FallbackChains / ModelPickList / MemoryPanel / UsagePanel（使用统计：tokens 用量 / Cache 命中率 / 活跃天数三张卡，默认「今日」+「Token 活动」热力图：每日 / 每周 / 累计三档、悬停浮层给按模型拆分、底部「少 ▢▢▢▢▢ 多」对照条）/ ProviderUsagePanel（供应商用量：各供应商滚动窗口的进度条 + 重置倒计时 + 无数据 / 停用凭据块；V15）/ StarToggle + Switch（共享小件）
   components/update/       # UpdateDialog（App 常驻挂载，updateDialogOpen 控制；有更新的提醒在左栏设置入口小点）
   components/git/
     CommitTaskPanel.tsx    # 工作区「提交并推送」任务浮层（V14：流式日志 / 提交结果 / 取消 / 后台运行 / 推送 / 重试）
@@ -71,6 +72,8 @@ src-tauri/src/
   providers.rs             # 设置 › 供应商 / 模型后端：auth-broker login/logout + modelRoles + cycleOrder + retry.fallbackChains
   memories.rs              # 设置 › 记忆后端：列 / 读 / 删 omp 项目记忆（含单测）
   usage.rs                 # 设置 › 使用统计后端：扫会话 jsonl 聚合 tokens 用量 / Cache 命中率 / 活跃天数 + 53 周热力图窗口（逐日按模型拆分）（只读；含单测）
+  provider_usage.rs        # 设置 › 供应商用量后端（V15；从 V11 删除的 quota.rs 恢复并增强）：`omp usage --json` 的解析与命令（只读；含单测与真实 omp 慢测试）
+  extra_usage.rs           # 供应商用量的**补充探针**（V15 二轮）：omp 无探针的 commandcode / deepseek 由壳侧补查（API key 经 `omp token` 内存传递、不落盘；reqwest 只读 GET；含单测与真实 commandcode 慢测试）
 scripts/                   # e2e-ipc-selfcheck.mjs（IPC 契约双向自检）、generate-icons.mjs、fixup-latest-json.mjs（latest.json 资产 URL → 公开直链；发版 fixup job 与存量修补共用）
 ```
 
@@ -91,6 +94,7 @@ sessionBatch.ts  # 批量归档/恢复/删除的唯一实现（BATCH_LIMIT 200 +
 myModels.ts / modelSelector.ts / modelNames.ts / roleNames.ts / ompSettings.ts  # 设置页数据层（含单测；myModels = 我的模型，模型选择器的候选范围）
 customModels.ts  # 自定义模型（models.yml）保真编辑数据层（yaml 包；含单测）
 usageHeat.ts     # Token 活动热力图（GitHub 贡献图口径）的纯计算：每日 / 每周 / 累计三档取值与悬停按模型拆分 `heatModels` + 分位分档 + 月份刻度（含单测）
+providerUsage.ts # 供应商用量数据层（V15）：模块级快照（useSyncExternalStore）+ 60s 节流 / 单飞 / 失败保留旧值 + 分组 / 告警档 / 相对时间纯函数（含单测）
 ompDiag.ts       # omp 自检与手动指定路径
 appUpdate.ts     # 应用内更新状态机
 ```
@@ -107,7 +111,7 @@ appUpdate.ts     # 应用内更新状态机
 - **工作区树刷新入口唯一**：`lib/workspaces.ts` 的 `loadWorkspaces()`（拉取 + 落 store + 失效选中项回退）。项目增删 / worktree 创建后都调它（`refreshSidebar`）。
 - **工作区「提交并推送」（V14）= `omp commit` 的壳侧封装**：左栏工作区行 hover 按钮 / 待推送徽章发起，**两段式**——`omp commit`（AI 生成信息 + changelog 维护，~20s）只提交，浮层里过目提交信息后点「推送」走 `omp commit --push` 的无改动快路径（~2s）。**任务按 cwd 建表**（`git_commit.rs`：不同工作区可并行 = Cursor 式「多个任务一起跑」，同一工作区 BUSY；取消与应用退出打进程组收尾）。**预检**（一条 `git status --porcelain -b` 出 dirty / ahead / upstream）决定跑什么：有改动 → 提交；仅 ahead **或无上游**（ahead 无法计数）→ 推送；干净且同步 → noop 不跑 omp——预检同时挡掉非仓库时上游吐的 JS 堆栈。**终态判定不解析上游的人类输出**：退出码 + 运行前后 HEAD 对比（`classify` 纯函数）+ 从 `git log` 读本次提交（split 场景多条）；「commit 成立但 push 失败」= 退出码 1 且 HEAD 已变（git 错误在 stderr，hint 识别无上游 / 无权限 / non-fast-forward）。输出经 Channel 流式（Rust 侧去 ANSI，stdout/stderr 混流按行），store 只放任务视图（日志 1000 行保尾）；**关闭浮层 = 转后台**（行徽章指示），后台成功即清记录、失败保留（已阅即清）。行徽章的 dirty / 领先·落后远程（ahead / behind）/ 上游缺失标记来自 git 快照（启动 / 任务结束 / 窗口可见 / 终端 π 转就绪时防抖刷新，**不轮询**），点按钮时的后端预检是最终裁决。上游行为实测（`docs/v14-schedule.md` §1）：自动 `add -A`（**含未跟踪文件**）、无关改动拆多个提交、`-c` 可传中文要求但摘要仍须英文动词开头。
 - **会话弹窗（项目行 Clock）**：数据 = `list_sessions(projectId)`（归属含 worktree）；行点击 = 新终端 `omp --resume <id>`；归档 / 恢复 = 覆盖层批量命令（单条=数组长度 1）；删除 = `delete_sessions` + ConfirmDialog。设置 ›「已归档对话」是归档的唯一管理面（不受扫描窗口限制），其「打开」= **恢复（unarchive）+ 终端 resume**（V11 没有只读回放渲染器）。
-- **设置是标签栏里的单例标签**：左栏底部「设置」入口打开 / 聚焦（`openSettingsTab`），标签的 `×` 或 ⌘W 关闭（`closeSettingsTab`，回到上次的终端标签；关闭最后一个终端标签时若设置标签开着则自动切过去）。设置页五个页签仍是全 app 唯一改 omp 状态的地方（除本应用偏好）：通用（`omp config` 白名单 **41 项**——V11 把 `tools.approvalMode` 收回本页）/ **模型**（V12b 起为唯一模型管理面；V12c 把「供应商」与「自定义模型」并成**一个区块 + 两个弹窗**：**供应商在最上方** → 我的模型（挑选结果）→ `modelRoles` → **快速切换环（`cycleOrder`）** → `retry.fallbackChains`；「添加供应商」弹窗 = 可搜索的提供商选择器 → API key / OAuth 走 `auth-broker login`，首项「自定义」写 models.yml（自定义表单：**名称可改**——改键保位置与原注释，支持中文（omp 实测无字符集约束，只挡空白与 `/` 等歧义字符）；接口类型只给 `openai-completions` / `anthropic-messages` 两档，既有文件里的其它 `api` 值原样列出保留；**认证只有 API Key**，留空 = `auth: none`）；「挑选模型」弹窗 = 该供应商的模型星标；平铺的「可用模型」目录已删除；**从终端标签切回设置标签会重读 omp 的角色 / 转移链**——omp TUI 里改完即识别，模型目录走 `get_models` 的 5 分钟缓存不额外重拉）/ 记忆（只删不写）/ 使用统计（只读；tokens 用量 / Cache 命中率 / 活跃天数三张卡 +「Token 活动」热力图，默认「今日」）/ 已归档对话（覆盖层 + 删文件）。读写口径与实测结论见 `docs/v8-schedule.md` / `docs/v9-schedule.md`（仍然有效）。
+- **设置是标签栏里的单例标签**：左栏底部「设置」入口打开 / 聚焦（`openSettingsTab`），标签的 `×` 或 ⌘W 关闭（`closeSettingsTab`，回到上次的终端标签；关闭最后一个终端标签时若设置标签开着则自动切过去）。设置页**六个页签**仍是全 app 唯一改 omp 状态的地方（除本应用偏好）：通用（`omp config` 白名单 **41 项**——V11 把 `tools.approvalMode` 收回本页）/ **模型**（V12b 起为唯一模型管理面；V12c 把「供应商」与「自定义模型」并成**一个区块 + 两个弹窗**：**供应商在最上方** → 我的模型（挑选结果）→ `modelRoles` → **快速切换环（`cycleOrder`）** → `retry.fallbackChains`；「添加供应商」弹窗 = 可搜索的提供商选择器 → API key / OAuth 走 `auth-broker login`，首项「自定义」写 models.yml（自定义表单：**名称可改**——改键保位置与原注释，支持中文（omp 实测无字符集约束，只挡空白与 `/` 等歧义字符）；接口类型只给 `openai-completions` / `anthropic-messages` 两档，既有文件里的其它 `api` 值原样列出保留；**认证只有 API Key**，留空 = `auth: none`）；「挑选模型」弹窗 = 该供应商的模型星标；平铺的「可用模型」目录已删除；**从终端标签切回设置标签会重读 omp 的角色 / 转移链**——omp TUI 里改完即识别，模型目录走 `get_models` 的 5 分钟缓存不额外重拉）/ 记忆（只删不写）/ 使用统计（只读；tokens 用量 / Cache 命中率 / 活跃天数三张卡 +「Token 活动」热力图，默认「今日」）/ **供应商用量**（V15；只读：各供应商的滚动窗口进度 + 重置倒计时 + 无数据供应商 / 停用凭据提示，数据 = `omp usage --json`；omp 未覆盖的 commandcode / deepseek 由**壳侧补充探针**补齐——`extra_usage.rs`，凭据只经 `omp token` 内存传递，查询失败显示「查询失败」而非「无数据」）/ 已归档对话（覆盖层 + 删文件）。读写口径与实测结论见 `docs/v8-schedule.md` / `docs/v9-schedule.md` / `docs/v15-schedule.md`（仍然有效）。
 - **「我的模型」= 模型选择器的候选范围**（V12b；`lib/myModels.ts`，localStorage 键沿用 `omp.favoriteModels.v1`）：我挑过的 selector 非空时，`candidateModels` 让模型角色 / 失败转移目标的候选只列这些；空 = 全部可用模型（不挡新人）。**不写 omp 的 `enabledModels`**——实测那才是 omp 侧 TUI `/model` 的白名单（`[]` = 不限制），本应用明确不动它（`docs/v12-schedule.md` §6）。
 - **自定义模型（V12；V12c 起入口在「供应商」区块的添加面板里，选择器首项「自定义」）直接写 `<agentDir>/models.yml`**——omp 没有 CLI 写入口（`omp models` 只有 ls / find / refresh，`omp config` 只管 `config.yml`），写文件是唯一路径；这是壳侧唯一直接写 omp 配置文件的例外。前端 `lib/customModels.ts`（`yaml` 包）做**保真编辑**：只改被编辑的节点，注释 / 格式 / 界面之外的字段（`headers` / `compat` / `modelOverrides` / `cost`…）原样保留；**覆盖型块（无 `models` 的覆盖字段块）界面只读**。后端 `models_config.rs` 四道闸：hash 乐观锁（外部改过即拒写）→ 预校验（临时 agentDir 跑一次 `omp models` 读 stderr，坏配置**不落盘**）→ 备份（`$APPDATA/omp-mini/backups/`，保留 10 份）→ 原子写。文件发现规则与 schema 细节见 `docs/v12-schedule.md`。
 - **模型编辑安全**：编辑表单固定读取时的文本/hash，模型条目按 `originalIndex` 复用原 YAML 节点（改模型 id 仍保留 cost 等隐藏字段）；新建/改名撞供应商、重复模型 id、异常结构及覆盖型块均拒写。保存期间禁用表单且不允许误关；预校验后再次检查文件内容与生效路径。YAML 序列化保留字段和注释内容，但部分集合行尾注释可能换到下一行，不承诺任意输入逐字节不变。
@@ -127,7 +131,7 @@ appUpdate.ts     # 应用内更新状态机
 - 左侧栏宽度 **292–480px（默认 292，localStorage 持久化）**；下限由底部行内容决定（改 `SIDEBAR_MIN` 前先量那一行）。窄窗 <768px 收抽屉。
 - 状态收敛：无独立状态条；omp 健康走 `HealthBanner`，更新提醒走左栏设置入口的小点（`update.status` 为 available/ready）。
 - 导出 / 复制 / 草稿 / 队列这些聊天概念亦已退场；新功能不许把它们引回来。
-- **视觉基线（2026-09-17 精修）**：冷灰外壳与内嵌工作面；桌面主区外沿 8px / 16px 圆角，48px 标签栏始终存在（空态仍保留工作区标题与新建按钮，窄窗提供项目抽屉入口）。设置页 `max-w-6xl`，通过容器查询在 176px 文字导航与 44px 图标导航间切换；五个页面共用卡片、控件与浮层层级。颜色与圆角真相见 `design-system/MASTER.md` / `index.css`，实心 accent 按钮文字用 `accent-foreground`。
+- **视觉基线（2026-09-17 精修）**：冷灰外壳与内嵌工作面；桌面主区外沿 8px / 16px 圆角，48px 标签栏始终存在（空态仍保留工作区标题与新建按钮，窄窗提供项目抽屉入口）。设置页 `max-w-6xl`，通过容器查询在 176px 文字导航与 44px 图标导航间切换；六个页面共用卡片、控件与浮层层级。颜色与圆角真相见 `design-system/MASTER.md` / `index.css`，实心 accent 按钮文字用 `accent-foreground`。
 
 ## 常用命令
 
@@ -142,7 +146,7 @@ pnpm test                   # vitest
 pnpm e2e:ipc                # IPC 契约双向自检（ipc.ts ↔ main.rs ↔ 实现）
 pnpm build                  # tsc + vite 构建
 cargo test --manifest-path src-tauri/Cargo.toml    # Rust 单测（含真实 PTY 回环）
-cargo test --manifest-path src-tauri/Cargo.toml -- --ignored   # 慢测试：真实 omp TUI 冒烟 / 真实 agentDir 基准 / 真实 omp commit 两段式（临时仓库，消耗一次 AI 调用）
+cargo test --manifest-path src-tauri/Cargo.toml -- --ignored   # 慢测试：真实 omp TUI 冒烟 / 真实 agentDir 基准 / 真实 omp usage 解析 / 真实 commandcode 探针（真实 HTTP） / 真实 omp commit 两段式（临时仓库，消耗一次 AI 调用）
 pnpm tauri:build            # 本机发布构建，产物见 src-tauri/target/release/bundle/
 pnpm icon                   # 从 design-system/icon/omp-mini-icon.svg 重生成桌面图标
 ```
@@ -161,7 +165,7 @@ pnpm icon                   # 从 design-system/icon/omp-mini-icon.svg 重生成
 - **不做**：编辑器 / 文件树 / diff 审查 / 内置浏览器 / SSH / 移动端 / PR 集成（Orca 的「复杂」部分）；终端滚动缓冲持久化（重启不恢复 tab）；终端与 jsonl 会话的运行时绑定；分屏（split）；多窗口。
 - 沿用旧口径的边界：自动化 / 定时任务、插件 / Skill / MCP / Hook 管理、主题市场、云同步——仍在范围外。
 - 自定义模型的 **`discovery` 表单**与**覆盖型块的编辑**不做（见 `docs/v12-schedule.md` §5）；写的是 agentDir 的全局层——项目级 models 配置上游没有发现路径。
-- 用量限额（V6）与上下文容量（V7）的**壳侧 UI 已随 V11 退场**（omp TUI 自带 `/usage`、`/context`）；后端对应模块已删除，需要时从 git 历史恢复。
+- 上下文容量（V7）的**壳侧 UI 已随 V11 退场**（omp TUI 自带 `/context`）；用量限额（V6）的供应商配额视图在 **V15 以设置 ›「供应商用量」回归**（`provider_usage.rs`；V6 的输入框上下文条入口随聊天界面删除），上游数据 = `omp usage --json`。壳侧对 omp 无探针但上游有「API key 可用」查询接口的供应商（commandcode / deepseek）做**有限补充探针**（`extra_usage.rs`：凭据只经 `omp token` 内存传递、不落盘、不回传前端；见 `docs/v15-schedule.md` §6）；既无 omp 探针也无可用接口的仍显示「无用量数据」。
 - 旧的会话内容搜索（M7b）随左栏会话列表一并退场；已归档对话仍可搜索式管理？——**不**，归档页只按项目分组列出（无搜索）。要恢复先定交互（见 `docs/v11-schedule.md` §7）。
 
 ## 命名与变更约定

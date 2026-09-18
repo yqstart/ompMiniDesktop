@@ -266,6 +266,34 @@ const ZH = {
  usageHeatModelsRest: "另有 {0} 个模型",
  usageHeatUnknownModel: "未知模型",
 
+ // 设置 ›「供应商用量」：各供应商侧的滚动窗口（omp usage）
+ tabProviderUsage: "供应商用量",
+ pusageHint:
+  "各供应商侧的滚动用量（5 小时 / 每周 / 每月等窗口）。数据来自 omp 自己的用量查询——本应用只读取，不直连供应商接口、不碰凭证；窗口由各供应商定义，额度以供应商为准。",
+ pusageLoading: "正在读取用量…",
+ pusageEmpty:
+  "还没有可显示的用量：omp 里登录一个有用量查询的供应商（如 Anthropic / OpenAI / OpenCode）后，这里会给出它的滚动窗口。",
+ pusageNoDataTitle: "以下供应商没有用量数据",
+ pusageNoDataHint: "omp 暂不支持查询它的用量（模型仍可正常使用）。",
+ pusageNoData: "无用量数据",
+ pusageFailedTitle: "以下供应商查询失败",
+ pusageWindowBalance: "余额",
+ pusageRemaining: "{0} 剩余",
+ pusageUpdatedAgo: "更新于 {0}",
+ pusageResetsIn: "{0}后重置",
+ pusageAccounts: "{0} 个账号",
+ pusageAccountN: "账号 {0}",
+ pusageWindow5h: "5 小时",
+ pusageWindow7d: "每周",
+ pusageWindowMonthly: "每月",
+ pusageStateOk: "用量充足",
+ pusageStateWarn: "接近限额",
+ pusageStateDanger: "已用尽",
+ pusageDisabledTitle: "已停用的凭据",
+ pusageDisabledHint: "重新登录该供应商即可恢复。",
+ pusageAccountsWithout: "另有 {0} 个已登录账号本次没有拿到用量数据。",
+ pusageFoot: "数据来自 omp 的用量查询（只读）；窗口重置时刻由供应商提供，可能有几分钟的缓存延迟。",
+
  // 设置 › 模型 ›「供应商」区块（合并的「添加供应商」面板：登录型凭据 + 自定义 models.yml）
  providersSection: "供应商",
  providersHint:
@@ -764,6 +792,34 @@ const EN: Record<TextKey, string> = {
  usageHeatMore: "More",
  usageHeatModelsRest: "{0} more models",
  usageHeatUnknownModel: "Unknown model",
+
+ // Settings › Provider usage: per-provider rolling windows (omp usage)
+ tabProviderUsage: "Provider usage",
+ pusageHint:
+  "Rolling usage windows (5-hour / weekly / monthly…) as reported by each provider. Data comes from omp's own usage query — this app only reads it; it never calls provider APIs or touches credentials. Windows and quotas are defined by each provider.",
+ pusageLoading: "Reading usage…",
+ pusageEmpty:
+  "Nothing to show yet. Once omp has a provider with a usage query (Anthropic / OpenAI / OpenCode, …) signed in, its rolling windows appear here.",
+ pusageNoDataTitle: "Providers without usage data",
+ pusageNoDataHint: "omp has no usage query for this provider (models still work).",
+ pusageNoData: "No usage data",
+ pusageFailedTitle: "Queries failed for these providers",
+ pusageWindowBalance: "Balance",
+ pusageRemaining: "{0} left",
+ pusageUpdatedAgo: "updated {0}",
+ pusageResetsIn: "resets in {0}",
+ pusageAccounts: "{0} accounts",
+ pusageAccountN: "Account {0}",
+ pusageWindow5h: "5 hours",
+ pusageWindow7d: "Weekly",
+ pusageWindowMonthly: "Monthly",
+ pusageStateOk: "Within limit",
+ pusageStateWarn: "Near limit",
+ pusageStateDanger: "Exhausted",
+ pusageDisabledTitle: "Disabled credentials",
+ pusageDisabledHint: "Sign in to that provider again to restore.",
+ pusageAccountsWithout: "{0} signed-in accounts reported no usage data this time.",
+ pusageFoot: "Data from omp's usage query (read-only). Reset times come from each provider and may lag by a few minutes of caching.",
 
  providersSection: "Providers",
  providersHint:

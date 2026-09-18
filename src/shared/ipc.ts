@@ -53,6 +53,8 @@ export const IPC = {
   deleteMemoryProject: "delete_memory_project",
   // 使用统计（设置 › 使用统计）：会话 jsonl 里 usage 的聚合（只读）
   getUsageStats: "get_usage_stats",
+  // 供应商用量（设置 › 供应商用量）：`omp usage --json` 的各供应商滚动窗口（只读）
+  getProviderUsage: "get_provider_usage",
   // omp 常用设置（设置 › 通用）：白名单键的批量读 / 单键写 / 恢复默认（写 omp 全局配置）
   getOmpSettings: "get_omp_settings",
   setOmpSetting: "set_omp_setting",

@@ -243,6 +243,91 @@ export type UsageStats = {
  truncated: boolean;
 };
 
+// ---------- 供应商用量（设置 › 供应商用量） ----------
+
+/**
+ * 供应商侧的一个限额窗口（5 小时滚动 / 每周 / 每月…），来自 `omp usage --json`。
+ * `usedFraction` / `percent` 上游可能只给其一，后端已归一到同源口径；超限时可能 >1。
+ */
+export type UsageLimit = {
+ id: string;
+ label: string;
+ /** 窗口标识（`5h` / `7d` / `monthly` / `balance`；字典按它选窗口名，未知值回退 `windowLabel`）。 */
+ windowId: string;
+ windowLabel: string;
+ /** 已用比例（0–1 小数）。 */
+ usedFraction: number;
+ /** 已用百分比（0–100 刻度）。 */
+ percent: number;
+ /** 上游状态（`ok` / `warning` / `exhausted`；开放枚举）。 */
+ status: string;
+ /** 下次重置时刻（epoch 毫秒）；上游没给为 null。 */
+ resetsAt: number | null;
+ /** 窗口时长（毫秒；monthly 恒缺省）；上游没给为 null。 */
+ durationMs: number | null;
+ /** 上游备注；没有为空数组。 */
+ notes: string[];
+ /** 金额 / 数量绝对值（仅非 percent 单位有意义；percent 单位时为 null）。 */
+ used: number | null;
+ /** 额度上限（与 `used` 同单位；余额型窗口没有上限时为 null）。 */
+ limit: number | null;
+ /** 剩余额（余额型窗口的主值；上游没给为 null）。 */
+ remaining: number | null;
+ /** 计量单位：`percent` / `usd` / `cny` / `credits` / `tokens` …（开放枚举）。 */
+ unit: string;
+};
+
+/** 一个供应商的用量报告（一个账号一份——同一 provider 多账号时有多份）。 */
+export type ProviderUsageReport = {
+ provider: string;
+ /** 套餐名（`OpenCode Go`）；上游没给为 null。 */
+ planType: string | null;
+ /** 账号标识（email / accountId / orgName 里第一个可用的）；多账号区分用。 */
+ accountLabel: string | null;
+ /** 数据真实抓取时刻（epoch 毫秒；0 = 上游未给）。 */
+ fetchedAt: number;
+ limits: UsageLimit[];
+};
+
+/** 已认证但本次拿不到用量的账号（界面给一行说明）。 */
+export type ProviderUsageAccount = {
+ provider: string;
+ /** `api_key` / `oauth` / `unknown`。 */
+ kind: string;
+ email: string | null;
+ accountId: string | null;
+};
+
+/** 被自动停用的凭据（刷新失败 / 上游失效；界面提示需重新登录）。 */
+export type ProviderUsageDisabled = ProviderUsageAccount & {
+ /** 停用原因（上游英文原文）；上游没给为 null。 */
+ cause: string | null;
+ /** 停用时刻（epoch 毫秒）；上游没给为 null。 */
+ disabledAtMs: number | null;
+};
+
+/** 补充探针（壳侧查询，commandcode / deepseek 等）的失败记录：能查但这次没查到。 */
+export type ExtraProbeFailure = {
+ provider: string;
+ message: string;
+};
+
+/** 供应商用量总览（`omp usage --json` 的投影 + 壳侧补充探针；只读，前端只格式化不重算）。 */
+export type ProviderUsage = {
+ /** 本次渲染时刻（epoch 毫秒）。 */
+ generatedAt: number;
+ reports: ProviderUsageReport[];
+ accountsWithoutUsage: ProviderUsageAccount[];
+ disabledCredentials: ProviderUsageDisabled[];
+ /**
+  * 已配置的供应商 id（取自模型目录缓存，与设置页「已配置」同一条口径）。
+  * `reports` 只含有用量探针的供应商；两者相减 = 「配了但上游拿不到用量」。
+  */
+ configuredProviders: string[];
+ /** 补充探针的失败记录（与「无用量数据」区分：这些是能查但这次没查到）。 */
+ extraFailures: ExtraProbeFailure[];
+};
+
 /** 应用更新状态（Tauri updater，直接面向 GitHub Release latest.json）。 */
 export type UpdateState =
  | { status: "idle" }

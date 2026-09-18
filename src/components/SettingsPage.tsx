@@ -1,4 +1,4 @@
-import { Archive, ChartBar, Check, Copy, FolderError, Key, Loader, Notebook, Refresh, Sliders } from "reicon-react";
+import { Archive, ChartBar, Check, Copy, FolderError, Gauge, Key, Loader, Notebook, Refresh, Sliders } from "reicon-react";
 import { useApp } from "../stores/app";
 import { checkForUpdate, getAppVersion, openUpdateDialog } from "../lib/appUpdate";
 import { pickOmpExecutable, refreshOmpHealth } from "../lib/ompDiag";
@@ -9,11 +9,12 @@ import { ArchivedSessions } from "./ArchivedSessions";
 import { GeneralSettingsPanel } from "./settings/GeneralSettingsPanel";
 import { MemoryPanel } from "./settings/MemoryPanel";
 import { ModelsPanel } from "./settings/ModelsPanel";
+import { ProviderUsagePanel } from "./settings/ProviderUsagePanel";
 import { UsagePanel } from "./settings/UsagePanel";
 
 /** 设置页分页签；顺序即界面顺序。 */
-const TABS = ["general", "models", "memories", "usage", "archived"] as const;
-const TAB_ICONS = { general: Sliders, models: Key, memories: Notebook, usage: ChartBar, archived: Archive };
+const TABS = ["general", "models", "memories", "usage", "providerUsage", "archived"] as const;
+const TAB_ICONS = { general: Sliders, models: Key, memories: Notebook, usage: ChartBar, providerUsage: Gauge, archived: Archive };
 
 export function SettingsPage({ visible = true }: { visible?: boolean }) {
   const { health, update } = useApp();
@@ -123,7 +124,7 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
         >
           {TABS.map((k) => {
             const Icon = TAB_ICONS[k];
-            const label = k === "general" ? t.tabGeneral : k === "models" ? t.tabModels : k === "memories" ? t.tabMemories : k === "usage" ? t.tabUsage : t.tabArchived;
+            const label = k === "general" ? t.tabGeneral : k === "models" ? t.tabModels : k === "memories" ? t.tabMemories : k === "usage" ? t.tabUsage : k === "providerUsage" ? t.tabProviderUsage : t.tabArchived;
             return (
               <button
                 key={k}
@@ -162,6 +163,8 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
           <MemoryPanel />
         ) : tab === "usage" ? (
           <UsagePanel />
+        ) : tab === "providerUsage" ? (
+          <ProviderUsagePanel />
         ) : (
           <>
             <section aria-label={t.diagSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">

@@ -75,10 +75,16 @@
 - 仓库：https://github.com/serde-rs/serde · https://github.com/serde-rs/json · https://github.com/chronotope/chrono · https://github.com/BurntSushi/walkdir
 - 许可证：MIT / Apache-2.0（双许可）
 
+### reqwest / rustls（HTTP 客户端）
+- 仓库：https://github.com/seanmonstar/reqwest · https://github.com/rustls/rustls
+- 许可证：Apache-2.0 / MIT（reqwest）；Apache-2.0 / ISC / MIT（rustls）
+- 说明：设置 ›「供应商用量」的**补充探针**——对 omp 没有用量探针、但上游提供「API key 可用」查询接口的供应商（commandcode / deepseek）做只读 GET；TLS 走 rustls + webpki-roots（纯 Rust，无系统依赖，四平台构建一致）。
+
 ## 上游运行时（不随本仓库分发，需用户另行安装）
 
 ### oh-my-pi（omp）
 - 仓库：https://github.com/ldx/oh-my-pi
 - 本 app 在 PTY 里直接运行 `omp`（交互式 TUI，V11 起；工作区创建走 `omp worktree add`，
-  供应商登录 / 登出走 `omp auth-broker`，设置读写走 `omp config`，用量统计走 `omp usage`）。
+  供应商登录 / 登出走 `omp auth-broker`，设置读写走 `omp config`，用量统计走 `omp usage`，
+  补充探针的凭据经 `omp token` 只读取出、只在内存中传递）。
   `docs/rpc-memo.md` 保留了 RPC 协议时代的实测备忘（历史存档）。
