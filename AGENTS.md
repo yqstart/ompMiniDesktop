@@ -27,7 +27,7 @@ Tauri v2 + React + TS + Tailwind v4 + Zustand，包管理 pnpm。
 
 ## 技术基线
 
-- 桌面壳：Tauri v2（`src-tauri/`，identifier `com.omnidesktop.mini`；窗口 `titleBarStyle: Overlay` + `hiddenTitle`，标题栏是自绘的——顶栏与左栏红绿灯占位都挂 `data-tauri-drag-region`，拖动走 `core:window` 的 `start_dragging`。**该权限不在 `core:default` 里**，必须在 `src-tauri/capabilities/default.json` 显式加 `core:window:allow-start-dragging`）
+- 桌面壳：Tauri v2（`src-tauri/`，identifier `com.omnidesktop.mini`；窗口 `titleBarStyle: Overlay` + `hiddenTitle`，标题栏是自绘的——顶栏与左栏红绿灯占位都挂 `data-tauri-drag-region`，拖动走 `core:window` 的 `start_dragging`。**该权限不在 `core:default` 里**，必须在 `src-tauri/capabilities/default.json` 显式加 `core:window:allow-start-dragging`；macOS 产物签名是 adhoc（`signingIdentity: "-"`），`src-tauri/Info.plist` 只放桌面/文稿/下载三处文件夹用量说明文案，打包时与生成值合并——它不解决 adhoc 下 TCC 授权不持久）
 - 前端：React 19 + TS + Vite + Tailwind v4 + Zustand（`src/`）+ `@xterm/xterm` 6（终端模拟器，DOM renderer）
 - 后端：Rust + tokio + serde/serde_json + **`portable-pty`**（PTY 进程管理）+ **`reqwest`**（供应商用量的补充探针，rustls/webpki-roots）+ tauri-plugin（dialog/opener/process/updater，`main.rs` 实注册）
 - 工具链：Node 22 + pnpm 11；Rust stable（已验证 1.97）+ 本地 `@tauri-apps/cli`（`pnpm tauri:*` 走项目本地 CLI）

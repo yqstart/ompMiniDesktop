@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+### Fixed
+- macOS 反复弹「“ompMiniDesktop”想访问“桌面”文件夹」：授权框现在显示中文用途说明（新增 `src-tauri/Info.plist` 的桌面/文稿/下载 `UsageDescription`，打包时与生成值合并；只改文案——adhoc 签名（`signingIdentity: "-"`）下 TCC 按签名身份记授权，`tauri:dev` 每次重编都是新身份，旧授权即失效，只能重弹；根治需 Apple Developer ID 签名+公证）。眼前绕行：把项目移出桌面/文稿/下载（如 `~/Projects`），或固定用同一份产物少重编；排障见 README「排障」。
 ## [0.4.0] - 2026-09-18
 
 ### 新增

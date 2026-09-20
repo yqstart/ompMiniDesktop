@@ -133,6 +133,7 @@ pnpm tauri:build    # 产物见 src-tauri/target/release/bundle/
 | 会话「已损坏」 | jsonl 头部解析失败，不阻塞列表，可在弹窗或归档页删除 |
 | 新建 worktree 报「already checked out」 | 该分支已在某个工作区（主目录或另一 worktree）检出——直接点那个工作区行即可 |
 | 打开的终端没有响应 | 终端进程退出后浮层会给「重启」；或点 `×` 关闭后重开（运行中关闭会先确认） |
+| 反复弹「“ompMiniDesktop”想访问“桌面”（/文稿/下载）文件夹」，明明已授过权 | macOS 按「签名身份」记授权，本应用目前是 adhoc 签名（`signingIdentity: "-"`），且 `tauri:dev` 每次编译都是新二进制 → 系统认作新应用，旧授权即失效，只能重弹（发版包同理：每次更新弹一次）。已加 `src-tauri/Info.plist` 用量说明，打包后授权框会显示中文用途（只改文案，不解决 adhoc 不持久）。根治需 Apple Developer ID 签名+公证；眼前绕行：把项目移出桌面/文稿/下载（如 `~/Projects`，不在保护目录内），或固定用同一份打包产物少重编。授权状态错乱时可 `tccutil reset SystemPolicyDesktopFolder com.omnidesktop.mini` 后重授（仅对打包产物有效，dev 二进制每次重编身份都变） |
 
 ---
 
