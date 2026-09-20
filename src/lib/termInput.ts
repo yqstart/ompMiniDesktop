@@ -1,7 +1,24 @@
 import type { Terminal } from "@xterm/xterm";
 
-/** fallback 只需要 textarea（监听漏网输入）与公开的 `input()`（补发一次）。 */
-type InputFallbackTerm = Pick<Terminal, "textarea" | "input">;
+/** xterm 内部去重状态（私有字段，运行时存在；读不到时宁可不补，避免双发回归）。 */
+export interface XtermDedupState {
+ _keyDownSeen?: unknown;
+ _keyPressHandled?: unknown;
+}
+
+/** fallback 只需要 textarea（监听漏网输入）、公开的 `input()`（补发）与 `options`（读屏门控）。 */
+type InputFallbackTerm = Pick<Terminal, "textarea" | "input" | "options"> & {
+ _core?: XtermDedupState | null;
+};
+
+/** `input` 事件里做决定只需要这五个字段（单测与真实 xterm 对拍都喂这个形状）。 */
+export interface DroppedInputCandidate {
+ defaultPrevented: boolean;
+ isComposing: boolean;
+ inputType: string;
+ data: string | null;
+ composed: boolean;
+}
 
 /**
  * macOS WKWebView 漏键补丁（上游 xterm.js #5374 的壳侧代偿，Tauri macOS 跑的正是 WKWebView）。
@@ -16,14 +33,46 @@ type InputFallbackTerm = Pick<Terminal, "textarea" | "input">;
  * 第一次的 keyup 把标记清零后第二遍才正常。
  *
  * 代偿：在 textarea 上再挂一层冒泡阶段的 `input` 监听（xterm 自己的监听在捕获阶段，
- * 先跑）。xterm 消费掉的输入会 `preventDefault`，IME 组字（`isComposing`）与删除、
- * 换行、粘贴等非 `insertText` 都有各自归宿——这些一律不动；只把 xterm 漏掉的真实文本
- * 经公开 `input()` 补发一次并清空 textarea 残留（否则 229 兜底的延时差值会把同一字符
- * 再发一遍，正好一次、不重复）。非 macOS 不挂载，保持上游行为。
+ * 先跑）。只补 xterm 按自身规则会拒绝、且 keypress 也没发的那一次（`isDroppedInput`，
+ * `_inputEvent` 接受条件 `(!composed || !keyDownSeen) && !keyPressHandled` 的镜像，
+ * 与真实 xterm 对拍保证一次且仅一次）；IME 组字、删除、换行、粘贴等非 `insertText`
+ * 与读屏模式一律不动。非 macOS 不挂载，保持上游行为。
+ *
+ * 0.4.1 的教训：曾用 `defaultPrevented` 判断“xterm 已消费”，但 xterm 默认
+ * `cancelEvents=false`，消费成功也不 `preventDefault`——空格、大写字母等正常字符
+ * 全被补了第二遍（逗号、引号、空格打出两个）。这次不猜消费与否，只看漏否。
+ *
+ * 补发只走公开 `input()`，不动 textarea 内容：落字是 xterm 自己逐次清理的
+ * （Enter / Ctrl+C / 失焦；上游 xterm.js #6078 的积累问题），壳侧不代清空。
  */
 export function isMacKeyboard(): boolean {
  if (typeof navigator === "undefined") return false;
  return /mac/i.test(navigator.platform) || /mac/i.test(navigator.userAgent);
+}
+
+/**
+ * xterm 是否会丢掉这次 `input`：true = xterm 自己不会发，fallback 才补；
+ * false = xterm 会发（或 keypress/读屏会接管），一律不动。
+ * 读不到内部去重状态时按“没漏”处理（保持上游行为，宁可沿用旧漏键也不双发）。
+ */
+export function isDroppedInput(
+ e: DroppedInputCandidate,
+ core: XtermDedupState | null | undefined,
+ screenReaderMode: boolean | undefined,
+): boolean {
+ if (e.defaultPrevented || e.isComposing) return false;
+ if (e.inputType !== "insertText" || !e.data) return false;
+ // 读屏模式 xterm 故意不消费 input（textarea 内容是读屏器的信源）：不动。
+ if (screenReaderMode) return false;
+ const seen = core?._keyDownSeen;
+ const press = core?._keyPressHandled;
+ return (
+  e.composed === true &&
+  typeof seen === "boolean" &&
+  typeof press === "boolean" &&
+  seen &&
+  !press
+ );
 }
 
 /**
@@ -35,14 +84,15 @@ export function installWkInputFallback(term: InputFallbackTerm): () => void {
  const textarea = term.textarea;
  if (!textarea) return () => { };
  const onInput = (event: Event) => {
-  // xterm 已消费（它会 preventDefault）、IME 组字中、非文本插入：都不是漏网之鱼
   const e = event as InputEvent;
-  if (e.defaultPrevented || e.isComposing) return;
-  if (e.inputType !== "insertText" || !e.data) return;
+  const data = e.data;
+  if (!data) return;
+  // 正常字符即使 xterm 已消费也无标记（默认 cancelEvents=false 不 preventDefault）——
+  // 漏否只看它自己的接受条件，不猜消费；读不到内部状态就当没漏（不双发）。
+  if (!isDroppedInput(e, term._core, term.options?.screenReaderMode)) return;
   event.preventDefault();
   event.stopPropagation();
-  term.input(e.data);
-  textarea.value = "";
+  term.input(data);
  };
  textarea.addEventListener("input", onInput);
  return () => {
