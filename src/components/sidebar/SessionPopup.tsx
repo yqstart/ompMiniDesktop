@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Clock, X } from "reicon-react";
 import { api } from "@shared/api";
-import type { ProjectView, SessionView } from "@shared/types";
+import type { ProjectView, SessionPage, SessionView } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { resumeSessionInTerminal } from "../../lib/workspaces";
 import { useText } from "../../lib/useText";
@@ -26,9 +26,12 @@ export function SessionPopup({
  const t = useText();
  const locale = useApp((s) => s.locale);
  const [sessions, setSessions] = useState<SessionView[] | null>(null);
+ const [page, setPage] = useState<SessionPage | null>(null);
  const [error, setError] = useState<string | null>(null);
+ const [loadError, setLoadError] = useState<string | null>(null);
  const [deleteTarget, setDeleteTarget] = useState<SessionView | null>(null);
  const [busyId, setBusyId] = useState<string | null>(null);
+ const [query, setQuery] = useState("");
  const cardRef = useRef<HTMLDivElement>(null);
  const actionRef = useRef(false);
  useDialogFocus(cardRef, true, onClose);
@@ -38,12 +41,14 @@ export function SessionPopup({
   void api
    .listSessions(project.id)
    .then((page) => {
-    if (alive) setSessions(page.sessions);
+    if (!alive) return;
+    setPage(page);
+    setSessions(page.sessions);
+    setLoadError(null);
    })
    .catch((e) => {
     if (!alive) return;
-    setSessions([]);
-    setError(e instanceof Error ? e.message : TEXT[useApp.getState().locale].sessLoadFailed);
+    setLoadError(e instanceof Error ? e.message : TEXT[useApp.getState().locale].sessLoadFailed);
    });
   return () => {
    alive = false;
@@ -53,10 +58,12 @@ export function SessionPopup({
 
  const refresh = async () => {
   try {
-   const page = await api.listSessions(project.id);
-   setSessions(page.sessions);
-  } catch {
-   // 刷新失败保留旧列表（写操作本身已成功）
+   const next = await api.listSessions(project.id);
+   setPage(next);
+   setSessions(next.sessions);
+  } catch (e) {
+   // 写操作本身已成功：刷新失败保留旧列表，只提示刷新失败，不诱导重复破坏性操作。
+   setError(`${t.sessRefreshFailedNote}：${e instanceof Error ? e.message : String(e)}`);
   }
  };
 
@@ -131,57 +138,122 @@ export function SessionPopup({
        {error}
       </div>
      )}
-     <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3 [scrollbar-gutter:stable]">
-      {sessions === null && <p className="px-3 py-8 text-center text-[13px] text-faint">{t.sessLoading}</p>}
-      {sessions?.length === 0 && (
-       <p className="px-3 py-8 text-center text-[13px] leading-relaxed text-muted">{t.sessEmpty}</p>
+     <div className="shrink-0 space-y-1.5 px-4 pt-3">
+      <input
+       value={query}
+       onChange={(e) => setQuery(e.target.value)}
+       onKeyDown={(e) => {
+        if (e.key !== "Escape" || e.nativeEvent.isComposing) return;
+        if (!query) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setQuery("");
+       }}
+       placeholder={t.sessSearch}
+       aria-label={t.sessSearch}
+       className="h-9 w-full rounded-md border border-border bg-surface px-2.5 text-[13px] outline-none focus:border-accent"
+      />
+      {sessions !== null && (
+       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-faint">
+        <span>{fmt(t.sessLoadedCount, sessions.length)}</span>
+        {query.trim() && <span>{fmt(t.sessMatchCount, sessions.filter((s) => `${s.title}\n${s.cwd}\n${s.id}`.toLowerCase().includes(query.trim().toLowerCase())).length)}</span>}
+        {page && page.scannedFiles < page.totalFiles && (
+         <span>{fmt(t.sessScanNote, page.scannedFiles, page.totalFiles)}</span>
+        )}
+       </div>
       )}
-      {sessions?.map((s) => (
-       <div
-        key={s.id}
-        className="group flex items-center gap-3 rounded-lg border border-border-soft bg-surface px-3 py-3 transition-colors duration-100 hover:bg-hover"
-       >
+     </div>
+     <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3 [scrollbar-gutter:stable]">
+      {sessions === null && (loadError ? (
+       <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
+        <p role="alert" className="text-[13px] text-danger">{loadError}</p>
         <button
          onClick={() => {
-          resumeSessionInTerminal({ id: s.id, cwd: s.cwd, title: s.title, projectId: s.projectId });
-          onClose();
+          setLoadError(null);
+          void api.listSessions(project.id).then((next) => {
+           setPage(next);
+           setSessions(next.sessions);
+          }).catch((e) => {
+           setLoadError(e instanceof Error ? e.message : t.sessLoadFailed);
+          });
          }}
-         disabled={s.corrupt || busyId !== null}
-         title={t.sessResumeHint}
-         className="min-w-0 flex-1 cursor-pointer rounded-sm text-left disabled:cursor-default disabled:opacity-50"
+         className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover"
         >
-         <div className="truncate text-[13px] font-medium">{s.title}</div>
-         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-faint">
-          <span className="font-mono">
-           {new Date(s.timestamp).toLocaleString(locale, {
-            month: "numeric",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-           })}
-          </span>
-          {s.archived && <span className="rounded-sm border border-border-soft px-1.5">{t.archivedTag}</span>}
-          {s.corrupt && <span className="text-warn">{t.corrupt}</span>}
-         </div>
+         {t.retry}
         </button>
-        <span className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100">
-         <button
-          onClick={() => void toggleArchive(s)}
-          disabled={busyId !== null}
-          className="min-h-7 cursor-pointer rounded-md border border-border px-2 text-[11px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
-         >
-          {s.archived ? t.archivedRestore : t.sessArchive}
-         </button>
-         <button
-          onClick={() => setDeleteTarget(s)}
-          disabled={busyId !== null}
-          className="min-h-7 cursor-pointer rounded-md border border-border px-2 text-[11px] text-muted transition-colors duration-100 hover:border-danger/40 hover:bg-danger/10 hover:text-danger disabled:opacity-40"
-         >
-          {t.delete}
-         </button>
-        </span>
        </div>
+      ) : (
+       <p role="status" className="px-3 py-8 text-center text-[13px] text-faint">{t.sessLoading}</p>
       ))}
+      {sessions !== null && (() => {
+       const cleaned = query.trim().toLowerCase();
+       const filtered = cleaned
+        ? sessions.filter((s) => `${s.title}\n${s.cwd}\n${s.id}`.toLowerCase().includes(cleaned))
+        : sessions;
+       if (sessions.length === 0) {
+        return <p className="px-3 py-8 text-center text-[13px] leading-relaxed text-muted">{t.sessEmpty}</p>;
+       }
+       if (filtered.length === 0) {
+        return (
+         <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
+          <p className="text-[13px] text-muted">{t.sessNoMatch}</p>
+          <button
+           onClick={() => setQuery("")}
+           className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover"
+          >
+           {t.quickSwitcherClear}
+          </button>
+         </div>
+        );
+       }
+       return filtered.map((s) => (
+        <div
+         key={s.id}
+         className="group flex items-center gap-3 rounded-lg border border-border-soft bg-surface px-3 py-3 transition-colors duration-100 hover:bg-hover"
+        >
+         <button
+          onClick={() => {
+           resumeSessionInTerminal({ id: s.id, cwd: s.cwd, title: s.title, projectId: s.projectId });
+           onClose();
+          }}
+          disabled={s.corrupt || busyId !== null}
+          title={`${t.sessResumeHint}\n${s.cwd}`}
+          className="min-w-0 flex-1 cursor-pointer rounded-sm text-left disabled:cursor-default disabled:opacity-50"
+         >
+          <div className="truncate text-[13px] font-medium">{s.title}</div>
+          <div className="mt-1 truncate font-mono text-[11px] text-faint" title={s.cwd}>{s.cwd.split("/").filter(Boolean).pop() ?? s.cwd}</div>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-faint">
+           <span className="font-mono">
+            {new Date(s.timestamp).toLocaleString(locale, {
+             month: "numeric",
+             day: "numeric",
+             hour: "2-digit",
+             minute: "2-digit",
+            })}
+           </span>
+           {s.archived && <span className="rounded-sm border border-border-soft px-1.5">{t.archivedTag}</span>}
+           {s.corrupt && <span className="text-warn">{t.corrupt}</span>}
+          </div>
+         </button>
+         <span className="flex shrink-0 items-center gap-1 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100 min-[hover:hover]:opacity-0">
+          <button
+           onClick={() => void toggleArchive(s)}
+           disabled={busyId !== null}
+           className="min-h-8 cursor-pointer rounded-md border border-border px-2 text-[11px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
+          >
+           {s.archived ? t.archivedRestore : t.sessArchive}
+          </button>
+          <button
+           onClick={() => setDeleteTarget(s)}
+           disabled={busyId !== null}
+           className="min-h-8 cursor-pointer rounded-md border border-border px-2 text-[11px] text-muted transition-colors duration-100 hover:border-danger/40 hover:bg-danger/10 hover:text-danger disabled:opacity-40"
+          >
+           {t.delete}
+          </button>
+         </span>
+        </div>
+       ));
+      })()}
      </div>
     </div>
    </div>
