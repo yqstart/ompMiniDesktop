@@ -10,6 +10,7 @@ import { readTermTheme } from "../../lib/termTheme";
 import { TEXT } from "../../lib/locale";
 import { useText } from "../../lib/useText";
 import { fmt } from "../../lib/locale";
+import { installWkInputFallback } from "../../lib/termInput";
 
 /**
  * 一个终端 tab 的渲染核心：xterm.js 实例 + 到后端 PTY 的双向管道。
@@ -53,6 +54,8 @@ export function TerminalPane({ term, active }: { term: TerminalView; active: boo
   const fit = new FitAddon();
   x.loadAddon(fit);
   x.open(host);
+  // macOS WKWebView 漏键补丁：中文 IME / Shift 组合键的首击会被 xterm 当重复输入吞掉（见 lib/termInput.ts）
+  const releaseWkInput = installWkInputFallback(x);
   termRef.current = x;
   fitRef.current = fit;
   const dataSub = x.onData((d) => {
@@ -68,6 +71,7 @@ export function TerminalPane({ term, active }: { term: TerminalView; active: boo
   return () => {
    dataSub.dispose();
    titleSub.dispose();
+   releaseWkInput();
    mo.disconnect();
    x.dispose();
    termRef.current = null;
