@@ -7,6 +7,7 @@ import type { TermTabState } from "@shared/types";
 import { WorkspaceSidebar } from "../components/sidebar/WorkspaceSidebar";
 import { TerminalView } from "../components/terminal/TerminalView";
 import { TerminalTabs } from "../components/terminal/TerminalTabs";
+import { QuickSwitcher } from "../components/terminal/QuickSwitcher";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CommitTaskPanel } from "../components/git/CommitTaskPanel";
 import { HealthBanner } from "../components/HealthBanner";
@@ -15,7 +16,8 @@ import { UpdateDialog } from "../components/update/UpdateDialog";
 import { newTerminalInActiveWorkspace } from "../lib/workspaces";
 import { refreshWorkspaceGitState, scheduleWorkspaceGitRefresh } from "../lib/commitTasks";
 import { autoCheckOnBoot } from "../lib/appUpdate";
-
+import { hasOpenDialog, useDialogFocus } from "../lib/useDropdown";
+import { isMacKeyboard } from "../lib/termInput";
 /** 皮肤落 class（浅色 token 是 `:root` 默认、深色挂在 `.dark`，见 src/index.css）。
  *  显式选深/浅时不听系统——系统偏好变了也不该动用户手动选的档。 */
 function useTheme() {
@@ -85,30 +87,41 @@ function useWorkspaceGitRefresh() {
 function useTerminalHotkeys() {
  useEffect(() => {
   const onKey = (e: KeyboardEvent) => {
-   if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+   if (e.defaultPrevented || e.isComposing || e.altKey) return;
+   const mod = isMacKeyboard() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+   if (!mod) return;
+   const key = e.key.toLowerCase();
+   const owned = key === "t" || key === "w" || key === "k" || /^[1-9]$/.test(key);
+   if (!owned || (key === "k" && !e.shiftKey) || (key !== "k" && e.shiftKey)) return;
+   const el = document.activeElement;
+   const typing = el instanceof HTMLElement
+    && !el.closest(".xterm-helper-textarea")
+    && !!el.closest("input, textarea, select, [contenteditable='true']");
+   // 识别到本应用组合键就先截获，避免浏览器默认或漏进 PTY；模态或输入中只阻断不执行。
+   e.preventDefault();
+   e.stopPropagation();
+   if (e.repeat || hasOpenDialog() || typing) return;
    const s = useApp.getState();
-   if (e.key === "t") {
-    e.preventDefault();
+   if (key === "t") {
     newTerminalInActiveWorkspace();
-   } else if (e.key === "w") {
+   } else if (key === "k") {
+    s.set({ quickSwitcherOpen: true });
+   } else if (key === "w") {
     // 设置标签激活时，⌘W 关的是设置标签（终端标签的关闭语义不变）
     if (s.settingsTabActive) {
-     e.preventDefault();
      s.closeSettingsTab();
      return;
     }
     if (!s.activeTerminalId) return;
-    e.preventDefault();
     s.requestCloseTerminal(s.activeTerminalId);
-   } else if (/^[1-9]$/.test(e.key)) {
-    const term = s.terminals[Number(e.key) - 1];
+   } else {
+    const term = s.terminals[Number(key) - 1];
     if (!term) return;
-    e.preventDefault();
     s.focusTerminal(term.id);
    }
   };
-  window.addEventListener("keydown", onKey);
-  return () => window.removeEventListener("keydown", onKey);
+  window.addEventListener("keydown", onKey, true);
+  return () => window.removeEventListener("keydown", onKey, true);
  }, []);
 }
 
@@ -124,10 +137,13 @@ function SidebarShell({
 }) {
  const dragging = useRef(false);
  const t = useText();
+ const { sidebarOpen, set } = useApp();
+ const shellRef = useRef<HTMLDivElement>(null);
  // hover 才加宽热区：平时 3px 隐身细条，悬停/拖拽时 6px 好抓
  const [hot, setHot] = useState(false);
  // 拖拽中的视觉态用 state 表达（render 里不许读 ref），ref 只在事件/effect 里做快速判断
  const [draggingUi, setDraggingUi] = useState(false);
+ const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches);
 
  useEffect(() => {
   const move = (e: PointerEvent) => {
@@ -149,63 +165,78 @@ function SidebarShell({
   };
  }, [onResize]);
 
+ useEffect(() => {
+  const query = window.matchMedia("(max-width: 767px)");
+  const onChange = () => {
+   setNarrow(query.matches);
+   if (!query.matches) set({ sidebarOpen: false });
+  };
+  onChange();
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+ }, [set]);
+
+ useDialogFocus(shellRef, narrow && sidebarOpen, () => set({ sidebarOpen: false }));
+ const closeDrawer = () => set({ sidebarOpen: false });
+
  return (
   <>
-   {/* 桌面端：固定宽度 + 右缘拖拽条 */}
-   <div className="relative hidden shrink-0 md:block" style={{ width }}>
-    {children}
-    <div
-     role="separator"
-     aria-orientation="vertical"
-     aria-label={t.resizeSidebar}
-     aria-valuemin={SIDEBAR_MIN}
-     aria-valuemax={SIDEBAR_MAX}
-     aria-valuenow={Math.round(width)}
-     tabIndex={0}
-     onKeyDown={(e) => {
-      if (e.key === "ArrowLeft") onResize(width - 8);
-      if (e.key === "ArrowRight") onResize(width + 8);
-     }}
-     onPointerDown={(e) => {
-      dragging.current = true;
-      setDraggingUi(true);
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
-      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-     }}
-     onPointerEnter={() => setHot(true)}
-     onPointerLeave={() => {
-      if (!dragging.current) setHot(false);
-     }}
-     className={`absolute top-0 right-0 z-10 h-full cursor-col-resize touch-none transition-colors focus-visible:outline-none ${hot || draggingUi ? "w-1.5 bg-accent/45" : "w-[3px] bg-transparent"
-      }`}
-    />
+   {/* 同一份侧栏子树：桌面用宽度容器，窗窗定位态态态组件重现挂载。 */}
+   <div
+    ref={shellRef}
+    role={narrow && sidebarOpen ? "dialog" : undefined}
+    aria-modal={narrow && sidebarOpen ? true : undefined}
+    aria-label={narrow && sidebarOpen ? t.workspaceTitle : undefined}
+    tabIndex={narrow && sidebarOpen ? -1 : undefined}
+    className={narrow
+     ? sidebarOpen
+      ? "fixed inset-0 z-20 md:hidden"
+      : "hidden"
+     : "relative hidden shrink-0 md:block"}
+    style={narrow ? undefined : { width }}
+   >
+    {narrow && sidebarOpen && (
+     <div className="absolute inset-0 bg-black/40" onClick={closeDrawer} aria-hidden />
+    )}
+    <div className={narrow
+     ? "absolute top-0 left-0 h-full w-[min(292px,calc(100vw-24px))] overflow-hidden rounded-r-lg bg-sidebar shadow-dialog"
+     : "h-full w-full"}>
+     {children}
+    </div>
+    {!narrow && (
+     <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={t.resizeSidebar}
+      aria-valuemin={SIDEBAR_MIN}
+      aria-valuemax={SIDEBAR_MAX}
+      aria-valuenow={Math.round(width)}
+      tabIndex={0}
+      onKeyDown={(e) => {
+       if (e.key === "ArrowLeft") onResize(width - 8);
+       if (e.key === "ArrowRight") onResize(width + 8);
+      }}
+      onPointerDown={(e) => {
+       dragging.current = true;
+       setDraggingUi(true);
+       document.body.style.cursor = "col-resize";
+       document.body.style.userSelect = "none";
+       (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+      }}
+      onPointerEnter={() => setHot(true)}
+      onPointerLeave={() => {
+       if (!dragging.current) setHot(false);
+      }}
+      className={`absolute top-0 right-0 z-10 h-full cursor-col-resize touch-none transition-colors focus-visible:outline-none ${hot || draggingUi ? "w-1.5 bg-accent/45" : "w-[3px] bg-transparent"
+       }`}
+     />
+    )}
    </div>
-   {/* 窄窗：抽屉由 sidebarOpen 控制 */}
-   <SidebarDrawer>{children}</SidebarDrawer>
   </>
  );
 }
-
-function SidebarDrawer({ children }: { children: React.ReactNode }) {
- const { sidebarOpen, set } = useApp();
- if (!sidebarOpen) return null;
- return (
-  <div className="fixed inset-0 z-40 md:hidden">
-   <div
-    className="absolute inset-0 bg-black/40"
-    onClick={() => set({ sidebarOpen: false })}
-    aria-hidden
-   />
-   <div className="absolute top-0 left-0 h-full w-72 max-w-[85vw] overflow-hidden rounded-r-lg bg-sidebar shadow-dialog">
-    {children}
-   </div>
-  </div>
- );
-}
-
 export function App() {
- const { settingsTabOpen, settingsTabActive, closingTerminalId, set, sidebarWidth, setSidebarWidth, updateDialogOpen } = useApp();
+ const { settingsTabOpen, settingsTabActive, closingTerminalId, set, sidebarWidth, setSidebarWidth, updateDialogOpen, sidebarOpen, quickSwitcherOpen } = useApp();
  const t = useText();
  useTheme();
  useLocale();
@@ -227,14 +258,6 @@ export function App() {
  }, []);
 
  useEffect(() => {
-  try {
-   document.documentElement.lang = useApp.getState().locale;
-  } catch {
-   // 非 DOM 环境忽略
-  }
- }, []);
-
- useEffect(() => {
   api
    .getHealth()
    .then((health) => set({ health }))
@@ -247,10 +270,7 @@ export function App() {
      },
     }),
    );
-  api
-   .listProjects()
-   .then((projects) => set({ projects }))
-   .catch(() => undefined);
+  // 项目与工作区由侧栏统一拉取；App 只负责健康与模型，避免重复请求覆盖侧栏错误态。
   // eslint-disable-next-line react-hooks/exhaustive-deps
  }, []);
 
@@ -264,11 +284,11 @@ export function App() {
    >
     <WorkspaceSidebar />
    </SidebarShell>
-   <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background md:my-2 md:mr-2 md:rounded-xl md:border md:border-border">
+   <main inert={sidebarOpen ? true : undefined} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background md:my-2 md:mr-2 md:rounded-xl md:border md:border-border">
     <HealthBanner />
     {/* 标签栏常驻（主区顶部）：终端标签 + 设置标签（单例）——设置打开时也看得见标签栏、
-        点得回终端。终端区与设置页都**常驻挂载、只切显隐**（卸载 `TerminalPane` 的
-        清理 effect 会 `pty_kill`，那是「关闭标签」才该发生的事）。 */}
+       点得回终端。终端区与设置页都**常驻挂载、只切显隐**（卸载 `TerminalPane` 的
+       清理 effect 会 `pty_kill`，那是「关闭标签」才该发生的事）。 */}
     <TerminalTabs />
     <TerminalView visible={!settingsTabActive} />
     {settingsTabOpen && <SettingsPage visible={settingsTabActive} />}
@@ -285,6 +305,7 @@ export function App() {
    </main>
    <CommitTaskPanel />
    {updateDialogOpen && <UpdateDialog />}
+   {quickSwitcherOpen && <QuickSwitcher />}
   </div>
  );
 }

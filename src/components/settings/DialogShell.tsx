@@ -16,16 +16,19 @@ export function DialogShell({
  onClose,
  children,
  width = "max-w-xl",
+ initialFocusRef,
 }: {
  title: string;
  onClose: () => void;
  children: React.ReactNode;
  /** 卡片最大宽度（默认 `max-w-xl`；表单类给 `max-w-2xl`）。 */
  width?: string;
+ /** 初始焦点（如快速切换的搜索框）；缺省时聚焦卡片。 */
+ initialFocusRef?: React.RefObject<HTMLElement | null>;
 }) {
  const t = useText();
  const cardRef = useRef<HTMLDivElement>(null);
- useDialogFocus(cardRef, true, onClose);
+ useDialogFocus(cardRef, true, onClose, initialFocusRef);
 
  return (
   <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-3 sm:p-6" onClick={onClose}>

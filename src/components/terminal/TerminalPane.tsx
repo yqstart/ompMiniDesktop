@@ -7,9 +7,9 @@ import { api } from "@shared/api";
 import type { PtyEvent, TerminalView } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { readTermTheme } from "../../lib/termTheme";
-import { TEXT } from "../../lib/locale";
+import { hasOpenDialog } from "../../lib/useDropdown";
+import { TEXT, fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
-import { fmt } from "../../lib/locale";
 import { installWkInputFallback } from "../../lib/termInput";
 
 /**
@@ -24,15 +24,14 @@ import { installWkInputFallback } from "../../lib/termInput";
  * 避免 ResizeObserver 因 `active` 变化被反复重建。
  */
 export function TerminalPane({ term, active }: { term: TerminalView; active: boolean }) {
- const hostRef = useRef<HTMLDivElement | null>(null);
+ const hostRef = useRef<HTMLDivElement>(null);
  const termRef = useRef<Terminal | null>(null);
  const fitRef = useRef<FitAddon | null>(null);
  const activeRef = useRef(active);
+ const focusSeq = useApp((s) => s.terminalFocusSeq);
+ const sidebarOpen = useApp((s) => s.sidebarOpen);
+ const quickSwitcherOpen = useApp((s) => s.quickSwitcherOpen);
  const t = useText();
-
- useEffect(() => {
-  activeRef.current = active;
- }, [active]);
 
  // xterm 实例（仅随 id 建立/销毁）
  useEffect(() => {
@@ -54,7 +53,7 @@ export function TerminalPane({ term, active }: { term: TerminalView; active: boo
   const fit = new FitAddon();
   x.loadAddon(fit);
   x.open(host);
-  // macOS WKWebView 漏键补丁：中文 IME / Shift 组合键的首击会被 xterm 当重复输入吞掉（见 lib/termInput.ts）
+  // macOS WKWebView 漏键补丁：只补 xterm 按自身接受条件会丢、且 keypress 也没发的那一次（见 lib/termInput.ts）
   const releaseWkInput = installWkInputFallback(x);
   termRef.current = x;
   fitRef.current = fit;
@@ -145,6 +144,7 @@ export function TerminalPane({ term, active }: { term: TerminalView; active: boo
  useEffect(() => {
   if (!active) return;
   const raf = requestAnimationFrame(() => {
+   if (useApp.getState().sidebarOpen || useApp.getState().quickSwitcherOpen || hasOpenDialog()) return;
    const x = termRef.current;
    const fit = fitRef.current;
    if (!x || !fit) return;
@@ -157,7 +157,7 @@ export function TerminalPane({ term, active }: { term: TerminalView; active: boo
    x.focus();
   });
   return () => cancelAnimationFrame(raf);
- }, [active, term.id]);
+ }, [active, focusSeq, quickSwitcherOpen, sidebarOpen, term.id]);
 
  // 卸载（关闭 tab）= kill 进程
  useEffect(() => {

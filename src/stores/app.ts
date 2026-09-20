@@ -52,6 +52,10 @@ type AppState = {
  /** 左栏选中的工作区（按 `path` 标识；`＋` 新建终端用它当目录）。 */
  activeWorkspacePath: string | null;
  setActiveWorkspace: (path: string | null) => void;
+ /** 快速切换面板是否打开（不持久化；仅在打开时挂载，关闭即卸载）。 */
+ quickSwitcherOpen: boolean;
+ /** 终端聚焦序号：每次成功打开或聚焦终端 +1，让选择同一终端也能恢复 xterm 焦点。 */
+ terminalFocusSeq: number;
  /** 打开一个新终端并聚焦（返回新 id）。`resume` = 以 `omp --resume` 恢复历史会话。 */
  openTerminal: (opts: {
   projectId: string | null;
@@ -192,6 +196,8 @@ export const useApp = create<AppState>((set, get) => ({
  activeTerminalId: null,
  activeWorkspacePath: null,
  setActiveWorkspace: (path) => set({ activeWorkspacePath: path }),
+ quickSwitcherOpen: false,
+ terminalFocusSeq: 0,
  openTerminal: ({ projectId, cwd, label, resume = null }) => {
   const id = crypto.randomUUID();
   const term: TerminalView = {
@@ -211,6 +217,7 @@ export const useApp = create<AppState>((set, get) => ({
    terminals: [...s.terminals, term],
    activeTerminalId: id,
    activeWorkspacePath: cwd,
+   terminalFocusSeq: s.terminalFocusSeq + 1,
    // 新终端必然切回终端视图（设置标签留在标签栏里）
    settingsTabActive: false,
   }));
@@ -219,7 +226,13 @@ export const useApp = create<AppState>((set, get) => ({
  focusTerminal: (id) =>
   set((s) => {
    const hit = s.terminals.find((t) => t.id === id);
-   return hit ? { activeTerminalId: id, activeWorkspacePath: hit.cwd, settingsTabActive: false } : {};
+   if (!hit) return {};
+   return {
+    activeTerminalId: id,
+    activeWorkspacePath: hit.cwd,
+    terminalFocusSeq: s.terminalFocusSeq + 1,
+    settingsTabActive: false,
+   };
   }),
  closeTerminal: (id) =>
   set((s) => {

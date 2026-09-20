@@ -41,18 +41,36 @@ export function openOrFocusWorkspace(ws: WorkspaceView): void {
 
 /** `＋` / ⌘T：在当前选中的工作区**新建**终端；没选中时退回第一个可用工作区。 */
 export function newTerminalInActiveWorkspace(): WorkspaceView | null {
+ const ws = resolveNewTerminalWorkspace(useApp.getState().workspaces, useApp.getState().activeWorkspacePath);
  const s = useApp.getState();
- const usable = s.workspaces.filter((w) => !w.missing);
- const ws =
-  usable.find((w) => w.path === s.activeWorkspacePath) ??
-  usable.find((w) => w.isMain) ??
-  usable[0] ??
-  null;
  if (!ws) return null;
  s.openTerminal({ projectId: ws.projectId, cwd: ws.path, label: workspaceLabel(ws) });
  return ws;
 }
 
+/** 新建终端的目标选择（侧栏 / 空态 / 标签栏按钮共用同一顺序，不各自猜测）。 */
+export function resolveNewTerminalWorkspace(
+ workspaces: readonly WorkspaceView[],
+ activePath: string | null,
+): WorkspaceView | null {
+ const usable = workspaces.filter((w) => !w.missing);
+ return (
+  usable.find((w) => w.path === activePath) ??
+  usable.find((w) => w.isMain) ??
+  usable[0] ??
+  null
+ );
+}
+/** 终端上下文显示：优先用工作区名，找不到时用路径末段；title 仍保留完整路径。 */
+export function describeTerminalWorkspace(
+ cwd: string,
+ workspaces: readonly WorkspaceView[],
+): { primary: string; title: string } {
+ const hit = workspaces.find((w) => w.path === cwd);
+ if (hit) return { primary: workspaceLabel(hit), title: cwd };
+ const tail = cwd.split("/").filter(Boolean).pop() ?? cwd;
+ return { primary: tail, title: cwd };
+}
 /** 会话弹窗的「在终端中恢复」：在新终端里 `omp --resume <id>`，cwd 用会话原目录。 */
 export function resumeSessionInTerminal(session: {
  id: string;
