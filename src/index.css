@@ -1,5 +1,16 @@
 @import "tailwindcss";
 
+/* 内嵌的 Nerd Font 图标字体（单宽，1 字符 = 1 cell）：omp 的 `symbolPreset: nerd`
+   图标由它渲染，等宽栈（--font-mono）里排在系统字体之后，只补图标码点。
+   `block` 而非 `swap`：字体未就绪时宁可不画——回退字形要么缺字形（豆腐）、要么宽度
+   不对，而终端是固定 cell 网格，字形宽度错会让 xterm 的宽度校正跟着错。
+   源：public/fonts/omp-nerd-icons.woff2（重新生成见 scripts/build-nerd-icons-font.py）。 */
+@font-face {
+ font-family: "OMP Nerd Icons";
+ src: url("/fonts/omp-nerd-icons.woff2") format("woff2");
+ font-display: block;
+}
+
 /* 冷灰工作台：外壳、工作面与浮层独立分级；强调色只标记动作与选中。 */
 :root {
  --background: #f3f5f9;
@@ -112,7 +123,10 @@
  --radius-2xl: 20px;
 
  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", Inter, sans-serif;
- --font-mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
+ /* 等宽栈末尾挂内嵌的图标字体：ASCII / 中文仍走系统字体，只有图标码点（PUA）落到它。
+    终端里的 omp `symbolPreset: nerd` 图标全靠它渲染——不装这个字体时那些码点没有系统
+    字形，会渲染成豆腐块。来源与派生方式见 THIRD-PARTY-NOTICES.md「字体资源」节。 */
+ --font-mono: "JetBrains Mono", "SF Mono", Menlo, "OMP Nerd Icons", monospace;
 
  /* 弹层阴影：深色下阴影几乎不可见，靠 --elevated 的亮度差与边框定型 */
  --shadow-pop: 0 12px 32px -12px rgb(0 0 0 / 0.45), 0 0 0 1px var(--border);

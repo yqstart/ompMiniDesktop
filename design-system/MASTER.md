@@ -53,7 +53,7 @@
 ## 3. 字体
 
 - 界面：系统栈 `-apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", Inter, sans-serif`。中文优先苹方 / 微软雅黑。
-- 等宽（工具参数、路径、session id 前缀）：`"JetBrains Mono", "SF Mono", Menlo, monospace`，12–13px；等宽文本自动带 `tabular-nums`（时间、token 数、行号对齐不跳动）。
+- 等宽（工具参数、路径、session id 前缀）：`"JetBrains Mono", "SF Mono", Menlo, monospace`，12–13px；等宽文本自动带 `tabular-nums`（时间、token 数、行号对齐不跳动）。**末尾挂一枚内嵌的图标字体 "OMP Nerd Icons"**（`--font-mono` 里排在系统字体之后，只补图标码点）：终端里 omp 的 `symbolPreset: nerd` 图标由它渲染，单宽（1 字符 = 1 cell，与 Menlo/JetBrains Mono/SF Mono 的 advance 对齐），源见 `scripts/build-nerd-icons-font.py` 与 `THIRD-PARTY-NOTICES.md`「字体资源」。
 - 字阶：正文 14px；控件 13px（标签栏 12px）；元信息 11px；设置标题 17px；终端空态标题 24px / 宽窗 28px。空态展示标题是唯一大字使用场景。终端仍是 13px 等宽、1.25 行高。
 - 设置页 `max-w-6xl` 居中；依据实际内容宽度做容器查询，导航在设置容器 <640px 时缩成 44px 图标栏，否则 176px；面板是唯一滚动区。
 

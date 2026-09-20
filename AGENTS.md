@@ -20,6 +20,7 @@ Tauri v2 + React + TS + Tailwind v4 + Zustand，包管理 pnpm。
 |快速切换环（现行）|`docs/v13-schedule.md`|`cycleOrder`（omp 终端 Ctrl+P 的轮换序）可视化的上游实测、实现与完成口径|
 |工作区提交并推送（现行）|`docs/v14-schedule.md`|左栏工作区行「提交并推送」（`omp commit` 集成，两段式：提交 → 过目信息 → 推送）的上游实测、设计与完成口径|
 |供应商用量（现行）|`docs/v15-schedule.md`|设置 ›「供应商用量」（`omp usage --json` 的滚动窗口：5 小时 / 每周 / 每月）的上游实测、设计与完成口径（含「能否自定义配置取用量」的结论）|
+|终端图标字体（现行）|`docs/v16-schedule.md`|终端 nerd 图标：内嵌单宽图标字体（Nerd Fonts Symbols Only 派生）+ 设置 ›「图标符号集」（`symbolPreset`）的上游实测、设计与完成口径|
 |设计真相|`design-system/MASTER.md`|token、布局、交互、组件命名（改 UI 先读）|
 |应用图标|`design-system/icon/omp-mini-icon.svg`|π 字标矢量唯一源，`pnpm icon` 重新生成 `src-tauri/icons/`|
 |更新日志|`CHANGELOG.md`|Keep a Changelog 风格，发版时归入新版本节|
@@ -74,7 +75,8 @@ src-tauri/src/
   usage.rs                 # 设置 › 使用统计后端：扫会话 jsonl 聚合 tokens 用量 / Cache 命中率 / 活跃天数 + 53 周热力图窗口（逐日按模型拆分）（只读；含单测）
   provider_usage.rs        # 设置 › 供应商用量后端（V15；从 V11 删除的 quota.rs 恢复并增强）：`omp usage --json` 的解析与命令（只读；含单测与真实 omp 慢测试）
   extra_usage.rs           # 供应商用量的**补充探针**（V15 二轮）：omp 无探针的 commandcode / deepseek 由壳侧补查（API key 经 `omp token` 内存传递、不落盘；reqwest 只读 GET；含单测与真实 commandcode 慢测试）
-scripts/                   # e2e-ipc-selfcheck.mjs（IPC 契约双向自检）、generate-icons.mjs、fixup-latest-json.mjs（latest.json 资产 URL → 公开直链；发版 fixup job 与存量修补共用）
+scripts/                   # e2e-ipc-selfcheck.mjs（IPC 契约双向自检）、generate-icons.mjs、fixup-latest-json.mjs（latest.json 资产 URL → 公开直链；发版 fixup job 与存量修补共用）、build-nerd-icons-font.py（终端图标字体派生 → public/fonts/omp-nerd-icons.woff2，V16）
+public/fonts/              # omp-nerd-icons.woff2：内嵌的单宽 Nerd Font 图标字体（V16；生成脚本见上，来源与许可见 THIRD-PARTY-NOTICES.md）
 ```
 
 `lib/` 明细（V11）：
@@ -84,6 +86,7 @@ locale.ts        # 全界面中英字典（~300 键）+ 语言偏好三档 + 解
 theme.ts         # 皮肤三档归一 + localStorage + resolveTheme + applyTheme（含单测）
 termTheme.ts     # 终端配色：从 CSS `--term-*` 读值喂给 xterm（组件不写死色值）
 termTitle.ts     # 终端标签 π 状态标：解析 omp 窗口标题 `π <状态> <会话名>` → 状态 + 会话名（含单测）
+termInput.ts     # macOS WKWebView 漏键补丁（上游 #5374）：只补 xterm 自身去重规则会拒绝、且 keypress 没发的那一次 input（`isDroppedInput` 镜像其 `_inputEvent` 接受条件，与真实 xterm 对拍）；正常按键、IME 组字、读屏一律不动（含单测）
 useText.ts       # 组件取文案的唯一入口
 useDropdown.ts   # 下拉与共用 useDialogFocus：最上层 Esc、Tab 圈定、焦点恢复、隐藏面板隔离
 workspaces.ts    # 工作区逻辑：loadWorkspaces（唯一刷新入口）/ 显示名 / 点工作区开终端 / ＋ 新建 / resume 到终端
@@ -102,7 +105,7 @@ appUpdate.ts     # 应用内更新状态机
 ## 核心数据流（不许违背）
 
 - **终端 = PTY 里的 `omp` TUI（V11 的根）**：每个终端 tab 在后端是一个 `omp --cwd <dir>` 进程跑在 PTY 里（**无 `--mode`** —— 交互式 TUI；`--resume <id>` 可选）。壳侧**不解析、不翻译**终端字节流：Rust 读线程做增量 UTF-8 解码后经 **Tauri Channel** 直推前端 `xterm.write`；键盘走 `pty_write`、尺寸走 `pty_resize`、关闭走 `pty_kill`。**kill 是双保险**：omp 的 TUI 收到 SIGHUP 不退出（实测），终止统一走 **SIGHUP → 1 秒宽限 → SIGKILL 进程组**（`force_kill_group` 打 `-pid`；应用退出路径直接补 SIGKILL）；读线程收尾用带宽限的 `wait_with_grace`，`PtyHandle.seq` 防「同 id 快速重启时旧读线程误删新句柄」。**高频字节流不进 Zustand**——store 只放 tab 元数据（id/cwd/label/title/state/status/exitCode/resume/spawnSeq）。
-- **终端环境**：`TERM=xterm-256color`、`COLORTERM=truecolor`；`PATH` 取登录 shell 的一次性探测结果（GUI 启动的 .app 只有 launchd 默认 PATH）。omp 发 OSC 0/2 标题（`π <状态> <会话名>`：转轮字形 = 工作中、`!` = 等你确认、`>` = 轮到你；`tui.titleState` 默认开）→ `setTerminalTitle` **解析出展示名与状态**（`lib/termTitle.ts`），标签上是「π 状态标 + 会话名」——**π 的颜色即 omp 状态**（working=accent+呼吸 / attention=warn / ready·正常退出=ok / 异常退出·启动失败=danger / 未知=faint），状态文字进 `sr-only` 与 π 的悬停提示（颜色不作唯一信号）。转轮每 80ms 换一帧：**解析放在 store 边界，只有名字或状态真变了才写 store**（别退回「每个标题帧写一次」）。终端配色从 `--term-*`（两套皮肤）运行时读取；`<html class="dark">` 变化时所有 xterm 实例换色（MutationObserver）。
+- **终端环境**：`TERM=xterm-256color`、`COLORTERM=truecolor`；`PATH` 取登录 shell 的一次性探测结果（GUI 启动的 .app 只有 launchd 默认 PATH）。**终端字体 = `--font-mono`**（`TerminalPane` 创建 xterm 时读它）——栈末尾挂内嵌的 "OMP Nerd Icons"（单宽 0.6 em，只补图标码点；omp 的 `symbolPreset: nerd` 图标靠它渲染，V16）：壳内没有别的字体来源，改字体栈就是改终端观感。omp 发 OSC 0/2 标题（`π <状态> <会话名>`：转轮字形 = 工作中、`!` = 等你确认、`>` = 轮到你；`tui.titleState` 默认开）→ `setTerminalTitle` **解析出展示名与状态**（`lib/termTitle.ts`），标签上是「π 状态标 + 会话名」——**π 的颜色即 omp 状态**（working=accent+呼吸 / attention=warn / ready·正常退出=ok / 异常退出·启动失败=danger / 未知=faint），状态文字进 `sr-only` 与 π 的悬停提示（颜色不作唯一信号）。转轮每 80ms 换一帧：**解析放在 store 边界，只有名字或状态真变了才写 store**（别退回「每个标题帧写一次」）。终端配色从 `--term-*`（两套皮肤）运行时读取；`<html class="dark">` 变化时所有 xterm 实例换色（MutationObserver）。
 - **fit 只在可见时做**：`display:none` 里量不到尺寸——`ResizeObserver` 与切 tab 的 fit 都用 active 判断挡掉隐藏面板；切到本 tab 时 rAF 后 fit + `pty_resize` + focus。同一 id 快速重启有竞态防护（后端 `PtyHandle.seq` 比对，旧读线程不误删新句柄）。
 - **主区 = 常驻标签栏 + 常驻面板（设置是标签，不是替换）**：`App` 里是 `<TerminalTabs />`（终端标签 + 设置标签 + ＋，只要有任何标签就常驻）+ `<TerminalView visible={!settingsTabActive} />` + `{settingsTabOpen && <SettingsPage visible={settingsTabActive} />}` + 终端关闭确认（`ConfirmDialog`，任意标签下都要弹得出来）。**面板只切显隐、不许条件渲染**——**卸载 `<TerminalView />` 会连带卸载每个 `TerminalPane`，其清理 effect 直接 `pty_kill`**（那是「关闭标签」才该发生的事；实测：卸载终端树 → kill 立即发生）。切到设置标签时 `visible=false` 让面板的 active 判定为假（不量尺寸 / 不推 resize），切回时按「切到本 tab」重新 fit + 聚焦；隐藏期间到达的输出照常进 xterm 缓冲，设置页的页签选择 / 滚动位置也保留（`settingsTabOpen` 置 false 才卸载）。`activeTerminalId` 在切去设置标签时保持不变，作为「上次的终端」。
 - **终端 tab 不追踪 session id**：jsonl 的 sessionId 由 TUI 自己创建，壳侧不做运行时绑定（会话列表的「运行中」标记不做——tab 上的 π 状态来自 OSC 标题，不是从 jsonl 推断）；`--resume` 由会话弹窗发起（cwd 用会话原目录）。
@@ -127,6 +130,7 @@ appUpdate.ts     # 应用内更新状态机
 - **左栏选中态**：工作区行 = `bg-active` 填充 + 左侧 2px accent 线 + 等宽加粗分支名；`DiagramTree` 区分主目录与 worktree（主目录强调色、普通 worktree 灰色），与项目行共用悬浮语言。
 - **终端关闭语义**：`requestCloseTerminal` 统一收口（running → ConfirmDialog 确认；exited → 直关）；关 = 从 store 移除 → 组件卸载 → kill 进程。重启 = `restartTerminal`（spawnSeq+1，TerminalPane 重新 spawn，xterm 实例与滚动缓冲保留）。
 - **皮肤与语言仍是纯展示层偏好**：三档分段控件挂在左栏底部「设置」行右侧（语言在左、皮肤在右），不写 omp 配置、不进设置页；`--term-*` 两套色板跟着这两个开关走。深浅色不准用 Tailwind `dark:` 变体绕开 token；终端色值只准放 `index.css` 的 `--term-*`（`lib/termTheme.ts` 运行时读取）。
+- **终端图标字体是壳的资源**（V16）：`--font-mono` 末尾的 "OMP Nerd Icons"（`public/fonts/omp-nerd-icons.woff2`，Nerd Fonts Symbols Only 派生、横向压到 0.6 em = 1 个终端 cell；重新生成走 `scripts/build-nerd-icons-font.py`）**只补图标码点**，ASCII / 中文仍走系统字体；`main.tsx` 启动预热。设置 › 通用的 `symbolPreset` 是**唯一进白名单的外观键**（nerd 档能不能渲染由壳决定）。omp 欢迎头那条「Please use nerdfont 😭.」是上游行为（unicode 档 + 每会话 10% 概率，见 `docs/v16-schedule.md`）——**不许在壳侧过滤终端输出**，消除它靠切 `symbolPreset`。
 - **界面文案一律走字典**（`src/lib/locale.ts` 的 `TEXT`）：组件内 `useText()`、非组件模块 `TEXT[useApp.getState().locale]`；插值 `fmt(t.key, v1)`（占位 `{0}`）；**上游数据不进字典**（会话标题、omp 输出、后端错误原样透传）。设置项 label 是动态键（`s_` + 点换下划线 / 分组 `sg_` / 值标签 `sv*`）——**这批前缀的键不许被「未使用键清理」误删**（有单测守着）。
 - 左侧栏宽度 **292–480px（默认 292，localStorage 持久化）**；下限由底部行内容决定（改 `SIDEBAR_MIN` 前先量那一行）。窄窗 <768px 收抽屉。
 - 状态收敛：无独立状态条；omp 健康走 `HealthBanner`，更新提醒走左栏设置入口的小点（`update.status` 为 available/ready）。
@@ -151,7 +155,7 @@ pnpm tauri:build            # 本机发布构建，产物见 src-tauri/target/re
 pnpm icon                   # 从 design-system/icon/omp-mini-icon.svg 重生成桌面图标
 ```
 
-界面核对（无屏幕权限时）：`pnpm dev` + 浏览器里注入 `window.__TAURI_INTERNALS__` mock（含 Channel 协议：`transformCallback` 回调表 + `{index, message}` 帧格式），可驱动全流程（开终端 / 多 tab / 退出浮层 / 会话弹窗）——mock 状态写进 `document.documentElement.dataset` 后用 DOM 读回；`page.evaluate` 与 `evaluateOnNewDocument` 之间 window 属性可能不保活，**断言要放在同一个 `tab.run` 里**。
+界面核对（无屏幕权限时）：`pnpm dev` + 浏览器里注入 `window.__TAURI_INTERNALS__` mock（含 Channel 协议：`transformCallback` 回调表 + `{index, message}` 帧格式），可驱动全流程（开终端 / 多 tab / 退出浮层 / 会话弹窗）——mock 状态写进 `document.documentElement.dataset` 后用 DOM 读回。**注意执行世界**：omp 的 browser runtime 里 `page.evaluate` 跑在 isolated world，那里写的 `window` 属性对 main world 的应用不可见（V16 实测：应用仍报 `Cannot read properties of undefined (reading 'invoke')`）——mock 与断言都要经 CDP `Runtime.evaluate` / `Page.addScriptToEvaluateOnNewDocument`（默认 main world）注入；断言放在同一个 `tab.run` 里。
 
 ## 发版与更新
 

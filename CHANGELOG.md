@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Added
+- **终端内嵌 Nerd Font 图标字体；设置 ›「通用」新增「图标符号集」**（`symbolPreset`，档位：Unicode 符号 / Nerd Font 图标 / 纯 ASCII）。起因：omp 在 `symbolPreset: unicode`（默认档）下会在欢迎头随机显示「Please use nerdfont 😭.」——这是上游行为（二进制里 `getSymbolPreset() === "unicode" && random < 0.1`），但此前壳里既没有能渲染 nerd 图标的字体、也没有切换入口，等于一条跟不了的提示。现在 `public/fonts/omp-nerd-icons.woff2`（Nerd Fonts Symbols Only 派生：轮廓与 advance 横向压到 0.6 em = 1 个终端 cell，即官方 `Nerd Font Mono` 的单宽形态；生成脚本 `scripts/build-nerd-icons-font.py`）挂在 `--font-mono` 末尾，只补图标码点（ASCII / 中文仍走系统字体）；应用启动预热该字体。切到「Nerd Font 图标」档后图标开箱即用、那条提示不再出现；`ascii` 档为纯 ASCII（零字体依赖）。改动何时生效遵循既有口径：**新起的会话**读到新值，已打开的会话不热读外部配置。
+- - 验证：`pnpm check` 全绿（166 单测 + e2e:ipc）；真实 PTY 抓 omp 两种预设的 TUI 输出（100×30，`--config` overlay 不改全局配置）在 xterm 里重放：nerd 档图标逐个渲染为 1 cell 宽（实测图标 span 宽 7.83px = Menlo 的 cell 宽，无需 letter-spacing 校正）、无重叠错位；设置页下拉读写（`omp config get/set symbolPreset`）实测。
+
+### Fixed
+- 终端里逗号、引号、空格等打出两个：0.4.1 的 WKWebView 漏键补丁曾用 `defaultPrevented` 判“xterm 已消费”，但 xterm 默认 `cancelEvents=false`、消费成功也不 `preventDefault`——正常字符全被补了第二遍。fallback 现在只看 xterm 自己的接受条件（`composed && keyDownSeen && !keyPressHandled` 的镜像，读内部 `_core` 去重状态）才补，正常按键原样走 xterm；补发只走公开 `input()`、不动 textarea 内容（壳侧不代清空，由 xterm 自己逐次清理），读屏模式与读不到内部状态时不动（上游 xterm.js #5374 / #6078 未修）。
+- 结构：`lib/termInput.ts` 抽出纯谓词 `isDroppedInput`（判定与监听分离，可与真实 xterm 对拍）；补发动作收敛成「公开 `input()` 一次」。
+- 验证：`pnpm check` 全绿（169 单测；`termInput.test.ts` 16 项 = 监听行为 + 穷举输入形状对拍 + 真实 xterm 6.0.0 集成）。临时验证台（真实 xterm + 真实补丁，数 `onData` 写入次数）——旧实现：真实键入 `a,!"␣␣` 写 8 次（两个空格各两遍）、`seen=false` 的 composed input 写 2 次、空格按键后写 2 次；新实现分别 6 / 1 / 1 次，且漏键场景（Shift 按住 + composed input）仍补 1 次、真实 Shift+3 连打 2 次不丢不重。**真机 WKWebView 未实测**：本机未授予屏幕/输入权限，无法驱动原生窗口，改用真实引擎（Chromium）+ 注入 WKWebView 形状的 `input` 事件替代。
+- - 结构：`lib/termInput.ts` 抽出纯谓词 `isDroppedInput`（判定与监听分离，可与真实 xterm 对拍）；补发动作收敛成「公开 `input()` 一次」。
+- - 验证：`pnpm check` 全绿（169 单测；`termInput.test.ts` 16 项 = 监听行为 + 穷举输入形状对拍 + 真实 xterm 6.0.0 集成）。临时验证台（真实 xterm + 真实补丁，数 `onData` 写入次数）——旧实现：真实键入 `a,!"␣␣` 写 8 次（两个空格各两遍）、`seen=false` 的 composed input 写 2 次、空格按键后写 2 次；新实现分别 6 / 1 / 1 次，且漏键场景（Shift 按住 + composed input）仍补 1 次、真实 Shift+3 连打 2 次不丢不重。**真机 WKWebView 未实测**：本机未授予屏幕/输入权限，无法驱动原生窗口，改用真实引擎（Chromium）+ 注入 WKWebView 形状的 `input` 事件替代。
 ## [0.4.1] - 2026-09-20
 
 ### Changed

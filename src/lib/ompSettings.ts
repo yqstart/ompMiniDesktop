@@ -9,6 +9,10 @@
  * 之前挂在输入框的 `PermissionBadge` 上；终端工作区改版后那个入口退场（审批在 omp TUI
  * 里进行），这个键**回归本页**，是它现在唯一的图形入口。
  *
+ * **唯一的外观键例外**是 `symbolPreset`（V16）：图标符号集不是纯 TUI 细节——能不能渲染
+ * 由壳决定（壳内嵌了单宽图标字体，见 `index.css` 的 "OMP Nerd Icons"），这个键是「切到
+ * nerd 档就能用」的入口；不选它时 omp 还会在欢迎头随机提示「Please use nerdfont」。
+ *
  * 口径（上游事实见 `src-tauri/src/settings.rs` 头注释）：
  * - 写的是 **omp 全局层**（`~/.omp/agent/config.yml`），不写 `<cwd>/.omp/config.yml`；
  * - 白名单只收 `boolean` / `enum` / `number` 三种标量——`array` / `record` 要整表读写，
@@ -193,6 +197,20 @@ export const SETTING_SPECS: readonly SettingSpec[] = [
  },
  { key: "hideThinkingBlock", type: "boolean", group: "interaction" },
  { key: "includeWorkspaceTree", type: "boolean", group: "interaction" },
+ // 外观键里唯一进白名单的一项：图标符号集直接决定终端里 omp 描出的图标形态，
+ // 而「能不能渲染」由壳决定——壳内嵌了单宽图标字体（`index.css` 的 "OMP Nerd Icons"，
+ // 见 THIRD-PARTY-NOTICES.md），nerd 档在这里是**可用**的；不选它时 omp 的欢迎头还会
+ // 随机提示「Please use nerdfont」（上游行为：`symbolPreset === "unicode"` 时 10% 概率）。
+ {
+  key: "symbolPreset",
+  type: "enum",
+  group: "interaction",
+  options: [
+   { value: "unicode", label: "svSymbolsUnicode" },
+   { value: "nerd", label: "svSymbolsNerd" },
+   { value: "ascii", label: "svSymbolsAscii" },
+  ],
+ },
 ];
 
 /** 白名单里的全部键（读取时一次性交给后端）。 */
