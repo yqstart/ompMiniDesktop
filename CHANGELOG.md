@@ -4,12 +4,15 @@
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-20
+
 ### Changed
 - 深色主题改用中性黑灰（去蓝偏）：工作面、侧栏、卡片、浮层与代码底色同步调整；终端底色/亮白与 `design-system/MASTER.md` 色表一并跟进，浅色冷灰保持不变。
 
 ### Fixed
 - macOS 反复弹「“ompMiniDesktop”想访问“桌面”文件夹」：授权框现在显示中文用途说明（新增 `src-tauri/Info.plist` 的桌面/文稿/下载 `UsageDescription`，打包时与生成值合并；只改文案——adhoc 签名（`signingIdentity: "-"`）下 TCC 按签名身份记授权，`tauri:dev` 每次重编都是新身份，旧授权即失效，只能重弹；根治需 Apple Developer ID 签名+公证）。眼前绕行：把项目移出桌面/文稿/下载（如 `~/Projects`），或固定用同一份产物少重编；排障见 README「排障」。
 - 终端里 `?` `@` `"` 等 Shift 组合键要按两遍、中文输入法下首击被吞：macOS 的 WKWebView（Safari 内核）把字符的 input 排在字符自身 keydown 之前，xterm 的去重标记还记着修饰键而误杀真实输入，随后的 keyCode 229 composition 兜底又读到空差值（上游 xterm.js #5374 未修）。壳侧在 textarea 冒泡阶段补一层 fallback：只处理 xterm 漏掉的真实文本（已消费 / IME 组字中 / 非文本输入一律不动），经公开 `input()` 补发一次并清空残留；非 macOS 不挂载。
+
 ## [0.4.0] - 2026-09-18
 
 ### 新增
