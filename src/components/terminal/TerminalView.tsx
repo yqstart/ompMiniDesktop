@@ -1,6 +1,10 @@
+import { useState } from "react";
 import { BrowserTerminal } from "reicon-react";
 import { useApp } from "../../stores/app";
-import { newTerminalInActiveWorkspace } from "../../lib/workspaces";
+import { loadWorkspaces, newTerminalInActiveWorkspace, resolveNewTerminalWorkspace } from "../../lib/workspaces";
+import { pickAndAddProject } from "../../lib/projects";
+import { isMacKeyboard } from "../../lib/termInput";
+import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
 import { TerminalPane } from "./TerminalPane";
 
@@ -37,8 +41,27 @@ export function TerminalView({ visible = true }: { visible?: boolean }) {
 
 /** 空态：引导开第一个终端（左栏空态负责引导添加项目）。 */
 function EmptyTerminal() {
- const hasProjects = useApp((s) => s.projects.length > 0);
+ const projects = useApp((s) => s.projects);
+ const workspaces = useApp((s) => s.workspaces);
+ const activeWorkspacePath = useApp((s) => s.activeWorkspacePath);
  const t = useText();
+ const [busy, setBusy] = useState(false);
+ const [error, setError] = useState<string | null>(null);
+ const target = resolveNewTerminalWorkspace(workspaces, activeWorkspacePath);
+ const shortcut = isMacKeyboard() ? "⌘ T" : "Ctrl+Shift+T";
+ const addProject = async () => {
+  setBusy(true);
+  setError(null);
+  try {
+   const res = await pickAndAddProject();
+   if (res && !res.ok) setError(res.message);
+   if (res?.ok) await loadWorkspaces();
+  } catch (e) {
+   setError(e instanceof Error ? e.message : t.addProjectFailed);
+  } finally {
+   setBusy(false);
+  }
+ };
  return (
   <div className="flex h-full flex-col items-center justify-center overflow-y-auto px-6 py-10">
    <div className="flex w-full max-w-md flex-col items-center text-center">
@@ -48,19 +71,48 @@ function EmptyTerminal() {
     <p className="mb-3 font-mono text-[11px] tracking-[0.16em] text-faint">omp / {t.termPaneAria}</p>
     <h2 className="text-[24px] leading-tight font-semibold tracking-tight sm:text-[28px]">{t.termEmptyTitle}</h2>
     <p className="mt-4 max-w-[340px] text-[13px] leading-6 text-muted">{t.termEmptyBody}</p>
-    {hasProjects ? (
+    {projects.length === 0 ? (
+     <>
+      <button
+       onClick={() => void addProject()}
+       disabled={busy}
+       aria-label={t.sidebarAddProjectAria}
+       className="mt-7 flex cursor-pointer items-center gap-4 rounded-md border border-accent/25 bg-accent/10 px-4 py-2.5 text-[13px] font-medium text-accent transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+      >
+       {t.sidebarAddProjectAria}
+      </button>
+      {error && (
+       <button
+        onClick={() => void addProject()}
+        disabled={busy}
+        className="mt-3 max-w-[340px] cursor-pointer rounded-md border border-danger/20 bg-danger/10 px-3 py-2 text-[12px] text-danger transition-colors duration-100 hover:bg-danger/15 disabled:opacity-50"
+       >
+        {error}
+       </button>
+      )}
+     </>
+    ) : target ? (
      <button
       onClick={() => newTerminalInActiveWorkspace()}
+      title={fmt(t.termOpenInHint, target.path)}
       className="mt-7 flex cursor-pointer items-center gap-4 rounded-md border border-accent/25 bg-accent/10 px-4 py-2.5 text-[13px] font-medium text-accent transition-colors duration-100 hover:bg-hover"
      >
       {t.termNew}
-      <kbd className="font-mono text-[11px] opacity-75">⌘ T</kbd>
+      <kbd className="font-mono text-[11px] opacity-75">{shortcut}</kbd>
      </button>
     ) : (
-     <p className="mt-7 rounded-md border border-border-soft bg-surface px-4 py-2.5 text-[12px] text-muted">{t.emptyNoProjectTitle}</p>
+     <>
+      <p className="mt-7 max-w-[340px] rounded-md border border-border-soft bg-surface px-4 py-2.5 text-[12px] leading-relaxed text-muted">{t.termEmptyNoWorkspaceBody}</p>
+      <button
+       onClick={() => useApp.getState().set({ sidebarOpen: true })}
+       className="mt-3 cursor-pointer rounded-md border border-border px-3 py-1.5 text-[12px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+      >
+       {t.termViewProjects}
+      </button>
+     </>
     )}
     <div className="mt-12 flex flex-wrap justify-center gap-x-6 gap-y-3 border-t border-border-soft pt-5 text-[11px] text-faint">
-     <span className="flex items-center gap-2"><kbd className="rounded-sm border border-border bg-surface px-1.5 py-0.5 font-mono">⌘ T</kbd>{t.termNew}</span>
+     <span className="flex items-center gap-2"><kbd className="rounded-sm border border-border bg-surface px-1.5 py-0.5 font-mono">{shortcut}</kbd>{t.termNew}</span>
      <span className="flex items-center gap-2"><kbd className="rounded-sm border border-border bg-surface px-1.5 py-0.5 font-mono">⌘ 1–9</kbd>{t.termSwitch}</span>
     </div>
    </div>
