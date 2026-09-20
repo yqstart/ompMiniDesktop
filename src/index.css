@@ -44,45 +44,45 @@
  --term-bright-white: #1e2226;
 }
 
-/* 深色沿用同一冷灰色系，避免纯黑底与过亮的边框。 */
+/* 深色走中性黑灰（无蓝偏），与浅色冷灰各自独立；避免纯黑底与过亮的边框。 */
 .dark {
- --background: #181c25;
- --sidebar: #202531;
- --surface: #262d3b;
- --elevated: #30394a;
- --foreground: #e8edf6;
- --muted: #b1bdd0;
- --faint: #95a3ba;
- --border: #3b4659;
- --border-soft: #2e3748;
+ --background: #171717;
+ --sidebar: #1f1f1f;
+ --surface: #282828;
+ --elevated: #323232;
+ --foreground: #e8e8e8;
+ --muted: #b8b8b8;
+ --faint: #9e9e9e;
+ --border: #3f3f3f;
+ --border-soft: #2e2e2e;
  --accent: #a5b4fc;
- --accent-foreground: #181c25;
+ --accent-foreground: #171717;
  --danger: #f87171;
  --warn: #fbbf24;
  --ok: #34d399;
- --code: #141820;
+ --code: #101010;
  --hover: color-mix(in srgb, var(--accent) 8%, transparent);
  --active: color-mix(in srgb, var(--accent) 14%, transparent);
  /* 终端 16 色（深色档；见 :root 的同名块注释） */
  --term-background: var(--background);
  --term-foreground: var(--foreground);
  --term-cursor: var(--accent);
- --term-black: #3a4145;
+ --term-black: #333333;
  --term-red: #f87171;
  --term-green: #34d399;
  --term-yellow: #fbbf24;
  --term-blue: #818cf8;
  --term-magenta: #c084fc;
  --term-cyan: #22d3ee;
- --term-white: #b0b7bc;
- --term-bright-black: #8e969b;
+ --term-white: #b8b8b8;
+ --term-bright-black: #9e9e9e;
  --term-bright-red: #fca5a5;
  --term-bright-green: #6ee7b7;
  --term-bright-yellow: #fcd34d;
  --term-bright-blue: #a5b4fc;
  --term-bright-magenta: #d8b4fe;
  --term-bright-cyan: #67e8f9;
- --term-bright-white: #e9ecee;
+ --term-bright-white: #e8e8e8;
 }
 
 @theme inline {

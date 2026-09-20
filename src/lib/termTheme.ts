@@ -18,7 +18,7 @@ export function withAlpha(color: string, alpha: number): string {
 export function readTermTheme(): ITheme {
  const cs = getComputedStyle(document.documentElement);
  const v = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback;
- const background = v("--term-background", "#1b1f21");
+ const background = v("--term-background", "#171717");
  return {
   background,
   foreground: v("--term-foreground", "#e9ecee"),
@@ -26,21 +26,21 @@ export function readTermTheme(): ITheme {
   cursorAccent: background,
   // 选区 = accent 稀释 30%：与全局 `::selection`（28%）同源，刻意留一点差异以便终端里更显眼
   selectionBackground: withAlpha(v("--accent", "#818cf8"), 0.3),
-  black: v("--term-black", "#3a4145"),
+  black: v("--term-black", "#333333"),
   red: v("--term-red", "#f87171"),
   green: v("--term-green", "#34d399"),
   yellow: v("--term-yellow", "#fbbf24"),
   blue: v("--term-blue", "#818cf8"),
   magenta: v("--term-magenta", "#c084fc"),
   cyan: v("--term-cyan", "#22d3ee"),
-  white: v("--term-white", "#b0b7bc"),
-  brightBlack: v("--term-bright-black", "#8e969b"),
+  white: v("--term-white", "#b8b8b8"),
+  brightBlack: v("--term-bright-black", "#9e9e9e"),
   brightRed: v("--term-bright-red", "#fca5a5"),
   brightGreen: v("--term-bright-green", "#6ee7b7"),
   brightYellow: v("--term-bright-yellow", "#fcd34d"),
   brightBlue: v("--term-bright-blue", "#a5b4fc"),
   brightMagenta: v("--term-bright-magenta", "#d8b4fe"),
   brightCyan: v("--term-bright-cyan", "#67e8f9"),
-  brightWhite: v("--term-bright-white", "#e9ecee"),
+  brightWhite: v("--term-bright-white", "#e8e8e8"),
  };
 }
