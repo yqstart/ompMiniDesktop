@@ -142,6 +142,23 @@ describe("ModelsPanel 的 omp 侧识别", () => {
   expect(container.textContent).not.toContain("demo/stale");
  });
 
+ it("角色失败而切换环成功时环可用，重试可恢复角色", async () => {
+  vi.mocked(api.getModelRoles).mockRejectedValueOnce(new Error("roles boom"));
+  h.cycleOrder = ["slow"];
+  act(() => root.render(<ModelsPanel />));
+  await flush();
+  expect(container.textContent).toContain("roles boom");
+  expect(container.querySelector('[aria-label="快速切换环"]')?.textContent).toContain("深思");
+  h.roles = { slow: "demo/fresh" };
+  act(() => {
+   const retry = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "重试");
+   retry?.click();
+  });
+  await flush();
+  expect(container.textContent).toContain("demo/fresh");
+  expect(container.textContent).not.toContain("roles boom");
+ });
+
  it("快速切换环：添加 / 上移 / 移除都按当前顺序整组写回", async () => {
   h.cycleOrder = ["default", "smol"];
   act(() => root.render(<ModelsPanel />));

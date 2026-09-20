@@ -28,6 +28,7 @@ export function ArchivedSessions() {
  const [rows, setRows] = useState<SessionView[] | null>(null);
  const [busy, setBusy] = useState(false);
  const [error, setError] = useState<string | null>(null);
+ const [loadError, setLoadError] = useState<string | null>(null);
  const [pending, setPending] = useState<PendingDelete | null>(null);
  /** 自增即重拉：挂载、点「刷新」、以及每次恢复/删除之后都走它。 */
  const [reloadKey, setReloadKey] = useState(0);
@@ -41,12 +42,16 @@ export function ArchivedSessions() {
    .then((list) => {
     if (!alive) return;
     setRows(list);
-    setError(null);
+    setLoadError(null);
    })
    .catch((e: unknown) => {
     if (!alive) return;
-    setRows([]);
-    setError(e instanceof Error ? e.message : t.archivedLoadFailed);
+    const message = e instanceof Error ? e.message : t.archivedLoadFailed;
+    setRows((prev) => {
+     if (!prev) setLoadError(message);
+     else setError(`${t.listRefreshFailed}：${message}`);
+     return prev;
+    });
    });
   return () => {
    alive = false;
@@ -113,7 +118,7 @@ export function ArchivedSessions() {
     <span className="font-mono text-xs text-muted">{total}</span>
     <button
      onClick={() => setReloadKey((k) => k + 1)}
-     disabled={busy}
+     disabled={busy || rows === null}
      className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
      aria-label={t.archivedRefresh}
     >
@@ -129,7 +134,20 @@ export function ArchivedSessions() {
    )}
 
    {rows === null ? (
-    <p className="mt-3 text-[13px] text-muted">{t.archivedLoading}</p>
+    loadError ? (
+     <div className="mt-3 flex flex-col items-start gap-2">
+      <p role="alert" className="text-[13px] text-danger">{loadError}</p>
+      <button
+       onClick={() => setReloadKey((k) => k + 1)}
+       disabled={busy}
+       className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+      >
+       {t.retry}
+      </button>
+     </div>
+    ) : (
+     <p role="status" className="mt-3 text-[13px] text-muted">{t.archivedLoading}</p>
+    )
    ) : total === 0 ? (
     <p className="mt-4 rounded-lg bg-background px-4 py-8 text-center text-[13px] leading-relaxed text-muted">{t.archivedEmpty}</p>
    ) : (

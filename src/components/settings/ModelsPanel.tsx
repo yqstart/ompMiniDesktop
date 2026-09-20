@@ -46,6 +46,10 @@ export function ModelsPanel() {
  const [chains, setChains] = useState<FallbackChainsInfo | null>(null);
  const [cycleOrder, setCycleOrder] = useState<string[] | null>(null);
  const [err, setErr] = useState<string | null>(null);
+ const [rolesError, setRolesError] = useState<string | null>(null);
+ const [chainsError, setChainsError] = useState<string | null>(null);
+ const [cycleError, setCycleError] = useState<string | null>(null);
+ const [catalogError, setCatalogError] = useState<string | null>(null);
  const [busy, setBusy] = useState(false);
  const requestSeq = useRef(0);
  const rolesRevision = useRef(0);
@@ -55,6 +59,11 @@ export function ModelsPanel() {
  const cycleWriting = useRef(false);
  const [savingRole, setSavingRole] = useState(false);
  const [savingCycle, setSavingCycle] = useState(false);
+
+ const readError = (res: PromiseSettledResult<unknown>, fallback: string): string | null => {
+  if (res.status === "fulfilled") return null;
+  return res.reason instanceof Error ? res.reason.message : String(res.reason || fallback);
+ };
 
  /** 重读只接纳最新请求；写入后的真值不能被更早发出的读请求覆盖。 */
  const load = useCallback(async (force: boolean) => {
@@ -69,14 +78,36 @@ export function ModelsPanel() {
    force ? api.refreshModels() : api.getModels(),
   ]);
   if (seq !== requestSeq.current) return;
-  if (res[0].status === "fulfilled" && roleVersion === rolesRevision.current && !roleWriting.current) setRoles(res[0].value);
-  if (res[1].status === "fulfilled" && chainVersion === chainsRevision.current) setChains(res[1].value);
-  if (res[2].status === "fulfilled" && cycleVersion === cycleRevision.current && !cycleWriting.current) setCycleOrder(res[2].value);
-  if (res[3].status === "fulfilled") set({ models: res[3].value });
-  const bad = res.find((r) => r.status === "rejected");
-  setErr(bad?.status === "rejected"
-   ? bad.reason instanceof Error ? bad.reason.message : String(bad.reason || t.modelsLoadFailed)
-   : res[3].status === "fulfilled" ? res[3].value.error ?? null : null);
+  if (roleVersion === rolesRevision.current && !roleWriting.current) {
+   if (res[0].status === "fulfilled") {
+    setRoles(res[0].value);
+    setRolesError(null);
+   } else {
+    setRolesError(readError(res[0], t.modelsLoadFailed));
+   }
+  }
+  if (chainVersion === chainsRevision.current) {
+   if (res[1].status === "fulfilled") {
+    setChains(res[1].value);
+    setChainsError(null);
+   } else {
+    setChainsError(readError(res[1], t.modelsLoadFailed));
+   }
+  }
+  if (cycleVersion === cycleRevision.current && !cycleWriting.current) {
+   if (res[2].status === "fulfilled") {
+    setCycleOrder(res[2].value);
+    setCycleError(null);
+   } else {
+    setCycleError(readError(res[2], t.modelsLoadFailed));
+   }
+  }
+  if (res[3].status === "fulfilled") {
+   set({ models: res[3].value });
+   setCatalogError(res[3].value.error ?? null);
+  } else {
+   setCatalogError(readError(res[3], t.modelsLoadFailed));
+  }
  }, [set, t.modelsLoadFailed]);
 
  // 挂载时拉一次；**每次设置标签重新激活**（从终端标签切回来）都重读——omp 侧（TUI / CLI）
@@ -84,8 +115,13 @@ export function ModelsPanel() {
  // 模型目录走 `get_models` 的 5 分钟缓存（`models` 已在 store 里时不强制重拉），这轮重读很轻。
  useEffect(() => {
   if (!settingsTabActive) return;
-  void load(!models);
-  return () => { requestSeq.current += 1; };
+  const timer = window.setTimeout(() => {
+   void load(!models);
+  }, 0);
+  return () => {
+   window.clearTimeout(timer);
+   requestSeq.current += 1;
+  };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在挂载与激活态翻转时重读
  }, [settingsTabActive]);
 
@@ -150,6 +186,26 @@ export function ModelsPanel() {
 
  return (
   <>
+   <div className="shrink-0">
+    <h2 className="text-[20px] font-semibold tracking-tight">{t.tabModels}</h2>
+    <p className="mt-1 text-[13px] text-muted">{t.tabModelsHint}</p>
+    <div className="mt-2 flex flex-wrap gap-1.5">
+     {[["settings-models-providers", t.settingsModelsJumpProviders], ["settings-models-my-models", t.settingsModelsJumpMine], ["settings-models-roles", t.settingsModelsJumpRoles], ["settings-models-cycle", t.settingsModelsJumpCycle], ["settings-models-fallback", t.settingsModelsJumpFallback]].map(([id, label]) => (
+      <button
+       key={id}
+       onClick={() => {
+        const root = document.getElementById("settings-panel");
+        const el = document.getElementById(id);
+        if (root && el) root.scrollTo({ top: el.offsetTop - root.offsetTop - 8 });
+        el?.querySelector<HTMLElement>("h2")?.focus({ preventScroll: true });
+       }}
+       className="cursor-pointer rounded-md border border-border-soft bg-surface px-2.5 py-1.5 text-[12px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+      >
+       {label}
+      </button>
+     ))}
+    </div>
+   </div>
    {err && (
     <p role="alert" className="rounded border border-danger/40 bg-danger/5 px-3 py-2 text-[13px] text-danger">
      {err}
@@ -157,13 +213,15 @@ export function ModelsPanel() {
    )}
 
    {/* 供应商：添加（登录型 API key / OAuth + 自定义 models.yml）+ 按供应商挑选模型 */}
-   <ProvidersSection />
+   <div id="settings-models-providers" className="scroll-mt-2">
+    <ProvidersSection />
+   </div>
 
    {/* 我的模型：本应用偏好；挑过之后下面角色 / 转移的候选只列这些 */}
-   <section aria-label={t.myModelsSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
+   <section id="settings-models-my-models" aria-label={t.myModelsSection} className="scroll-mt-2 shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
     <div className="flex flex-wrap items-center gap-2">
      <Star size={16} aria-hidden className="text-muted" />
-     <h2 className="text-sm font-semibold">{t.myModelsSection}</h2>
+     <h2 tabIndex={-1} className="text-sm font-semibold outline-none">{t.myModelsSection}</h2>
      {entries.length > 0 && (
       <span className="text-[13px] text-muted">{fmt(t.myModelsCount, String(entries.length))}</span>
      )}
@@ -177,6 +235,11 @@ export function ModelsPanel() {
      )}
     </div>
     <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.myModelsHint}</p>
+    {catalogError && (
+     <p role="alert" className="mt-1.5 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
+      {catalogError}
+     </p>
+    )}
     <div className="mt-4">
      {entries.length === 0 ? (
       <p className="py-2 text-[13px] text-muted">{t.myModelsEmpty}</p>
@@ -198,10 +261,10 @@ export function ModelsPanel() {
    </section>
 
    {/* 模型角色：把 omp 的 modelRoles 读写给用户（候选 = 我的模型 或 全部） */}
-   <section aria-label={t.rolesSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
+   <section id="settings-models-roles" aria-label={t.rolesSection} className="scroll-mt-2 shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
     <div className="flex flex-wrap items-center gap-2">
      <Sliders size={16} aria-hidden className="text-muted" />
-     <h2 className="text-sm font-semibold">{t.rolesSection}</h2>
+     <h2 tabIndex={-1} className="text-sm font-semibold outline-none">{t.rolesSection}</h2>
      <button
       onClick={() => void refreshAll()}
       disabled={busy}
@@ -219,9 +282,27 @@ export function ModelsPanel() {
       {t.roleStorageProject}
      </p>
     )}
+    {rolesError && roles !== null && (
+     <p role="alert" className="mt-1.5 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
+      {t.ompSettingsStale}：{rolesError}
+     </p>
+    )}
     <div className="mt-2">
      {roles === null ? (
-      <div className="py-2 text-[13px] text-muted">{t.archivedLoading}</div>
+      rolesError ? (
+       <div className="flex flex-col items-start gap-2 py-2">
+        <p role="alert" className="text-[13px] text-danger">{rolesError}</p>
+        <button
+         onClick={() => void refreshAll()}
+         disabled={busy}
+         className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+        >
+         {t.retry}
+        </button>
+       </div>
+      ) : (
+       <div className="py-2 text-[13px] text-muted">{t.archivedLoading}</div>
+      )
      ) : (
       roleKeys.map((role) => (
        <RoleRow
@@ -246,6 +327,7 @@ export function ModelsPanel() {
     selectors={roles?.roles ?? {}}
     busy={busy}
     saving={savingCycle}
+    loadError={cycleError}
     onSave={saveCycleOrder}
     onRefresh={() => void refreshAll()}
    />
@@ -257,6 +339,7 @@ export function ModelsPanel() {
     catalog={catalog}
     roles={roleKeys}
     busy={busy}
+    loadError={chainsError}
     onSaved={(info) => { chainsRevision.current += 1; setChains(info); }}
     onRefresh={() => void refreshAll()}
    />

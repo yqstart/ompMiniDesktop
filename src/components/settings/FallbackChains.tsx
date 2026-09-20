@@ -44,6 +44,7 @@ export function FallbackChainsSection({
  catalog,
  roles,
  busy,
+ loadError,
  onSaved,
  onRefresh,
 }: {
@@ -53,6 +54,8 @@ export function FallbackChainsSection({
  /** 角色候选（内置 + 自定义，与角色区块同一份）。 */
  roles: string[];
  busy: boolean;
+ /** 读取失败（保留旧数据时显示过期提示，空快照时显示重试）。 */
+ loadError: string | null;
  onSaved: (info: FallbackChainsInfo) => void;
  onRefresh: () => void;
 }) {
@@ -87,10 +90,10 @@ export function FallbackChainsSection({
  };
 
  return (
-  <section aria-label={t.fallbackSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
+  <section id="settings-models-fallback" aria-label={t.fallbackSection} className="scroll-mt-2 shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
    <div className="flex flex-wrap items-center gap-2">
     <DiagramTree size={16} aria-hidden className="text-muted" />
-    <h2 className="text-sm font-semibold">{t.fallbackSection}</h2>
+    <h2 tabIndex={-1} className="text-sm font-semibold outline-none">{t.fallbackSection}</h2>
     <button
      onClick={onRefresh}
      disabled={busy || writing}
@@ -104,189 +107,212 @@ export function FallbackChainsSection({
    </div>
    <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.fallbackHint}</p>
 
-   {err && (
-    <p role="alert" className="mt-1.5 rounded border border-danger/40 bg-danger/5 px-2 py-1.5 text-[13px] text-danger">
-     {err}
-    </p>
-   )}
+   {
+    err && (
+     <p role="alert" className="mt-1.5 rounded border border-danger/40 bg-danger/5 px-2 py-1.5 text-[13px] text-danger">
+      {err}
+     </p>
+    )
+   }
+   {
+    loadError && info !== null && (
+     <p role="alert" className="mt-1.5 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
+      {t.ompSettingsStale}：{loadError}
+     </p>
+    )
+   }
 
-   {info === null ? (
-    <div className="py-2 text-[13px] text-muted">{t.archivedLoading}</div>
-   ) : (
-    <>
-     {/* 总开关 + 回归策略：链配得再好，总开关关了也不生效，所以两者同屏 */}
-     <div className="mt-4 flex flex-wrap items-center gap-2">
-      <button
-       type="button"
-       role="switch"
-       aria-checked={enabled}
-       disabled={writing}
-       onClick={() =>
-        void write(
-         () => api.setRetryOptions(!enabled, policy),
-         t.fallbackOptionsWriteFailed,
-         false,
-        )
-       }
-       title={t.fallbackRevertHint}
-       className={`shrink-0 cursor-pointer rounded-md border px-2.5 py-1 text-[13px] transition-colors duration-100 disabled:opacity-50 ${enabled
-        ? "border-accent/50 bg-active text-foreground"
-        : "border-border text-muted hover:bg-hover hover:text-foreground"
-        }`}
-      >
-       {t.fallbackEnabled}
-      </button>
-      {enabled && (
-       <div
-        role="radiogroup"
-        aria-label={t.fallbackRevertLabel}
-        title={t.fallbackRevertHint}
-        className="flex min-w-0 flex-wrap items-center gap-1 rounded-md bg-background p-1"
+   {
+    info === null ? (
+     loadError ? (
+      <div className="flex flex-col items-start gap-2 py-2">
+       <p role="alert" className="text-[13px] text-danger">{loadError}</p>
+       <button
+        onClick={onRefresh}
+        disabled={busy || writing}
+        className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
        >
-        {(
-         [
-          ["cooldown-expiry", t.fallbackRevertCooldown],
-          ["never", t.fallbackRevertNever],
-         ] as const
-        ).map(([value, label]) => {
-         const selected = policy === value;
-         return (
-          <button
-           key={value}
-           type="button"
-           role="radio"
-           aria-checked={selected}
-           disabled={writing}
-           onClick={() =>
-            void write(
-             () => api.setRetryOptions(enabled, value),
-             t.fallbackOptionsWriteFailed,
-             false,
-            )
-           }
-           className={`cursor-pointer rounded-sm px-2 py-0.5 text-[12px] transition-colors duration-100 disabled:opacity-50 ${selected ? "bg-active text-foreground" : "text-muted hover:bg-hover hover:text-foreground"
-            }`}
-          >
-           {label}
-          </button>
-         );
-        })}
-       </div>
-      )}
-     </div>
-     {/* 关闭态必须看得见：链配好了却不生效是这块最容易踩的坑，不藏在悬浮提示里 */}
-     {!enabled && <p className="mt-1.5 text-[13px] text-warn">{t.fallbackDisabledHint}</p>}
+        {t.retry}
+       </button>
+      </div>
+     ) : (
+      <div className="py-2 text-[13px] text-muted">{t.archivedLoading}</div>
+     )
+    ) : (
+     <>
+      {/* 总开关 + 回归策略：链配得再好，总开关关了也不生效，所以两者同屏 */}
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+       <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        disabled={writing}
+        onClick={() =>
+         void write(
+          () => api.setRetryOptions(!enabled, policy),
+          t.fallbackOptionsWriteFailed,
+          false,
+         )
+        }
+        title={t.fallbackRevertHint}
+        className={`shrink-0 cursor-pointer rounded-md border px-2.5 py-1 text-[13px] transition-colors duration-100 disabled:opacity-50 ${enabled
+         ? "border-accent/50 bg-active text-foreground"
+         : "border-border text-muted hover:bg-hover hover:text-foreground"
+         }`}
+       >
+        {t.fallbackEnabled}
+       </button>
+       {enabled && (
+        <div
+         role="radiogroup"
+         aria-label={t.fallbackRevertLabel}
+         title={t.fallbackRevertHint}
+         className="flex min-w-0 flex-wrap items-center gap-1 rounded-md bg-background p-1"
+        >
+         {(
+          [
+           ["cooldown-expiry", t.fallbackRevertCooldown],
+           ["never", t.fallbackRevertNever],
+          ] as const
+         ).map(([value, label]) => {
+          const selected = policy === value;
+          return (
+           <button
+            key={value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            disabled={writing}
+            onClick={() =>
+             void write(
+              () => api.setRetryOptions(enabled, value),
+              t.fallbackOptionsWriteFailed,
+              false,
+             )
+            }
+            className={`cursor-pointer rounded-sm px-2 py-0.5 text-[12px] transition-colors duration-100 disabled:opacity-50 ${selected ? "bg-active text-foreground" : "text-muted hover:bg-hover hover:text-foreground"
+             }`}
+           >
+            {label}
+           </button>
+          );
+         })}
+        </div>
+       )}
+      </div>
+      {/* 关闭态必须看得见：链配好了却不生效是这块最容易踩的坑，不藏在悬浮提示里 */}
+      {!enabled && <p className="mt-1.5 text-[13px] text-warn">{t.fallbackDisabledHint}</p>}
 
-     {/* 链列表 */}
-     <div className="mt-2">
-      {chains.length === 0 && editing !== "" ? (
-       <p className="py-2 text-[13px] text-muted">{t.fallbackEmpty}</p>
-      ) : (
-       chains.map(([key, targets]) => (
-        <div key={key} className="border-t border-border-soft py-2 first:border-t-0">
-         <div className="flex flex-wrap items-center gap-2">
-          <span className="shrink-0 rounded border border-border px-1.5 py-0.5 text-xs text-muted">
-           {kindLabel(chainKind(key), t)}
-          </span>
-          <span className="min-w-0 flex-1 truncate font-mono text-xs">{key}</span>
-          {confirmKey === key ? (
-           <>
-            <span className="shrink-0 text-[13px] text-muted">{t.fallbackConfirmDelete}</span>
-            <button
-             onClick={() => void write(() => api.setFallbackChain(key, null), t.fallbackWriteFailed)}
-             disabled={writing}
-             className="shrink-0 cursor-pointer rounded-md border border-danger/40 px-2.5 py-1 text-[13px] text-danger transition-colors duration-100 hover:bg-danger/10 disabled:opacity-50"
-            >
-             {t.fallbackDelete}
-            </button>
-            <button
-             onClick={() => setConfirmKey(null)}
-             disabled={writing}
-             className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-50"
-            >
-             {t.fallbackCancel}
-            </button>
-           </>
-          ) : (
-           <>
-            <button
-             onClick={() => setEditing(editing === key ? null : key)}
-             disabled={writing || (editing !== null && editing !== key)}
-             aria-expanded={editing === key}
-             aria-label={fmt(t.fallbackEditAria, key)}
-             className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
-            >
-             {t.fallbackEdit}
-            </button>
-            <button
-             onClick={() => setConfirmKey(key)}
-             disabled={writing || editing !== null}
-             aria-label={fmt(t.fallbackDeleteAria, key)}
-             className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-50"
-            >
-             {t.fallbackDelete}
-            </button>
-           </>
+      {/* 链列表 */}
+      <div className="mt-2">
+       {chains.length === 0 && editing !== "" ? (
+        <p className="py-2 text-[13px] text-muted">{t.fallbackEmpty}</p>
+       ) : (
+        chains.map(([key, targets]) => (
+         <div key={key} className="border-t border-border-soft py-2 first:border-t-0">
+          <div className="flex flex-wrap items-center gap-2">
+           <span className="shrink-0 rounded border border-border px-1.5 py-0.5 text-xs text-muted">
+            {kindLabel(chainKind(key), t)}
+           </span>
+           <span className="min-w-0 flex-1 truncate font-mono text-xs">{key}</span>
+           {confirmKey === key ? (
+            <>
+             <span className="shrink-0 text-[13px] text-muted">{t.fallbackConfirmDelete}</span>
+             <button
+              onClick={() => void write(() => api.setFallbackChain(key, null), t.fallbackWriteFailed)}
+              disabled={writing}
+              className="shrink-0 cursor-pointer rounded-md border border-danger/40 px-2.5 py-1 text-[13px] text-danger transition-colors duration-100 hover:bg-danger/10 disabled:opacity-50"
+             >
+              {t.fallbackDelete}
+             </button>
+             <button
+              onClick={() => setConfirmKey(null)}
+              disabled={writing}
+              className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-50"
+             >
+              {t.fallbackCancel}
+             </button>
+            </>
+           ) : (
+            <>
+             <button
+              onClick={() => setEditing(editing === key ? null : key)}
+              disabled={writing || (editing !== null && editing !== key)}
+              aria-expanded={editing === key}
+              aria-label={fmt(t.fallbackEditAria, key)}
+              className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+             >
+              {t.fallbackEdit}
+             </button>
+             <button
+              onClick={() => setConfirmKey(key)}
+              disabled={writing || editing !== null}
+              aria-label={fmt(t.fallbackDeleteAria, key)}
+              className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-50"
+             >
+              {t.fallbackDelete}
+             </button>
+            </>
+           )}
+          </div>
+          {/* 转移目标：按 omp 的尝试顺序排 */}
+          <div className="mt-1 flex flex-wrap items-center gap-1 pl-1">
+           {targets.map((sel, i) => (
+            <span key={`${sel}-${i}`} className="flex min-w-0 max-w-full items-center gap-1">
+             {i > 0 && (
+              <span aria-hidden className="text-[11px] text-faint">
+               →
+              </span>
+             )}
+             <span className="min-w-0 rounded-sm bg-background px-2 py-1 font-mono text-[11px] break-all text-muted">
+              {sel}
+             </span>
+            </span>
+           ))}
+          </div>
+          {editing === key && (
+           <ChainEditor
+            isNew={false}
+            initialKey={key}
+            initialTargets={targets}
+            models={models}
+            catalog={catalog}
+            roles={roles}
+            usedKeys={usedKeys}
+            writing={writing}
+            onSave={(k, list) => void write(() => api.setFallbackChain(k, list), t.fallbackWriteFailed)}
+            onCancel={() => setEditing(null)}
+           />
           )}
          </div>
-         {/* 转移目标：按 omp 的尝试顺序排 */}
-         <div className="mt-1 flex flex-wrap items-center gap-1 pl-1">
-          {targets.map((sel, i) => (
-           <span key={`${sel}-${i}`} className="flex min-w-0 max-w-full items-center gap-1">
-            {i > 0 && (
-             <span aria-hidden className="text-[11px] text-faint">
-              →
-             </span>
-            )}
-            <span className="min-w-0 rounded-sm bg-background px-2 py-1 font-mono text-[11px] break-all text-muted">
-             {sel}
-            </span>
-           </span>
-          ))}
-         </div>
-         {editing === key && (
-          <ChainEditor
-           isNew={false}
-           initialKey={key}
-           initialTargets={targets}
-           models={models}
-           catalog={catalog}
-           roles={roles}
-           usedKeys={usedKeys}
-           writing={writing}
-           onSave={(k, list) => void write(() => api.setFallbackChain(k, list), t.fallbackWriteFailed)}
-           onCancel={() => setEditing(null)}
-          />
-         )}
-        </div>
-       ))
-      )}
-     </div>
+        ))
+       )}
+      </div>
 
-     {editing === "" ? (
-      <ChainEditor
-       isNew
-       initialKey=""
-       initialTargets={[]}
-       models={models}
-       roles={roles}
-       catalog={catalog}
-       usedKeys={usedKeys}
-       writing={writing}
-       onSave={(k, list) => void write(() => api.setFallbackChain(k, list), t.fallbackWriteFailed)}
-       onCancel={() => setEditing(null)}
-      />
-     ) : (
-      <button
-       onClick={() => setEditing("")}
-       disabled={writing || editing !== null}
-       className="mt-2 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
-      >
-       {t.fallbackAddChain}
-      </button>
-     )}
-    </>
-   )}
+      {editing === "" ? (
+       <ChainEditor
+        isNew
+        initialKey=""
+        initialTargets={[]}
+        models={models}
+        roles={roles}
+        catalog={catalog}
+        usedKeys={usedKeys}
+        writing={writing}
+        onSave={(k, list) => void write(() => api.setFallbackChain(k, list), t.fallbackWriteFailed)}
+        onCancel={() => setEditing(null)}
+       />
+      ) : (
+       <button
+        onClick={() => setEditing("")}
+        disabled={writing || editing !== null}
+        className="mt-2 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+       >
+        {t.fallbackAddChain}
+       </button>
+      )}
+     </>
+    )}
   </section>
  );
 }

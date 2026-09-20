@@ -37,19 +37,24 @@ const GROUPS = SETTING_GROUPS.map((group) => ({ group, specs: specsOfGroup(group
 export function GeneralSettingsPanel() {
  const t = useText();
  const health = useApp((s) => s.health);
- const [items, setItems] = useState<Record<string, OmpSetting>>({});
+ const [items, setItems] = useState<Record<string, OmpSetting> | null>(null);
  const [err, setErr] = useState<string | null>(null);
  /** 正在写入 / 恢复默认的键：那一行的控件在落地前不接第二次点击（同键连点会竞态）。 */
  const [busyKeys, setBusyKeys] = useState<ReadonlySet<string>>(new Set());
  /** 正在手动刷新（首次挂载的自动加载不点亮按钮——那一下太快，闪一下反而更吵）。 */
  const [refreshing, setRefreshing] = useState(false);
+ /** 首次读取失败（保持 null，不显示伪设置行）。 */
+ const [loadError, setLoadError] = useState<string | null>(null);
+ /** 刷新失败但有旧数据（保留快照，只提示结果可能过期）。 */
+ const [staleError, setStaleError] = useState<string | null>(null);
  /** 折叠的组（默认全展开：这是「常用设置」，可见性优先）。 */
  const [closed, setClosed] = useState<ReadonlySet<SettingGroup>>(new Set());
+ /** 本地搜索（只过滤 41 项白名单，不扩张配置范围）。 */
+ const [query, setQuery] = useState("");
  /** 行内展开的枚举选择器（同屏只开一个）。 */
  const [openEnum, setOpenEnum] = useState<string | null>(null);
  /** 数字框的编辑草稿（提交前不写 omp）。 */
  const [drafts, setDrafts] = useState<Record<string, string>>({});
-
  /** 重新拉一次读数。写成 promise 链（不在 effect 里同步 setState）：state 只在回调里更新，
   *  符合 react-hooks 对「effect 内同步 setState 会级联渲染」的约束（与 ModelsPanel 同款）。 */
  const load = useCallback(
@@ -58,10 +63,17 @@ export function GeneralSettingsPanel() {
     .getOmpSettings([...SETTING_KEYS])
     .then((list) => {
      setItems(Object.fromEntries(list.map((s) => [s.key, s])));
+     setLoadError(null);
+     setStaleError(null);
      setErr(null);
     })
     .catch((e: unknown) => {
-     setErr(e instanceof Error ? e.message : t.ompSettingsLoadFailed);
+     const message = e instanceof Error ? e.message : t.ompSettingsLoadFailed;
+     setItems((prev) => {
+      if (!prev) setLoadError(message);
+      else setStaleError(message);
+      return prev;
+     });
     }),
   [t.ompSettingsLoadFailed],
  );
@@ -80,11 +92,11 @@ export function GeneralSettingsPanel() {
   setBusyKeys((prev) => new Set(prev).add(key));
   try {
    const saved = await fn();
-   setItems((prev) => ({ ...prev, [saved.key]: saved }));
+   setItems((prev) => ({ ...(prev ?? {}), [saved.key]: saved }));
    setErr(null);
   } catch (e) {
    // 乐观值撤回去：界面不许停在没生效的状态上
-   if (rollback) setItems((prev) => ({ ...prev, [rollback.key]: rollback }));
+   if (rollback) setItems((prev) => ({ ...(prev ?? {}), [rollback.key]: rollback }));
    setErr(e instanceof Error ? e.message : t.ompSettingsSaveFailed);
   } finally {
    setBusyKeys((prev) => {
@@ -97,8 +109,8 @@ export function GeneralSettingsPanel() {
 
  /** 写一个键并回读：先乐观改（开关要立刻有反馈），失败由 `withBusy` 复原。 */
  const save = (key: string, value: unknown) => {
-  const prev = items[key];
-  setItems((p) => (prev ? { ...p, [key]: { ...prev, value } } : p));
+  const prev = items?.[key];
+  setItems((p) => (prev && p ? { ...p, [key]: { ...prev, value } } : p));
   void withBusy(key, () => api.setOmpSetting(key, value), prev);
  };
 
@@ -126,20 +138,34 @@ export function GeneralSettingsPanel() {
   });
   const n = Number(raw.trim());
   if (raw.trim() === "" || Number.isNaN(n)) return;
-  if (items[spec.key]?.value === n) return;
+  if (items?.[spec.key]?.value === n) return;
   save(spec.key, n);
  };
 
  const missingOmp = health?.ok === false;
+ const cleanedQuery = query.trim().toLowerCase();
+ const filteredGroups = GROUPS.map(({ group, specs }) => ({
+  group,
+  specs: specs.filter((spec) => {
+   if (!cleanedQuery) return true;
+   const label = t[settingLabelKey(spec.key)].toLowerCase();
+   return (
+    label.includes(cleanedQuery)
+    || spec.key.toLowerCase().includes(cleanedQuery)
+    || items?.[spec.key]?.description.toLowerCase().includes(cleanedQuery) === true
+   );
+  }),
+ })).filter(({ specs }) => specs.length > 0);
+ const searching = cleanedQuery.length > 0;
 
  return (
   <section aria-label={t.ompSettingsSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
    <div className="flex flex-wrap items-center gap-2">
     <Sliders size={16} aria-hidden className="text-muted" />
-    <h2 className="text-sm font-semibold">{t.ompSettingsSection}</h2>
+    <h2 tabIndex={-1} className="text-sm font-semibold outline-none">{t.ompSettingsSection}</h2>
     <button
      onClick={refresh}
-     disabled={refreshing}
+     disabled={refreshing || items === null}
      className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
      aria-label={t.ompSettingsRefresh}
      title={t.ompSettingsRefresh}
@@ -149,54 +175,98 @@ export function GeneralSettingsPanel() {
     </button>
    </div>
    <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.ompSettingsHint}</p>
+   <input
+    value={query}
+    onChange={(e) => setQuery(e.target.value)}
+    placeholder={t.ompSettingsSearch}
+    aria-label={t.ompSettingsSearch}
+    className="mt-3 h-9 w-full rounded-md border border-border bg-background px-2.5 text-[13px] outline-none focus:border-accent"
+   />
    {missingOmp && <p className="mt-2 text-[13px] text-warn">{t.ompSettingsMissing}</p>}
    {err && (
     <p role="alert" className="mt-2 rounded border border-danger/40 bg-danger/5 px-3 py-2 text-[13px] text-danger">
      {err}
     </p>
    )}
-
-   <div className="mt-5 space-y-4">
-    {GROUPS.map(({ group, specs }) => {
-     const isClosed = closed.has(group);
-     return (
-      <div key={group}>
+   {items === null ? (
+    loadError ? (
+     <div className="mt-5 flex flex-col items-start gap-2">
+      <p role="alert" className="rounded border border-danger/40 bg-danger/5 px-3 py-2 text-[13px] text-danger">
+       {loadError}
+      </p>
+      <button
+       onClick={refresh}
+       disabled={refreshing}
+       className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+      >
+       {t.retry}
+      </button>
+     </div>
+    ) : (
+     <p role="status" className="mt-5 text-[13px] text-muted">{t.archivedLoading}</p>
+    )
+   ) : (
+    <>
+     {staleError && (
+      <p role="alert" className="mt-2 rounded border border-warn/40 bg-warn/5 px-3 py-2 text-[13px] text-warn">
+       {t.ompSettingsStale}：{staleError}
+      </p>
+     )}
+     {searching && filteredGroups.length === 0 ? (
+      <div className="mt-5 flex flex-col items-start gap-2">
+       <p className="text-[13px] text-muted">{t.ompSettingsNoMatch}</p>
        <button
-        onClick={() => toggleGroup(group)}
-        aria-expanded={!isClosed}
-        className="flex min-h-10 w-full cursor-pointer items-center gap-2 rounded-md bg-background px-3 py-2 text-left transition-colors duration-100 hover:bg-hover"
+        onClick={() => setQuery("")}
+        className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover"
        >
-        {isClosed ? <ChevronRight size={12} aria-hidden /> : <ChevronDown size={12} aria-hidden />}
-        <span className="text-[13px] font-medium">{t[groupLabelKey(group)]}</span>
-        <span className="font-mono text-[11px] text-faint">{specs.length}</span>
+        {t.quickSwitcherClear}
        </button>
-       {!isClosed && (
-        <div className="mt-1 divide-y divide-border-soft">
-         {specs.map((spec) => {
-          const item = items[spec.key];
-          const busy = busyKeys.has(spec.key);
-          return (
-           <SettingRow
-            key={spec.key}
-            spec={spec}
-            item={item}
-            busy={busy}
-            open={openEnum === spec.key}
-            draft={drafts[spec.key]}
-            onToggleEnum={() => setOpenEnum(openEnum === spec.key ? null : spec.key)}
-            onSave={save}
-            onReset={reset}
-            onDraft={(v) => setDrafts((prev) => ({ ...prev, [spec.key]: v }))}
-            onCommitNumber={() => commitNumber(spec)}
-           />
-          );
-         })}
-        </div>
-       )}
       </div>
-     );
-    })}
-   </div>
+     ) : (
+      <div className="mt-5 space-y-4">
+       {filteredGroups.map(({ group, specs }) => {
+        const isClosed = searching ? false : closed.has(group);
+        return (
+         <div key={group}>
+          <button
+           onClick={() => toggleGroup(group)}
+           aria-expanded={!isClosed}
+           className="flex min-h-10 w-full cursor-pointer items-center gap-2 rounded-md bg-background px-3 py-2 text-left transition-colors duration-100 hover:bg-hover"
+          >
+           {isClosed ? <ChevronRight size={12} aria-hidden /> : <ChevronDown size={12} aria-hidden />}
+           <span className="text-[13px] font-medium">{t[groupLabelKey(group)]}</span>
+           <span className="font-mono text-[11px] text-faint">{specs.length}</span>
+          </button>
+          {!isClosed && (
+           <div className="mt-1 divide-y divide-border-soft">
+            {specs.map((spec) => {
+             const item = items[spec.key];
+             const busy = busyKeys.has(spec.key);
+             return (
+              <SettingRow
+               key={spec.key}
+               spec={spec}
+               item={item}
+               busy={busy}
+               open={openEnum === spec.key}
+               draft={drafts[spec.key]}
+               onToggleEnum={() => setOpenEnum(openEnum === spec.key ? null : spec.key)}
+               onSave={save}
+               onReset={reset}
+               onDraft={(v) => setDrafts((prev) => ({ ...prev, [spec.key]: v }))}
+               onCommitNumber={() => commitNumber(spec)}
+              />
+             );
+            })}
+           </div>
+          )}
+         </div>
+        );
+       })}
+      </div>
+     )}
+    </>
+   )}
   </section>
  );
 }

@@ -27,6 +27,7 @@ export function CycleOrderSection({
  selectors,
  busy,
  saving,
+ loadError,
  onSave,
  onRefresh,
 }: {
@@ -40,17 +41,17 @@ export function CycleOrderSection({
  busy: boolean;
  /** 写入进行中（父级串行化；禁点防止连发）。 */
  saving: boolean;
+ /** 读取失败（保留旧数据时显示过期提示，空快照时显示重试）。 */
+ loadError: string | null;
  onSave: (order: string[]) => Promise<void>;
  onRefresh: () => void;
 }) {
  const t = useText();
  const [addOpen, setAddOpen] = useState(false);
  const addRef = useDropdown(addOpen, () => setAddOpen(false));
-
  const inCycle = new Set(order ?? []);
  const candidates = roles.filter((r) => !inCycle.has(r));
  const disabled = saving || busy;
-
  const move = (i: number, delta: number) => {
   if (!order) return;
   const next = [...order];
@@ -59,10 +60,10 @@ export function CycleOrderSection({
  };
 
  return (
-  <section aria-label={t.cycleSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
+  <section id="settings-models-cycle" aria-label={t.cycleSection} className="scroll-mt-2 shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
    <div className="flex flex-wrap items-center gap-2">
     <Repeat size={16} aria-hidden className="text-muted" />
-    <h2 className="text-sm font-semibold">{t.cycleSection}</h2>
+    <h2 tabIndex={-1} className="text-sm font-semibold outline-none">{t.cycleSection}</h2>
     <kbd className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted">Ctrl+P</kbd>
     <button
      onClick={onRefresh}
@@ -76,9 +77,27 @@ export function CycleOrderSection({
     </button>
    </div>
    <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.cycleHint}</p>
+   {loadError && order !== null && (
+    <p role="alert" className="mt-1.5 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
+     {t.ompSettingsStale}：{loadError}
+    </p>
+   )}
 
    {order === null ? (
-    <div className="py-2 text-[13px] text-muted">{t.archivedLoading}</div>
+    loadError ? (
+     <div className="flex flex-col items-start gap-2 py-2">
+      <p role="alert" className="text-[13px] text-danger">{loadError}</p>
+      <button
+       onClick={onRefresh}
+       disabled={busy || saving}
+       className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+      >
+       {t.retry}
+      </button>
+     </div>
+    ) : (
+     <div className="py-2 text-[13px] text-muted">{t.archivedLoading}</div>
+    )
    ) : (
     <>
      <div className="mt-2">
