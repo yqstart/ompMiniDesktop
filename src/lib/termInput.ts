@@ -38,7 +38,7 @@ export interface DroppedInputCandidate {
  * 与真实 xterm 对拍保证一次且仅一次）；IME 组字、删除、换行、粘贴等非 `insertText`
  * 与读屏模式一律不动。非 macOS 不挂载，保持上游行为。
  *
- * 0.4.1 的教训：曾用 `defaultPrevented` 判断“xterm 已消费”，但 xterm 默认
+ * 早期补丁的教训：曾用 `defaultPrevented` 判断“xterm 已消费”，但 xterm 默认
  * `cancelEvents=false`，消费成功也不 `preventDefault`——空格、大写字母等正常字符
  * 全被补了第二遍（逗号、引号、空格打出两个）。这次不猜消费与否，只看漏否。
  *

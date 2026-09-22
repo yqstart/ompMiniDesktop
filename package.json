@@ -1,6 +1,6 @@
 {
   "name": "omp-mini-desktop",
-  "version": "0.4.1",
+  "version": "0.1.0",
   "description": "oh-my-pi 极简桌面端（Tauri v2 + React）",
   "license": "MIT",
   "repository": {
