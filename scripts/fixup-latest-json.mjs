@@ -13,12 +13,17 @@
  * GitHub CDN 无限流），由 Release 工作流的 fixup job 调用；已发布版本的存量
  * latest.json 也用同一脚本修补。幂等：非 API 形式的 URL 原样保留。
  *
+ * 同一趟里还做一件事：把 `notes` 换成 CHANGELOG 里该版本的整节说明
+ * （见 scripts/changelog-notes.mjs）。tauri-action 写的 notes 只是 Release 的
+ * releaseBody，应用内更新弹窗拿它当「这次改了什么」显示，等于什么都没说。
+ *
  * 用法：node scripts/fixup-latest-json.mjs <latest.json 路径> <tag> [owner/repo]
  *   owner/repo 缺省取 GITHUB_REPOSITORY，再缺省从 git origin 解析。
  *   需要 GITHUB_TOKEN / GH_TOKEN（或已登录的 gh CLI）。
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
+import { readChangelogSection } from "./changelog-notes.mjs";
 
 /** 只匹配 tauri-action 生成的资产 API 链接；其余 URL 原样保留。 */
 const API_ASSET_URL = /^https:\/\/api\.github\.com\/repos\/[^/]+\/[^/]+\/releases\/assets\/(\d+)$/;
@@ -72,6 +77,11 @@ function main() {
   byId.set(line.slice(0, tab), line.slice(tab + 1));
  }
  if (byId.size === 0) throw new Error(`release ${tag} 里没有资产`);
+
+ // notes：换成 CHANGELOG 里该版本的整节说明（应用内更新弹窗显示的就是它）。
+ // 版本节缺失会直接抛错——「发版但忘了写更新日志」挡在这里。
+ const notes = readChangelogSection(String(content.version ?? tag.replace(/^v/, "")));
+ content.notes = notes;
 
  let rewritten = 0;
  for (const [key, platform] of platforms) {

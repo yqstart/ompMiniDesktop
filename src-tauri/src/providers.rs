@@ -521,7 +521,7 @@ pub(crate) async fn run_omp(bin: &str, args: &[&str]) -> Result<String, String> 
 /// 同上，但显式钉住工作目录。
 ///
 /// **为什么需要它**：`omp config list|get` 读的是**合并了项目层之后的有效值**——实测同一个
-/// key 在「有 `<cwd>/.omp/config.yml` 覆盖」与「没有」的目录下读到不同结果。设置 › 通用
+/// key 在「有 `<cwd>/.omp/config.yml` 覆盖」与「没有」的目录下读到不同结果。设置 ›「常用设置」
 /// 改的是全局层，读数也必须钉在一个没有项目层的目录上（agentDir），否则从项目目录启动 app
 /// 时，界面显示的是该项目的覆盖值，用户改全局会「看起来没生效」。
 pub(crate) async fn run_omp_in(
@@ -559,7 +559,7 @@ pub(crate) fn omp_bin(state: &tauri::State<'_, AppState>) -> Result<String, CmdE
         cmd_err(
             "OMP_MISSING",
             "未找到 omp，无法管理供应商".into(),
-            Some("请先在设置 › 通用里指定 omp 路径".into()),
+            Some("请先在设置 ›「关于」里指定 omp 路径".into()),
         )
     })
 }

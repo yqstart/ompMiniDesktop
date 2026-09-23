@@ -17,6 +17,7 @@ import { newTerminalInActiveWorkspace } from "../lib/workspaces";
 import { terminalsInWorkspace } from "../lib/terminalScope";
 import { refreshWorkspaceGitState, scheduleWorkspaceGitRefresh, startWorkspaceGitPolling } from "../lib/commitTasks";
 import { autoCheckOnBoot } from "../lib/appUpdate";
+import { syncTitlePromptLanguage } from "../lib/titlePrompt";
 import { hasOpenDialog, useDialogFocus } from "../lib/useDropdown";
 import { isMacKeyboard } from "../lib/termInput";
 /** 皮肤落 class（浅色 token 是 `:root` 默认、深色挂在 `.dark`，见 src/index.css）。
@@ -44,6 +45,21 @@ function useLocale() {
   window.addEventListener("languagechange", apply);
   return () => window.removeEventListener("languagechange", apply);
  }, [localeMode, setLocaleMode]);
+}
+
+/**
+ * 会话标题语言（V18）：界面语言落定（含启动）后，把语言同步给 omp 的自动标题 prompt
+ * （`<agentDir>/TITLE_SYSTEM.md`，见 `lib/titlePrompt.ts`）——omp 只在**会话启动**时读它，
+ * 所以切语言对**新开的终端**生效，已开的会话保持原语言（上游口径，壳侧不代偿）。
+ * 等健康检查把 agentDir 解析出来再写：非默认 profile / `PI_CONFIG_DIR` 下两者路径不同。
+ */
+function useTitlePromptSync() {
+ const locale = useApp((s) => s.locale);
+ const agentDir = useApp((s) => s.health?.omp.agentDir);
+ useEffect(() => {
+  if (!agentDir) return;
+  void syncTitlePromptLanguage(locale);
+ }, [agentDir, locale]);
 }
 
 /**
@@ -252,6 +268,7 @@ export function App() {
  useLocale();
  useTerminalHotkeys();
  useWorkspaceGitRefresh();
+ useTitlePromptSync();
 
  useEffect(() => {
   // 启动静默检查更新（有更新点亮设置入口的小点，不打断）

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { useApp } from "../stores/app";
 import { isMacKeyboard } from "../lib/termInput";
+import { api } from "@shared/api";
 import type { TerminalView } from "@shared/types";
 
 const actEnv = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
@@ -25,6 +26,7 @@ vi.mock("@shared/api", () => ({
   listProjects: vi.fn(async () => []),
   listWorkspaces: vi.fn(async () => []),
   getWorkspaceGitState: vi.fn(async () => []),
+  syncTitlePrompt: vi.fn(async () => ({ path: "/tmp/TITLE_SYSTEM.md", action: "written" as const })),
  },
 }));
 vi.mock("../components/sidebar/WorkspaceSidebar", () => ({
@@ -78,6 +80,7 @@ beforeEach(() => {
   sidebarOpen: false,
   quickSwitcherOpen: false,
   terminalFocusSeq: 0,
+  localeMode: "system",
   locale: "zh-CN",
  });
  container = document.createElement("div");
@@ -91,6 +94,23 @@ beforeEach(() => {
 afterEach(() => {
  act(() => root.unmount());
  container.remove();
+});
+
+describe("会话标题语言同步", () => {
+ it("健康检查落定后按界面语言写标题 prompt，切语言再写一次", async () => {
+  // 挂载时 health 还没落定（mock 是异步的）——等一次宏任务把 getHealth → set → effect 走完
+  await act(async () => {
+   await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(vi.mocked(api.syncTitlePrompt)).toHaveBeenCalledWith("zh");
+  const before = vi.mocked(api.syncTitlePrompt).mock.calls.length;
+  act(() => useApp.getState().setLocaleMode("en"));
+  await act(async () => {
+   await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(vi.mocked(api.syncTitlePrompt)).toHaveBeenLastCalledWith("en");
+  expect(vi.mocked(api.syncTitlePrompt).mock.calls.length).toBeGreaterThan(before);
+ });
 });
 
 describe("应用外壳快捷键与侧栏", () => {

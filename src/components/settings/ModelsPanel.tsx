@@ -189,22 +189,6 @@ export function ModelsPanel() {
    <div className="shrink-0">
     <h2 className="text-[20px] font-semibold tracking-tight">{t.tabModels}</h2>
     <p className="mt-1 text-[13px] text-muted">{t.tabModelsHint}</p>
-    <div className="mt-2 flex flex-wrap gap-1.5">
-     {[["settings-models-providers", t.settingsModelsJumpProviders], ["settings-models-my-models", t.settingsModelsJumpMine], ["settings-models-roles", t.settingsModelsJumpRoles], ["settings-models-cycle", t.settingsModelsJumpCycle], ["settings-models-fallback", t.settingsModelsJumpFallback]].map(([id, label]) => (
-      <button
-       key={id}
-       onClick={() => {
-        const root = document.getElementById("settings-panel");
-        const el = document.getElementById(id);
-        if (root && el) root.scrollTo({ top: el.offsetTop - root.offsetTop - 8 });
-        el?.querySelector<HTMLElement>("h2")?.focus({ preventScroll: true });
-       }}
-       className="cursor-pointer rounded-md border border-border-soft bg-surface px-2.5 py-1.5 text-[12px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
-      >
-       {label}
-      </button>
-     ))}
-    </div>
    </div>
    {err && (
     <p role="alert" className="rounded border border-danger/40 bg-danger/5 px-3 py-2 text-[13px] text-danger">
@@ -213,15 +197,13 @@ export function ModelsPanel() {
    )}
 
    {/* 供应商：添加（登录型 API key / OAuth + 自定义 models.yml）+ 按供应商挑选模型 */}
-   <div id="settings-models-providers" className="scroll-mt-2">
-    <ProvidersSection />
-   </div>
+   <ProvidersSection />
 
    {/* 我的模型：本应用偏好；挑过之后下面角色 / 转移的候选只列这些 */}
-   <section id="settings-models-my-models" aria-label={t.myModelsSection} className="scroll-mt-2 shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
+   <section aria-label={t.myModelsSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
     <div className="flex flex-wrap items-center gap-2">
      <Star size={16} aria-hidden className="text-muted" />
-     <h2 tabIndex={-1} className="text-sm font-semibold outline-none">{t.myModelsSection}</h2>
+     <h2 className="text-sm font-semibold">{t.myModelsSection}</h2>
      {entries.length > 0 && (
       <span className="text-[13px] text-muted">{fmt(t.myModelsCount, String(entries.length))}</span>
      )}
@@ -261,10 +243,10 @@ export function ModelsPanel() {
    </section>
 
    {/* 模型角色：把 omp 的 modelRoles 读写给用户（候选 = 我的模型 或 全部） */}
-   <section id="settings-models-roles" aria-label={t.rolesSection} className="scroll-mt-2 shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
+   <section aria-label={t.rolesSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
     <div className="flex flex-wrap items-center gap-2">
      <Sliders size={16} aria-hidden className="text-muted" />
-     <h2 tabIndex={-1} className="text-sm font-semibold outline-none">{t.rolesSection}</h2>
+     <h2 className="text-sm font-semibold">{t.rolesSection}</h2>
      <button
       onClick={() => void refreshAll()}
       disabled={busy}

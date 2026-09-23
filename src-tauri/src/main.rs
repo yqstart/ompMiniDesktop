@@ -10,6 +10,7 @@ mod providers;
 mod pty;
 mod session_scan;
 mod settings;
+mod title_prompt;
 mod usage;
 
 use commands::*;
@@ -76,7 +77,8 @@ fn main() {
             settings::set_omp_setting,
             settings::reset_omp_setting,
             models_config::read_models_config,
-            models_config::write_models_config
+            models_config::write_models_config,
+            title_prompt::sync_title_prompt
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

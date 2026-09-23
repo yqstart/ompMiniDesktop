@@ -17,7 +17,7 @@ import {
 } from "../../lib/ompSettings";
 
 /**
- * 设置 › 通用 ›「omp 常用设置」：把 omp 全局配置（`config.yml`）里最常改的那些键
+ * 设置 ›「常用设置」：把 omp 全局配置（`config.yml`）里最常改的那些键
  * 映射成开关 / 下拉 / 数字框。白名单与分组见 `src/lib/ompSettings.ts`，读写口径
  * （一次 `config list --json` 批量读、`config set/… -- …` 写、写完回读、负数要 `--`）
  * 见 `src-tauri/src/settings.rs` 头注释。
@@ -162,7 +162,7 @@ export function GeneralSettingsPanel() {
   <section aria-label={t.ompSettingsSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
    <div className="flex flex-wrap items-center gap-2">
     <Sliders size={16} aria-hidden className="text-muted" />
-    <h2 tabIndex={-1} className="text-sm font-semibold outline-none">{t.ompSettingsSection}</h2>
+    <h2 className="text-sm font-semibold">{t.ompSettingsSection}</h2>
     <button
      onClick={refresh}
      disabled={refreshing || items === null}

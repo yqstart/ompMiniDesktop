@@ -55,13 +55,15 @@ export const IPC = {
   getUsageStats: "get_usage_stats",
   // 供应商用量（设置 › 供应商用量）：`omp usage --json` 的各供应商滚动窗口（只读）
   getProviderUsage: "get_provider_usage",
-  // omp 常用设置（设置 › 通用）：白名单键的批量读 / 单键写 / 恢复默认（写 omp 全局配置）
+  // omp 常用设置（设置 ›「常用设置」）：白名单键的批量读 / 单键写 / 恢复默认（写 omp 全局配置）
   getOmpSettings: "get_omp_settings",
   setOmpSetting: "set_omp_setting",
   resetOmpSetting: "reset_omp_setting",
   // 自定义模型（设置 › 供应商）：omp `models.yml` 的读写——上游没有 CLI 写入口，写文件是唯一路径
   readModelsConfig: "read_models_config",
   writeModelsConfig: "write_models_config",
+  // 会话标题语言（V18）：把界面语言同步成 omp 的 `<agentDir>/TITLE_SYSTEM.md`（标题生成 prompt）
+  syncTitlePrompt: "sync_title_prompt",
   // events
   /** 供应商登录进度（payload = 全量 ProviderLoginStatus 快照）。 */
   providerLogin: "omp-provider://login",

@@ -60,10 +60,10 @@ export function CycleOrderSection({
  };
 
  return (
-  <section id="settings-models-cycle" aria-label={t.cycleSection} className="scroll-mt-2 shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
+  <section aria-label={t.cycleSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
    <div className="flex flex-wrap items-center gap-2">
     <Repeat size={16} aria-hidden className="text-muted" />
-    <h2 tabIndex={-1} className="text-sm font-semibold outline-none">{t.cycleSection}</h2>
+    <h2 className="text-sm font-semibold">{t.cycleSection}</h2>
     <kbd className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted">Ctrl+P</kbd>
     <button
      onClick={onRefresh}

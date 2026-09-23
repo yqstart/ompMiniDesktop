@@ -116,6 +116,17 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      # Release 说明与 latest.json 的 notes 都取 CHANGELOG 里本版本的整节说明：
+      # 应用内更新弹窗把 notes 当「这次改了什么」显示，写一句「见 CHANGELOG.md」等于什么都没说。
+      # 版本节缺失 / 为空会让这一步失败——发版前没更新 CHANGELOG 就别想发出 Release。
+      - name: 取本版本更新说明（CHANGELOG 版本节）
+        run: |
+          {
+            echo 'RELEASE_BODY<<CHANGELOG_EOF'
+            node scripts/changelog-notes.mjs
+            echo 'CHANGELOG_EOF'
+          } >> "$GITHUB_ENV"
+
       - name: Build and upload to Release
         uses: tauri-apps/tauri-action@v1
         env:
@@ -125,8 +136,7 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: ompMiniDesktop v__VERSION__
-          releaseBody: |
-            见 CHANGELOG.md。
+          releaseBody: ${{ env.RELEASE_BODY }}
           releaseDraft: false
           prerelease: false
           uploadUpdaterJson: true
@@ -134,10 +144,11 @@ jobs:
 
   # tauri-action 生成的 latest.json 用的是 api.github.com 资产 API 链接：匿名限流 60 次/小时/出口 IP，
   # 应用内 updater 经系统代理从共享节点下载会 403（检查更新走 github.com 网页域不受限，表现为「能检查、下载 403」）。
-  # 发布完成后统一改写为 releases/download 公开直链（GitHub CDN 无限流）。
+  # 发布完成后统一改写为 releases/download 公开直链（GitHub CDN 无限流），
+  # 并把 notes 换成 CHANGELOG 里本版本的整节说明（应用内更新弹窗显示的「更新内容」就是它）。
   fixup:
     needs: publish
-    name: Fixup latest.json (资产 API 链接 → 公开直链)
+    name: Fixup latest.json (资产 API 链接 → 公开直链 + notes 回填)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

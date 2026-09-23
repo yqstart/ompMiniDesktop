@@ -339,7 +339,7 @@ export type UpdateState =
  | { status: "error"; message: string };
 
 /**
- * omp 设置项（设置 › 通用 ›「omp 常用设置」）：值来自 `omp config list --json`。
+ * omp 设置项（设置 ›「常用设置」）：值来自 `omp config list --json`。
  * `kind` 是 omp 的 schema 类型（boolean / number / enum / …），`description` 是上游英文说明
  * （原样透传，不翻译）；上游没有这个键时它整个缺席，界面据此显示「当前 omp 版本没有这个设置」。
  */
@@ -500,4 +500,18 @@ export type ModelsConfigFile = {
  exists: boolean;
  text: string;
  hash: string;
+};
+
+// ---------- 会话标题语言（V18） ----------
+
+/** 标题语言档（壳的 `Locale` 归一：`zh-CN` → `zh`；只有中 / 英两档）。 */
+export type TitlePromptLang = "zh" | "en";
+
+/**
+ * `sync_title_prompt` 的结果：`written` = 已写 / `unchanged` = 内容一致未写 /
+ * `skipped` = 用户自写 `TITLE_SYSTEM.md`（后端不碰）。
+ */
+export type TitlePromptOutcome = {
+ path: string;
+ action: "written" | "unchanged" | "skipped";
 };

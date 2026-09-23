@@ -1,4 +1,4 @@
-//! omp 常用设置（设置 › 通用）：把 omp 全局配置（`config.yml`）里用户最常改的那些键
+//! omp 常用设置（设置 ›「常用设置」）：把 omp 全局配置（`config.yml`）里用户最常改的那些键
 //! 映射进界面。**读写走 `omp config` CLI 子进程**（与供应商页走 `omp auth-broker` 同款），
 //! 壳侧不直接解析 / 改写 `config.yml` —— YAML 的合并、类型解析、schema 默认值都是 omp 的事。
 //!
@@ -139,7 +139,7 @@ fn omp_bin(state: &tauri::State<'_, AppState>) -> Result<String, CmdError> {
         cmd_err(
             "OMP_MISSING",
             "未找到 omp，无法读写设置".into(),
-            Some("请先在设置 › 通用里指定 omp 路径".into()),
+            Some("请先在设置 ›「关于」里指定 omp 路径".into()),
         )
     })
 }

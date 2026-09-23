@@ -1,4 +1,8 @@
+import type { ReactNode } from "react";
 import { Download, Loader, X } from "reicon-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useApp } from "../../stores/app";
 import { checkForUpdate, deferUpdate, installUpdate, relaunchToApply } from "../../lib/appUpdate";
 import { fmt } from "../../lib/locale";
@@ -19,6 +23,21 @@ function Progress({ downloaded, total }: { downloaded: number; total: number | n
    </div>
    <div className="mt-1 text-[11px] text-faint">{pct}%</div>
   </div>
+ );
+}
+
+/** 更新说明里的链接：点击交给系统浏览器（`opener` 插件），不让 webview 自己导航走。 */
+function NotesLink({ href, children }: { href?: string; children?: ReactNode }) {
+ return (
+  <button
+   type="button"
+   onClick={() => {
+    if (href) void openUrl(href).catch(() => undefined);
+   }}
+   className="cursor-pointer text-accent underline underline-offset-2"
+  >
+   {children}
+  </button>
  );
 }
 
@@ -47,7 +66,16 @@ export function UpdateDialog() {
      <>
       <p className="mt-2 text-sm text-muted">{fmt(t.updateCurrentTo, update.current, update.version)}</p>
       {update.body && (
-       <pre className="mt-2 max-h-48 overflow-auto rounded bg-code p-2 text-[13px] whitespace-pre-wrap">{update.body}</pre>
+       <>
+        <p className="mt-3 text-[11px] text-faint">{t.updateNotes}</p>
+        {/* 更新说明 = Release 里 CHANGELOG 本版本整节（Markdown）。按不可信输入处理：
+            react-markdown 默认不渲染原始 HTML；链接一律交给系统浏览器，不给 webview 自行导航的机会。 */}
+        <div className="md-body mt-1 max-h-64 overflow-auto rounded-md bg-code p-3 text-[13px]">
+         <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: NotesLink }}>
+          {update.body}
+         </ReactMarkdown>
+        </div>
+       </>
       )}
       <div className="mt-3 flex justify-end gap-2">
        <button onClick={deferUpdate} className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover">

@@ -19,7 +19,7 @@ oh-my-pi（`omp`）的极简桌面端 —— 左侧项目 / 分支树，右侧 o
 - **终端**：每个标签页 = 一个跑在 PTY 里的 `omp` 交互式会话；多标签、`⌘T` 新建 / `⌘W` 关闭 / `⌘1..9` 切换；关闭运行中的终端二次确认（防误杀进行中的 agent）；进程退出后显示退出码并可重启；omp 的会话名经 OSC 标题更新到标签页。右栏按左栏选中的工作区过滤——只列当前分支的终端（别的分支的照常跑，左栏工作区行上的徽章显示数量，`⌘⇧K` 可全局跳过去）。
 - **会话弹窗**：项目行的「会话」入口列出该项目（含全部 worktree）的会话——点击在新终端 `omp --resume` 接着聊；行内归档 / 恢复 / 删除（删除二次确认）。
 - **已归档对话**（设置 ›）：归档会话的统一管理面（不受列表扫描窗口限制，按项目分组），「打开」= 恢复并在终端里继续；删除真删 jsonl。
-- **设置页（六个页签）**：通用（omp 常用设置 41 项：含工具审批档、上下文与压缩、工具开关、LSP、记忆后端、任务并发等）、**模型**（omp 模型相关的唯一管理面：我的模型 → 供应商 → 模型角色 → 失败转移；「添加供应商」弹窗先选提供商（可搜索、已配置置顶）——登录型走 `omp auth-broker`（API key / OAuth），首项「自定义」写 `models.yml`；「挑选模型」弹窗带搜索过滤，星标进「我的模型」）、记忆（omp 项目记忆的查看与删除）、使用统计（本机会话 jsonl 的 tokens / 缓存命中率 / 活跃天数与「Token 活动」热力图）、**供应商用量**（各供应商侧的滚动窗口——5 小时 / 每周 / 每月限额的进度、重置倒计时与停用凭据提示；数据来自 omp 自己的 `omp usage` 查询，omp 未覆盖的 commandcode / deepseek 由壳侧补充查询——commandcode 额度接口与 deepseek 官方余额接口，凭据只经 `omp token` 在内存中传递、只读）、已归档对话；外加 omp 诊断（路径 / 版本 / agentDir + 手动指定路径）与应用更新。
+- **设置页（七个页签，左栏分 omp / 本应用两组）**：**omp 组**——**常用设置**（omp 常用设置 41 项：含工具审批档、上下文与压缩、工具开关、LSP、记忆后端、任务并发等）、**模型**（omp 模型相关的唯一管理面：我的模型 → 供应商 → 模型角色 → 失败转移；「添加供应商」弹窗先选提供商（可搜索、已配置置顶）——登录型走 `omp auth-broker`（API key / OAuth），首项「自定义」写 `models.yml`；「挑选模型」弹窗带搜索过滤，星标进「我的模型」）、记忆（omp 项目记忆的查看与删除）、**供应商用量**（各供应商侧的滚动窗口——5 小时 / 每周 / 每月限额的进度、重置倒计时与停用凭据提示；数据来自 omp 自己的 `omp usage` 查询，omp 未覆盖的 commandcode / deepseek 由壳侧补充查询——commandcode 额度接口与 deepseek 官方余额接口，凭据只经 `omp token` 在内存中传递、只读）；**本应用组**——**关于**（应用更新 + omp 运行环境诊断：路径 / 版本 / agentDir 展示与复制、重新检测、手动指定可执行文件）、使用统计（本机会话 jsonl 的 tokens / 缓存命中率 / 活跃天数与「Token 活动」热力图）、已归档对话（归档的统一管理面）。
 - **界面语言**（跟随系统 / 简体中文 / English）与**皮肤**（跟随系统 / 深色 / 浅色）：左栏底部「设置」行右侧的两个分段控件，纯展示层偏好；终端配色跟随皮肤。
 
 **明确不做**：编辑器 / 文件树 / diff 审查 / 内置浏览器 / SSH / 移动端 / PR 集成 / 终端滚动缓冲持久化 / 分屏 / 多窗口。
@@ -81,8 +81,9 @@ pnpm tauri:build    # 产物见 src-tauri/target/release/bundle/
 
 - 更新源：GitHub Release 的 `latest.json`（Tauri updater 标准链路，需签名校验）。
 - 触发：启动后静默检查一次（有更新在左栏「设置」入口点亮小点，不打断）；设置页「应用更新」可手动检查。
-- 行为：有更新弹「立即更新 / 稍后更新」；下载完成后可「立即重启 / 稍后重启」（稍后则下次启动生效）；稍后过的版本本轮不再弹窗。
+- 行为：有更新弹「立即更新 / 稍后更新」，弹窗里按 Markdown 列出这个版本的更新内容（取自 `CHANGELOG.md` 的版本节，见下）；下载完成后可「立即重启 / 稍后重启」（稍后则下次启动生效）；稍后过的版本本轮不再弹窗，之后可在设置 ›「关于」的「应用更新」里「查看详情」重新打开。
 - 发版流程：打 `v*` tag 推送 → GitHub Actions Release 工作流多平台打包并生成 `latest.json`。
+- **更新说明来自 CHANGELOG 的版本节**：`scripts/changelog-notes.mjs` 抽出当前版本那一节，工作流用它当 Release 说明，末尾的 fixup job 再用它回填 `latest.json` 的 `notes`（应用内更新弹窗显示的就是它）。版本节没写或为空会让发版失败；存量 release 也可用 `node scripts/fixup-latest-json.mjs <latest.json> vX.Y.Z` 回填。
 - **`latest.json` 里的资产链接必须是公开直链**：tauri-action v1 默认写 `api.github.com/.../releases/assets/<id>` 形式的资产 API 链接，而 REST API 域对匿名请求限流 60 次/小时/**出口 IP**——应用内下载走系统代理（reqwest 默认启用 `system-proxy`），共享节点 IP 上配额耗尽就会报 `Download request failed with status: 403 Forbidden`；检查更新走 `github.com` 网页域不受限，所以表现为「能检查、不能下载」。发布工作流的 `fixup` job 会用 `scripts/fixup-latest-json.mjs` 统一改写为 `releases/download` 直链（幂等，也已用于修补存量 release）。
 - **仓库必须保持 public**：updater 以匿名请求拉 `releases/latest/download/latest.json`，私有仓库会被 GitHub 以 404 拒绝（应用内报 `Could not fetch a valid release JSON from the remote`）——Release 工作流的守卫 job 会挡住私有状态下的发版。
 

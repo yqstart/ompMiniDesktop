@@ -202,7 +202,8 @@ fn prune_backups(dir: &Path, stem: &str, ext: &str, keep: usize) {
 }
 
 /// 原子写：同目录临时文件 + rename（避免半截文件被 omp 读到）。
-fn write_atomic(path: &Path, text: &str) -> Result<(), String> {
+/// `models_config` 与 `title_prompt` 共用。
+pub(crate) fn write_atomic(path: &Path, text: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败：{e}"))?;
     }

@@ -280,7 +280,7 @@ fn omp_bin(state: &State<'_, AppState>) -> Result<String, CmdError> {
         cmd_err(
             "OMP_MISSING",
             "未找到 omp，无法读取供应商用量".into(),
-            Some("请先在设置 › 通用里指定 omp 路径".into()),
+            Some("请先在设置 ›「关于」里指定 omp 路径".into()),
         )
     })
 }

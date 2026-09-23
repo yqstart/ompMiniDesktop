@@ -17,7 +17,8 @@ import { canRenameSession, renameTerminalSession, sanitizeSessionTitle, SESSION_
  *   徽章与 `⌘K` 快速切换是它们的入口）；
  * - 常驻是硬约束：设置标签激活时整栏仍在（用户点得回终端，也看得见有哪些终端在跑）；
  *   终端标签高亮要 `!settingsTabActive`——切去设置后不能有两个"选中"的标签；
- * - 标签 = `π` 状态标 + 会话名：**π 的颜色就是 omp 的状态**（工作中 / 等你确认 / 就绪 / 已退出 /
+ * - 标签 = `π` 状态标 + 会话名（**单行**；V18 起不再显示 cwd 第二行——工作目录由左栏选中项与
+ *   本栏的工作区过滤表达，完整 cwd 留在标签的悬停提示里）：**π 的颜色就是 omp 的状态**（工作中 / 等你确认 / 就绪 / 已退出 /
  *   失败，见 `lib/termTitle.ts` 与 `STATE_TONE`）；标题用 OSC 标题解析出的会话名，
  *   还没来过就是工作区名（store 保证初始值）；
  * - 运行中终端的关闭走 `requestCloseTerminal`（弹确认，防误杀进行中的 agent）；
@@ -111,7 +112,7 @@ export function TerminalTabs() {
     ref={listRef}
     role="tablist"
     aria-label={t.termPaneAria}
-    className="no-scrollbar flex min-w-0 flex-1 items-stretch gap-1 overflow-x-auto px-2 py-2"
+    className="no-scrollbar flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-2 py-2"
     onKeyDown={(e) => {
      const el = e.target as HTMLElement;
      const key = el.closest<HTMLElement>("[data-tab-key]")?.dataset.tabKey;
@@ -172,7 +173,7 @@ export function TerminalTabs() {
          useApp.getState().focusTerminal(term.id);
         }
        }}
-       className={`group flex h-11 min-w-0 w-40 max-w-60 shrink-0 cursor-pointer items-center gap-2 rounded-md border px-3 text-[12px] transition-colors duration-100 sm:w-48 ${active ? "border-border bg-surface font-medium text-foreground" : "border-transparent text-muted hover:bg-hover"
+       className={`group flex min-h-9 min-w-0 w-40 max-w-60 shrink-0 cursor-pointer items-center gap-2 rounded-md border px-3 text-[12px] transition-colors duration-100 sm:w-48 ${active ? "border-border bg-surface font-medium text-foreground" : "border-transparent text-muted hover:bg-hover"
         }`}
       >
        <span
@@ -203,9 +204,7 @@ export function TerminalTabs() {
         )}
         {renaming?.id === term.id && renaming.error ? (
          <span className="block truncate text-[11px] leading-4 text-danger">{renaming.error}</span>
-        ) : (
-         <span className="block truncate font-mono text-[11px] leading-4 text-faint">{term.cwd}</span>
-        )}
+        ) : null}
        </span>
        {stateText && <span className="sr-only">{t[stateText]}</span>}
        <button
@@ -240,7 +239,7 @@ export function TerminalTabs() {
         useApp.getState().openSettingsTab();
        }
       }}
-      className={`group flex h-11 min-w-0 w-40 max-w-60 shrink-0 cursor-pointer items-center gap-2 rounded-md border px-3 text-[12px] transition-colors duration-100 ${settingsTabActive ? "border-border bg-surface font-medium text-foreground" : "border-transparent text-muted hover:bg-hover"
+      className={`group flex min-h-9 min-w-0 w-40 max-w-60 shrink-0 cursor-pointer items-center gap-2 rounded-md border px-3 text-[12px] transition-colors duration-100 ${settingsTabActive ? "border-border bg-surface font-medium text-foreground" : "border-transparent text-muted hover:bg-hover"
        }`}
      >
       <Settings className="size-3.5 shrink-0 text-faint" />

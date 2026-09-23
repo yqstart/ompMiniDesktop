@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
-import type { CommitEvent, FallbackChainsInfo, GitInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, Overlay, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
+import type { CommitEvent, FallbackChainsInfo, GitInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, Overlay, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -145,7 +145,7 @@ export const api = {
   */
  getProviderUsage: () => call<ProviderUsage>(IPC.getProviderUsage),
  /**
-  * omp 常用设置（设置 › 通用）：白名单键的**批量读**（一次 `omp config list --json`，
+  * omp 常用设置（设置 ›「常用设置」）：白名单键的**批量读**（一次 `omp config list --json`，
   * 不逐键 spawn 进程）+ 单键写 / 恢复默认。写的是 omp **全局层**
   * （`~/.omp/agent/config.yml`，`<cwd>/.omp/config.yml` 的项目覆盖优先于它），
   * 不动覆盖层、不碰凭证库；上游没有的键整个缺席（界面据此显示「没有这个设置」）。
@@ -165,4 +165,11 @@ export const api = {
  readModelsConfig: () => call<ModelsConfigFile>(IPC.readModelsConfig),
  writeModelsConfig: (text: string, expectHash: string | null) =>
   call<ModelsConfigFile>(IPC.writeModelsConfig, { text, expectHash }),
+ /**
+  * 会话标题语言（V18）：把壳的界面语言同步成 omp 的 `<agentDir>/TITLE_SYSTEM.md`
+  * （标题生成 prompt）——上游没有 CLI / 设置项改标题 prompt，写该文件是唯一路径。
+  * `lang` 只有 `"zh"` / `"en"` 两档；用户自写的同名文件后端不碰（回 `skipped`）。
+  */
+ syncTitlePrompt: (lang: TitlePromptLang) =>
+  call<TitlePromptOutcome>(IPC.syncTitlePrompt, { lang }),
 };
