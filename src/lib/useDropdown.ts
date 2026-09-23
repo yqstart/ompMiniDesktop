@@ -77,8 +77,16 @@ export function useDialogFocus(
 /**
  * 单开下拉容器：点击外部 / Esc 关闭，打开时聚焦首个可聚焦元素。
  * 解决截图问题 1：模型列表与思考等级弹窗同时开、点外部关不掉。
+ *
+ * `ignore` 是「由它自己开关」的元素（触发按钮）：pointerdown 落在里面时这里不关——否则
+ * 同一次点击先被 pointerdown 关掉、又被随后的 click 打开，按钮就永远关不上（`EnumSelect`
+ * 依赖这一条；其它调用方没传 `ignore`，行为与从前一致）。
  */
-export function useDropdown(open: boolean, onClose: () => void) {
+export function useDropdown(
+ open: boolean,
+ onClose: () => void,
+ ignore?: { readonly current: HTMLElement | null },
+) {
  const ref = useRef<HTMLDivElement>(null);
  // WorktreePanel 挂载时已有 autoFocus；提交后再读 activeElement 会把输入框误当触发项。
  const focusOnMount = useRef(document.activeElement);
@@ -103,10 +111,10 @@ export function useDropdown(open: boolean, onClose: () => void) {
   )).find((element) => element.tabIndex >= 0 && !element.matches(":disabled") && isVisible(element));
   if (active()) first?.focus({ preventScroll: true });
   const onDown = (event: PointerEvent) => {
-   if (active() && !popup.contains(event.target as Node)) {
-    restoreFocus = false;
-    closeRef.current();
-   }
+   const target = event.target as Node;
+   if (!active() || popup.contains(target) || ignore?.current?.contains(target)) return;
+   restoreFocus = false;
+   closeRef.current();
   };
   const onKey = (event: KeyboardEvent) => {
    if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || !active()) return;
@@ -123,7 +131,8 @@ export function useDropdown(open: boolean, onClose: () => void) {
    if (!restoreFocus || (document.activeElement !== document.body && !popup.contains(document.activeElement))) return;
    if (previous && isVisible(previous) && !previous.matches(":disabled")) previous.focus({ preventScroll: true });
   };
- }, [open]);
+  // `ignore` 是调用方的 ref（`useRef` 的返回值，引用稳定），进依赖只为让 lint 满意
+ }, [ignore, open]);
 
  return ref;
 }

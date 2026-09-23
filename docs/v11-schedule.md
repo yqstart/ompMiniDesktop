@@ -245,6 +245,13 @@ worktree 里产生的会话归到所属项目，不再落「未归属」。
 - **空态**：`TerminalView` 的空态判定从 `terminals.length === 0` 改成「当前工作区没有激活终端」；`activeWorkspacePath == null`（一个可用工作区都没有）时**不过滤**——那种局面下藏终端只会让人以为终端丢了。`store` 的 `setActiveWorkspace`（无人调用的死代码）删除。
 - **验证**：`pnpm check` 全绿（新增 `terminalScope.test.ts` 2 项、`stores/app.test.ts` 2 项、`workspaces.test.ts` 1 项、`App.test.tsx` 的 `⌘1..9` 用例；共 176 单测）。`pnpm dev` + 注入 IPC mock（工作区 main / login）全流程核对：点 main 开终端 → 标签仅 `/tmp/alpha`；点 login → 标签仅 `/tmp/alpha-login`（main 的 pane `display:none`，`pty_kill` 计数不变）；点回 main → 聚焦既有终端（`pty_spawn` 仍 2 次）；`⌘1` 在 login 视图不切到别的分支；`⌘T` 落在当前工作区（`cwd=/tmp/alpha-login`）；关掉 login 最后一个终端 → 空态 + 选中项留在 login + 该行徽章消失；`⌘⇧K` 列出 3 个终端 + 2 个工作区；键盘输入经 `pty_write` 到达（8 次）。截图核对两套选中态（main 行 `main 1` + login 行 `worktree 2`／反向）。
 
+### 6.7 设置页枚举项改下拉浮层（2026-09-23）
+
+- **口径**：设置 ›「常用设置」的枚举项（`defaultThinkingLevel` / `tools.approvalMode` 这类）从「行下面展开一块选项列表」改成**贴着触发按钮的浮层**——新组件 `EnumSelect`，选项**不进设置页的文档流**（不再把后面几十行设置推走）。触发按钮、值文本、busy 转圈、`—` 占位与此前一致，`GeneralSettingsPanel` 的 `openEnum`（同屏单开）状态随之删除——浮层各自开关，`useDropdown` 的「点击外部关闭」天然保证同屏只开一个。
+- **为什么不是行内浮层**：设置页的内容区（`#settings-panel`）是唯一滚动容器，`position: absolute` 的浮层会被它裁掉。所以列表 `portal` 到 `body` + `position: fixed`，位置由触发按钮的视口矩形算出：下方放不下且上方更宽裕时**向上弹**，滚动（捕获阶段监听所有滚动容器）与缩放时重算跟随，量到位置前 `visibility: hidden`（不闪左上角一帧）。位置直接写 `style`（不在 effect 里 `setState`——`react-hooks/set-state-in-effect` 规则与级联渲染都挡在这里）。
+- **`useDropdown` 新增 `ignore`**：触发按钮吃自己的点击。此前 `pointerdown` 落在触发按钮上会先关闭、随后的 `click` 又把它打开，即「点按钮关不掉」（`CycleOrderSection` / `ModelsPanel` / `FallbackChains` 等调用方都是 `setOpen(v => !v)`）。没传 `ignore` 的调用方行为不变。
+- **验证**：`pnpm check` 全绿（`useDropdown.test.tsx` 新增 2 项：触发按钮能开能关 / 点外部关闭；`GeneralSettingsPanel.test.tsx` 新增 2 项：选项在 body 的浮层里且选中后写回 omp 并收起 / 再点触发按钮收起）；生产构建 + 注入 IPC mock 的真实浏览器（1440×900）逐条核对：打开后 `#settings-panel` 的 `scrollHeight` **不变**（3235 → 3235，不撑开）、浮层 `position: fixed` 且父节点是 `body`、7 个选项齐全、位置在触发按钮下方（间隙 4px）或下方放不下时上方（实测触发按钮贴视口底部时 `top=487` 对上 `trigger=696`）；真实鼠标点选项 → 触发按钮文本 `medium → high`、浮层关闭；真实鼠标连点触发按钮 → 开 → 关；滚动面板 120px → 浮层与触发按钮相对位置不变；`Esc` 关闭且焦点回到触发按钮、`Enter` 在触发按钮上可打开（焦点落在首个选项）；浅色皮肤下浮层白底 + 8px 圆角，中文档位（每次询问 / 写入时询问 / 全部自动通过）宽度自适应到 109px 不截断，当前项为 accent 色。
+
 ## 7. 明确不做（用户已确认）
 
 - 编辑器 / 文件树 / diff 审查 / 浏览器 / SSH / 移动端 / PR 集成（Orca 的「复杂」部分）。

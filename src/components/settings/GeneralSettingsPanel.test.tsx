@@ -87,3 +87,59 @@ describe("通用设置读取状态", () => {
     expect(container.textContent).toContain("终端命令");
   });
 });
+
+describe("枚举设置", () => {
+  /** 真实点击序列：`pointerdown` 与 `click` 都派发（jsdom 不会自己生成）。 */
+  function click(element: Element) {
+    act(() => {
+      element.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      element.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+  }
+
+  const item = { key: "defaultThinkingLevel", value: "medium", kind: "enum", description: "thinking" };
+
+  it("选项在浮层里，选中后写回 omp 并收起", async () => {
+    vi.mocked(api.getOmpSettings).mockResolvedValue([item]);
+    vi.mocked(api.setOmpSetting).mockResolvedValue({ ...item, value: "high" });
+    act(() => {
+      root.render(<GeneralSettingsPanel />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const trigger = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "medium");
+    if (!trigger) throw new Error("枚举触发按钮没渲染出来");
+    click(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    // 选项挂在 body 的浮层里：设置页自己的文档流不出现这一块（不把后面的设置推走）
+    expect(document.body.textContent).toContain("xhigh");
+    expect(container.textContent).not.toContain("xhigh");
+
+    const option = Array.from(document.body.querySelectorAll("button")).find((b) => b.textContent === "high");
+    if (!option) throw new Error("浮层里的选项没渲染出来");
+    click(option);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(api.setOmpSetting).toHaveBeenCalledWith("defaultThinkingLevel", "high");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("再点触发按钮收起", async () => {
+    vi.mocked(api.getOmpSettings).mockResolvedValue([item]);
+    act(() => {
+      root.render(<GeneralSettingsPanel />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const trigger = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "medium")!;
+    click(trigger);
+    expect(container.ownerDocument.body.textContent).toContain("xhigh");
+    click(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(document.body.textContent).not.toContain("xhigh");
+  });
+});

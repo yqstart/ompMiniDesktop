@@ -4,6 +4,7 @@ import { api } from "@shared/api";
 import type { OmpSetting } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { useText } from "../../lib/useText";
+import { EnumSelect } from "./EnumSelect";
 import { Switch } from "./Switch";
 import {
  SETTING_GROUPS,
@@ -51,8 +52,6 @@ export function GeneralSettingsPanel() {
  const [closed, setClosed] = useState<ReadonlySet<SettingGroup>>(new Set());
  /** 本地搜索（只过滤 41 项白名单，不扩张配置范围）。 */
  const [query, setQuery] = useState("");
- /** 行内展开的枚举选择器（同屏只开一个）。 */
- const [openEnum, setOpenEnum] = useState<string | null>(null);
  /** 数字框的编辑草稿（提交前不写 omp）。 */
  const [drafts, setDrafts] = useState<Record<string, string>>({});
  /** 重新拉一次读数。写成 promise 链（不在 effect 里同步 setState）：state 只在回调里更新，
@@ -115,7 +114,6 @@ export function GeneralSettingsPanel() {
  };
 
  const reset = (key: string) => {
-  setOpenEnum(null);
   void withBusy(key, () => api.resetOmpSetting(key));
  };
 
@@ -248,9 +246,7 @@ export function GeneralSettingsPanel() {
                spec={spec}
                item={item}
                busy={busy}
-               open={openEnum === spec.key}
                draft={drafts[spec.key]}
-               onToggleEnum={() => setOpenEnum(openEnum === spec.key ? null : spec.key)}
                onSave={save}
                onReset={reset}
                onDraft={(v) => setDrafts((prev) => ({ ...prev, [spec.key]: v }))}
@@ -276,9 +272,7 @@ function SettingRow({
  spec,
  item,
  busy,
- open,
  draft,
- onToggleEnum,
  onSave,
  onReset,
  onDraft,
@@ -287,9 +281,7 @@ function SettingRow({
  spec: SettingSpec;
  item: OmpSetting | undefined;
  busy: boolean;
- open: boolean;
  draft: string | undefined;
- onToggleEnum: () => void;
  onSave: (key: string, value: unknown) => void;
  onReset: (key: string) => void;
  onDraft: (v: string) => void;
@@ -331,16 +323,14 @@ function SettingRow({
       onToggle={() => onSave(spec.key, value !== true)}
      />
     ) : spec.type === "enum" ? (
-     <button
-      onClick={onToggleEnum}
-      disabled={busy || unavailable}
-      aria-expanded={open}
-      className="flex min-h-8 max-w-full cursor-pointer items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-[12px] transition-colors duration-100 hover:bg-hover disabled:opacity-40"
-     >
-      {busy ? <Loader size={11} className="animate-spin" aria-hidden /> : null}
-      {typeof value === "string" ? value : "—"}
-      <ChevronDown size={11} aria-hidden />
-     </button>
+     <EnumSelect
+      label={label}
+      value={typeof value === "string" ? value : undefined}
+      choices={optionsFor(spec, value).map((opt) => ({ value: opt.value, label: opt.label ? t[opt.label] : opt.value }))}
+      busy={busy}
+      disabled={unavailable}
+      onPick={(v) => onSave(spec.key, v)}
+     />
     ) : (
      <input
       type="number"
@@ -357,24 +347,6 @@ function SettingRow({
      />
     )}
    </div>
-   {open && spec.type === "enum" && (
-    <div className="mt-1.5 mb-0.5 space-y-0.5 rounded-md border border-border bg-background p-1">
-     {optionsFor(spec, value).map((opt) => (
-      <button
-       key={opt.value}
-       onClick={() => {
-        onToggleEnum();
-        if (opt.value !== value) onSave(spec.key, opt.value);
-       }}
-       aria-current={opt.value === value}
-       className={`block w-full cursor-pointer truncate rounded px-2 py-1 text-left text-[13px] transition-colors duration-100 hover:bg-hover ${opt.value === value ? "text-accent" : ""
-        }`}
-      >
-       {opt.label ? t[opt.label] : opt.value}
-      </button>
-     ))}
-    </div>
-   )}
   </div>
  );
 }
