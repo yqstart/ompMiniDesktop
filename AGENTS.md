@@ -18,7 +18,8 @@ Tauri v2 + React + TS + Tailwind v4 + Zustand，包管理 pnpm。
 |功能排期（历史）|`docs/v2..v10-schedule.md`|各期明细与实测数据（设置页各页签的沿革在这批文档里）|
 |自定义模型与添加供应商（现行）|`docs/v12-schedule.md`|`models.yml` 可视化 + 合并式「添加供应商」面板（V12c）的上游实测、实现与完成口径（**改这块前先读**）|
 |快速切换环（现行）|`docs/v13-schedule.md`|`cycleOrder`（omp 终端 Ctrl+P 的轮换序）可视化的上游实测、实现与完成口径|
-|工作区提交并推送（现行）|`docs/v14-schedule.md`|左栏工作区行「提交并推送」（`omp commit` 集成，两段式：提交 → 过目信息 → 推送）的上游实测、设计与完成口径|
+|git 工作流（现行）|`docs/v19-schedule.md`|提交 / 推送 / 提交信息 / worktree 的重构（V19）：壳侧快路径（一次 `omp -p`）+ 可选的完整轨（`omp commit`，含 CHANGELOG）、文件勾选、一键提交并推送、worktree 生命周期——**改 git 这块前先读**|
+|工作区提交并推送（历史）|`docs/v14-schedule.md`|V14 的 `omp commit` 两段式封装（形态已被 V19 取代，仅作历史参考）|
 |供应商用量（现行）|`docs/v15-schedule.md`|设置 ›「供应商用量」（`omp usage --json` 的滚动窗口：5 小时 / 每周 / 每月）的上游实测、设计与完成口径（含「能否自定义配置取用量」的结论）|
 |终端图标字体（现行）|`docs/v16-schedule.md`|终端 nerd 图标：内嵌单宽图标字体（Nerd Fonts Symbols Only 派生）+ 设置 ›「图标符号集」（`symbolPreset`）的上游实测、设计与完成口径|
 |会话标题与改名 / 批量归档 / git 快照刷新 / 内存实测（现行）|`docs/v17-schedule.md`|终端标签用会话标题（识别 omp 的 cwd 回退名）+ 双击改名（`/rename` 注入）、会话弹窗批量归档 / 删除、git 快照刷新时机（窗口 focus + 30s 兜底轮询）与三终端内存实测结论|
@@ -50,15 +51,15 @@ src/
   components/sidebar/
     WorkspaceSidebar.tsx   # 左栏：添加项目 + 项目列表 + 底部「设置/语言/皮肤」行（更新小点在设置入口上）
     ProjectGroup.tsx       # 项目组：折叠头（会话入口 / 新建 worktree）+ 工作区行 + WorktreePanel（分支过滤 + 新建分支）
-    SessionPopup.tsx       # 项目会话弹窗：会话搜索与勾选（批量归档 / 恢复 / 删除）+ resume 到终端
+    SessionPopup.tsx       # 项目会话弹窗：会话搜索 + 全部归档 / 全部删除（作用于当前过滤结果）+ resume 到终端
   components/terminal/
     TerminalView.tsx       # 终端面板区：全部终端面板（隐藏不销毁）+ 当前工作区空态（标签栏与关闭确认归 App）
     TerminalTabs.tsx       # 标签栏（常驻）：当前工作区的终端标签（π 状态标 + 会话标题 + 关闭；双击改名）+ 设置标签（单例）+ ＋
     TerminalPane.tsx       # 单个终端：xterm 实例 + PTY 管道（Channel）+ fit/resize + 退出浮层（重启/关闭）
-  components/settings/     # GeneralSettingsPanel（常用设置）/ ModelsPanel（模型页壳：我的模型 / 供应商 / 角色 / 快速切换环 / 转移）/ CycleOrderSection（快速切换环：Ctrl+P 轮换序）/ ProvidersSection（供应商合并区块：已添加列表 + 两个弹窗）/ ProviderPicker（提供商搜索选择器）/ ProviderModelsDialog（挑选模型弹窗 + 列表）/ CustomProviderEditForm（models.yml 表单）/ DialogShell（设置页模态壳）/ FallbackChains / ModelPickList / MemoryPanel / UsagePanel（使用统计：tokens 用量 / Cache 命中率 / 活跃天数三张卡，默认「今日」+「Token 活动」热力图：每日 / 每周 / 累计三档、悬停浮层给按模型拆分、底部「少 ▢▢▢▢▢ 多」对照条）/ ProviderUsagePanel（供应商用量：各供应商滚动窗口的进度条 + 重置倒计时 + 无数据 / 停用凭据块；V15）/ StarToggle + Switch（共享小件）
+  components/settings/     # GeneralSettingsPanel（常用设置）/ ModelsPanel（模型页壳：我的模型 / 供应商 / 角色 / 快速切换环 / 转移）/ CycleOrderSection（快速切换环：Ctrl+P 轮换序）/ ProvidersSection（供应商合并区块：已添加列表 + 两个弹窗）/ ProviderPicker（提供商搜索选择器）/ ProviderModelsDialog（挑选模型弹窗 + 列表）/ CustomProviderEditForm（models.yml 表单）/ DialogShell（设置页模态壳）/ EnumSelect（枚举下拉浮层：设置页的枚举值选择器）/ FallbackChains / ModelPickList / MemoryPanel / UsagePanel（使用统计：tokens 用量 / Cache 命中率 / 活跃天数三张卡，默认「今日」+「Token 活动」热力图：每日 / 每周 / 累计三档、悬停浮层给按模型拆分、底部「少 ▢▢▢▢▢ 多」对照条）/ ProviderUsagePanel（供应商用量：各供应商滚动窗口的进度条 + 重置倒计时 + 无数据 / 停用凭据块；V15）/ StarToggle + Switch（共享小件）
   components/update/       # UpdateDialog（App 常驻挂载，updateDialogOpen 控制；有更新的提醒在左栏设置入口小点）
   components/git/
-    CommitTaskPanel.tsx    # 工作区「提交并推送」任务浮层（V14：流式日志 / 提交结果 / 提交信息语言三档 + 记住选择 / 取消 / 后台运行 / 推送 / 重试）
+    CommitTaskPanel.tsx     # 提交 / 推送浮层（V19：轨道切换「快速 / 完整（含 CHANGELOG）」/ 文件勾选 / 可编辑提交信息 / 提交并推送 / 语言三档 + 记住选择 / 完整轨日志）
   lib/                     # 见下
   shared/                  # api（invoke 唯一入口，命令名走 IPC 常量）/ ipc（命令与事件常量的唯一清单）/ types
   stores/app.ts            # Zustand 全局状态（项目/工作区/终端/语言/皮肤/设置页/更新/提交任务）
@@ -69,7 +70,9 @@ src-tauri/src/
   session_scan.rs          # agentDir 解析 + jsonl 头解析 + cwd 归组（含单测）
   overlay.rs               # overlay.json 读写与版本归一（含单测）
   git_info.rs              # git 只读查询（当前分支 / 本地分支 / 脏工作区 / **worktree list**）+ git 路径探测缓存（含单测）
-  git_commit.rs            # 工作区「提交并推送」（V14）：`omp commit` 封装（预检 / 按 cwd 的任务表 / Channel 流式 / 取消打进程组 / 退出清理；含单测与真实仓库慢测试）
+  git_commit.rs            # 提交 / 推送的任务编排（V19）：按 cwd 的任务表 + Channel 事件 + CancelToken 取消 + 子进程泵；`git commit`/`git push` 与完整轨 `omp commit` 的执行器（含单测与真实仓库测试）
+  git_ops.rs               # 壳侧 git 写操作（V19）：变更集读取（porcelain -z + numstat）、勾选 → 暂存区同步（含子集复查）、推送参数、远端默认分支解析、worktree 删除 / prune / 孤儿清理（含单测与真实仓库测试）
+  commit_msg.rs            # 提交信息快路径（V19）：一次 `omp -p` 单轮生成——参数序列 / diff 截断 / 提示词 / 输出解析 / 模型角色读取（含单测）
   settings.rs              # 设置 ›「常用设置」后端：`omp config list/set/reset` 三个命令（含单测）
   models_config.rs         # 设置 › 供应商 ›「自定义模型」后端：`<agentDir>/models.yml` 的读 / 写（保真文本由前端给，后端做 hash 乐观锁 + 预校验 + 备份 + 原子写；含单测）
   title_prompt.rs          # 会话标题语言（V18）：按界面语言写 `<agentDir>/TITLE_SYSTEM.md`（omp 的标题生成 prompt；用户自写的同名文件不覆盖，原子写；含单测）
@@ -95,8 +98,8 @@ useText.ts       # 组件取文案的唯一入口
 useDropdown.ts   # 下拉与共用 useDialogFocus：最上层 Esc、Tab 圈定、焦点恢复、隐藏面板隔离
 workspaces.ts    # 工作区逻辑：loadWorkspaces（唯一刷新入口）/ 显示名 / 点工作区开终端 / ＋ 新建 / resume 到终端
 terminalScope.ts # 右栏终端范围：terminalsInWorkspace（按左栏选中工作区过滤，null 不过滤）+ 工作区行徽章计数（含单测）
-commitTasks.ts   # 工作区提交任务编排（start / push / cancel / 关闭语义 / git 快照刷新时机；V14）
-commitLang.ts    # 提交信息语言偏好（系统默认 / 中文 / 英文，localStorage 按项目存 → omp commit --context；V14 增补；含单测）
+commitTasks.ts   # 提交 / 推送前端编排（V19）：打开面板与变更集 / 勾选与消息编辑 / 生成 / 提交（可选推送）/ 完整轨 / 只推送 / 取消 / 关闭语义 / git 快照刷新时机
+commitLang.ts    # 提交信息语言偏好（系统默认 / 中文 / 英文，localStorage 按项目存 → 两轨共用的要求文本；V14 增补、V19 扩展到快路径；含单测）
 titlePrompt.ts   # 会话标题语言（V18）：把界面语言同步成 omp 的标题生成 prompt（`<agentDir>/TITLE_SYSTEM.md`，失败静默；判定「谁的文件」在后端）
 projects.ts      # 添加项目（pickAndAddProject 唯一实现）
 sessions.ts      # 会话按项目分组（归档页用；含单测）
@@ -118,12 +121,17 @@ appUpdate.ts     # 应用内更新状态机
 - **主区 = 常驻标签栏 + 常驻面板（设置是标签，不是替换）**：`App` 里是 `<TerminalTabs />`（终端标签 + 设置标签 + ＋，只要有任何标签就常驻）+ `<TerminalView visible={!settingsTabActive} />` + `{settingsTabOpen && <SettingsPage visible={settingsTabActive} />}` + 终端关闭确认（`ConfirmDialog`，任意标签下都要弹得出来）。**面板只切显隐、不许条件渲染**——**卸载 `<TerminalView />` 会连带卸载每个 `TerminalPane`，其清理 effect 直接 `pty_kill`**（那是「关闭标签」才该发生的事；实测：卸载终端树 → kill 立即发生）。切到设置标签时 `visible=false` 让面板的 active 判定为假（不量尺寸 / 不推 resize），切回时按「切到本 tab」重新 fit + 聚焦；隐藏期间到达的输出照常进 xterm 缓冲，设置页的页签选择 / 滚动位置也保留（`settingsTabOpen` 置 false 才卸载）。`activeTerminalId` 在切去设置标签时保持不变，作为「上次的终端」。
 - **终端 tab 不追踪 session id**：jsonl 的 sessionId 由 TUI 自己创建，壳侧不做运行时绑定（会话列表的「运行中」标记不做——tab 上的 π 状态来自 OSC 标题，不是从 jsonl 推断）；`--resume` 由会话弹窗发起（cwd 用会话原目录）。**改名同理**：壳侧不写 jsonl、不留本地覆盖——注入 omp 原生命令 `/rename <title>`，让 omp 自己改（`title_change`）、自己广播（OSC）。
 - **会话标题语言 = 壳的界面语言（V18；`title_prompt.rs` + `lib/titlePrompt.ts`）**：omp 的自动标题 prompt 可用 `TITLE_SYSTEM.md` 覆盖——**项目级 `<cwd>/.omp/TITLE_SYSTEM.md` 优先，其次用户级 `<agentDir>/TITLE_SYSTEM.md`**；上游**没有** CLI / 设置项能改它（`omp --help` 只有 `--no-title`，`omp config list` 只有 `title.refreshOnReplan`），写用户级文件是壳侧唯一路径（继 `models.yml` 之后第二个「无 CLI 入口只能写文件」的例外）。壳在健康检查解析出 `agentDir` 后同步一次、界面语言每变一次再同步：**只在文件不存在或内容恰好是壳的中文 / 英文文本时才写**；用户自写的同名文件一律跳过（`skipped`）永不覆盖，写入是原子写、失败静默。**生效范围 = 该 agentDir 下所有新会话**（不止壳内；项目级文件存在时项目级优先）——omp 只在**会话启动**时读它，所以切语言对**新开的终端**生效、已开会话保持原语言（上游口径，壳侧不代偿）。`~/.omp/agent/pi-session-title.json` + `title-prompt.txt` 是 Pi 时代遗留（omp 18.2.10 二进制 0 命中，不再读），壳侧不碰。实测见 `docs/v18-schedule.md` §1.2。
-- **左栏 = 项目 → 工作区（主目录 + git worktree）**：`list_workspaces` 聚合（每个项目一次 `git worktree list --porcelain`；porcelain 第一块是主目录）。**worktree 真相 = git**（手工 `git worktree add` 的也列出）；**创建走 `omp worktree add`**（clone-first + `~/.omp/wt` 管理目录是 omp 的既有约定），路径 `~/.omp/wt/<repo>-<branch-slug>`，已检出的分支幂等复用（分支已 checkout 在别处时 git 会拒绝，错误透传）。点击工作区行：该目录已有终端 → 聚焦最近一个；否则新建。`＋`/`⌘T` 用 `activeWorkspacePath`（无选中时退第一个可用工作区）。行尾状态区的**终端数徽章**（`BrowserTerminal` + 数量，有进程在跑时上 accent）是「别的分支还开着几个终端」的提示——右栏只看当前工作区。
+- **左栏 = 项目 → 工作区（主目录 + git worktree）**：`list_workspaces` 聚合（每个项目一次 `git worktree list --porcelain`；porcelain 第一块是主目录）。**worktree 真相 = git**（手工 `git worktree add` 的也列出）；**创建走 `omp worktree add`**（clone-first + `~/.omp/wt` 管理目录是 omp 的既有约定），路径 `~/.omp/wt/<repo>-<branch-slug>`，已检出的分支幂等复用（分支已 checkout 在别处时 git 会拒绝，错误透传）；新建分支时可选**基于远端最新**（先 `git fetch <remote> <默认分支>` 再以 `<remote>/<默认分支>` 为 base；默认分支取 `origin/HEAD`，回退 `main`/`master`，认不出就报错不猜）。**V19 补齐生命周期**：worktree 行 hover 的「删除」→ 后端先探脏（脏则返回 `WORKTREE_DIRTY`，前端用那句话做二次确认再带 `force` 重删）→ `git worktree remove` + `prune`（有终端开在该目录时前端直接拒绝）；项目头「…」（`Broom`）的维护面板 = 「清理失效登记」（`git worktree prune -v`，目录被手工删掉的那些）+「清理孤儿 worktree」（`omp worktree clear`，**`~/.omp/wt` 全域**、确认框写明范围）。点击工作区行：该目录已有终端 → 聚焦最近一个；否则新建。`＋`/`⌘T` 用 `activeWorkspacePath`（无选中时退第一个可用工作区）。行尾状态区的**终端数徽章**（`BrowserTerminal` + 数量，有进程在跑时上 accent）是「别的分支还开着几个」的提示，另有 dirty 点 / ahead（可点推送）/ behind / 上游缺失 / 任务徽章（顺序与口径见 `design-system/MASTER.md` §8）。
 - **会话归属扩展到 worktree**：`ownership_scope(projects)` = 项目路径 ∪ 各项目全部 worktree 路径（`git worktree list` 求得）——`list_sessions` / `list_archived_sessions` / `list_memories` 的归属**全部走它**。worktree 里跑的会话（jsonl cwd = worktree 目录）必须归到所属项目，不许掉「未归属」。`owner_project` 仍是唯一判定入口（真实路径前缀匹配、最长优先）。
 - **工作区树刷新入口唯一**：`lib/workspaces.ts` 的 `loadWorkspaces()`（拉取 + 落 store + 失效选中项回退）。项目增删 / worktree 创建后都调它（`refreshSidebar`）。
-- **工作区「提交并推送」（V14）= `omp commit` 的壳侧封装**：左栏工作区行 hover 按钮 / 待推送徽章发起，**两段式**——`omp commit`（AI 生成信息 + changelog 维护，~20s）只提交，浮层里过目提交信息后点「推送」走 `omp commit --push` 的无改动快路径（~2s）。**任务按 cwd 建表**（`git_commit.rs`：不同工作区可并行 = Cursor 式「多个任务一起跑」，同一工作区 BUSY；取消与应用退出打进程组收尾）。**预检**（一条 `git status --porcelain -b` 出 dirty / ahead / upstream）决定跑什么：有改动 → 提交；仅 ahead **或无上游**（ahead 无法计数）→ 推送；干净且同步 → noop 不跑 omp——预检同时挡掉非仓库时上游吐的 JS 堆栈。**终态判定不解析上游的人类输出**：退出码 + 运行前后 HEAD 对比（`classify` 纯函数）+ 从 `git log` 读本次提交（split 场景多条）；「commit 成立但 push 失败」= 退出码 1 且 HEAD 已变（git 错误在 stderr，hint 识别无上游 / 无权限 / non-fast-forward）。输出经 Channel 流式（Rust 侧去 ANSI，stdout/stderr 混流按行），store 只放任务视图（日志 1000 行保尾）；**关闭浮层 = 转后台**（行徽章指示），后台成功即清记录、失败保留（已阅即清）。行徽章的 dirty / 领先·落后远程（ahead / behind）/ 上游缺失标记来自 git 快照（启动 / 任务结束 / 窗口可见**或重新获得焦点** / 终端 π 转就绪时防抖刷新 / **可见时 30s 兜底轮询**——终端里手敲 git 或 agent 中途提交不改变 π 状态，只靠事件时机等不到），点按钮时的后端预检是最终裁决。上游行为实测（`docs/v14-schedule.md` §1）：自动 `add -A`（**含未跟踪文件**）、无关改动拆多个提交、`-c` 可传中文要求但摘要仍须英文动词开头。
-- **提交信息语言（V14 增补；`lib/commitLang.ts`）**：提交浮层里三档（系统默认 / 中文 / English）+「记住选择（本项目）」——偏好**按项目**（`projectId`）记，同一项目的主目录与全部 worktree 共用；「记住」= 写 localStorage `omp.commitLang.v1`（只落已记住的项目），不记住则只在本次运行的内存态里生效。发起任务时由 `lib/commitTasks.ts` 的 `contextArgFor(cwd)` 解析成 `omp commit --context="…"` 的附加要求（`system` = 不传，跟从 omp 自身行为），**两段都传**（推送段若遇到新改动会先提交）。运行中锁住控件（参数在 spawn 时已定），终态可改、下次任务生效。上游实测（omp 18.2.10）：`--context` 能决定摘要主体与正文的语言，但**摘要首词仍必须是英文过去式动词**（校验器硬约束，中文档在浮层里如实提示，壳侧不代偿）；「简体中文 / English」是语言自称（复用 `LOCALE_NAMES`，不进字典），只有「系统默认」进字典。
-- **会话弹窗（项目行 Clock）**：数据 = `list_sessions(projectId)`（归属含 worktree）；行点击 = 新终端 `omp --resume <id>`；归档 / 恢复 = 覆盖层批量命令（单条=数组长度 1）；删除 = `delete_sessions` + ConfirmDialog。**批量**（V17）：行首勾选 + 底部操作条（归档 / 恢复各按选中集的适用项过滤、没有适用项时禁用；删除走同一确认框；「全选」作用于当前过滤结果），与单条行内操作共用 `lib/sessionBatch.ts` 的分批与失败聚合。设置 ›「已归档对话」是归档的唯一管理面（不受扫描窗口限制），其「打开」= **恢复（unarchive）+ 终端 resume**（V11 没有只读回放渲染器）。
+- **提交 / 推送（V19）= 两轨并存**（`docs/v19-schedule.md`）：左栏工作区行 hover 的「提交…」**打开提交面板**（`activeCommitCwd` 单例浮层），面板里先勾选文件（勾选 = 本次提交包含哪些文件；默认 = 已暂存的那批，一个都没暂存则全选）。
+  - **快速轨（默认）**：「生成提交信息」→ 壳侧把勾选同步进暂存区（`git_ops::apply_selection`：未选的 `restore --staged`、选的 `add -A -- <paths>`，提交前复查「暂存集合 ⊆ 勾选集合」）→ `git diff --cached` 进提示词 → **一次 `omp -p` 单轮**（`commit_msg.rs`：`--no-session --no-tools --no-lsp --no-extensions --no-rules`，模型与思考档取 `modelRoles.commit`；实测 p50 3.5s）→ 输出流式进编辑框（`delta`）并落定解析结果（`message`）→ 用户过目 / 手改 → 「提交」（`git commit --cleanup=strip -F -`，消息走 stdin）或「提交并推送」（再跑 `git push`）。
+  - **完整轨（可选）**：切「完整（含 CHANGELOG）」→ 同样先同步勾选（上游见到非空暂存区就不再 `add -A`，**实测尊重勾选**）→ `omp commit`（AI 信息 + changelog 维护 + 校验器，数十秒）→ 日志流式。推送仍由壳侧 `git push` 完成。
+  - **推送**：有上游 `git push`；没有上游自动 `git push -u <remote> <branch>`（优先 origin，唯一 remote 也行，多个且无 origin 报错不猜）；壳侧 git 子进程带 `GIT_TERMINAL_PROMPT=0`（没有 TTY 就快速失败，凭证问题给「终端里先手动 push 一次」的 hint）。
+  - **任务模型**（`git_commit.rs`）：按 **cwd** 建表（不同工作区并行 = Cursor 式「多个任务一起跑」，同一工作区 BUSY），取消走 `CancelToken`（多步子进程要各自可见）+ 杀当前子进程的进程组，各步有硬超时；应用退出 `kill_all` 收尾。**闭浮层 = 转后台**（行徽章指示：`Loader` 运行中 / `AlertTriangle` 失败，点开面板）。
+  - 行徽章的 git 快照（改动点 / ahead 可点推送 / behind 只读 / 上游缺失）与刷新时机（启动 / 任务结束 / 窗口可见或获焦 / 终端 π 转就绪防抖 / 可见时 30s 兜底轮询）**沿用 V14 口径**；点按钮不再走后端预检选路，改由面板的变更集 + 提交前的暂存复查裁决。
+- **提交信息语言（V14 增补、V19 扩展到两轨；`lib/commitLang.ts`）**：提交浮层里三档（系统默认 / 中文 / English）+「记住选择（本项目）」——偏好**按项目**（`projectId`）记，同一项目的主目录与全部 worktree 共用；「记住」= 写 localStorage `omp.commitLang.v1`（只落已记住的项目），不记住则只在本次运行的内存态里生效。`lib/commitTasks.ts` 的 `contextArgFor(cwd)` 把该档解析成一段**要求文本**：快速轨拼进提示词（`commit_msg::build_commit_prompt` 的「语言要求：」段），完整轨走 `omp commit --context=`。运行中锁住控件（参数在 spawn 时已定），终态可改、下次任务生效。上游实测（omp 18.2.10）：`--context` 能决定摘要主体与正文的语言（实测 `chore: added a.txt 与 b.txt 文件`），但摘要首词必须是英文过去式动词——完整轨的校验器硬约束；快速轨把「首词英文过去式动词」写进提示词（仓库约定），壳侧不改写模型产物。
+- **会话弹窗（项目行 Clock）**：数据 = `list_sessions(projectId)`（归属含 worktree）；行点击 = 新终端 `omp --resume <id>`；归档 / 恢复 = 覆盖层批量命令（单条=数组长度 1）；删除 = `delete_sessions` + ConfirmDialog。**批量不勾选**（V17 增补）：底部常驻「全部归档（N）」「全部删除（N）」，作用于**当前过滤结果**（搜索后就是搜出来的那批）——全部归档只数未归档的那些（无适用项 = 禁用），全部删除覆盖列出的每一行；与单条行内操作共用 `lib/sessionBatch.ts` 的分批与失败聚合。设置 ›「已归档对话」是归档的唯一管理面（不受扫描窗口限制），其「打开」= **恢复（unarchive）+ 终端 resume**（V11 没有只读回放渲染器）。
 - **设置是标签栏里的单例标签**：左栏底部「设置」入口打开 / 聚焦（`openSettingsTab`），标签的 `×` 或 ⌘W 关闭（`closeSettingsTab`，回到上次的终端标签；关闭最后一个终端标签时若设置标签开着则自动切过去）。设置页左栏分**两组**（**omp** = 改 omp 的配置与数据；**本应用** = 本应用自己的信息与设置——组标题在窄导航下收进 sr-only，页内快捷定位 chips 已删、左栏切页是唯一导航），**七个页签**仍是全 app 唯一改 omp 状态的地方（除本应用偏好）：**常用设置**（`omp config` 白名单 **41 项**——V11 把 `tools.approvalMode` 收回本页）/ **模型**（V12b 起为唯一模型管理面；V12c 把「供应商」与「自定义模型」并成**一个区块 + 两个弹窗**：**供应商在最上方** → 我的模型（挑选结果）→ `modelRoles` → **快速切换环（`cycleOrder`）** → `retry.fallbackChains`；「添加供应商」弹窗 = 可搜索的提供商选择器 → API key / OAuth 走 `auth-broker login`，首项「自定义」写 models.yml（自定义表单：**名称可改**——改键保位置与原注释，支持中文（omp 实测无字符集约束，只挡空白与 `/` 等歧义字符）；接口类型只给 `openai-completions` / `anthropic-messages` 两档，既有文件里的其它 `api` 值原样列出保留；**认证只有 API Key**，留空 = `auth: none`）；「挑选模型」弹窗 = 该供应商的模型星标；平铺的「可用模型」目录已删除；**从终端标签切回设置标签会重读 omp 的角色 / 转移链**——omp TUI 里改完即识别，模型目录走 `get_models` 的 5 分钟缓存不额外重拉）/ 记忆（只删不写）/ **供应商用量**（V15；只读：各供应商的滚动窗口进度 + 重置倒计时 + 无数据供应商 / 停用凭据提示，数据 = `omp usage --json`；omp 未覆盖的 commandcode / deepseek 由**壳侧补充探针**补齐——`extra_usage.rs`，凭据只经 `omp token` 内存传递，查询失败显示「查询失败」而非「无数据」）——以上为 omp 组，以下为本应用组：**关于**（本应用的更新 + omp 运行环境诊断：路径 / 版本 / agentDir 的展示与复制、重新检测、手动指定可执行文件）/ 使用统计（只读；tokens 用量 / Cache 命中率 / 活跃天数三张卡 +「Token 活动」热力图，默认「今日」）/ 已归档对话（覆盖层 + 删文件）。读写口径与实测结论见 `docs/v8-schedule.md` / `docs/v9-schedule.md` / `docs/v15-schedule.md`（仍然有效）。
 - **「我的模型」= 模型选择器的候选范围**（V12b；`lib/myModels.ts`，localStorage 键沿用 `omp.favoriteModels.v1`）：我挑过的 selector 非空时，`candidateModels` 让模型角色 / 失败转移目标的候选只列这些；空 = 全部可用模型（不挡新人）。**不写 omp 的 `enabledModels`**——实测那才是 omp 侧 TUI `/model` 的白名单（`[]` = 不限制），本应用明确不动它（`docs/v12-schedule.md` §6）。
 - **自定义模型（V12；V12c 起入口在「供应商」区块的添加面板里，选择器首项「自定义」）直接写 `<agentDir>/models.yml`**——omp 没有 CLI 写入口（`omp models` 只有 ls / find / refresh，`omp config` 只管 `config.yml`），写文件是唯一路径；这是壳侧唯一直接写 omp 配置文件的例外。前端 `lib/customModels.ts`（`yaml` 包）做**保真编辑**：只改被编辑的节点，注释 / 格式 / 界面之外的字段（`headers` / `compat` / `modelOverrides` / `cost`…）原样保留；**覆盖型块（无 `models` 的覆盖字段块）界面只读**。后端 `models_config.rs` 四道闸：hash 乐观锁（外部改过即拒写）→ 预校验（临时 agentDir 跑一次 `omp models` 读 stderr，坏配置**不落盘**）→ 备份（`$APPDATA/omp-mini/backups/`，保留 10 份）→ 原子写。文件发现规则与 schema 细节见 `docs/v12-schedule.md`。
@@ -160,7 +168,7 @@ pnpm test                   # vitest
 pnpm e2e:ipc                # IPC 契约双向自检（ipc.ts ↔ main.rs ↔ 实现）
 pnpm build                  # tsc + vite 构建
 cargo test --manifest-path src-tauri/Cargo.toml    # Rust 单测（含真实 PTY 回环）
-cargo test --manifest-path src-tauri/Cargo.toml -- --ignored   # 慢测试：真实 omp TUI 冒烟 / 真实 agentDir 基准 / 真实 omp usage 解析 / 真实 commandcode 探针（真实 HTTP） / 真实 omp commit 两段式（临时仓库，消耗一次 AI 调用）
+cargo test --manifest-path src-tauri/Cargo.toml -- --ignored   # 慢测试：真实 omp TUI 冒烟 / 真实 agentDir 基准 / 真实 omp usage 解析 / 真实 commandcode 探针（真实 HTTP） / 真实提交信息快路径（3 次 `omp -p`，打印耗时）/ 真实 `omp commit` 完整轨（各消耗 AI 调用，临时仓库自建自清）
 pnpm tauri:build            # 本机发布构建，产物见 src-tauri/target/release/bundle/
 pnpm icon                   # 从 design-system/icon/omp-mini-icon.svg 重生成桌面图标
 ```
@@ -178,6 +186,7 @@ pnpm icon                   # 从 design-system/icon/omp-mini-icon.svg 重生成
 ## 范围边界（V11 现行口径）
 
 - **不做**：编辑器 / 文件树 / diff 审查 / 内置浏览器 / SSH / 移动端 / PR 集成（Orca 的「复杂」部分）；终端滚动缓冲持久化（重启不恢复 tab）；终端与 jsonl 会话的运行时绑定；分屏（split）；多窗口。
+- git 这块的边界（V19）：**不做** pull / 同步远端、创建 PR、逐 hunk 暂存、提交撤销、提交前的 diff 预览；提交信息支持「生成 + 手改」，但**不给自由文本附加说明**（`omp commit -c` 的输入框仍是候选）。快速轨**不维护 `CHANGELOG.md`**——要它就用完整轨（`omp commit`）。
 - 沿用旧口径的边界：自动化 / 定时任务、插件 / Skill / MCP / Hook 管理、主题市场、云同步——仍在范围外。
 - 自定义模型的 **`discovery` 表单**与**覆盖型块的编辑**不做（见 `docs/v12-schedule.md` §5）；写的是 agentDir 的全局层——项目级 models 配置上游没有发现路径。
 - 上下文容量（V7）的**壳侧 UI 已随 V11 退场**（omp TUI 自带 `/context`）；用量限额（V6）的供应商配额视图在 **V15 以设置 ›「供应商用量」回归**（`provider_usage.rs`；V6 的输入框上下文条入口随聊天界面删除），上游数据 = `omp usage --json`。壳侧对 omp 无探针但上游有「API key 可用」查询接口的供应商（commandcode / deepseek）做**有限补充探针**（`extra_usage.rs`：凭据只经 `omp token` 内存传递、不落盘、不回传前端；见 `docs/v15-schedule.md` §6）；既无 omp 探针也无可用接口的仍显示「无用量数据」。

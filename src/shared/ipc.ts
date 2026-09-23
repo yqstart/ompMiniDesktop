@@ -20,11 +20,20 @@ export const IPC = {
   // 工作区（V11 左栏树）：项目 → 主目录 + git worktree
   listWorkspaces: "list_workspaces",
   createWorktree: "create_worktree",
-  // 工作区「提交并推送」（V14）：omp commit 的壳侧封装（两段式：提交 → 推送）
+  // 工作区提交 / 推送（V19）：默认壳侧快路径（一次 omp -p 生成 + git commit/push），
+  // 另有一条可选的完整轨（omp commit，含 CHANGELOG 维护）
+  getChangeSet: "get_change_set",
+  generateCommitMessage: "generate_commit_message",
+  commitSelected: "commit_selected",
+  startFullCommit: "start_full_commit",
+  pushWorkspace: "push_workspace",
+  cancelCommitTask: "cancel_commit_task",
   getWorkspaceGitState: "get_workspace_git_state",
-  startCommitPush: "start_commit_push",
-  pushCommits: "push_commits",
-  cancelCommitPush: "cancel_commit_push",
+  // worktree 生命周期（V19）：删除 / 清理失效登记 / 清理孤儿（omp 管理目录）
+  removeWorktree: "remove_worktree",
+  pruneWorktrees: "prune_worktrees",
+  listOrphanWorktrees: "list_orphan_worktrees",
+  clearOrphanWorktrees: "clear_orphan_worktrees",
   // 终端 PTY（V11）：per-终端 omp TUI 进程
   ptySpawn: "pty_spawn",
   ptyWrite: "pty_write",

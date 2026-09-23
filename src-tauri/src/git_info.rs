@@ -33,6 +33,10 @@ pub struct GitInfo {
     pub branches: Vec<String>,
     /// 工作区是否有已跟踪文件的改动；null = 未检测 / 超时。
     pub dirty: Option<bool>,
+    /// 远端默认分支的本地跟踪名（如 `origin/main`）；没有远端 / 查不到为 null。
+    /// 新建 worktree 时「基于远端最新」这一档用它做基线。
+    #[serde(rename = "remoteDefault")]
+    pub remote_default: Option<String>,
     /// 非仓库 / 命令失败的原因（只用于 tooltip 与日志，不弹窗）。
     pub error: Option<String>,
 }
@@ -40,7 +44,15 @@ pub struct GitInfo {
 impl GitInfo {
     /// 降级值：非仓库、目录缺失、找不到 git 都走这里。
     pub fn not_repo(error: Option<String>) -> Self {
-        Self { is_repo: false, branch: None, detached: false, branches: vec![], dirty: None, error }
+        Self {
+            is_repo: false,
+            branch: None,
+            detached: false,
+            branches: vec![],
+            dirty: None,
+            remote_default: None,
+            error,
+        }
     }
 }
 
@@ -92,13 +104,25 @@ pub fn parse_short_sha(out: &str) -> Option<String> {
 
 /// 跑一条 git 子命令：失败返回 stderr 文本（调用方决定是降级还是当作正常分支缺失）。
 pub(crate) async fn run_git(git: &str, dir: &str, args: &[&str]) -> Result<String, String> {
+    run_git_timeout(git, dir, args, GIT_TIMEOUT).await
+}
+
+/// 同 [`run_git`]，但可指定超时：`fetch` / 大仓库的 `status` / `worktree remove` 这类
+/// 天然可能超过 4s 的命令要用更宽的超时（否则好的操作被误判成失败）。
+pub(crate) async fn run_git_timeout(
+    git: &str,
+    dir: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<String, String> {
     let fut = tokio::process::Command::new(git)
         .arg("-C")
         .arg(dir)
         .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
         .output();
-    match tokio::time::timeout(GIT_TIMEOUT, fut).await {
+    match tokio::time::timeout(timeout, fut).await {
         Err(_) => Err("git 命令超时".into()),
         Ok(Err(e)) => Err(e.to_string()),
         Ok(Ok(out)) if out.status.success() => Ok(String::from_utf8_lossy(&out.stdout).to_string()),
@@ -144,7 +168,13 @@ pub async fn read_git_info(git: &str, dir: &str) -> GitInfo {
         .await
         .ok()
         .map(|out| parse_dirty(&out));
-    GitInfo { is_repo: true, branch, detached, branches, dirty, error: None }
+    // 6) 远端默认分支的本地跟踪名（`origin/HEAD` 是 git 在 clone / remote set-head 时写的符号引用）
+    let remote_default = run_git(git, dir, &["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"])
+        .await
+        .ok()
+        .map(|out| out.trim().to_string())
+        .filter(|s| !s.is_empty());
+    GitInfo { is_repo: true, branch, detached, branches, dirty, remote_default, error: None }
 }
 
 /// 探测结果缓存：git 路径一次解析，后续命令零开销（首次可能要走登录 shell，约百毫秒）。

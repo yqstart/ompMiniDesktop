@@ -1,7 +1,9 @@
 mod commands;
+mod commit_msg;
 mod extra_usage;
 mod git_commit;
 mod git_info;
+mod git_ops;
 mod memories;
 mod models_config;
 mod overlay;
@@ -47,9 +49,16 @@ fn main() {
             list_workspaces,
             create_worktree,
             git_commit::get_workspace_git_state,
-            git_commit::start_commit_push,
-            git_commit::push_commits,
-            git_commit::cancel_commit_push,
+            git_commit::generate_commit_message,
+            git_commit::commit_selected,
+            git_commit::start_full_commit,
+            git_commit::push_workspace,
+            git_commit::cancel_commit_task,
+            git_ops::get_change_set,
+            git_ops::remove_worktree,
+            git_ops::prune_worktrees,
+            git_ops::list_orphan_worktrees,
+            git_ops::clear_orphan_worktrees,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,

@@ -490,12 +490,15 @@ pub async fn list_workspaces(state: State<'_, AppState>) -> Result<Vec<Workspace
 ///   管理目录都是 omp 的既有约定，壳侧不自造）。
 ///
 /// `new_branch=true` 表示分支尚不存在、要新建（`-b`）；false = 检出已有分支。
+/// `base` 只在新建分支时生效：`None` = 基于当前 HEAD；`Some("remote")` = 基于远端默认分支
+/// 的最新（先 `git fetch` 再拿 `<remote>/<默认分支>` 当基线）。
 #[tauri::command]
 pub async fn create_worktree(
     state: State<'_, AppState>,
     project_id: String,
     branch: String,
     new_branch: bool,
+    base: Option<String>,
 ) -> Result<WorkspaceView, CmdError> {
     let branch = branch.trim().to_string();
     // git 分支名的保守子集校验（真正的合法性由 git 判定，这里只挡明显坏输入：
@@ -545,15 +548,17 @@ pub async fn create_worktree(
     let home = std::env::var("HOME").map_err(|_| cmd_err("NO_HOME", "无法确定 HOME 目录".into(), None))?;
     let slug = branch.replace('/', "-");
     let wt_path = format!("{home}/.omp/wt/{proj_name}-{slug}");
-    let mut args: Vec<String> = vec!["worktree".into(), "add".into(), "-q".into()];
-    if new_branch {
-        args.push("-b".into());
-        args.push(branch.clone());
-    }
-    args.push(wt_path.clone());
-    if !new_branch {
-        args.push(branch.clone());
-    }
+    // 「基于远端最新」：先 fetch 再拿 <remote>/<默认分支> 当基线（只在新建分支时有意义）
+    let base_ref: Option<String> = match (new_branch, base.as_deref()) {
+        (true, Some("remote")) => {
+            let g = git
+                .clone()
+                .ok_or_else(|| cmd_err("GIT_MISSING", "未找到 git，无法拉取远端".into(), None))?;
+            Some(crate::git_ops::resolve_remote_base(&g, &proj_path).await?)
+        }
+        _ => None,
+    };
+    let args = crate::git_ops::worktree_add_args(new_branch, &branch, &wt_path, base_ref.as_deref());
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     crate::providers::run_omp_in(Some(std::path::Path::new(&proj_path)), &bin, &arg_refs)
         .await

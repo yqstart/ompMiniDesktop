@@ -82,6 +82,8 @@ export type GitInfo = {
  branches: string[];
  /** 有未提交的已跟踪文件改动；null = 未检测 / 超时。 */
  dirty: boolean | null;
+ /** 远端默认分支的本地跟踪名（如 `origin/main`）；没有远端 / 查不到为 null。 */
+ remoteDefault: string | null;
  /** 降级原因（tooltip 与日志用）。 */
  error: string | null;
 };
@@ -366,17 +368,17 @@ export type WorkspaceView = {
  missing: boolean;
 };
 
-// ---------- 工作区「提交并推送」（V14） ----------
+// ---------- 工作区提交 / 推送（V19） ----------
 
 /**
  * 工作区 git 快照（行徽章用）：`git status --porcelain -b` 的只读投影。
  * 刷新时机见 `lib/commitTasks.ts`（启动 / 任务结束 / 窗口可见或获得焦点 / 终端转就绪 / 30s 兜底轮询）；
- * 点击按钮时的**后端预检**才是最终裁决。
+ * 点击提交面板里的按钮时，前端勾选与后端暂存校验才是最终裁决。
  */
 export type WorkspaceGitState = {
  path: string;
  isRepo: boolean;
- /** 有未提交改动（含未跟踪文件——与 `omp commit` 的 `add -A` 语义对齐）。 */
+ /** 有未提交改动（含未跟踪文件——提交走 `add -A`，语义一致）。 */
  dirty: boolean;
  /** 本地领先上游的提交数（无上游 / detached 时为 0）。 */
  ahead: number;
@@ -387,9 +389,51 @@ export type WorkspaceGitState = {
  upstreamGone: boolean;
 };
 
+/** 变更集里的一个文件（与 Rust `git_ops::ChangeFile` 同构）。`index` / `worktree` = porcelain 的 XY。 */
+export type ChangeFile = {
+ path: string;
+ /** 重命名 / 复制时的原名 */
+ origPath: string | null;
+ /** 暂存区态：`M` / `A` / `D` / `R` / `?`（未跟踪时两位都是 `?`） */
+ index: string;
+ /** 工作区态 */
+ worktree: string;
+ untracked: boolean;
+ /** 已跟踪改动的 +N（未跟踪恒 0） */
+ add: number;
+ /** 已跟踪改动的 -M */
+ del: number;
+};
+
+/** 提交面板打开时的变更视图（与 Rust `git_ops::ChangeSet` 同构）。 */
+export type ChangeSet = {
+ isRepo: boolean;
+ branch: string | null;
+ /** detached 时的短 sha */
+ head: string | null;
+ upstream: string | null;
+ upstreamGone: boolean;
+ ahead: number;
+ behind: number;
+ files: ChangeFile[];
+};
+
+/** 孤儿 worktree（`omp worktree list --json` 里带 orphanReason 的条目）。 */
+export type OrphanWorktree = {
+ path: string;
+ kind: string | null;
+ parentRepo: string | null;
+ orphanReason: string;
+};
+
+export type OrphanClearResult = { removed: number; failed: number };
+
 /** 提交任务阶段（与 Rust `git_commit::CommitPhase` 同构）。 */
 export type CommitPhase =
+ | "idle"
  | "checking"
+ | "generating"
+ | "generated"
  | "committing"
  | "pushing"
  | "committed"
@@ -398,7 +442,10 @@ export type CommitPhase =
  | "failed"
  | "canceled";
 
-/** 一次提交（短 sha + 摘要）；split 场景一次任务可能多条。 */
+/** 轨道：快速（壳侧单轮生成）/ 完整（omp commit，含 CHANGELOG）。 */
+export type CommitMode = "fast" | "full";
+
+/** 一次提交（短 sha + 摘要）；完整轨可能一次产出多条（split）。 */
 export type CommitEntry = {
  sha: string;
  subject: string;
@@ -407,8 +454,10 @@ export type CommitEntry = {
 /** 任务终态与结果（与 Rust `git_commit::CommitOutcome` 同构）。 */
 export type CommitOutcome = {
  phase: CommitPhase;
- /** 本次任务新建的提交（失败时也可能非空——部分成功）。 */
+ /** 本次任务新建的提交（失败时也可能非空——部分成功：提交成功、推送失败）。 */
  commits: CommitEntry[];
+ /** 快速轨生成的信息（`generated` 终态带回来）。 */
+ message: string | null;
  error: string | null;
  hint: string | null;
 };
@@ -416,16 +465,29 @@ export type CommitOutcome = {
 /** git_commit → 前端事件（与 Rust `git_commit::CommitEvent` 同构，tag 为 `type`）。 */
 export type CommitEvent =
  | { type: "line"; text: string }
+ /** 生成流：模型 stdout 的增量，直接追加进编辑框 */
+ | { type: "delta"; text: string }
+ /** 生成结束：解析后的提交信息 */
+ | { type: "message"; text: string }
  | { type: "phase"; phase: CommitPhase }
  | { type: "exit"; outcome: CommitOutcome };
 
 /**
- * 前端任务视图（store 里按 cwd 存）：`log` 是流式累积的已去 ANSI 行（有上限，保尾），
- * `outcome` 只在结束后有；运行中关闭浮层 = 转后台（任务继续，行徽章指示）。
+ * 前端任务视图（store 里按 cwd 存）：
+ * - `files` / `selected` 是打开面板时的快照与勾选（勾选 = 本次提交包含哪些文件）；
+ * - `message` 是可编辑的提交信息（生成结果或用户手改）；
+ * - `log` 是完整轨的流式日志（快速轨不用它，只在错误摘要里体现）；
+ * - 运行中关闭浮层 = 转后台（任务继续，行徽章指示）。
  */
 export type CommitTaskView = {
  cwd: string;
+ mode: CommitMode;
  phase: CommitPhase;
+ files: ChangeFile[];
+ selected: string[];
+ message: string;
+ /** 本轮是否已生成过信息（决定按钮显示「生成」还是「重新生成」）。 */
+ generated: boolean;
  log: string[];
  commits: CommitEntry[];
  error: string | null;

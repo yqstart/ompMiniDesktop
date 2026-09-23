@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
-import type { CommitEvent, FallbackChainsInfo, GitInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, Overlay, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
+import type { ChangeSet, CommitEvent, FallbackChainsInfo, GitInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OrphanClearResult, OrphanWorktree, Overlay, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -53,26 +53,58 @@ export const api = {
   * worktree 真相 = `git worktree list`（手工建的也在）；创建走 `omp worktree add`。
   */
  listWorkspaces: () => call<WorkspaceView[]>(IPC.listWorkspaces),
- /** 确保某分支有可工作的目录：已检出直接复用，否则 `omp worktree add` 新建。 */
- createWorktree: (projectId: string, branch: string, newBranch: boolean) =>
-  call<WorkspaceView>(IPC.createWorktree, { projectId, branch, newBranch }),
+ /** 确保某分支有可工作的目录：已检出直接复用，否则 `omp worktree add` 新建。
+  *  `base` 只在 `newBranch=true` 时有意义：`null` = 基于当前 HEAD；`"remote"` = 基于远端默认分支的最新。 */
+ createWorktree: (projectId: string, branch: string, newBranch: boolean, base?: string | null) =>
+  call<WorkspaceView>(IPC.createWorktree, { projectId, branch, newBranch, base: base ?? null }),
+ /** 删除一个 worktree（先探脏：脏目录会抛 `WORKTREE_DIRTY`，带 `force` 再来一次）。
+  *  返回 true = 已删除；false = 目录本来就不在了（只清了登记）。 */
+ removeWorktree: (projectId: string, path: string, force: boolean) =>
+  call<void>(IPC.removeWorktree, { projectId, path, force }),
+ /** 清理失效登记（`git worktree prune -v`）：返回被清掉的条目原文（条数给界面用）。 */
+ pruneWorktrees: (projectId: string) => call<string[]>(IPC.pruneWorktrees, { projectId }),
+ /** 列孤儿 worktree（`~/.omp/wt` 全域，不限于某个项目）。 */
+ listOrphanWorktrees: () => call<OrphanWorktree[]>(IPC.listOrphanWorktrees),
+ /** 清理孤儿 worktree（`omp worktree clear`，只清孤儿）。 */
+ clearOrphanWorktrees: () => call<OrphanClearResult>(IPC.clearOrphanWorktrees),
+
  /**
-  * 工作区「提交并推送」（V14）：底部是 `omp commit`（AI 生成提交信息 + changelog 维护 + push）。
-  *
-  * 两段式：`startCommitPush` 预检后自己选路（有改动 → 提交；仅有未推送提交 → 推送快路径）；
-  * `pushCommits` 是第二段（也用于推送失败后的重试）。输出经 **Channel** 流式直推
-  * （`{type:"line"|"phase"|"exit"}`），同 PTY 的口径——高频行流不进事件系统。
-  *
-  * `context` = 提交信息语言要求（`omp commit --context`，null = 不传，跟从 omp 自身行为）；
-  * 文案由前端按项目偏好给出（`src/lib/commitLang.ts`），两段都要传——推送段若遇到新改动会先提交。
+  * 提交 / 推送（V19）：先取变更集（打开面板），再按轨道发起任务。
+  * 输出都经 **Channel** 流式回流（`line` / `delta` / `message` / `phase` / `exit`）。
+  */
+ getChangeSet: (cwd: string) => call<ChangeSet>(IPC.getChangeSet, { cwd }),
+ /** 快速轨第一步：把勾选同步进暂存区 → 一次 `omp -p` 单轮生成提交信息（不提交）。 */
+ generateCommitMessage: (
+  cwd: string,
+  paths: string[],
+  language: string | null,
+  onEvent: Channel<CommitEvent>,
+ ) => call<void>(IPC.generateCommitMessage, { cwd, paths, language, onEvent }),
+ /** 快速轨第二步：再同步一次勾选 → `git commit` →（可选）`git push`。 */
+ commitSelected: (
+  cwd: string,
+  paths: string[],
+  message: string,
+  push: boolean,
+  onEvent: Channel<CommitEvent>,
+ ) => call<void>(IPC.commitSelected, { cwd, paths, message, push, onEvent }),
+ /** 完整轨：`omp commit`（AI 信息 + changelog 维护 + 校验器）；慢但功能全。 */
+ startFullCommit: (
+  cwd: string,
+  paths: string[],
+  language: string | null,
+  onEvent: Channel<CommitEvent>,
+ ) => call<void>(IPC.startFullCommit, { cwd, paths, language, onEvent }),
+ /** 推送（有上游直接推；没有上游自动 `-u` 建立跟踪）。 */
+ pushWorkspace: (cwd: string, onEvent: Channel<CommitEvent>) =>
+  call<void>(IPC.pushWorkspace, { cwd, onEvent }),
+ /** 取消运行中的任务（后端杀进程组，落 `canceled` 终态）。 */
+ cancelCommitTask: (cwd: string) => call<void>(IPC.cancelCommitTask, { cwd }),
+ /**
+  * 左栏行徽章的 git 快照（批量；每行一次 `status --porcelain -b`，后端并发 + 超时降级）。
   */
  getWorkspaceGitState: (paths: string[]) =>
   call<WorkspaceGitState[]>(IPC.getWorkspaceGitState, { paths }),
- startCommitPush: (cwd: string, context: string | null, onEvent: Channel<CommitEvent>) =>
-  call<void>(IPC.startCommitPush, { cwd, context, onEvent }),
- pushCommits: (cwd: string, context: string | null, onEvent: Channel<CommitEvent>) =>
-  call<void>(IPC.pushCommits, { cwd, context, onEvent }),
- cancelCommitPush: (cwd: string) => call<void>(IPC.cancelCommitPush, { cwd }),
  /**
   * 终端 PTY（V11）：每个终端 = 一个 `omp` TUI 进程跑在 PTY 里。
   * 输出经 **Channel** 直推（高频字节流不走事件系统）；输入 / 尺寸 / 关闭走一次命令。

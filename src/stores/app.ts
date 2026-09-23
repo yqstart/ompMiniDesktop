@@ -94,7 +94,7 @@ type AppState = {
  /**
   * 工作区 git 快照（行徽章）：有改动小点 / 待推送 `BranchUp` / 非仓库降级。
   * 刷新时机（启动 / 任务结束 / 窗口可见或获得焦点 / 终端转就绪 / 30s 兜底轮询）在 `App`
-  * 与 `lib/commitTasks.ts`；点按钮时的后端预检是最终裁决。
+  * 与 `lib/commitTasks.ts`；面板里的变更集与提交前的暂存复查才是最终裁决。
   */
  workspaceGitStates: Record<string, WorkspaceGitState>;
  setWorkspaceGitStates: (states: WorkspaceGitState[]) => void;
@@ -108,6 +108,8 @@ type AppState = {
  setCommitTask: (task: CommitTaskView) => void;
  patchCommitTask: (cwd: string, patch: Partial<CommitTaskView>) => void;
  appendCommitLog: (cwd: string, line: string) => void;
+ /** 追加生成流（快速轨的模型输出直接进编辑框；有上限，防异常输出撑爆 store）。 */
+ appendCommitMessage: (cwd: string, text: string) => void;
  finishCommitTask: (cwd: string, outcome: CommitOutcome) => void;
  /** 清除任务记录（浮层关闭时对非运行中的任务调用；见 `lib/commitTasks.ts` 的 `closeCommitPanel`）。 */
  dropCommitTask: (cwd: string) => void;
@@ -115,8 +117,8 @@ type AppState = {
  /**
   * 提交信息语言偏好（**按项目 id**，V14 增补）：同一项目的主目录与全部 worktree 共用，
   * 项目之间互不影响。「记住选择」= `remembered`（已写 localStorage），未记住的只在本次
-  * 运行期间生效。任务发起时由 `lib/commitTasks.ts` 解析成 `omp commit --context` 的要求文本
-  * （见 `src/lib/commitLang.ts`）。
+  * 运行期间生效。任务发起时由 `lib/commitTasks.ts` 解析成给模型的要求文本（快速轨进提示词、
+  * 完整轨走 `omp commit --context=`，见 `src/lib/commitLang.ts`）。
   */
  commitLangPrefs: Record<string, CommitLangPref>;
  setCommitLangPref: (projectId: string, pref: CommitLangPref) => void;
@@ -137,6 +139,8 @@ export const SIDEBAR_DEFAULT = SIDEBAR_MIN;
 
 /** 提交任务日志行数上限（保尾）：异常输出不撑爆 store；与后端的错误摘要上限（TAIL_MAX）不是一回事。 */
 const COMMIT_LOG_MAX = 1000;
+/** 生成流的字符上限（保尾）：模型跑飞时的兜底；后端解析结果本身也有 4000 字符上限。 */
+const COMMIT_MSG_MAX = 8000;
 
 /** 启动时的语言偏好（模块加载时读一次，供 store 初始化解析出实际语言）。 */
 const INITIAL_LOCALE_MODE = loadLocaleMode();
@@ -326,7 +330,7 @@ export const useApp = create<AppState>((set, get) => ({
  },
  cancelCloseTerminal: () => set({ closingTerminalId: null }),
 
- // ---------- V14 工作区「提交并推送」 ----------
+ // ---------- V19 工作区提交 / 推送（见 lib/commitTasks.ts） ----------
 
  workspaceGitStates: {},
  setWorkspaceGitStates: (states) =>
@@ -354,6 +358,15 @@ export const useApp = create<AppState>((set, get) => ({
      : [...t.log, line];
    return { commitTasks: { ...s.commitTasks, [cwd]: { ...t, log } } };
   }),
+ appendCommitMessage: (cwd, text) =>
+  set((s) => {
+   const t = s.commitTasks[cwd];
+   if (!t) return {};
+   const raw = t.message + text;
+   // 生成流可能很长（模型跑飞）：保头也保尾没意义，直接截到上限（编辑框里本来就只是草稿）
+   const message = raw.length <= COMMIT_MSG_MAX ? raw : raw.slice(raw.length - COMMIT_MSG_MAX);
+   return { commitTasks: { ...s.commitTasks, [cwd]: { ...t, message } } };
+  }),
  finishCommitTask: (cwd, outcome) =>
   set((s) => {
    const t = s.commitTasks[cwd];
@@ -368,7 +381,16 @@ export const useApp = create<AppState>((set, get) => ({
    return {
     commitTasks: {
      ...s.commitTasks,
-     [cwd]: { ...t, phase: outcome.phase, commits: outcome.commits, error: outcome.error, hint: outcome.hint },
+     [cwd]: {
+      ...t,
+      phase: outcome.phase,
+      commits: outcome.commits,
+      // 生成的信息随终态回来（编辑框里可能只有流式原文，落定用解析后的那份）
+      message: outcome.message ?? t.message,
+      generated: t.generated || outcome.phase === "generated",
+      error: outcome.error,
+      hint: outcome.hint,
+     },
     },
    };
   }),

@@ -60,12 +60,13 @@ export function saveCommitLangPrefs(prefs: Record<string, CommitLangPref>): void
 }
 
 /**
- * 三档 → `omp commit --context` 的附加要求（`system` = 不传，跟从 omp 自身行为）。
+ * 三档 → 生成提交信息时给模型的语言要求（`system` = 不附加，跟从上游默认）。
+ * 快速轨把它拼进提示词，完整轨走 `omp commit --context=`；两轨共用同一段文本。
  * 这是**给模型的要求文本**，不是界面文案（不进 `locale.ts` 字典）。
  */
 export function commitContextArg(lang: CommitLang): string | null {
  if (lang === "zh") {
-  return "请用简体中文撰写提交信息：正文与摘要都用简体中文；摘要首词按校验器要求保留英文过去式动词。";
+  return "请用简体中文撰写提交信息：正文与摘要都用简体中文；摘要首词用英文过去式动词（仓库约定）。";
  }
  if (lang === "en") {
   return "请用英文撰写提交信息：摘要与正文都用英文，摘要首词为英文过去式动词。";
