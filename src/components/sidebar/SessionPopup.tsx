@@ -15,8 +15,9 @@ import { useDialogFocus } from "../../lib/useDropdown";
  *
  * - 点击行 = 在新终端里 `omp --resume` 接着聊（cwd 用会话原目录）；
  * - 行内「归档 / 恢复」直发（写覆盖层，不碰 jsonl）；「删除」走二次确认（真删文件，不可恢复）；
- * - **批量**：行首勾选 → 底部操作条对选中集归档 / 恢复 / 删除（走 `lib/sessionBatch`，
- *   与设置页「已归档对话」同一份分批与失败聚合）；
+ * - **无勾选**（V17 增补）：底部固定两个动作——「全部归档」「全部删除」，作用于**当前过滤结果**
+ *   （搜索之后就是搜出来的那批）；按钮带数量，全部归档只数未归档的那些（无适用项 = 禁用）；
+ *   批量走 `lib/sessionBatch`，与设置页「已归档对话」同一份分批与失败聚合；
  * - 数据 = `list_sessions`（归属已含 worktree）；挂载方用 `key={project.id}` 保证换项目即重挂载。
  */
 export function SessionPopup({
@@ -35,8 +36,6 @@ export function SessionPopup({
  /** 删除的待确认目标：单条与批量共用同一个确认框（`ids` 长度 1 = 单条）。 */
  const [pendingDelete, setPendingDelete] = useState<{ ids: string[]; title: string; detail: string } | null>(null);
  const [busy, setBusy] = useState(false);
- /** 勾选中的会话 id（底部操作条的批量归档 / 恢复 / 删除只作用于它们）。 */
- const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
  const [query, setQuery] = useState("");
  const cardRef = useRef<HTMLDivElement>(null);
  const actionRef = useRef(false);
@@ -97,15 +96,6 @@ export function SessionPopup({
    ? null
    : fmt(t.sessBatchFailed, failed.length, failed.map((f) => f.message || f.id).join("；"));
 
- const runBatch = (kind: "archive" | "unarchive" | "delete", ids: string[]) =>
-  ids.length === 0
-   ? undefined
-   : void runAction(async () => {
-    const res = await runSessionBatch(kind, ids);
-    setSelected(new Set());
-    return failedDetail(res.failed);
-   });
-
  const toggleArchive = (s: SessionView) =>
   void runAction(async () => {
    const res = s.archived ? await api.unarchiveSessions([s.id]) : await api.archiveSessions([s.id]);
@@ -119,29 +109,19 @@ export function SessionPopup({
   if (!target) return;
   await runAction(async () => {
    const res = await api.deleteSessions(target.ids);
-   setSelected(new Set());
    return failedDetail(res.failed);
   });
  };
-
- const toggleSelect = (id: string) =>
-  setSelected((cur) => {
-   const next = new Set(cur);
-   if (next.has(id)) next.delete(id);
-   else next.add(id);
-   return next;
-  });
 
  const cleaned = query.trim().toLowerCase();
  const filtered = useMemo(
   () => (sessions ?? []).filter((s) => !cleaned || `${s.title}\n${s.cwd}\n${s.id}`.toLowerCase().includes(cleaned)),
   [sessions, cleaned],
  );
- // 选中集切到「适用项」：归档只作用于未归档的、恢复只作用于已归档的（按钮按适用项数禁用）
- const selectedRows = useMemo(() => (sessions ?? []).filter((s) => selected.has(s.id)), [sessions, selected]);
- const toArchive = selectedRows.filter((s) => !s.archived).map((s) => s.id);
- const toRestore = selectedRows.filter((s) => s.archived).map((s) => s.id);
- const toDelete = selectedRows.map((s) => s.id);
+ // 批量动作作用于**当前过滤结果**：「全部归档」只数未归档的那些（没有适用项 = 按钮禁用），
+ // 「全部删除」覆盖列出的每一行（含已归档）。
+ const archiveIds = filtered.filter((s) => !s.archived).map((s) => s.id);
+ const deleteIds = filtered.map((s) => s.id);
 
  const actionButton =
   "min-h-8 cursor-pointer rounded-md border border-border px-2.5 text-[12px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-40";
@@ -205,14 +185,6 @@ export function SessionPopup({
         {page && page.scannedFiles < page.totalFiles && (
          <span>{fmt(t.sessScanNote, page.scannedFiles, page.totalFiles)}</span>
         )}
-        {filtered.length > 0 && (
-         <button
-          onClick={() => setSelected(new Set(filtered.map((s) => s.id)))}
-          className="ml-auto cursor-pointer rounded-sm border border-border px-1.5 py-0.5 transition-colors duration-100 hover:bg-hover hover:text-foreground"
-         >
-          {fmt(t.sessSelectAll, filtered.length)}
-         </button>
-        )}
        </div>
       )}
      </div>
@@ -256,13 +228,6 @@ export function SessionPopup({
          key={s.id}
          className="group flex items-center gap-3 rounded-lg border border-border-soft bg-surface px-3 py-3 transition-colors duration-100 hover:bg-hover"
         >
-         <input
-          type="checkbox"
-          checked={selected.has(s.id)}
-          onChange={() => toggleSelect(s.id)}
-          aria-label={fmt(t.sessSelectAria, s.title)}
-          className="size-3.5 shrink-0 cursor-pointer accent-accent"
-         />
          <button
           onClick={() => {
            resumeSessionInTerminal({ id: s.id, cwd: s.cwd, title: s.title, projectId: s.projectId });
@@ -307,31 +272,32 @@ export function SessionPopup({
        ))
       ))}
      </div>
-     {selected.size > 0 && (
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border px-4 py-3">
-       <span className="text-[12px] text-muted">{fmt(t.sessSelectedCount, selected.size)}</span>
-       <span className="min-w-2 flex-1" />
-       <button onClick={() => runBatch("archive", toArchive)} disabled={busy || toArchive.length === 0} className={actionButton}>
-        {t.sessArchive}
-       </button>
-       <button onClick={() => runBatch("unarchive", toRestore)} disabled={busy || toRestore.length === 0} className={actionButton}>
-        {t.archivedRestore}
+     {filtered.length > 0 && (
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border px-4 py-3">
+       <button
+        onClick={() =>
+         void runAction(async () => {
+          const res = await runSessionBatch("archive", archiveIds);
+          return failedDetail(res.failed);
+         })
+        }
+        disabled={busy || archiveIds.length === 0}
+        className={actionButton}
+       >
+        {fmt(t.sessArchiveAll, archiveIds.length)}
        </button>
        <button
         onClick={() =>
          setPendingDelete({
-          ids: toDelete,
-          title: fmt(t.sessDeleteSelected, toDelete.length),
-          detail: t.sessDeleteSelectedDetail,
+          ids: deleteIds,
+          title: fmt(t.sessDeleteAllConfirm, deleteIds.length),
+          detail: t.sessDeleteAllDetail,
          })
         }
         disabled={busy}
         className="min-h-8 cursor-pointer rounded-md border border-border px-2.5 text-[12px] text-muted transition-colors duration-100 hover:border-danger/40 hover:bg-danger/10 hover:text-danger disabled:cursor-default disabled:opacity-40"
        >
-        {t.delete}
-       </button>
-       <button onClick={() => setSelected(new Set())} className={actionButton}>
-        {t.sessClearSelection}
+        {fmt(t.sessDeleteAll, deleteIds.length)}
        </button>
       </div>
      )}
