@@ -15,7 +15,7 @@ import { SettingsPage } from "../components/SettingsPage";
 import { UpdateDialog } from "../components/update/UpdateDialog";
 import { newTerminalInActiveWorkspace } from "../lib/workspaces";
 import { terminalsInWorkspace } from "../lib/terminalScope";
-import { refreshWorkspaceGitState, scheduleWorkspaceGitRefresh } from "../lib/commitTasks";
+import { refreshWorkspaceGitState, scheduleWorkspaceGitRefresh, startWorkspaceGitPolling } from "../lib/commitTasks";
 import { autoCheckOnBoot } from "../lib/appUpdate";
 import { hasOpenDialog, useDialogFocus } from "../lib/useDropdown";
 import { isMacKeyboard } from "../lib/termInput";
@@ -47,9 +47,9 @@ function useLocale() {
 }
 
 /**
- * V14：工作区 git 快照的刷新时机（不轮询）——启动 / 工作区清单变化 / 窗口转可见 /
- * 终端刚干完活（π 由工作态转就绪或等待确认，防抖 2s）。任务结束后的单点刷新在
- * `lib/commitTasks.ts` 里；点按钮时的**后端预检**才是最终裁决。
+ * 工作区 git 快照的刷新时机——启动 / 工作区清单变化 / 窗口转可见或重新获得焦点 /
+ * 终端刚干完活（π 由工作态转就绪或等待确认，防抖 2s）/ **可见时 30s 兜底轮询**。
+ * 任务结束后的单点刷新在 `lib/commitTasks.ts` 里；点按钮时的**后端预检**才是最终裁决。
  */
 function useWorkspaceGitRefresh() {
  const workspaces = useApp((s) => s.workspaces);
@@ -61,12 +61,20 @@ function useWorkspaceGitRefresh() {
  }, [workspaces]);
 
  useEffect(() => {
+  // 转可见与重新获得焦点（点回本应用）都刷一轮：徽章是「现在有没有东西要处理」的提示
   const onVisible = () => {
    if (!document.hidden) void refreshWorkspaceGitState();
   };
   document.addEventListener("visibilitychange", onVisible);
-  return () => document.removeEventListener("visibilitychange", onVisible);
+  window.addEventListener("focus", onVisible);
+  return () => {
+   document.removeEventListener("visibilitychange", onVisible);
+   window.removeEventListener("focus", onVisible);
+  };
  }, []);
+
+ // 兜底轮询：终端里的 git 活动（agent 或手敲）不改变 π 状态，等不到「转就绪」那个时机
+ useEffect(() => startWorkspaceGitPolling(), []);
 
  useEffect(() => {
   let woke = false;

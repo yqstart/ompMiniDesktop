@@ -33,3 +33,32 @@ describe("关闭终端后的激活项收敛（右栏只显示当前工作区的�
   expect(useApp.getState().activeWorkspacePath).toBe("/a/login");
  });
 });
+
+describe("OSC 标题 → 会话标题（omp 的回退名要认出来，别当会话标题）", () => {
+ it("会话标题落 store；cwd 末段目录名（omp 还没有标题时的回退值）落 null", () => {
+  seed([term("a1", "/w/ompMiniDesktop")], "a1", "/w/ompMiniDesktop");
+  useApp.getState().setTerminalTitle("a1", "π > ompMiniDesktop");
+  expect(useApp.getState().terminals[0].title).toBeNull();
+  useApp.getState().setTerminalTitle("a1", "π > 修登录 bug");
+  expect(useApp.getState().terminals[0].title).toBe("修登录 bug");
+  expect(useApp.getState().terminals[0].state).toBe("ready");
+  // 会话回到无标题（回退名再次到达）：旧标题必须清掉，不能继续冒充会话标题
+  useApp.getState().setTerminalTitle("a1", "π > ompMiniDesktop");
+  expect(useApp.getState().terminals[0].title).toBeNull();
+ });
+
+ it("标题帧没带名字（`π ⠋`）时保留上一次的会话标题，只更新状态", () => {
+  seed([term("a1", "/w/app")], "a1", "/w/app");
+  useApp.getState().setTerminalTitle("a1", "π > 老标题");
+  useApp.getState().setTerminalTitle("a1", "π ⠋");
+  expect(useApp.getState().terminals[0].title).toBe("老标题");
+  expect(useApp.getState().terminals[0].state).toBe("working");
+ });
+
+ it("重启终端清掉旧会话标题（新进程可能不是同一个会话）", () => {
+  seed([term("a1", "/w/app")], "a1", "/w/app");
+  useApp.getState().setTerminalTitle("a1", "π > 老标题");
+  useApp.getState().restartTerminal("a1");
+  expect(useApp.getState().terminals[0].title).toBeNull();
+ });
+});

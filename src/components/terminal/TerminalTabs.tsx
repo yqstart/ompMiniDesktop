@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Folder, Plus, Search, Settings, X } from "reicon-react";
 import { useApp } from "../../stores/app";
+import type { TerminalView } from "@shared/types";
 import { newTerminalInActiveWorkspace, resolveNewTerminalWorkspace } from "../../lib/workspaces";
 import { terminalsInWorkspace } from "../../lib/terminalScope";
 import { useText } from "../../lib/useText";
 import { STATE_TEXT, STATE_TONE } from "../../lib/termState";
+import { terminalDisplayName } from "../../lib/termTitle";
+import { canRenameSession, renameTerminalSession, sanitizeSessionTitle, SESSION_TITLE_MAX } from "../../lib/termRename";
 
 /**
  * 标签栏（主区顶部**常驻**）：**当前工作区**的终端标签 + 设置标签（单例）+ `＋`。
@@ -53,6 +56,43 @@ export function TerminalTabs() {
   const index = order.indexOf(key);
   if (index < 0 || order.length === 0) return null;
   return order[(index + delta + order.length) % order.length];
+ };
+ /** 会话重命名（双击 tab）：draft 只存在于编辑期间，提交走 omp 原生的 `/rename` 注入
+  *  （见 `lib/termRename.ts`）——新名字由 omp 的 OSC 标题回来，这里不写本地 override。 */
+ const [renaming, setRenaming] = useState<{ id: string; draft: string; error: string | null } | null>(null);
+ const startRename = (term: TerminalView) => {
+  setRenaming((cur) => (cur ? cur : { id: term.id, draft: term.title ?? "", error: null }));
+ };
+ const submitRename = () => {
+  if (!renaming) return;
+  const term = terminals.find((x) => x.id === renaming.id);
+  if (!term) {
+   setRenaming(null);
+   return;
+  }
+  const name = sanitizeSessionTitle(renaming.draft);
+  if (name === null) {
+   setRenaming({ ...renaming, error: t.termRenameInvalid });
+   return;
+  }
+  if (!canRenameSession(term)) {
+   setRenaming({ ...renaming, error: t.termRenameBusy });
+   return;
+  }
+  renameTerminalSession(term.id, name);
+  setRenaming(null);
+ };
+ const renameKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+  // 编辑期间键盘完全归输入框：别让标签栏的 ArrowLeft/Right（roam）与 Enter/Space（激活）接走
+  e.stopPropagation();
+  if (e.nativeEvent.isComposing) return;
+  if (e.key === "Enter") {
+   e.preventDefault();
+   submitRename();
+  } else if (e.key === "Escape") {
+   e.preventDefault();
+   setRenaming(null);
+  }
  };
  return (
   <div
@@ -117,8 +157,14 @@ export function TerminalTabs() {
        aria-controls={`terminal-panel-${term.id}`}
        tabIndex={focusedKey === term.id ? 0 : -1}
        aria-selected={active}
-       title={term.cwd}
+       title={renaming?.id === term.id ? undefined : `${term.cwd}\n${t.termRenameHint}`}
        onClick={() => useApp.getState().focusTerminal(term.id)}
+       onDoubleClick={(e) => {
+        e.preventDefault();
+        // 双击默认会选中名字文本：重命名入口不需要那层选区
+        window.getSelection()?.removeAllRanges();
+        startRename(term);
+       }}
        onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
          e.preventDefault();
@@ -137,8 +183,29 @@ export function TerminalTabs() {
         π
        </span>
        <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13px] leading-4">{term.title}</span>
-        <span className="block truncate font-mono text-[11px] leading-4 text-faint">{term.cwd}</span>
+        {renaming?.id === term.id ? (
+         <input
+          autoFocus
+          value={renaming.draft}
+          onChange={(e) => setRenaming((cur) => (cur ? { ...cur, draft: e.target.value, error: null } : cur))}
+          onKeyDown={renameKeyDown}
+          onBlur={() => setRenaming(null)}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          aria-label={t.termRenameAria}
+          aria-invalid={renaming.error !== null}
+          placeholder={t.termRenamePlaceholder}
+          maxLength={SESSION_TITLE_MAX}
+          className={`block h-4 w-full rounded-sm border bg-background px-1 text-[12px] leading-4 outline-none ${renaming.error ? "border-danger" : "border-accent"}`}
+         />
+        ) : (
+         <span className="block truncate text-[13px] leading-4">{terminalDisplayName(term)}</span>
+        )}
+        {renaming?.id === term.id && renaming.error ? (
+         <span className="block truncate text-[11px] leading-4 text-danger">{renaming.error}</span>
+        ) : (
+         <span className="block truncate font-mono text-[11px] leading-4 text-faint">{term.cwd}</span>
+        )}
        </span>
        {stateText && <span className="sr-only">{t[stateText]}</span>}
        <button
@@ -147,6 +214,7 @@ export function TerminalTabs() {
          useApp.getState().requestCloseTerminal(term.id);
         }}
         onKeyDown={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
         aria-label={t.termClose}
         className={`flex size-6 shrink-0 cursor-pointer items-center justify-center rounded transition-opacity duration-100 hover:bg-active ${active ? "opacity-60 hover:opacity-100" : "opacity-0 group-hover:opacity-60 group-focus-within:opacity-60"
          }`}

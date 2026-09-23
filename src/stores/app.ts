@@ -5,7 +5,7 @@ import { loadLocaleMode, resolveLocale, saveLocaleMode, systemLang } from "../li
 import { applyTheme, loadTheme, saveTheme, type ThemeMode } from "../lib/theme";
 import { loadMyModels, saveMyModels } from "../lib/myModels";
 import { loadCommitLangPrefs, saveCommitLangPrefs, type CommitLangPref } from "../lib/commitLang";
-import { parseTermTitle } from "../lib/termTitle";
+import { parseTermTitle, isWorkspaceNameFallback } from "../lib/termTitle";
 
 type AppState = {
  health: HealthInfo | null;
@@ -72,8 +72,8 @@ type AppState = {
  setTerminalStatus: (id: string, status: TerminalStatus, code: number | null) => void;
  /**
   * OSC 0/2 标题到达时更新 tab：解析 `π <状态> <会话名>`（`lib/termTitle.ts`），
-  * 落展示名（会话名）与 π 的状态。标题帧率很高（工作态转轮每 80ms 一帧），
-  * 解析后只有「名字或状态真的变了」才写 store。
+  * 落会话标题与 π 的状态；omp 的「还没有标题」回退值（cwd 末段目录名）落 null。
+  * 标题帧率很高（工作态转轮每 80ms 一帧），解析后只有「名字或状态真的变了」才写 store。
   */
  setTerminalTitle: (id: string, title: string) => void;
  /** 启动失败（omp 缺失 / cwd 不存在等）：进程没起来，π 直接落失败态。 */
@@ -93,8 +93,8 @@ type AppState = {
 
  /**
   * 工作区 git 快照（行徽章）：有改动小点 / 待推送 `BranchUp` / 非仓库降级。
-  * 刷新时机（启动 / 任务结束 / 窗口可见 / 终端转就绪）在 `App` 与 `lib/commitTasks.ts`；
-  * 不轮询——点按钮时的后端预检是最终裁决。
+  * 刷新时机（启动 / 任务结束 / 窗口可见或获得焦点 / 终端转就绪 / 30s 兜底轮询）在 `App`
+  * 与 `lib/commitTasks.ts`；点按钮时的后端预检是最终裁决。
   */
  workspaceGitStates: Record<string, WorkspaceGitState>;
  setWorkspaceGitStates: (states: WorkspaceGitState[]) => void;
@@ -216,7 +216,7 @@ export const useApp = create<AppState>((set, get) => ({
    projectId,
    cwd,
    label,
-   title: label,
+   title: null,
    state: "unknown",
    status: "running",
    exitCode: null,
@@ -285,8 +285,10 @@ export const useApp = create<AppState>((set, get) => ({
    // 已退出 / 启动失败的不再接收标题：收尾阶段可能还有缓冲输出，别把终态改回去
    if (!t || t.status !== "running" || !title.trim()) return {};
    const { phase, label } = parseTermTitle(title);
-   // 标题没带会话名（`π ⠋`）时保留上一次的展示名（store 保证初始值是工作区名，不是空）
-   const nextTitle = label || t.title;
+   // 名字为空（`π ⠋`）= 这一帧没带名字，保留上一次的会话标题；
+   // 名字 == cwd 末段目录名 = omp 的「会话还没有标题」回退值（是项目名，不是会话标题）→ 清掉，
+   // 展示层回退到工作区显示名（`terminalDisplayName`）。
+   const nextTitle = !label ? t.title : isWorkspaceNameFallback(label, t.cwd) ? null : label;
    if (t.title === nextTitle && t.state === phase) return {};
    return { terminals: s.terminals.map((x) => (x.id === id ? { ...x, title: nextTitle, state: phase } : x)) };
   }),
@@ -299,7 +301,8 @@ export const useApp = create<AppState>((set, get) => ({
  restartTerminal: (id) =>
   set((s) => ({
    terminals: s.terminals.map((t) =>
-    t.id === id ? { ...t, status: "running", exitCode: null, spawnSeq: t.spawnSeq + 1, state: "unknown" } : t,
+    // 重启 = 新进程（可能带 --resume）：清掉旧会话标题，等新的 OSC 标题到达（回退到工作区名）
+    t.id === id ? { ...t, title: null, status: "running", exitCode: null, spawnSeq: t.spawnSeq + 1, state: "unknown" } : t,
    ),
   })),
  detachTerminalProject: (projectId) =>

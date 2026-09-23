@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseTermTitle } from "./termTitle";
+import { isWorkspaceNameFallback, parseTermTitle, terminalDisplayName } from "./termTitle";
 
 describe("omp 标题解析（π <状态> <会话名>）", () => {
  it("四套转轮字形 + WSL 的静态 `:` 都读成 working，展示名剥掉前缀", () => {
@@ -27,5 +27,21 @@ describe("omp 标题解析（π <状态> <会话名>）", () => {
   });
   // 前缀在、分隔符不认识：状态未知，但仍剥掉 π 前缀
   expect(parseTermTitle("π x 未知分隔符")).toEqual({ phase: "unknown", label: "未知分隔符" });
+ });
+});
+
+describe("会话标题的回退名与展示名", () => {
+ it("cwd 末段目录名 = omp 的「会话还没有标题」回退值（是项目名，不是会话标题）", () => {
+  expect(isWorkspaceNameFallback("ompMiniDesktop", "/Users/x/WorkSpace/ompMiniDesktop")).toBe(true);
+  expect(isWorkspaceNameFallback("ompMiniDesktop", "/Users/x/WorkSpace/ompMiniDesktop/")).toBe(true);
+  // worktree 的回退名 = worktree 目录名
+  expect(isWorkspaceNameFallback("repo-feat-x", "/Users/x/.omp/wt/repo-feat-x")).toBe(true);
+  expect(isWorkspaceNameFallback("修登录 bug", "/Users/x/WorkSpace/ompMiniDesktop")).toBe(false);
+  expect(isWorkspaceNameFallback("", "/Users/x/WorkSpace/ompMiniDesktop")).toBe(false);
+ });
+
+ it("terminalDisplayName：会话标题优先，还没有就回退工作区显示名", () => {
+  expect(terminalDisplayName({ title: "修登录 bug", label: "ompMiniDesktop · main" })).toBe("修登录 bug");
+  expect(terminalDisplayName({ title: null, label: "ompMiniDesktop · main" })).toBe("ompMiniDesktop · main");
  });
 });

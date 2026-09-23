@@ -2,6 +2,7 @@ import { useId, useMemo, useRef, useState } from "react";
 import type { TerminalView, WorkspaceView } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { describeTerminalWorkspace, openOrFocusWorkspace, workspaceLabel } from "../../lib/workspaces";
+import { terminalDisplayName } from "../../lib/termTitle";
 import { useText } from "../../lib/useText";
 import { STATE_TEXT, STATE_TONE } from "../../lib/termState";
 import { DialogShell } from "../settings/DialogShell";
@@ -11,7 +12,7 @@ type Match =
  | { kind: "workspace"; path: string; key: string; title: string; subtitle: string; disabled: boolean };
 
 function keyOf(term: TerminalView, workspaces: readonly WorkspaceView[]): string {
- return `${term.title}\n${term.cwd}\n${describeTerminalWorkspace(term.cwd, workspaces).primary}`;
+ return `${terminalDisplayName(term)}\n${term.cwd}\n${describeTerminalWorkspace(term.cwd, workspaces).primary}`;
 }
 
 function workspaceKey(ws: WorkspaceView): string {
@@ -44,7 +45,7 @@ export function QuickSwitcher(): React.JSX.Element {
     kind: "terminal" as const,
     id: term.id,
     key: `term-${term.id}`,
-    title: term.title,
+    title: terminalDisplayName(term),
     subtitle: context.primary,
    };
   }), [cleaned, terminals, workspaces]);

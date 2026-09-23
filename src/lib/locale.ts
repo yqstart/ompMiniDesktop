@@ -649,6 +649,11 @@ const ZH = {
  termStateReady: "等待输入",
  termStateExited: "已退出",
  termStateFailed: "失败",
+ termRenameHint: "双击重命名会话",
+ termRenameAria: "重命名会话标题",
+ termRenamePlaceholder: "会话标题",
+ termRenameInvalid: "标题不能为空，也不能包含换行等控制字符",
+ termRenameBusy: "会话正忙，等它回到「等待输入」再改名",
  workspaceTitle: "终端工作区",
  workspaceShow: "显示项目侧栏",
  termSwitch: "切换终端",
@@ -662,6 +667,13 @@ const ZH = {
  sessLoadFailed: "加载会话失败",
  sessDeleteConfirm: "删除会话后不可恢复。确定删除吗？",
  sessArchive: "归档",
+ sessSelectAll: "全选（{0}）",
+ sessClearSelection: "清除选择",
+ sessSelectedCount: "已选 {0} 项",
+ sessSelectAria: "选择会话：{0}",
+ sessDeleteSelected: "删除选中的 {0} 个会话？",
+ sessDeleteSelectedDetail: "会连同 jsonl 会话文件一起删除，不可恢复。",
+ sessBatchFailed: "{0} 项失败：{1}",
 } as const;
 
 export type TextKey = keyof typeof ZH;
@@ -1218,6 +1230,11 @@ const EN: Record<TextKey, string> = {
  termStateReady: "Ready for input",
  termStateExited: "Exited",
  termStateFailed: "Failed",
+ termRenameHint: "Double-click to rename this session",
+ termRenameAria: "Rename session title",
+ termRenamePlaceholder: "Session title",
+ termRenameInvalid: "Title must be non-empty and free of control characters",
+ termRenameBusy: "Session is busy — rename it when it is ready for input",
  workspaceTitle: "Terminal workspace",
  workspaceShow: "Show projects",
  termSwitch: "Switch terminals",
@@ -1230,6 +1247,13 @@ const EN: Record<TextKey, string> = {
  sessLoadFailed: "Failed to load sessions",
  sessDeleteConfirm: "Deleted sessions cannot be recovered. Delete this one?",
  sessArchive: "Archive",
+ sessSelectAll: "Select all ({0})",
+ sessClearSelection: "Clear selection",
+ sessSelectedCount: "{0} selected",
+ sessSelectAria: "Select session: {0}",
+ sessDeleteSelected: "Delete the {0} selected sessions?",
+ sessDeleteSelectedDetail: "The jsonl session files are deleted with them; this cannot be undone.",
+ sessBatchFailed: "{0} failed: {1}",
 };
 
 export const TEXT: Record<Locale, Text> = { "zh-CN": ZH, en: EN };

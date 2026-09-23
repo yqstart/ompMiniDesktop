@@ -370,7 +370,7 @@ export type WorkspaceView = {
 
 /**
  * 工作区 git 快照（行徽章用）：`git status --porcelain -b` 的只读投影。
- * 刷新时机见 `lib/commitTasks.ts`（启动 / 任务结束 / 窗口可见 / 终端转就绪），不轮询；
+ * 刷新时机见 `lib/commitTasks.ts`（启动 / 任务结束 / 窗口可见或获得焦点 / 终端转就绪 / 30s 兜底轮询）；
  * 点击按钮时的**后端预检**才是最终裁决。
  */
 export type WorkspaceGitState = {
@@ -454,10 +454,15 @@ export type TerminalView = {
  projectId: string | null;
  /** 工作目录（工作区目录：项目主目录或 worktree）。 */
  cwd: string;
- /** 工作区显示名（项目 · 分支）；OSC 标题到达前 tab 用它。 */
+ /** 工作区显示名（项目 · 分支）；会话标题到达前 tab 用它。 */
  label: string;
- /** tab 上显示的**会话名**（OSC 标题 `π <状态> <会话名>` 解析后的名字；解析不出就用 label）。 */
- title: string;
+ /**
+  * tab 上显示的**会话标题**（OSC 标题 `π <状态> <会话名>` 解析；null = 还没有会话标题）。
+  * omp 在会话还没有标题时会把 cwd 的末段目录名当名字发出来（实测 18.2.x）——那是「项目名」
+  * 不是会话标题，store 识别后落 null（见 `lib/termTitle.ts` 的 `isWorkspaceNameFallback`）。
+  * 展示名 = `title ?? label`（`terminalDisplayName`）。
+  */
+ title: string | null;
  /** 标签 π 的状态（标题状态 + 进程结局，见 `lib/termTitle.ts`）；π 的颜色由它决定。 */
  state: TermTabState;
  status: TerminalStatus;

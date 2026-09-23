@@ -57,3 +57,18 @@ export function parseTermTitle(raw: string): { phase: TitlePhase; label: string 
  // 不是 omp 的标题格式（扩展覆盖等）：状态未知，展示名原样
  return { phase: "unknown", label: raw };
 }
+
+/**
+ * 标题里的名字是不是 omp 的「会话还没有标题」回退值——实测（omp 18.2.x）：会话未生成标题时
+ * 标题形如 `π > <cwd 末段目录名>`（= 项目 / worktree 目录名），生成或 `/rename` 之后才是会话标题。
+ * 壳侧把这种回退值认出来：它不是会话标题，tab 该显示工作区显示名（`项目 · 分支`）而不是项目名。
+ */
+export function isWorkspaceNameFallback(label: string, cwd: string): boolean {
+ const base = cwd.split("/").filter(Boolean).pop();
+ return base != null && base.length > 0 && label === base;
+}
+
+/** tab 上显示的会话名：会话标题（OSC）优先，还没有就回退工作区显示名。 */
+export function terminalDisplayName(term: { title: string | null; label: string }): string {
+ return term.title ?? term.label;
+}

@@ -126,3 +126,27 @@ export function scheduleWorkspaceGitRefresh(delayMs = 2000): void {
   void refreshWorkspaceGitState();
  }, delayMs);
 }
+
+/**
+ * 行徽章的兜底轮询：**可见时每 30s 一轮**（页隐藏跳过；上一轮没回来就跳过这一轮）。
+ * 为什么需要它：在终端里跑 git 命令（agent 自己跑、或用户手敲）不改变 omp 的 π 状态，
+ * 「π 转就绪」那个时机等不到——左栏徽章会一直停在旧值。轮询与「打开一次左栏」同一量级：
+ * 一轮 = 每个工作区一条 `git status --porcelain -b`（后端已并发 + 4s 超时降级）。
+ * 返回清理函数（`App` 的 useEffect 直接返回它；重复调用 = 重启计时器）。
+ */
+let pollTimer: number | undefined;
+let pollBusy = false;
+export function startWorkspaceGitPolling(intervalMs = 30_000): () => void {
+ if (pollTimer !== undefined) window.clearInterval(pollTimer);
+ pollTimer = window.setInterval(() => {
+  if (document.hidden || pollBusy) return;
+  pollBusy = true;
+  void refreshWorkspaceGitState().finally(() => {
+   pollBusy = false;
+  });
+ }, intervalMs);
+ return () => {
+  if (pollTimer !== undefined) window.clearInterval(pollTimer);
+  pollTimer = undefined;
+ };
+}
