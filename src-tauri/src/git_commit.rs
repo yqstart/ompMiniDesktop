@@ -299,10 +299,12 @@ pub async fn get_workspace_git_state(paths: Vec<String>) -> Result<Vec<Workspace
 /// 第一段入口：点击「提交并推送」。
 /// 预检决定跑什么——有改动 → `omp commit`；仅 ahead → `omp commit --push`（推送快路径）；
 /// 都没 → 直接 noop（省掉上游 ~10s 的空跑）。
+/// `context` = 提交信息语言要求（前端按项目偏好给，见 `docs/v14-schedule.md` §7；None = 不干预）。
 #[tauri::command]
 pub async fn start_commit_push(
     state: State<'_, AppState>,
     cwd: String,
+    context: Option<String>,
     on_event: Channel<CommitEvent>,
 ) -> Result<(), CmdError> {
     let _ = on_event.send(CommitEvent::Phase { phase: CommitPhase::Checking });
@@ -325,17 +327,19 @@ pub async fn start_commit_push(
             });
             Ok(())
         }
-        Decision::Commit => run(state, cwd, RunMode::Commit, on_event).await,
-        Decision::Push => run(state, cwd, RunMode::Push, on_event).await,
+        Decision::Commit => run(state, cwd, RunMode::Commit, context, on_event).await,
+        Decision::Push => run(state, cwd, RunMode::Push, context, on_event).await,
     }
 }
 
 /// 第二段入口：推送（`omp commit --push`——无改动时走 2s 快路径；若等待期间又改了文件，
 /// 它会先提交再推送，语义自洽）。也用于推送失败后的重试。
+/// `context` 与第一段同源：推送段若遇到新改动会先提交，语言要求因此照传。
 #[tauri::command]
 pub async fn push_commits(
     state: State<'_, AppState>,
     cwd: String,
+    context: Option<String>,
     on_event: Channel<CommitEvent>,
 ) -> Result<(), CmdError> {
     let _ = on_event.send(CommitEvent::Phase { phase: CommitPhase::Checking });
@@ -347,7 +351,7 @@ pub async fn push_commits(
     }
     // 推送前仍确认是仓库（挡掉上游的 JS 堆栈），但不看 dirty / ahead——用户点了推送就推。
     read_status(&git, &cwd).await.map_err(|e| cmd_err("PREFLIGHT", e, None))?;
-    run(state, cwd, RunMode::Push, on_event).await
+    run(state, cwd, RunMode::Push, context, on_event).await
 }
 
 /// 取消运行中的任务：杀进程组（pump 收尾时落 canceled 终态）。
@@ -373,20 +377,33 @@ pub(crate) struct RunSignals {
     pub err_tail: Vec<String>,
 }
 
-/// spawn `omp commit [--push]`：新进程组（取消时打 `-pid` 覆盖内部的 git 子进程）、
+/// `omp commit` 的命令行参数（纯函数，便于单测）：`--push` 与提交信息语言要求。
+///
+/// `context` = 前端按项目偏好给的语言要求，走 `--context=<值>`（等号形式，值里的空格与中文
+/// 不经 shell 解析，原样传给上游）；`None` / 空白 = 「系统默认」档，不干预 omp 自身行为。
+fn commit_args(push: bool, context: Option<&str>) -> Vec<String> {
+    let mut args = vec!["commit".to_string()];
+    if push {
+        // `--push`：有改动时 commit 后推；无改动但有未推送提交时走 ~2s 快路径直接推。
+        args.push("--push".to_string());
+    }
+    if let Some(text) = context.map(str::trim).filter(|t| !t.is_empty()) {
+        args.push(format!("--context={text}"));
+    }
+    args
+}
+
+/// spawn `omp commit [--push] [--context=…]`：新进程组（取消时打 `-pid` 覆盖内部的 git 子进程）、
 /// 继承登录 shell 的 PATH（GUI .app 的 PATH 缺 Homebrew）、三路管道、kill_on_drop。
 /// 命令层与真实仓库慢测试共用（见文末 `#[ignore]` 测试）。
 pub(crate) fn spawn_omp_commit(
     bin: &str,
     cwd: &str,
     push: bool,
+    context: Option<&str>,
 ) -> std::io::Result<tokio::process::Child> {
     let mut cmd = tokio::process::Command::new(bin);
-    cmd.arg("commit");
-    if push {
-        // `--push`：有改动时 commit 后推；无改动但有未推送提交时走 ~2s 快路径直接推。
-        cmd.arg("--push");
-    }
+    cmd.args(commit_args(push, context));
     cmd.current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -567,6 +584,7 @@ async fn run(
     state: State<'_, AppState>,
     cwd: String,
     mode: RunMode,
+    context: Option<String>,
     on_event: Channel<CommitEvent>,
 ) -> Result<(), CmdError> {
     let bin = {
@@ -602,7 +620,7 @@ async fn run(
     };
     let _ = on_event.send(CommitEvent::Phase { phase });
 
-    let child = match spawn_omp_commit(&bin, &cwd, mode == RunMode::Push) {
+    let child = match spawn_omp_commit(&bin, &cwd, mode == RunMode::Push, context.as_deref()) {
         Ok(c) => c,
         Err(e) => {
             let mut map = state.commit_tasks.lock().unwrap_or_else(|e| e.into_inner());
@@ -771,6 +789,16 @@ mod tests {
     }
 
     #[test]
+    fn commit_args_carries_push_and_context() {
+        assert_eq!(commit_args(false, None), ["commit"]);
+        assert_eq!(commit_args(true, None), ["commit", "--push"]);
+        assert_eq!(commit_args(false, Some(" 用中文写 ")), ["commit", "--context=用中文写"]);
+        assert_eq!(commit_args(true, Some("用英文")), ["commit", "--push", "--context=用英文"]);
+        // 空白要求视作不传（「系统默认」档就是 None，这里防前端误传空串）
+        assert_eq!(commit_args(true, Some("   ")), ["commit", "--push"]);
+    }
+
+    #[test]
     fn failure_hint_recognizes_common_git_errors() {
         assert!(failure_hint("fatal: The current branch feature has no upstream branch.").is_some());
         assert!(failure_hint("fatal: Could not read from remote repository.").is_some());
@@ -873,7 +901,8 @@ mod tests {
         assert_eq!(decide(&status), Decision::Commit);
 
         let before = head_sha(&git, &w).await;
-        let child = spawn_omp_commit(&omp, &w, false).expect("spawn 失败");
+        // 第一段不传语言要求（「系统默认」档路径）
+        let child = spawn_omp_commit(&omp, &w, false, None).expect("spawn 失败");
         let pid = child.id();
         let mut lines: Vec<String> = vec![];
         let signals = pump_omp_commit(child, pid, None, |l| lines.push(l.to_string())).await;
@@ -897,8 +926,10 @@ mod tests {
         assert!(!status.dirty);
         assert_eq!(decide(&status), Decision::Push);
 
-        // 第二段：快路径推送（~2s，不再调用 AI）
-        let child = spawn_omp_commit(&omp, &w, true).expect("spawn 失败");
+        // 第二段：快路径推送（~2s，不再调用 AI）；顺带用真实 omp 验证
+        // `--push` 与 `--context=` 的组合合法（拼错的参数在这里就会失败）
+        let child = spawn_omp_commit(&omp, &w, true, Some("请用简体中文撰写提交信息。"))
+            .expect("spawn 失败");
         let pid = child.id();
         let signals = pump_omp_commit(child, pid, None, |_| {}).await;
         let (phase, error, _) = classify(RunMode::Push, &signals, false);
@@ -913,7 +944,7 @@ mod tests {
         let status = read_status(&git, &w).await.expect("预检失败");
         assert_eq!(decide(&status), Decision::Push, "无上游也应尝试推送而不是报 noop");
 
-        let child = spawn_omp_commit(&omp, &w, true).expect("spawn 失败");
+        let child = spawn_omp_commit(&omp, &w, true, None).expect("spawn 失败");
         let pid = child.id();
         let signals = pump_omp_commit(child, pid, None, |_| {}).await;
         let (phase, error, hint) = classify(RunMode::Push, &signals, false);

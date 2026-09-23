@@ -4,6 +4,7 @@ import type { Locale, LocaleMode } from "../lib/locale";
 import { loadLocaleMode, resolveLocale, saveLocaleMode, systemLang } from "../lib/locale";
 import { applyTheme, loadTheme, saveTheme, type ThemeMode } from "../lib/theme";
 import { loadMyModels, saveMyModels } from "../lib/myModels";
+import { loadCommitLangPrefs, saveCommitLangPrefs, type CommitLangPref } from "../lib/commitLang";
 import { parseTermTitle } from "../lib/termTitle";
 
 type AppState = {
@@ -111,6 +112,14 @@ type AppState = {
  /** 清除任务记录（浮层关闭时对非运行中的任务调用；见 `lib/commitTasks.ts` 的 `closeCommitPanel`）。 */
  dropCommitTask: (cwd: string) => void;
  setActiveCommitCwd: (cwd: string | null) => void;
+ /**
+  * 提交信息语言偏好（**按项目 id**，V14 增补）：同一项目的主目录与全部 worktree 共用，
+  * 项目之间互不影响。「记住选择」= `remembered`（已写 localStorage），未记住的只在本次
+  * 运行期间生效。任务发起时由 `lib/commitTasks.ts` 解析成 `omp commit --context` 的要求文本
+  * （见 `src/lib/commitLang.ts`）。
+  */
+ commitLangPrefs: Record<string, CommitLangPref>;
+ setCommitLangPref: (projectId: string, pref: CommitLangPref) => void;
 };
 
 /**
@@ -368,4 +377,11 @@ export const useApp = create<AppState>((set, get) => ({
    return { commitTasks: next };
   }),
  setActiveCommitCwd: (cwd) => set({ activeCommitCwd: cwd }),
+ commitLangPrefs: loadCommitLangPrefs(),
+ setCommitLangPref: (projectId, pref) => {
+  // 内存态与已记住的盘上副本一起更新（未记住的项目写盘时会被过滤掉）
+  const next = { ...get().commitLangPrefs, [projectId]: pref };
+  saveCommitLangPrefs(next);
+  set({ commitLangPrefs: next });
+ },
 }));

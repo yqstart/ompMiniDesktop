@@ -1,6 +1,7 @@
 import { Channel } from "@tauri-apps/api/core";
 import { api } from "@shared/api";
 import type { CommitEvent, CommitPhase, CommitTaskView } from "@shared/types";
+import { commitContextArg } from "./commitLang";
 import { useApp } from "../stores/app";
 
 /**
@@ -17,12 +18,22 @@ export function isCommitTaskRunning(phase: CommitPhase): boolean {
  return phase === "checking" || phase === "committing" || phase === "pushing";
 }
 
+/**
+ * 该项目（按工作区归属）当前的提交信息语言 → `omp commit --context` 的要求文本。
+ * `system` 档（或工作区尚未落地）返回 null = 不传，跟从 omp 自身行为。
+ */
+function contextArgFor(cwd: string): string | null {
+ const s = useApp.getState();
+ const projectId = s.workspaces.find((w) => w.path === cwd)?.projectId;
+ return commitContextArg(projectId ? (s.commitLangPrefs[projectId]?.lang ?? "system") : "system");
+}
+
 /** 第一段入口：左栏行内「提交并推送」。后端预检自己选路——有改动 → 提交；仅 ahead → 推送快路径；都没有 → noop。 */
 export function startCommitTask(cwd: string): void {
  const existing = useApp.getState().commitTasks[cwd];
  if (existing && isCommitTaskRunning(existing.phase)) return;
  openTask(cwd);
- runCommand(cwd, (channel) => api.startCommitPush(cwd, channel));
+ runCommand(cwd, (channel) => api.startCommitPush(cwd, contextArgFor(cwd), channel));
 }
 
 /** 第二段入口：推送已有提交（浮层的「推送」、行上待推送徽章都走它）。 */
@@ -30,7 +41,7 @@ export function pushCommits(cwd: string): void {
  const existing = useApp.getState().commitTasks[cwd];
  if (existing && isCommitTaskRunning(existing.phase)) return;
  openTask(cwd);
- runCommand(cwd, (channel) => api.pushCommits(cwd, channel));
+ runCommand(cwd, (channel) => api.pushCommits(cwd, contextArgFor(cwd), channel));
 }
 
 /** 取消运行中的任务（终态由后端事件落定）。 */

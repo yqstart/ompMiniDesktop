@@ -237,6 +237,14 @@ worktree 里产生的会话归到所属项目，不再落「未归属」。
 - **结构**：新增 `lib/termTitle.ts`（纯函数 + 5 项单测）解析标题成 `{phase, label}`；`TerminalView` 增 `state: TermTabState`、`title` 语义收成「展示用会话名」；`setTerminalTitle` 在 store 边界解析（转轮换帧不再触发整表更新）、`setTerminalStatus` 由退出码落 `exited` / `failed`、新增 `failTerminal`（spawn 失败落红）；`TerminalTabs` 换成 π；字典新增 `termState*` 5 键 × 2 语言。
 - **验证**（`pnpm dev` + 注入 IPC mock，经 xterm 真实解析 OSC 0 字节驱动）：刚 spawn = faint / 无文字 → `π ⠋ 会话甲` = accent + `animate-pulse` + Working → 转轮换帧不抖动 → `π ! 会话甲` = warn + Waiting for confirmation → `π > 会话甲` = ok + Ready for input → `π: 会话甲` = faint 且名字仍剥前缀 → `exit 0` = ok + Exited（此后标题不再改状态）→ 第二终端 `exit 3` = danger + Failed → spawn 抛错 = danger + 终端内「Failed to start」；5 个终端同屏深浅两套皮肤截图核对（14px 状态标在 32px 标签内不溢出 `fits=true`）；`prefers-reduced-motion: reduce` 下呼吸动画被全局规则钳到 0.01ms / 1 次。`pnpm check` 全绿（103 单测）。
 
+### 6.6 终端视图按工作区过滤（2026-09-23）
+
+- **口径**：右栏（标签栏 / 面板 / `⌘1..9`）只显示**当前工作区**的终端——过滤键 = `activeWorkspacePath`，条件是 `cwd` 精确匹配（`lib/terminalScope.ts` 的 `terminalsInWorkspace`）。左栏选中 `login` 分支就只列 login 目录的终端；别的分支的终端照常跑，只是不在这个视图里（隐藏 = CSS 显隐，pane 仍挂载、不 kill）。
+- **一致性不变式**：`activeTerminalId` 要么 null、要么落在 `activeWorkspacePath` 目录里。四处维持：`openTerminal` / `focusTerminal` 同步过滤键；`closeTerminal` 在**同工作区**的相邻终端里收敛（同工作区关完 → 空态且选中项不动，不跳到别的分支）；`loadWorkspaces` 选中项失效回退时同步收敛激活终端（否则视图会空掉）。
+- **不丢终端**：左栏工作区行的状态区新增**终端数徽章**（`BrowserTerminal` + 数量，有运行中的上 `accent`；计数走 `countTerminalsIn` / `countRunningTerminalsIn`），`⌘⇧K` 快速切换仍全局列出所有终端与工作区，跳过去会带着左栏选中一起切。
+- **空态**：`TerminalView` 的空态判定从 `terminals.length === 0` 改成「当前工作区没有激活终端」；`activeWorkspacePath == null`（一个可用工作区都没有）时**不过滤**——那种局面下藏终端只会让人以为终端丢了。`store` 的 `setActiveWorkspace`（无人调用的死代码）删除。
+- **验证**：`pnpm check` 全绿（新增 `terminalScope.test.ts` 2 项、`stores/app.test.ts` 2 项、`workspaces.test.ts` 1 项、`App.test.tsx` 的 `⌘1..9` 用例；共 176 单测）。`pnpm dev` + 注入 IPC mock（工作区 main / login）全流程核对：点 main 开终端 → 标签仅 `/tmp/alpha`；点 login → 标签仅 `/tmp/alpha-login`（main 的 pane `display:none`，`pty_kill` 计数不变）；点回 main → 聚焦既有终端（`pty_spawn` 仍 2 次）；`⌘1` 在 login 视图不切到别的分支；`⌘T` 落在当前工作区（`cwd=/tmp/alpha-login`）；关掉 login 最后一个终端 → 空态 + 选中项留在 login + 该行徽章消失；`⌘⇧K` 列出 3 个终端 + 2 个工作区；键盘输入经 `pty_write` 到达（8 次）。截图核对两套选中态（main 行 `main 1` + login 行 `worktree 2`／反向）。
+
 ## 7. 明确不做（用户已确认）
 
 - 编辑器 / 文件树 / diff 审查 / 浏览器 / SSH / 移动端 / PR 集成（Orca 的「复杂」部分）。

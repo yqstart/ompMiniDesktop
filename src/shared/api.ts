@@ -62,13 +62,16 @@ export const api = {
   * 两段式：`startCommitPush` 预检后自己选路（有改动 → 提交；仅有未推送提交 → 推送快路径）；
   * `pushCommits` 是第二段（也用于推送失败后的重试）。输出经 **Channel** 流式直推
   * （`{type:"line"|"phase"|"exit"}`），同 PTY 的口径——高频行流不进事件系统。
+  *
+  * `context` = 提交信息语言要求（`omp commit --context`，null = 不传，跟从 omp 自身行为）；
+  * 文案由前端按项目偏好给出（`src/lib/commitLang.ts`），两段都要传——推送段若遇到新改动会先提交。
   */
  getWorkspaceGitState: (paths: string[]) =>
   call<WorkspaceGitState[]>(IPC.getWorkspaceGitState, { paths }),
- startCommitPush: (cwd: string, onEvent: Channel<CommitEvent>) =>
-  call<void>(IPC.startCommitPush, { cwd, onEvent }),
- pushCommits: (cwd: string, onEvent: Channel<CommitEvent>) =>
-  call<void>(IPC.pushCommits, { cwd, onEvent }),
+ startCommitPush: (cwd: string, context: string | null, onEvent: Channel<CommitEvent>) =>
+  call<void>(IPC.startCommitPush, { cwd, context, onEvent }),
+ pushCommits: (cwd: string, context: string | null, onEvent: Channel<CommitEvent>) =>
+  call<void>(IPC.pushCommits, { cwd, context, onEvent }),
  cancelCommitPush: (cwd: string) => call<void>(IPC.cancelCommitPush, { cwd }),
  /**
   * 终端 PTY（V11）：每个终端 = 一个 `omp` TUI 进程跑在 PTY 里。
