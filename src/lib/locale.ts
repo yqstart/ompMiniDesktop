@@ -597,6 +597,8 @@ const ZH = {
  wsCreateFailed: "创建 worktree 失败",
  wsSessionsTitle: "查看项目会话",
  wsSessionsAria: "项目会话",
+ wsTerminals: "{0} 个终端",
+ wsTerminalsRunning: "{0} 个终端（{1} 个运行中）",
  // 工作区提交并推送（V14）
  gitCommitTitle: "提交并推送",
  gitCommitNotRepo: "不是 git 仓库",
@@ -1159,6 +1161,8 @@ const EN: Record<TextKey, string> = {
  wsCreateFailed: "Failed to create worktree",
  wsSessionsTitle: "View project sessions",
  wsSessionsAria: "Project sessions",
+ wsTerminals: "{0} terminal(s)",
+ wsTerminalsRunning: "{0} terminal(s), {1} running",
  // 工作区提交并推送（V14）
  gitCommitTitle: "Commit & push",
  gitCommitNotRepo: "Not a git repository",

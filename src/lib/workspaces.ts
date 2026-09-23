@@ -2,6 +2,7 @@ import { api } from "@shared/api";
 import type { WorkspaceView } from "@shared/types";
 import { useApp } from "../stores/app";
 import { TEXT } from "./locale";
+import { terminalsInWorkspace } from "./terminalScope";
 
 /**
  * 工作区（项目主目录 / git worktree）的前端逻辑：
@@ -14,15 +15,26 @@ export function workspaceLabel(ws: WorkspaceView): string {
  return where ? `${ws.projectName} · ${where}` : ws.projectName;
 }
 
-/** 拉取工作区清单并落库；失效的选中项自动退回第一个可用工作区。 */
+/** 拉取工作区清单并落库；失效的选中项自动退回第一个可用工作区。
+ *
+ * 选中项失效（项目被移除 / 目录不见了）时，激活终端要**一起收敛回同一工作区**：
+ * 右栏终端视图跟着 `activeWorkspacePath` 过滤，留下一个别的目录的激活终端会让视图空掉
+ * （标签栏无选中标签、面板空白）。 */
 export async function loadWorkspaces(): Promise<WorkspaceView[]> {
  const list = await api.listWorkspaces();
  const s = useApp.getState();
  const active = s.activeWorkspacePath;
  const activeValid = active != null && list.some((w) => w.path === active && !w.missing);
+ if (activeValid) {
+  s.set({ workspaces: list });
+  return list;
+ }
+ const next = list.find((w) => !w.missing)?.path ?? null;
+ const scoped = terminalsInWorkspace(s.terminals, next);
  s.set({
   workspaces: list,
-  ...(activeValid ? {} : { activeWorkspacePath: list.find((w) => !w.missing)?.path ?? null }),
+  activeWorkspacePath: next,
+  activeTerminalId: scoped[scoped.length - 1]?.id ?? null,
  });
  return list;
 }

@@ -14,6 +14,7 @@ import { HealthBanner } from "../components/HealthBanner";
 import { SettingsPage } from "../components/SettingsPage";
 import { UpdateDialog } from "../components/update/UpdateDialog";
 import { newTerminalInActiveWorkspace } from "../lib/workspaces";
+import { terminalsInWorkspace } from "../lib/terminalScope";
 import { refreshWorkspaceGitState, scheduleWorkspaceGitRefresh } from "../lib/commitTasks";
 import { autoCheckOnBoot } from "../lib/appUpdate";
 import { hasOpenDialog, useDialogFocus } from "../lib/useDropdown";
@@ -115,7 +116,8 @@ function useTerminalHotkeys() {
     if (!s.activeTerminalId) return;
     s.requestCloseTerminal(s.activeTerminalId);
    } else {
-    const term = s.terminals[Number(key) - 1];
+    // ⌘1..9 的序号 = **当前工作区**里的终端顺序（与右栏视图一致的过滤列表）
+    const term = terminalsInWorkspace(s.terminals, s.activeWorkspacePath)[Number(key) - 1];
     if (!term) return;
     s.focusTerminal(term.id);
    }

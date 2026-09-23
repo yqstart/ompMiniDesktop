@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { BrowserTerminal } from "reicon-react";
 import { useApp } from "../../stores/app";
 import { loadWorkspaces, newTerminalInActiveWorkspace, resolveNewTerminalWorkspace } from "../../lib/workspaces";
+import { terminalsInWorkspace } from "../../lib/terminalScope";
 import { pickAndAddProject } from "../../lib/projects";
 import { isMacKeyboard } from "../../lib/termInput";
 import { fmt } from "../../lib/locale";
@@ -19,22 +20,27 @@ import { TerminalPane } from "./TerminalPane";
  * 面板按隐藏处理（不量尺寸 / 不推 resize），回来时按「切到本 tab」重新 fit + 聚焦。
  */
 export function TerminalView({ visible = true }: { visible?: boolean }) {
- const terminals = useApp((s) => s.terminals);
+ const allTerminals = useApp((s) => s.terminals);
  const activeId = useApp((s) => s.activeTerminalId);
+ const activeWorkspacePath = useApp((s) => s.activeWorkspacePath);
+ const scoped = useMemo(
+  () => terminalsInWorkspace(allTerminals, activeWorkspacePath),
+  [allTerminals, activeWorkspacePath],
+ );
+ // 显示哪个面板：激活终端必须落在当前工作区里，否则这个工作区就是「没有终端」——交回空态。
+ const inScope = activeId !== null && scoped.some((term) => term.id === activeId);
+ const shownId = visible && inScope ? activeId : null;
  return (
   <div className={visible ? "relative min-h-0 flex-1" : "hidden"}>
-   {terminals.length === 0 ? (
-    <EmptyTerminal />
-   ) : (
-    terminals.map((term) => (
-     <div
-      key={term.id}
-      className={term.id === activeId && visible ? "absolute inset-0" : "hidden"}
-     >
-      <TerminalPane term={term} active={term.id === activeId && visible} />
-     </div>
-    ))
-   )}
+   {!inScope && <EmptyTerminal />}
+   {allTerminals.map((term) => (
+    <div
+     key={term.id}
+     className={term.id === shownId ? "absolute inset-0" : "hidden"}
+    >
+     <TerminalPane term={term} active={term.id === shownId} />
+    </div>
+   ))}
   </div>
  );
 }

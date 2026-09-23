@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, ArrowUpCircle, BranchDown, BranchUp, ChevronRight, Clock, DiagramTree, Folder, LinkOff, Loader, Nodes } from "reicon-react";
+import { AlertTriangle, ArrowUpCircle, BranchDown, BranchUp, BrowserTerminal, ChevronRight, Clock, DiagramTree, Folder, LinkOff, Loader, Nodes } from "reicon-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "@shared/api";
 import type { ProjectView, WorkspaceView } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { openOrFocusWorkspace } from "../../lib/workspaces";
+import { countRunningTerminalsIn, countTerminalsIn } from "../../lib/terminalScope";
 import { isCommitTaskRunning, pushCommits, startCommitTask } from "../../lib/commitTasks";
 import { useDropdown } from "../../lib/useDropdown";
 import { useText } from "../../lib/useText";
@@ -130,13 +131,22 @@ export function ProjectGroup({
 /** 一个工作区行：分支名 + 位置徽章 + git 状态（改动点 / 领先·落后远程徽章 / 上游缺失标记）+ 任务徽章；
  *  hover 出现「提交并推送」按钮。点击行 = 打开/聚焦该目录的终端。
  *
- *  状态区顺序固定为：dirty 点 → 领先（BranchUp ↑，可点=推）→ 落后（BranchDown ↓，只读）→
- *  上游缺失（LinkOff：无上游 / 上游已被删除）→ 任务徽章（运行中 / 失败；点击开任务浮层）；
- *  有任务记录时 hover 按钮让位（任务态优先，处理入口在浮层里）。 */
+ *  状态区顺序固定为：终端数（`BrowserTerminal` + 数量，有运行中的上强调色；右栏只看当前工作区，
+ *  这个徽章是「别的分支还开着几个」的提示）→ dirty 点 → 领先（BranchUp ↑，可点=推）→
+ *  落后（BranchDown ↓，只读）→ 上游缺失（LinkOff：无上游 / 上游已被删除）→ 任务徽章
+ *  （运行中 / 失败；点击开任务浮层）；有任务记录时 hover 按钮让位（任务态优先，处理入口在浮层里）。 */
 function WorkspaceRow({ ws, active }: { ws: WorkspaceView; active: boolean }) {
  const t = useText();
  const gitState = useApp((s) => s.workspaceGitStates[ws.path]);
  const task = useApp((s) => s.commitTasks[ws.path]);
+ // 右栏终端视图只显示当前工作区的终端，这里的徽章是「别的分支还开着几个」的入口提示
+ const termCount = useApp((s) => countTerminalsIn(s.terminals, ws.path));
+ const runningTerms = useApp((s) => countRunningTerminalsIn(s.terminals, ws.path));
+ const termBadge = termCount === 0
+  ? null
+  : runningTerms > 0
+   ? fmt(t.wsTerminalsRunning, termCount, runningTerms)
+   : fmt(t.wsTerminals, termCount);
  const label = ws.branch ?? (ws.head ? `${t.wsDetached} ${ws.head.slice(0, 7)}` : t.unknownBranch);
 
  const running = task ? isCommitTaskRunning(task.phase) : false;
@@ -186,6 +196,16 @@ function WorkspaceRow({ ws, active }: { ws: WorkspaceView; active: boolean }) {
    </button>
 
    <span className="flex shrink-0 items-center gap-1 pr-1.5">
+    {termBadge && (
+     <span
+      title={termBadge}
+      aria-label={termBadge}
+      className={`flex h-5 items-center gap-0.5 px-0.5 ${runningTerms > 0 ? "text-accent" : "text-faint"}`}
+     >
+      <BrowserTerminal size={11} aria-hidden />
+      <span className="font-mono text-[10px] leading-none">{termCount}</span>
+     </span>
+    )}
     {dirty && <span className="size-1.5 rounded-full bg-accent" title={t.gitDirtyTitle} aria-label={t.gitDirtyTitle} />}
     {ahead > 0 && (
      <button

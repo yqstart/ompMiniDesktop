@@ -2,12 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Folder, Plus, Search, Settings, X } from "reicon-react";
 import { useApp } from "../../stores/app";
 import { newTerminalInActiveWorkspace, resolveNewTerminalWorkspace } from "../../lib/workspaces";
+import { terminalsInWorkspace } from "../../lib/terminalScope";
 import { useText } from "../../lib/useText";
 import { STATE_TEXT, STATE_TONE } from "../../lib/termState";
 
 /**
- * 标签栏（主区顶部**常驻**）：全部终端标签 + 设置标签（单例）+ `＋`。
+ * 标签栏（主区顶部**常驻**）：**当前工作区**的终端标签 + 设置标签（单例）+ `＋`。
  *
+ * - 终端标签按左栏选中工作区**过滤**（`lib/terminalScope.ts`）：选中 `login` 分支就只列
+ *   `login` 目录的终端——别的分支的终端照常跑，只是不在这个视图里（左栏工作区行上的终端
+ *   徽章与 `⌘K` 快速切换是它们的入口）；
  * - 常驻是硬约束：设置标签激活时整栏仍在（用户点得回终端，也看得见有哪些终端在跑）；
  *   终端标签高亮要 `!settingsTabActive`——切去设置后不能有两个"选中"的标签；
  * - 标签 = `π` 状态标 + 会话名：**π 的颜色就是 omp 的状态**（工作中 / 等你确认 / 就绪 / 已退出 /
@@ -18,7 +22,7 @@ import { STATE_TEXT, STATE_TONE } from "../../lib/termState";
  * - 整栏挂 `data-tauri-drag-region`：空白处可以拖窗口（按钮自身的 mousedown 不触发拖拽）。
  */
 export function TerminalTabs() {
- const terminals = useApp((s) => s.terminals);
+ const allTerminals = useApp((s) => s.terminals);
  const workspaces = useApp((s) => s.workspaces);
  const activeId = useApp((s) => s.activeTerminalId);
  const settingsTabOpen = useApp((s) => s.settingsTabOpen);
@@ -28,6 +32,11 @@ export function TerminalTabs() {
  const target = resolveNewTerminalWorkspace(workspaces, activeWorkspacePath);
  const listRef = useRef<HTMLDivElement>(null);
  const [roam, setRoam] = useState<string | null>(null);
+ // 只列当前工作区的终端（过滤键 = 左栏选中项；下面整段渲染与键盘导航都走这个列表）
+ const terminals = useMemo(
+  () => terminalsInWorkspace(allTerminals, activeWorkspacePath),
+  [allTerminals, activeWorkspacePath],
+ );
  const order = useMemo(() => [...terminals.map((term) => term.id), ...(settingsTabOpen ? ["settings"] : [])], [settingsTabOpen, terminals]);
  const focusedKey = roam && order.includes(roam) ? roam : settingsTabActive ? "settings" : activeId;
  useEffect(() => {

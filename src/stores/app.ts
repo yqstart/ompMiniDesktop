@@ -47,11 +47,14 @@ type AppState = {
  workspaces: WorkspaceView[];
  /** 打开中的终端（tab 元数据；PTY 进程与高频字节流都不进 store）。 */
  terminals: TerminalView[];
- /** 终端标签里当前激活的那个（切去设置标签时保持不变，回来就是「上次的终端」）。 */
+ /** 终端标签里当前激活的那个（切去设置标签时保持不变，回来就是「上次的终端」）。
+  *  不变式：它**要么是 null，要么落在 `activeWorkspacePath` 目录里**——右栏视图按工作区过滤，
+  *  跨工作区的激活项会让标签栏与面板同时空掉。`openTerminal` / `focusTerminal` / `closeTerminal` /
+  *  `loadWorkspaces` 四处负责维持。 */
  activeTerminalId: string | null;
- /** 左栏选中的工作区（按 `path` 标识；`＋` 新建终端用它当目录）。 */
+ /** 左栏选中的工作区（按 `path` 标识）。三重身份：右栏终端视图的**过滤键**（只列 cwd 命中它的终端，
+  *  见 `lib/terminalScope.ts`）、`＋` 新建终端的目录、左栏高亮。跟随 `openTerminal` / `focusTerminal` 走。 */
  activeWorkspacePath: string | null;
- setActiveWorkspace: (path: string | null) => void;
  /** 快速切换面板是否打开（不持久化；仅在打开时挂载，关闭即卸载）。 */
  quickSwitcherOpen: boolean;
  /** 终端聚焦序号：每次成功打开或聚焦终端 +1，让选择同一终端也能恢复 xterm 焦点。 */
@@ -195,7 +198,6 @@ export const useApp = create<AppState>((set, get) => ({
  terminals: [],
  activeTerminalId: null,
  activeWorkspacePath: null,
- setActiveWorkspace: (path) => set({ activeWorkspacePath: path }),
  quickSwitcherOpen: false,
  terminalFocusSeq: 0,
  openTerminal: ({ projectId, cwd, label, resume = null }) => {
@@ -238,11 +240,16 @@ export const useApp = create<AppState>((set, get) => ({
   set((s) => {
    const idx = s.terminals.findIndex((t) => t.id === id);
    if (idx < 0) return {};
+   const closing = s.terminals[idx];
    const terminals = s.terminals.filter((t) => t.id !== id);
-   // 关闭当前 tab 后聚焦相邻的一个（优先右邻，退回左邻）；全关则回到空态
+   // 关闭当前 tab 后聚焦**同一工作区**里相邻的一个（优先右邻，退回左邻）：
+   // 右栏视图按工作区过滤，跳到别的分支的终端等于把人从当前视图里踢出去；
+   // 同工作区都关完就交回空态（`activeWorkspacePath` 不动，空态里能接着新建）。
    let activeTerminalId = s.activeTerminalId;
    if (activeTerminalId === id) {
-    const next = terminals[Math.min(idx, terminals.length - 1)] ?? null;
+    const siblings = terminals.filter((t) => t.cwd === closing.cwd);
+    const at = s.terminals.slice(0, idx).filter((t) => t.cwd === closing.cwd).length;
+    const next = siblings[Math.min(at, siblings.length - 1)] ?? null;
     activeTerminalId = next ? next.id : null;
    }
    // 最后一个终端也关掉时：设置标签开着就切过去（否则主区回到空态）
