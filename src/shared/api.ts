@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
-import type { ChangeSet, CommitEvent, FallbackChainsInfo, GitInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OrphanClearResult, OrphanWorktree, Overlay, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
+import type { ChangeSet, CommitEvent, FallbackChainsInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, Overlay, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -46,27 +46,12 @@ export const api = {
   call<{ ok: number; failed: { id: string; message: string }[] }>(IPC.unarchiveSessions, { ids }),
  deleteSessions: (ids: string[]) =>
   call<{ ok: number; failed: { id: string; message: string }[] }>(IPC.deleteSessions, { ids }),
- getGitInfo: (path: string) => call<GitInfo>(IPC.getGitInfo, { path }),
  setOmpPath: (path: string | null) => call<OmpInfo>(IPC.setOmpPath, { path }),
  /**
-  * 工作区（V11 左栏树）：每个项目 = 主目录 + 它全部 git worktree。
-  * worktree 真相 = `git worktree list`（手工建的也在）；创建走 `omp worktree add`。
+  * 工作区（V11 左栏树）：每个项目 = 主目录 + 它全部 git worktree（只读展示，
+  * 壳侧不创建 / 不删除 worktree）。
   */
  listWorkspaces: () => call<WorkspaceView[]>(IPC.listWorkspaces),
- /** 确保某分支有可工作的目录：已检出直接复用，否则 `omp worktree add` 新建。
-  *  `base` 只在 `newBranch=true` 时有意义：`null` = 基于当前 HEAD；`"remote"` = 基于远端默认分支的最新。 */
- createWorktree: (projectId: string, branch: string, newBranch: boolean, base?: string | null) =>
-  call<WorkspaceView>(IPC.createWorktree, { projectId, branch, newBranch, base: base ?? null }),
- /** 删除一个 worktree（先探脏：脏目录会抛 `WORKTREE_DIRTY`，带 `force` 再来一次）。
-  *  返回 true = 已删除；false = 目录本来就不在了（只清了登记）。 */
- removeWorktree: (projectId: string, path: string, force: boolean) =>
-  call<void>(IPC.removeWorktree, { projectId, path, force }),
- /** 清理失效登记（`git worktree prune -v`）：返回被清掉的条目原文（条数给界面用）。 */
- pruneWorktrees: (projectId: string) => call<string[]>(IPC.pruneWorktrees, { projectId }),
- /** 列孤儿 worktree（`~/.omp/wt` 全域，不限于某个项目）。 */
- listOrphanWorktrees: () => call<OrphanWorktree[]>(IPC.listOrphanWorktrees),
- /** 清理孤儿 worktree（`omp worktree clear`，只清孤儿）。 */
- clearOrphanWorktrees: () => call<OrphanClearResult>(IPC.clearOrphanWorktrees),
 
  /**
   * 提交 / 推送（V19）：先取变更集（打开面板），再按轨道发起任务。

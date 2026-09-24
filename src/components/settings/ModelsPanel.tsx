@@ -60,54 +60,69 @@ export function ModelsPanel() {
  const [savingRole, setSavingRole] = useState(false);
  const [savingCycle, setSavingCycle] = useState(false);
 
- const readError = (res: PromiseSettledResult<unknown>, fallback: string): string | null => {
-  if (res.status === "fulfilled") return null;
-  return res.reason instanceof Error ? res.reason.message : String(res.reason || fallback);
- };
-
  /** 重读只接纳最新请求；写入后的真值不能被更早发出的读请求覆盖。 */
  const load = useCallback(async (force: boolean) => {
   const seq = ++requestSeq.current;
   const roleVersion = rolesRevision.current;
   const chainVersion = chainsRevision.current;
   const cycleVersion = cycleRevision.current;
-  const res = await Promise.allSettled([
-   api.getModelRoles(),
-   api.getFallbackChains(),
-   api.getCycleOrder(),
-   force ? api.refreshModels() : api.getModels(),
+  /** 每个读取**各自到达即渲染**——目录（`omp models --json`，实测 2–10s；后端已收敛成
+   *  单飞 + 缓存）不该拖着角色 / 切换环 / 转移链一起白等，那是「设置页要等好几秒」的主因。 */
+  const each = <T,>(req: Promise<T>, apply: (v: T) => void, onError: (msg: string) => void) =>
+   req.then(
+    (v) => {
+     if (seq === requestSeq.current) apply(v);
+    },
+    (e: unknown) => {
+     if (seq === requestSeq.current) onError(e instanceof Error ? e.message : String(e || t.modelsLoadFailed));
+    },
+   );
+  return Promise.all([
+   each(
+    api.getModelRoles(),
+    (v) => {
+     if (roleVersion !== rolesRevision.current || roleWriting.current) return;
+     setRoles(v);
+     setRolesError(null);
+    },
+    (msg) => {
+     if (roleVersion !== rolesRevision.current || roleWriting.current) return;
+     setRolesError(msg);
+    },
+   ),
+   each(
+    api.getFallbackChains(),
+    (v) => {
+     if (chainVersion !== chainsRevision.current) return;
+     setChains(v);
+     setChainsError(null);
+    },
+    (msg) => {
+     if (chainVersion !== chainsRevision.current) return;
+     setChainsError(msg);
+    },
+   ),
+   each(
+    api.getCycleOrder(),
+    (v) => {
+     if (cycleVersion !== cycleRevision.current || cycleWriting.current) return;
+     setCycleOrder(v);
+     setCycleError(null);
+    },
+    (msg) => {
+     if (cycleVersion !== cycleRevision.current || cycleWriting.current) return;
+     setCycleError(msg);
+    },
+   ),
+   each(
+    force ? api.refreshModels() : api.getModels(),
+    (v) => {
+     set({ models: v });
+     setCatalogError(v.error ?? null);
+    },
+    (msg) => setCatalogError(msg),
+   ),
   ]);
-  if (seq !== requestSeq.current) return;
-  if (roleVersion === rolesRevision.current && !roleWriting.current) {
-   if (res[0].status === "fulfilled") {
-    setRoles(res[0].value);
-    setRolesError(null);
-   } else {
-    setRolesError(readError(res[0], t.modelsLoadFailed));
-   }
-  }
-  if (chainVersion === chainsRevision.current) {
-   if (res[1].status === "fulfilled") {
-    setChains(res[1].value);
-    setChainsError(null);
-   } else {
-    setChainsError(readError(res[1], t.modelsLoadFailed));
-   }
-  }
-  if (cycleVersion === cycleRevision.current && !cycleWriting.current) {
-   if (res[2].status === "fulfilled") {
-    setCycleOrder(res[2].value);
-    setCycleError(null);
-   } else {
-    setCycleError(readError(res[2], t.modelsLoadFailed));
-   }
-  }
-  if (res[3].status === "fulfilled") {
-   set({ models: res[3].value });
-   setCatalogError(res[3].value.error ?? null);
-  } else {
-   setCatalogError(readError(res[3], t.modelsLoadFailed));
-  }
  }, [set, t.modelsLoadFailed]);
 
  // 挂载时拉一次；**每次设置标签重新激活**（从终端标签切回来）都重读——omp 侧（TUI / CLI）

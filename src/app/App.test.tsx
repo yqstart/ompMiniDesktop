@@ -6,7 +6,11 @@ import { App } from "./App";
 import { useApp } from "../stores/app";
 import { isMacKeyboard } from "../lib/termInput";
 import { api } from "@shared/api";
-import type { TerminalView } from "@shared/types";
+import { IPC } from "@shared/ipc";
+import type { ModelInfo, TerminalView } from "@shared/types";
+
+/** 事件监听注册表（mock 的 `listen` 把回调存这里，测试直接触发）。 */
+const eventListeners = vi.hoisted(() => new Map<string, (e: { payload: unknown }) => void>());
 
 const actEnv = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
 actEnv.IS_REACT_ACT_ENVIRONMENT = true;
@@ -28,6 +32,12 @@ vi.mock("@shared/api", () => ({
   getWorkspaceGitState: vi.fn(async () => []),
   syncTitlePrompt: vi.fn(async () => ({ path: "/tmp/TITLE_SYSTEM.md", action: "written" as const })),
  },
+}));
+vi.mock("@tauri-apps/api/event", () => ({
+ listen: vi.fn(async (event: string, handler: (e: { payload: unknown }) => void) => {
+  eventListeners.set(event, handler);
+  return () => eventListeners.delete(event);
+ }),
 }));
 vi.mock("../components/sidebar/WorkspaceSidebar", () => ({
  WorkspaceSidebar: () => <div data-testid="sidebar">sidebar</div>,
@@ -141,5 +151,31 @@ describe("应用外壳快捷键与侧栏", () => {
   expect(useApp.getState().activeTerminalId).toBe("t-b1");
   press({ key: "2", ...mod });
   expect(useApp.getState().activeTerminalId).toBe("t-b2");
+ });
+});
+
+describe("模型目录快照事件", () => {
+ it("后端广播的新快照直接换掉 store.models", async () => {
+  // 等挂载期的异步落定（listen 注册是 promise 链）
+  await act(async () => {
+   await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  const handler = eventListeners.get(IPC.modelsRefreshed);
+  expect(handler, "App 应订阅 omp-models://catalog").toBeTruthy();
+  const model: ModelInfo = {
+   provider: "demo",
+   id: "one",
+   selector: "demo/one",
+   name: "One",
+   contextWindow: null,
+   maxTokens: null,
+   reasoning: null,
+   thinking: null,
+   input: null,
+  };
+  act(() => {
+   handler!({ payload: { models: [model], fetchedAt: 123 } });
+  });
+  expect(useApp.getState().models).toEqual({ models: [model], fetchedAt: 123 });
  });
 });

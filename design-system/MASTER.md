@@ -61,8 +61,8 @@
 
 - V11 两栏：左栏可拖拽（**292–480px，默认 292**，`sidebarWidth` 存 Zustand + localStorage 持久化；窄窗 <768px 收抽屉）→ 右侧工作区（**常驻标签栏**：终端标签 + 设置标签；xterm 全尺寸铺满）。**下限 = 左栏底部那一行的内容宽度**（设置全称 + 语言 + 皮肤并排不挤压，按最宽的英文界面算；实测 288px 临界 + 4px 字体余量），不为审美而定——改它之前先量那一行。
 - 左栏：40px macOS 红绿灯占位 → ompMiniDesktop 字标 → 36px 添加项目按钮 → 工作区标题与项目树 → 固定底栏。字标区同样支持拖窗；滚动区预留滚动条槽位。
-- 项目组：36px 折叠头（chevron + 24px 文件夹图标底 + 项目名）与 hover/focus 操作槽（会话、新建 worktree）；缺失目录给 warning 修复条，不在树里放不可逆操作。
-- 工作区：32px 行，`DiagramTree` + 等宽分支名 + worktree 徽章；选中左线、填充与加粗。主目录图标 accent，普通 worktree faint；缺失目录禁用。从属关系用弱引导线表达。
+- 项目组：36px 折叠头（chevron + 24px 文件夹图标底 + 项目名）与 hover/focus 操作槽（会话、移除项目）；**文件夹图标即「当前打开的项目」**——活动工作区落在本项目（右栏正在显示它的终端）时用 `accent`，否则 `muted`，缺失目录优先 `warn`。「移除项目」走 `ConfirmDialog`（解绑 + 会话标记归档，不删文件）；缺失目录给 warning 修复条。
+- 工作区：32px 行，`DiagramTree` + 等宽分支名 + worktree 徽章；选中左线、填充与加粗。主目录图标 accent，普通 worktree faint；缺失目录禁用。从属关系用弱引导线表达。worktree **只读展示**（V20：壳侧不创建 / 不删除，行上没有删除按钮）。
 - 右侧工作面：桌面端外沿 8px 留白、16px 圆角与轻描边；终端本身无额外 padding。48px 常驻标签栏（即便没有任何标签也保留工作区标题与新建入口）——**终端标签按左栏选中的工作区过滤**（只列当前分支的终端，别的分支的终端照常跑、不在这个视图里），激活标签 surface 填充与细边框；窄窗左端显示项目抽屉按钮。标题截断、关闭入口和常驻 `＋` 行为不变；标签溢出时栏内横向滚动、隐藏滚动条（`.no-scrollbar`，垂直滚轮映射为横向）；终端和设置面板只切显隐，不卸载。
 - **终端标签 = π 状态标 + 会话标题**（`π` 是 omp 血统；标签上不再用终端图标）：π 用 mono 14px，**颜色即 omp 的运行状态**（`lib/termTitle.ts` 从 OSC 标题读）：工作中 `accent` + `animate-pulse` 呼吸、等待确认 `warn`、等待输入与正常退出 `ok`、异常退出与启动失败 `danger`、未知 `faint`。颜色不是唯一信号——状态文字进 `sr-only`（屏幕阅读器）并作为 π 的 `title` 悬停提示；π 的呼吸动画在 `prefers-reduced-motion` 下由全局规则关掉（§5 动效）。名字位显示**会话标题**；omp 在会话还没有标题时广播的是 cwd 末段目录名（回退值）——壳侧识别后不显示，退回工作区显示名「项目 · 分支」。**标签只占一行**（V18）：不显示 cwd 第二行（工作目录由左栏选中项与标签栏的工作区过滤表达，完整 cwd 留在悬停提示里）；会话标题的语言随界面语言（V18 写 `<agentDir>/TITLE_SYSTEM.md`，见 `AGENTS.md` 数据流）。**双击标签 = 改名**（V17）：内联输入框替换名字行（draft 初值 = 当前会话标题，Enter 提交 / Esc / 失焦取消），提交走 omp 原生命令 `/rename`（`lib/termRename.ts`）；失败（标题为空 / 含控制字符，或会话不在等待输入）时留在编辑态、输入框描边转 danger 并在名字行下方显示 danger 文案（编辑期标签高度自适应，常态 36px 单行）。
 - 终端面板：xterm 全尺寸铺满（`FitAddon` 跟随容器；隐藏面板不与后端同步尺寸），**不显示滚动条**（xterm 6 自绘 overlay，`index.css` 全局 `display:none`；滚轮/键盘/回看照常）。omp 退出后浮层 = `bg-background/75` 遮罩 + `bg-elevated` 小卡（13px muted「omp 已退出」；异常退出显示「omp 意外退出（退出代码 N）」+「重启」accent 实心键 +「关闭」描边键）。**终端自己就是内容面**——不再套卡片、边框或内边距。
@@ -71,16 +71,16 @@
 - 边框：默认 `border-border`；分组内的弱分隔用 `border-border-soft`。禁止 `border-border/60`、`/70` 这类透明度档现场手调。
 - 阴影只有两档：`shadow-pop`（下拉、浮层）、`shadow-dialog`（对话框、抽屉）。普通容器不用阴影，靠亮度与边框分层。
 - 间距：4 / 8 / 12 / 16 / 20 / 24；设置卡片 16–20px padding，对话框 16–24px，空态保留更宽的呼吸区。
-- z-index：`10` 下拉 / 菜单浮层，`20` worktree 创建面板，`30` 对话框。
+- z-index：`10` 下拉 / 菜单浮层，`20` 面板级浮层（V20 起无使用者，保留给将来），`30` 对话框。
 - 响应：窄窗（<768px）左栏收成抽屉（遮罩 + 侧滑面板），终端区占满；禁止横向滚动。
 
 ## 5. 交互
 
 - 触控目标 ≥ 44px（小图标按钮用 28px 可视 + 44px 热区 padding）。
 - 过渡统一 100ms（`duration-100`，弹层出入可到 150ms），只做 `color / opacity / transform`，禁止布局抖动（hover 不许 scale 位移）。
-- 按钮：async 操作期间禁用 + spinner（worktree 创建、归档批量等）。
+- 按钮：async 操作期间禁用 + spinner（归档批量、模型目录刷新等）。
 - 终端焦点：切到某终端 tab 时把键盘焦点交给 xterm（`term.focus()`）；快捷键（⌘T / ⌘W / ⌘1..9）在 window 层监听，与 xterm 的按键处理不冲突（组合键不被 xterm 消费）。
-- 焦点：所有可交互元素可见 focus ring（`accent` 2px outline）。**例外**：焦点已由容器表达的输入框不画内层环（如 worktree 面板的搜索输入框）
+- 焦点：所有可交互元素可见 focus ring（`accent` 2px outline）。**例外**：焦点已由容器表达的输入框不画内层环（如项目会话弹窗的搜索框）
 - 动效：`prefers-reduced-motion` 时禁用旋转指示（loader），改为静态文案。
 - 模态键盘行为统一由 `useDialogFocus` 提供：Tab / Shift+Tab 只遍历最上层可见模态中的启用控件，Esc 先关内部下拉、再关最上层模态；关闭恢复触发焦点。隐藏设置面板 `inert`，不抢终端焦点、不消费 Esc；纵向设置导航用上下方向键与 Home/End 切换，只有选中页签进入 Tab 顺序。
 - 自定义供应商错误紧邻字段并关联 `aria-describedby`；保存失败聚焦错误、保留草稿；保存中整表禁用且关闭入口无效。筛选模型时明确显示「全选匹配项 / 清空匹配项」及匹配数，禁用无实际变化的批量操作。模型选择器同时显示名称和 id，用选中态标识当前值，不用裸数字表示思考能力。
@@ -110,10 +110,8 @@
 ### V11 组件（终端工作区）
 
 - `WorkspaceSidebar`（`src/components/sidebar/WorkspaceSidebar.tsx`）= 左栏主容器：红绿灯占位 +「添加项目」+ 项目组列表 + 底部「设置」行（`LanguageToggle` / `ThemeToggle` / 更新小点）。添加项目失败等错误用内联 danger 条 + 关闭按钮，不造第三种提示样式。
-- `ProjectGroup`（`src/components/sidebar/ProjectGroup.tsx`）= 项目组：折叠头（chevron + `Folder` + 名称 + 悬浮槽位 `Clock`（会话弹窗）/ `Nodes`（新建 worktree）/ `Broom`（项目维护））+ 工作区行 + `WorktreePanel` + `MaintenancePanel` + 目录缺失时的「重定位」行。悬浮槽位只在 hover / focus-within 出现。
-- `WorktreePanel`（ProjectGroup 内私有）= 新建 worktree 面板（绝对定位浮层：`left-2 right-2 top-full` + `shadow-pop`，点外部 / Esc 关）：输入框（过滤未检出的本地分支）→「新建分支「输入名」」出现时多看一行**基线**两档分段控件（「当前 HEAD」/「远端最新（origin/main）」，后者只在项目有远端默认分支时可选；`role="radiogroup"` + `role="radio"`，同左栏三档控件样式）→ 候选行（圆点 + mono 分支名）→「新建分支「输入名」」选项（输入非空且不在候选时出现）；创建中禁用控件，失败回抛左栏错误条。
-- `WorkspaceRow`（ProjectGroup 内私有）= 工作区行（口径见 §4）：工作区图标 + 分支名（mono）+「worktree」徽章 + 缺失态；行尾状态区 = 终端数徽章（`BrowserTerminal` + 数量，有进程在跑时上 `accent`）/ dirty 小点（`accent`）/ 领先远程徽章（`BranchUp` + 数量，`accent`，点击 = 推送）/ 落后远程徽章（`BranchDown` + 数量，`warn`，只读）/ 上游缺失标记（`LinkOff`，`faint`；无上游 / 上游已被删除——留白表示与远程一致）/ 任务徽章（`Loader` 运行中 / `AlertTriangle` 失败，点击 = 打开提交面板），hover 出现「提交…」（打开提交面板，`ArrowUpCircle`）与 worktree 行的「删除」（`Trash2`，危险操作 hover 变 `danger`；先探脏 → `ConfirmDialog` 二次确认（焦点默认在「取消」）；点击行 = 打开 / 聚焦该目录的终端。
-- `MaintenancePanel`（ProjectGroup 内私有）= 项目维护浮层（V19，与 `WorktreePanel` 同款定位：`absolute left-0 right-0 top-full z-20 mt-2` + `shadow-pop`，点外部 / Esc 关）：两项——「清理失效登记」（`Eraser`，`git worktree prune -v`，结果以 `ok` 色一行小字给条数）与「清理孤儿 worktree（N）」（`Broom`，N 由打开面板时的 `omp worktree list --json` 数出来；N=0 或仍在检查时禁用），下方是可滚动的小字路径列表（mono 路径 + `faint` 原因 / 所属仓库），清理走 `ConfirmDialog`（danger，文案写明「全部位于 ~/.omp/wt，不限于本项目」）。
+- `ProjectGroup`（`src/components/sidebar/ProjectGroup.tsx`）= 项目组：折叠头（chevron + `Folder` + 名称 + 悬浮槽位 `Clock`（会话弹窗）/ `Trash2`（移除项目，hover 转 `danger`））+ 工作区行 + 目录缺失时的「重定位」行 + 「移除项目」的 `ConfirmDialog`。悬浮槽位只在 hover / focus-within 出现；`Folder` 在项目为「当前打开的项目」（活动工作区落在本项目）时用 `accent`。worktree 的创建 / 删除 / 清理浮层已在 V20 退场（只读展示）。
+- `WorkspaceRow`（ProjectGroup 内私有）= 工作区行（口径见 §4）：工作区图标 + 分支名（mono）+「worktree」徽章 + 缺失态；行尾状态区 = 终端数徽章（`BrowserTerminal` + 数量，有进程在跑时上 `accent`）/ dirty 小点（`accent`）/ 领先远程徽章（`BranchUp` + 数量，`accent`，点击 = 推送）/ 落后远程徽章（`BranchDown` + 数量，`warn`，只读）/ 上游缺失标记（`LinkOff`，`faint`；无上游 / 上游已被删除——留白表示与远程一致）/ 任务徽章（`Loader` 运行中 / `AlertTriangle` 失败，点击 = 打开提交面板），hover 出现「提交…」（打开提交面板，`ArrowUpCircle`）；点击行 = 打开 / 聚焦该目录的终端。worktree **只读展示**（V20：行上不再有删除入口）。
 - `TerminalView`（`src/components/terminal/TerminalView.tsx`）= 终端面板区：全部终端面板（`hidden` 切显隐不销毁，按当前工作区过滤显示）+ 空态引导（当前工作区没有激活终端时）。标签栏与关闭确认（一个 `ConfirmDialog` 实例，`closingTerminalId` 驱动）都挂在 `App` 层——设置标签激活时它们也要可见 / 可弹。
 - `TerminalTabs`（`src/components/terminal/TerminalTabs.tsx`）= 标签栏（视觉口径见 §4）：**只列当前工作区的终端标签**（`cwd` 命中 `activeWorkspacePath`，`lib/terminalScope.ts`；设置标签不受影响）——终端标签（**π 状态标**（颜色 = omp 状态，`lib/termTitle.ts`）+ 会话标题 + 关闭；**双击标签改名**，内联输入框 + 失败文案见 §4）+ **设置标签（单例，`settingsTabOpen` / `settingsTabActive`）** + `＋`；`role="tab"` + `aria-selected`，Enter / Space 聚焦；关闭按钮 `aria-label` 走字典（设置标签走 `closeSettingsTab`，不进确认流程）；`＋` 常驻最右。
 - `TerminalPane`（`src/components/terminal/TerminalPane.tsx`）= 单个终端：xterm 实例（随 id 建立 / 销毁，切 tab 不丢滚动缓冲）+ PTY 管道（`pty_spawn` 的 Channel 直推）+ fit / resize（仅可见时）+ 退出浮层（重启 / 关闭）。
@@ -135,7 +133,7 @@
 - 唯一矢量源 `design-system/icon/omp-mini-icon.svg`。改图标只改这个文件，再跑 `pnpm icon` 重新生成 `src-tauri/icons/`（icns / ico / 各尺寸 png）。
 - 造型：oh-my-pi 的血脉是 Pi，故图标取 **π 作字标**——不加文字、不加第二个符号。
 - 几何：1024 画布，内容圆角方 824×824 居中（圆角 186，macOS Big Sur 图标网格）；π 视觉盒 600×464 居中，笔画 96 全圆头，两腿相对横杠两端内缩 26%。T 型交汇处填 4 个 R46 内圆角（曲边三角，**不是整圆**——填整圆会在笔画外冒出珠子），横杠两端与腿底全圆头。
-- 配色：**图标是品牌物，允许走出 §2 的单强调色约束**。π 走极光渐变 `#5EEAD4 → #38BDF8 → #A78BFA → #F472B6`（沿横杠左上 → 右腿右下流动），石墨底 `#232329 → #07070A` 上叠三处同色辉光（左下取极光首色、右上取末色、中央取过渡色）。
+- 配色：**图标是品牌物，允许走出 §2 的单强调色约束，但只许走一个色相带**。π 走蓝→靛渐变 `#6FB4FF → #9C93FF`（沿横杠左上 → 右腿右下流动，色相 211° → 245°，中点 ≈ 应用 `accent` 的 230–243°），石墨底 `#1C1C23 → #09090C` 上叠两处同色微辉光（左下偏蓝 12%、右上偏靛 8%）。**不许跨色相族**：原先的青 → 蓝 → 紫 → 粉四色「极光」（色相跨度 158°，含粉色）在 Dock 里与邻居（无彩立方体 / 单色 256° 紫 M / 白 `>_` + 柠檬绿）并排时是一道彩虹，底板还被三处彩色辉光染成 214°/228°/186° 的偏色；收敛后底板实测饱和度 0.048 / 0.179，落在邻居区间（M 0.113、终端 0.058）内。
 - 底线：16px 下仍要读出「一条横杠 + 两条腿」；辉光只柔化边缘，不许糊掉字形。
 - 验证方式：**`pnpm tauri:dev` 里看不到自定义图标，这不是 bug**——macOS 下 dev 跑的是裸二进制（`target/debug/omp-mini-desktop`，无 .app bundle、无 `CFBundleIdentifier`），系统只给它通用可执行文件图标，根本不会去读 `src-tauri/icons/`。要验图标必须出应用包：`pnpm tauri:build` → `src-tauri/target/release/bundle/macos/ompMiniDesktop.app`。
 - `src-tauri/build.rs` 里的 `println!("cargo:rerun-if-changed=icons")` 不许删：`tauri-build` 的 rerun-if-changed 只覆盖 `tauri.conf.json` / dist / Info.plist / capabilities，不覆盖 `icons/`，删掉后换了图标 cargo 不重建，产物里还是旧图标。

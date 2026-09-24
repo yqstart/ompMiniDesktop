@@ -4,7 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { ArrowUpRightSquare, Check, Copy, Key, Loader, Plus, Refresh, Trash2 } from "reicon-react";
 import { api } from "@shared/api";
 import { IPC } from "@shared/ipc";
-import type { ModelInfo, ModelsConfigFile, ProviderLoginStatus, ProviderView } from "@shared/types";
+import type { ModelCatalog, ModelInfo, ModelsConfigFile, ProviderLoginStatus, ProviderView } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
 import {
@@ -69,21 +69,22 @@ export function ProvidersSection() {
  const [startingLogin, setStartingLogin] = useState(false);
  const [closing, setClosing] = useState(false);
 
- /** 拉供应商清单、配置与目录；较早请求的结果不能覆盖更新后的快照。 */
+ /** 拉供应商清单、配置与目录；较早请求的结果不能覆盖更新后的快照。
+  *  三个读取各自到达即渲染：目录（`omp models --json`，实测 2–10s；后端已收敛成单飞 + 缓存
+  *  + 过期后台刷新）不该拖住供应商清单与 models.yml 的显示。 */
  const load = useCallback((force: boolean) => {
   const version = ++loadVersion.current;
-  return Promise.allSettled([
-   api.listProviders(),
-   api.readModelsConfig(),
-   force ? api.refreshModels() : api.getModels(),
-  ]).then((results) => {
-   if (version !== loadVersion.current) return;
-   const [providerResult, fileResult, modelResult] = results;
-   if (providerResult.status === "fulfilled") setProviders(providerResult.value);
-   if (fileResult.status === "fulfilled") setFile(fileResult.value);
-   if (modelResult.status === "fulfilled") set({ models: modelResult.value });
-   const bad = results.find((r) => r.status === "rejected");
-   setErr(bad?.status === "rejected" ? bad.reason instanceof Error ? bad.reason.message : t.providerLoadFailed : null);
+  let failed = false;
+  const fail = (e: unknown) => {
+   failed = true;
+   if (version === loadVersion.current) setErr(e instanceof Error ? e.message : t.providerLoadFailed);
+  };
+  return Promise.all([
+   api.listProviders().then((v) => { if (version === loadVersion.current) setProviders(v); }).catch(fail),
+   api.readModelsConfig().then((v) => { if (version === loadVersion.current) setFile(v); }).catch(fail),
+   (force ? api.refreshModels() : api.getModels()).then((v) => { if (version === loadVersion.current) set({ models: v }); }).catch(fail),
+  ]).then(() => {
+   if (version === loadVersion.current && !failed) setErr(null);
   });
  }, [set, t.providerLoadFailed]);
 
@@ -127,6 +128,19 @@ export function ProvidersSection() {
    void un.then((dispose) => dispose()).catch(() => { });
   };
  }, [load, t.loginFailed]);
+
+ // 目录快照刷新完成：已配置标记按新目录更新。后端那时缓存已新鲜，这次 `load` 是瞬时的
+ // （`listProviders` 不再等 `omp models --json`）；load 本身不会触发新刷新，无循环。
+ useEffect(() => {
+  let active = true;
+  const un = listen<ModelCatalog>(IPC.modelsRefreshed, () => {
+   if (active) void load(false);
+  });
+  return () => {
+   active = false;
+   void un.then((dispose) => dispose()).catch(() => { });
+  };
+ }, [load]);
 
  /** 发起 `auth-broker login`：上游先打印取 key 的说明 / 授权链接，用户在面板里回答提问。 */
  const startLogin = (id: string) => {

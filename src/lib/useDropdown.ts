@@ -88,7 +88,7 @@ export function useDropdown(
  ignore?: { readonly current: HTMLElement | null },
 ) {
  const ref = useRef<HTMLDivElement>(null);
- // WorktreePanel 挂载时已有 autoFocus；提交后再读 activeElement 会把输入框误当触发项。
+ // 面板挂载时可能已有 autoFocus（输入框）：提交后再读 activeElement 会把输入框误当触发项。
  const focusOnMount = useRef(document.activeElement);
  const closeRef = useRef(onClose);
  useEffect(() => {

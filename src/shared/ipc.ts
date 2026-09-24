@@ -1,79 +1,78 @@
 /** Tauri command / event 通道常量，前后端共用命名。 */
 export const IPC = {
-  // commands
-  locateOmp: "locate_omp",
-  getHealth: "get_health",
-  getModels: "get_models",
-  refreshModels: "refresh_models",
-  getOverlay: "get_overlay",
-  listProjects: "list_projects",
-  addProject: "add_project",
-  removeProject: "remove_project",
-  relocateProject: "relocate_project",
-  listSessions: "list_sessions",
-  listArchivedSessions: "list_archived_sessions",
-  archiveSessions: "archive_sessions",
-  unarchiveSessions: "unarchive_sessions",
-  deleteSessions: "delete_sessions",
-  getGitInfo: "get_git_info",
-  setOmpPath: "set_omp_path",
-  // 工作区（V11 左栏树）：项目 → 主目录 + git worktree
-  listWorkspaces: "list_workspaces",
-  createWorktree: "create_worktree",
-  // 工作区提交 / 推送（V19）：默认壳侧快路径（一次 omp -p 生成 + git commit/push），
-  // 另有一条可选的完整轨（omp commit，含 CHANGELOG 维护）
-  getChangeSet: "get_change_set",
-  generateCommitMessage: "generate_commit_message",
-  commitSelected: "commit_selected",
-  startFullCommit: "start_full_commit",
-  pushWorkspace: "push_workspace",
-  cancelCommitTask: "cancel_commit_task",
-  getWorkspaceGitState: "get_workspace_git_state",
-  // worktree 生命周期（V19）：删除 / 清理失效登记 / 清理孤儿（omp 管理目录）
-  removeWorktree: "remove_worktree",
-  pruneWorktrees: "prune_worktrees",
-  listOrphanWorktrees: "list_orphan_worktrees",
-  clearOrphanWorktrees: "clear_orphan_worktrees",
-  // 终端 PTY（V11）：per-终端 omp TUI 进程
-  ptySpawn: "pty_spawn",
-  ptyWrite: "pty_write",
-  ptyResize: "pty_resize",
-  ptyKill: "pty_kill",
-  // 供应商（设置 › 供应商）：login / logout / modelRoles
-  listProviders: "list_providers",
-  getProviderLogin: "get_provider_login",
-  startProviderLogin: "start_provider_login",
-  providerLoginInput: "provider_login_input",
-  cancelProviderLogin: "cancel_provider_login",
-  logoutProvider: "logout_provider",
-  getModelRoles: "get_model_roles",
-  setModelRole: "set_model_role",
-  // 快速切换环（设置 › 模型）：Ctrl+P 轮换序 cycleOrder（array 键，整组覆盖写）
-  getCycleOrder: "get_cycle_order",
-  setCycleOrder: "set_cycle_order",
-  // 失败转移链（设置 › 模型）：retry.fallbackChains 的读写与两个配套开关
-  getFallbackChains: "get_fallback_chains",
-  setFallbackChain: "set_fallback_chain",
-  setRetryOptions: "set_retry_options",
-  // 记忆（设置 › 记忆）：omp 项目记忆的列表 / 查看 / 删除
-  listMemories: "list_memories",
-  readMemoryFile: "read_memory_file",
-  deleteMemoryFile: "delete_memory_file",
-  deleteMemoryProject: "delete_memory_project",
-  // 使用统计（设置 › 使用统计）：会话 jsonl 里 usage 的聚合（只读）
-  getUsageStats: "get_usage_stats",
-  // 供应商用量（设置 › 供应商用量）：`omp usage --json` 的各供应商滚动窗口（只读）
-  getProviderUsage: "get_provider_usage",
-  // omp 常用设置（设置 ›「常用设置」）：白名单键的批量读 / 单键写 / 恢复默认（写 omp 全局配置）
-  getOmpSettings: "get_omp_settings",
-  setOmpSetting: "set_omp_setting",
-  resetOmpSetting: "reset_omp_setting",
-  // 自定义模型（设置 › 供应商）：omp `models.yml` 的读写——上游没有 CLI 写入口，写文件是唯一路径
-  readModelsConfig: "read_models_config",
-  writeModelsConfig: "write_models_config",
-  // 会话标题语言（V18）：把界面语言同步成 omp 的 `<agentDir>/TITLE_SYSTEM.md`（标题生成 prompt）
-  syncTitlePrompt: "sync_title_prompt",
-  // events
-  /** 供应商登录进度（payload = 全量 ProviderLoginStatus 快照）。 */
-  providerLogin: "omp-provider://login",
+ // commands
+ locateOmp: "locate_omp",
+ getHealth: "get_health",
+ getModels: "get_models",
+ refreshModels: "refresh_models",
+ getOverlay: "get_overlay",
+ listProjects: "list_projects",
+ addProject: "add_project",
+ removeProject: "remove_project",
+ relocateProject: "relocate_project",
+ listSessions: "list_sessions",
+ listArchivedSessions: "list_archived_sessions",
+ archiveSessions: "archive_sessions",
+ unarchiveSessions: "unarchive_sessions",
+ deleteSessions: "delete_sessions",
+ setOmpPath: "set_omp_path",
+ // 工作区（V11 左栏树）：项目 → 主目录 + git worktree（只读展示）
+ listWorkspaces: "list_workspaces",
+ // 工作区提交 / 推送（V19）：默认壳侧快路径（一次 omp -p 生成 + git commit/push），
+ // 另有一条可选的完整轨（omp commit，含 CHANGELOG 维护）
+ getChangeSet: "get_change_set",
+ generateCommitMessage: "generate_commit_message",
+ commitSelected: "commit_selected",
+ startFullCommit: "start_full_commit",
+ pushWorkspace: "push_workspace",
+ cancelCommitTask: "cancel_commit_task",
+ getWorkspaceGitState: "get_workspace_git_state",
+ // 终端 PTY（V11）：per-终端 omp TUI 进程
+ ptySpawn: "pty_spawn",
+ ptyWrite: "pty_write",
+ ptyResize: "pty_resize",
+ ptyKill: "pty_kill",
+ // 供应商（设置 › 供应商）：login / logout / modelRoles
+ listProviders: "list_providers",
+ getProviderLogin: "get_provider_login",
+ startProviderLogin: "start_provider_login",
+ providerLoginInput: "provider_login_input",
+ cancelProviderLogin: "cancel_provider_login",
+ logoutProvider: "logout_provider",
+ getModelRoles: "get_model_roles",
+ setModelRole: "set_model_role",
+ // 快速切换环（设置 › 模型）：Ctrl+P 轮换序 cycleOrder（array 键，整组覆盖写）
+ getCycleOrder: "get_cycle_order",
+ setCycleOrder: "set_cycle_order",
+ // 失败转移链（设置 › 模型）：retry.fallbackChains 的读写与两个配套开关
+ getFallbackChains: "get_fallback_chains",
+ setFallbackChain: "set_fallback_chain",
+ setRetryOptions: "set_retry_options",
+ // 记忆（设置 › 记忆）：omp 项目记忆的列表 / 查看 / 删除
+ listMemories: "list_memories",
+ readMemoryFile: "read_memory_file",
+ deleteMemoryFile: "delete_memory_file",
+ deleteMemoryProject: "delete_memory_project",
+ // 使用统计（设置 › 使用统计）：会话 jsonl 里 usage 的聚合（只读）
+ getUsageStats: "get_usage_stats",
+ // 供应商用量（设置 › 供应商用量）：`omp usage --json` 的各供应商滚动窗口（只读）
+ getProviderUsage: "get_provider_usage",
+ // omp 常用设置（设置 ›「常用设置」）：白名单键的批量读 / 单键写 / 恢复默认（写 omp 全局配置）
+ getOmpSettings: "get_omp_settings",
+ setOmpSetting: "set_omp_setting",
+ resetOmpSetting: "reset_omp_setting",
+ // 自定义模型（设置 › 供应商）：omp `models.yml` 的读写——上游没有 CLI 写入口，写文件是唯一路径
+ readModelsConfig: "read_models_config",
+ writeModelsConfig: "write_models_config",
+ // 会话标题语言（V18）：把界面语言同步成 omp 的 `<agentDir>/TITLE_SYSTEM.md`（标题生成 prompt）
+ syncTitlePrompt: "sync_title_prompt",
+ // events
+ /** 供应商登录进度（payload = 全量 ProviderLoginStatus 快照）。 */
+ providerLogin: "omp-provider://login",
+ /**
+  * 模型目录快照刷新完成（payload = 全量 ModelCatalog）。
+  * `omp models --json` 实测 2–10s：后端把目录拉取收敛成单飞 + 缓存（过期只后台刷新），
+  * 新快照完成后广播——已挂载的设置页（模型 / 供应商）据此原地更新，不必自己重拉。
+  */
+ modelsRefreshed: "omp-models://catalog",
 } as const;

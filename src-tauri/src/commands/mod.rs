@@ -1,7 +1,7 @@
 use serde::Serialize;
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, future::Future, path::PathBuf};
 use tokio::sync::Mutex;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{overlay::*, session_scan::*};
 
@@ -12,6 +12,10 @@ pub struct AppState {
     pub omp_path: Mutex<Option<String>>,
     pub omp_version: Mutex<Option<String>>,
     pub models_cache: Mutex<Option<(i64, serde_json::Value)>>,
+    /// 模型目录拉取的**单飞锁**：`omp models --json` 实测 2–10s（上游要拉各供应商的
+    /// 模型列表，抖动大），而读取方有四个（启动预取 / 健康检查 / 供应商页 / 模型页）
+    /// ——必须共用同一次拉取（见 [`load_catalog`]）。
+    pub models_fetch: Mutex<()>,
     /// 进行中的供应商登录（同一时刻只允许一个）。
     pub login: std::sync::Arc<Mutex<Option<crate::providers::LoginSession>>>,
     /// 最近一次登录的进度快照（切走设置页再回来时用它补齐，见 `providers.rs`）。
@@ -188,12 +192,17 @@ pub struct HealthInfo {
 }
 
 #[tauri::command]
-pub async fn get_health(state: State<'_, AppState>) -> Result<HealthInfo, CmdError> {
+pub async fn get_health(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<HealthInfo, CmdError> {
     let omp = locate_omp(state.clone()).await?;
     let mut models_error = None;
-    if let Some(ref p) = omp.omp_path {
-        if let Err(e) = run_cmd(p, &["models", "--json"]) {
-            models_error = Some(format!("模型目录加载失败：{e}"));
+    if omp.omp_path.is_some() {
+        // 目录走缓存（SWR）：健康检查的职责是「omp 能不能用」，不该每次重拉目录——
+        // `omp models --json` 实测 2–10s，这是启动慢与「重新检测」慢的主要来源。
+        if let Err(e) = catalog_swr(&state, &app).await {
+            models_error = Some(format!("模型目录加载失败：{}", e.message));
         }
     } else {
         models_error = Some("未找到 omp，无法加载模型目录".into());
@@ -209,37 +218,149 @@ pub async fn get_overlay(state: State<'_, AppState>) -> Result<Overlay, CmdError
     Ok(state.overlay.lock().await.clone())
 }
 
-// ---------- 模型 ----------
+// ---------- 模型目录（唯一读取入口） ----------
 
-#[tauri::command]
-pub async fn get_models(state: State<'_, AppState>) -> Result<serde_json::Value, CmdError> {
-    if let Some((at, v)) = state.models_cache.lock().await.clone() {
-        if chrono::Utc::now().timestamp_millis() - at < 5 * 60_000 {
+/// 模型目录（`omp models --json`）的缓存有效期：过期后由读取方顺带**后台**刷新
+/// （stale-while-revalidate），只有从未拉过时才阻塞等待。
+pub const MODELS_TTL_MS: i64 = 5 * 60_000;
+/// 目录快照刷新完成的事件通道（payload = `{models, fetchedAt}` 目录快照）。
+/// 冷启动 / 后台刷新完成后广播——已挂载的设置页据此在原地换成新目录，不必自己轮询重拉。
+pub const MODELS_EVENT: &str = "omp-models://catalog";
+
+/// 快照是否仍在有效期内（纯函数，单测锁着）。
+pub fn catalog_fresh(at: i64, now: i64) -> bool {
+    now - at < MODELS_TTL_MS
+}
+
+/// 单飞 + SWR 的缓存读取核心（与 Tauri 解耦，单测锁着；[`load_catalog`] 是它的一个实例）。
+///
+/// - `force = false`：缓存新鲜（< `ttl_ms`）直接命中；过期才考虑真拉。
+/// - 需要真拉的路径都先抢 `lock`（**单飞**）：等锁后二次检查——若缓存时间戳晚于本次请求
+///   起点（别人刚拉完），直接复用，**不重复拉**。
+pub(crate) async fn load_cached<T, E, F, Fut>(
+    cache: &Mutex<Option<(i64, T)>>,
+    lock: &Mutex<()>,
+    force: bool,
+    ttl_ms: i64,
+    fetch: F,
+) -> Result<T, E>
+where
+    T: Clone,
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+{
+    let started = chrono::Utc::now().timestamp_millis();
+    if !force {
+        if let Some((at, v)) = cache.lock().await.clone() {
+            if started - at < ttl_ms {
+                return Ok(v);
+            }
+        }
+    }
+    let _guard = lock.lock().await;
+    if let Some((at, v)) = cache.lock().await.clone() {
+        // 等锁期间别人拉过：更新的（或仍然新鲜的）快照直接用，不再重复拉
+        if at >= started || (!force && chrono::Utc::now().timestamp_millis() - at < ttl_ms) {
             return Ok(v);
         }
     }
-    refresh_models(state).await
+    let v = fetch().await?;
+    *cache.lock().await = Some((chrono::Utc::now().timestamp_millis(), v.clone()));
+    Ok(v)
+}
+
+/// 模型目录的**唯一读取入口**（`get_models` / `refresh_models` / 健康检查 / 供应商页都走它）。
+///
+/// **为什么要单飞**：`omp models --json` 实测 2–10s（上游要拉各供应商的模型列表，抖动大），
+/// 没有单飞时四个读取方会各起一个进程（实测设置页里最多并发三个）——总延迟按最慢的算，
+/// CPU / 网络翻倍。
+///
+/// - `force = false`：快照新鲜（< [`MODELS_TTL_MS`]）直接命中；过期则真拉一次。
+/// - `force = true`（用户点「刷新」）：必拉；但等锁期间若别人刚拉完（快照时间戳晚于本次
+///   请求起点），直接用它——同一份数据不重复拉。
+pub async fn load_catalog(
+    state: &State<'_, AppState>,
+    app: &AppHandle,
+    force: bool,
+) -> Result<serde_json::Value, CmdError> {
+    load_cached(
+        &state.models_cache,
+        &state.models_fetch,
+        force,
+        MODELS_TTL_MS,
+        || async {
+            // omp 定位走 `discover_omp_path`（唯一入口：覆盖层 → 登录 shell → 常见路径），
+            // 而不是诊断状态里的 `state.omp_path`——那个只在 `locate_omp` 成功后才非空，
+            // 用它会让「诊断还没跑完 / 探测失败」连模型目录一起拖垮（供应商页与 ModelPicker 都会中招）。
+            let Some(p) = discover_omp_path(state) else {
+                return Err(cmd_err("OMP_MISSING", "未找到 omp，无法加载模型目录".into(), Some("请先安装 oh-my-pi".into())));
+            };
+            *state.omp_path.lock().await = Some(p.clone());
+            // 拉取最长可到 10s：`run_cmd` 是同步子进程，放 `spawn_blocking` 别占 tokio 工作线程
+            let out = tokio::task::spawn_blocking(move || run_cmd(&p, &["models", "--json"]))
+                .await
+                .map_err(|e| cmd_err("MODELS_FAILED", format!("模型目录加载失败：{e}"), Some("重试或检查网络".into())))?
+                .map_err(|e| cmd_err("MODELS_FAILED", format!("模型目录加载失败：{e}"), Some("重试或检查网络".into())))?;
+            let v: serde_json::Value =
+                serde_json::from_str(&out).map_err(|e| cmd_err("MODELS_PARSE", format!("模型目录解析失败：{e}"), None))?;
+            let catalog = serde_json::json!({
+                "models": v.get("models").cloned().unwrap_or(serde_json::Value::Array(vec![])),
+                "fetchedAt": chrono::Utc::now().timestamp_millis(),
+            });
+            // 广播新快照：设置页（模型 / 供应商）据此在原地更新，不必自己重拉
+            let _ = app.emit(MODELS_EVENT, &catalog);
+            Ok(catalog)
+        },
+    )
+    .await
+}
+
+/// SWR 读取：有快照立即返回（哪怕过期——过期时顺带起一次**后台**刷新，完成后广播事件）；
+/// 从未拉过才阻塞等待。
+///
+/// 给「目录是参考信息、不该拖慢页面」的调用方用（健康检查 / 供应商页的已配置标记）：
+/// `omp models --json` 2–10s，等它只会让页面白等。
+pub async fn catalog_swr(
+    state: &State<'_, AppState>,
+    app: &AppHandle,
+) -> Result<serde_json::Value, CmdError> {
+    let cached = state.models_cache.lock().await.clone();
+    match cached {
+        Some((at, v)) => {
+            if !catalog_fresh(at, chrono::Utc::now().timestamp_millis()) {
+                spawn_catalog_refresh(app);
+            }
+            Ok(v)
+        }
+        None => load_catalog(state, app, false).await,
+    }
+}
+
+/// 起一次后台目录刷新（不等待）。已有拉取在飞时，[`load_catalog`] 会等锁后直接复用结果。
+pub fn spawn_catalog_refresh(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let _ = load_catalog(&state, &app, false).await;
+    });
+}
+
+// ---------- 模型 ----------
+
+#[tauri::command]
+pub async fn get_models(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, CmdError> {
+    load_catalog(&state, &app, false).await
 }
 
 #[tauri::command]
-pub async fn refresh_models(state: State<'_, AppState>) -> Result<serde_json::Value, CmdError> {
-    // omp 定位走 `discover_omp_path`（唯一入口：覆盖层 → 登录 shell → 常见路径），
-    // 而不是诊断状态里的 `state.omp_path`——那个只在 `locate_omp` 成功后才非空，
-    // 用它会让「诊断还没跑完 / 探测失败」连模型目录一起拖垮（供应商页与 ModelPicker 都会中招）。
-    let Some(p) = discover_omp_path(&state) else {
-        return Err(cmd_err("OMP_MISSING", "未找到 omp，无法加载模型目录".into(), Some("请先安装 oh-my-pi".into())));
-    };
-    *state.omp_path.lock().await = Some(p.clone());
-    let out = run_cmd(&p, &["models", "--json"])
-        .map_err(|e| cmd_err("MODELS_FAILED", format!("模型目录加载失败：{e}"), Some("重试或检查网络".into())))?;
-    let v: serde_json::Value =
-        serde_json::from_str(&out).map_err(|e| cmd_err("MODELS_PARSE", format!("模型目录解析失败：{e}"), None))?;
-    let catalog = serde_json::json!({
-        "models": v.get("models").cloned().unwrap_or(serde_json::Value::Array(vec![])),
-        "fetchedAt": chrono::Utc::now().timestamp_millis(),
-    });
-    *state.models_cache.lock().await = Some((chrono::Utc::now().timestamp_millis(), catalog.clone()));
-    Ok(catalog)
+pub async fn refresh_models(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, CmdError> {
+    load_catalog(&state, &app, true).await
 }
 
 // ---------- 项目 ----------
@@ -436,10 +557,10 @@ fn project_display_name(path: &str) -> String {
         .to_string()
 }
 
-/// 左栏树数据源：每个项目 = 主目录行 + 该仓库的全部 worktree 行。
+/// 左栏树数据源：每个项目 = 主目录行 + 该仓库的全部 worktree 行（只读展示）。
 ///
 /// worktree 真相 = `git worktree list --porcelain`（手工 `git worktree add` 的也在），
-/// 而不是 `omp worktree list`（只登记 `~/.omp/wt` 下的）；创建路径才走 omp 的约定。
+/// 而不是 `omp worktree list`（只登记 `~/.omp/wt` 下的）。
 #[tauri::command]
 pub async fn list_workspaces(state: State<'_, AppState>) -> Result<Vec<WorkspaceView>, CmdError> {
     let projects: Vec<(String, String, String)> = {
@@ -482,96 +603,6 @@ pub async fn list_workspaces(state: State<'_, AppState>) -> Result<Vec<Workspace
         }
     }
     Ok(out)
-}
-
-/// 「确保某分支有一个可工作的目录」：
-/// - 该分支已检出（主目录或任一 worktree）→ 直接返回那个工作区，不重复创建；
-/// - 否则 `omp worktree add` 到 `~/.omp/wt/<repo>-<branch-slug>`（clone-first 与
-///   管理目录都是 omp 的既有约定，壳侧不自造）。
-///
-/// `new_branch=true` 表示分支尚不存在、要新建（`-b`）；false = 检出已有分支。
-/// `base` 只在新建分支时生效：`None` = 基于当前 HEAD；`Some("remote")` = 基于远端默认分支
-/// 的最新（先 `git fetch` 再拿 `<remote>/<默认分支>` 当基线）。
-#[tauri::command]
-pub async fn create_worktree(
-    state: State<'_, AppState>,
-    project_id: String,
-    branch: String,
-    new_branch: bool,
-    base: Option<String>,
-) -> Result<WorkspaceView, CmdError> {
-    let branch = branch.trim().to_string();
-    // git 分支名的保守子集校验（真正的合法性由 git 判定，这里只挡明显坏输入：
-    // 空、空白、`..`、以 `-` 开头、路径分隔符——它们要么会让 git 报难懂的错，要么是注入面）。
-    if branch.is_empty()
-        || branch.contains(char::is_whitespace)
-        || branch.contains("..")
-        || branch.starts_with('-')
-        || branch.starts_with('/')
-        || branch.ends_with('/')
-        || branch.ends_with(".lock")
-        || branch.contains("@{")
-        || branch.contains('\\')
-    {
-        return Err(cmd_err("BAD_BRANCH", "分支名不合法".into(), None));
-    }
-    let (proj_path, proj_name) = {
-        let ov = state.overlay.lock().await;
-        let Some(p) = ov.projects.iter().find(|p| p.id == project_id) else {
-            return Err(cmd_err("NOT_FOUND", "项目不存在".into(), None));
-        };
-        (p.path.clone(), project_display_name(&p.path))
-    };
-    if !std::path::Path::new(&proj_path).is_dir() {
-        return Err(cmd_err("DIR_MISSING", "项目目录不存在".into(), None));
-    }
-    let git = crate::git_info::git_bin().await;
-    // 已检出 → 幂等返回（含主目录：分支就在那里）
-    if let Some(g) = &git {
-        for (i, w) in crate::git_info::list_worktrees(g, &proj_path).await.iter().enumerate() {
-            if w.branch.as_deref() == Some(branch.as_str()) {
-                return Ok(WorkspaceView {
-                    project_id,
-                    project_name: proj_name,
-                    path: if i == 0 { proj_path.clone() } else { w.path.clone() },
-                    branch: w.branch.clone(),
-                    head: w.head.clone(),
-                    is_main: i == 0,
-                    missing: false,
-                });
-            }
-        }
-    }
-    let bin = discover_omp_path(&state)
-        .ok_or_else(|| cmd_err("OMP_MISSING", "未找到 omp，无法创建 worktree".into(), None))?;
-    *state.omp_path.lock().await = Some(bin.clone());
-    let home = std::env::var("HOME").map_err(|_| cmd_err("NO_HOME", "无法确定 HOME 目录".into(), None))?;
-    let slug = branch.replace('/', "-");
-    let wt_path = format!("{home}/.omp/wt/{proj_name}-{slug}");
-    // 「基于远端最新」：先 fetch 再拿 <remote>/<默认分支> 当基线（只在新建分支时有意义）
-    let base_ref: Option<String> = match (new_branch, base.as_deref()) {
-        (true, Some("remote")) => {
-            let g = git
-                .clone()
-                .ok_or_else(|| cmd_err("GIT_MISSING", "未找到 git，无法拉取远端".into(), None))?;
-            Some(crate::git_ops::resolve_remote_base(&g, &proj_path).await?)
-        }
-        _ => None,
-    };
-    let args = crate::git_ops::worktree_add_args(new_branch, &branch, &wt_path, base_ref.as_deref());
-    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    crate::providers::run_omp_in(Some(std::path::Path::new(&proj_path)), &bin, &arg_refs)
-        .await
-        .map_err(|e| cmd_err("WORKTREE_ADD", format!("创建 worktree 失败：{e}"), None))?;
-    Ok(WorkspaceView {
-        project_id,
-        project_name: proj_name,
-        path: wt_path,
-        branch: Some(branch),
-        head: None,
-        is_main: false,
-        missing: false,
-    })
 }
 
 /// 归属匹配集：项目路径 ∪ 其全部 worktree 路径（同 project id）。
@@ -921,20 +952,6 @@ async fn delete_session_inner(state: &State<'_, AppState>, id: &str) -> Result<(
     Ok(())
 }
 
-/// 输入框上方上下文条的 git **只读**查询：当前分支 + 本地分支清单 + 脏工作区标记。
-/// 目录不存在 / 不是仓库 / 找不到 git 都返回降级值（`isRepo:false`），不算命令失败——
-/// 前端据此只隐藏分支展示，绝不把「这里不是 git 仓库」变成一条错误横幅。
-#[tauri::command]
-pub async fn get_git_info(path: String) -> Result<crate::git_info::GitInfo, CmdError> {
-    if !crate::git_info::dir_exists(&path) {
-        return Ok(crate::git_info::GitInfo::not_repo(Some("目录不存在".into())));
-    }
-    let Some(git) = crate::git_info::git_bin().await else {
-        return Ok(crate::git_info::GitInfo::not_repo(Some("未找到 git".into())));
-    };
-    Ok(crate::git_info::read_git_info(&git, &path).await)
-}
-
 pub fn load_state(app: &AppHandle) -> AppState {
     let dir = app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
     let overlay_path = dir.join("omp-mini").join("overlay.json");
@@ -950,6 +967,7 @@ pub fn load_state(app: &AppHandle) -> AppState {
         omp_path: Mutex::new(None),
         omp_version: Mutex::new(None),
         models_cache: Mutex::new(None),
+        models_fetch: Mutex::new(()),
         login: std::sync::Arc::new(Mutex::new(None)),
         login_status: std::sync::Arc::new(Mutex::new(Default::default())),
         roles_edit: Mutex::new(()),
@@ -962,7 +980,7 @@ pub fn load_state(app: &AppHandle) -> AppState {
 
 #[cfg(test)]
 mod tests {
-    use super::{list_archived_in, owner_project, scan_window};
+    use super::{catalog_fresh, list_archived_in, load_cached, owner_project, scan_window, MODELS_TTL_MS};
     use std::collections::HashMap;
 
     /// 会话归属：与 `list_sessions` 同一条规则（真实路径前缀匹配、最长优先）。
@@ -1072,6 +1090,56 @@ mod tests {
         // 过小/过大都夹回合法区间，offset 原样透传
         assert_eq!(scan_window(Some(0), None), (1, 0));
         assert_eq!(scan_window(Some(99999), None), (5000, 0));
+    }
+
+    /// 目录快照的新鲜判定：TTL 内算新鲜，刚好到 TTL 就算过期（严格小于）。
+    #[test]
+    fn catalog_freshness_boundary() {
+        assert!(catalog_fresh(1_000, 1_000 + MODELS_TTL_MS - 1));
+        assert!(!catalog_fresh(1_000, 1_000 + MODELS_TTL_MS));
+        assert!(!catalog_fresh(1_000, 1_000 + MODELS_TTL_MS + 5_000));
+    }
+
+    /// 目录缓存核心：TTL 内命中、过期重拉、**并发只真拉一次**（单飞 + 等锁二次检查）。
+    #[tokio::test]
+    async fn load_cached_single_flight_and_ttl() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use tokio::sync::Mutex;
+        let cache: Mutex<Option<(i64, i32)>> = Mutex::new(None);
+        let lock = Mutex::new(());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let fetch = |calls: Arc<AtomicUsize>| async move {
+            calls.fetch_add(1, Ordering::SeqCst);
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            Ok::<i32, String>(7)
+        };
+        let n = || calls.load(Ordering::SeqCst);
+
+        // 冷缓存并发三个：只有第一个真拉，其余等锁后复用
+        let (a, b, c) = tokio::join!(
+            load_cached(&cache, &lock, false, 60_000, || fetch(calls.clone())),
+            load_cached(&cache, &lock, false, 60_000, || fetch(calls.clone())),
+            load_cached(&cache, &lock, false, 60_000, || fetch(calls.clone())),
+        );
+        assert_eq!((a.unwrap(), b.unwrap(), c.unwrap()), (7, 7, 7));
+        assert_eq!(n(), 1, "并发只真拉一次");
+
+        // 新鲜缓存：再读不拉
+        assert_eq!(load_cached(&cache, &lock, false, 60_000, || fetch(calls.clone())).await.unwrap(), 7);
+        assert_eq!(n(), 1);
+
+        // 过期（ttl 0 → 任何缓存都过期）→ 真拉一次。同样睡 2ms：同一毫秒内刚写入的快照
+        // 会被二次检查当成「别人刚拉过」而复用（时间戳是毫秒精度）
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        assert_eq!(load_cached(&cache, &lock, false, 0, || fetch(calls.clone())).await.unwrap(), 7);
+        assert_eq!(n(), 2);
+
+        // force：即使新鲜也真拉（用户点「刷新」的语义）。睡 2ms 让请求起点严格晚于上次
+        // 写入——同一毫秒内的并发写入会被复用（等锁二次检查按毫秒判定）。
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        assert_eq!(load_cached(&cache, &lock, true, 60_000, || fetch(calls.clone())).await.unwrap(), 7);
+        assert_eq!(n(), 3);
     }
 
 }

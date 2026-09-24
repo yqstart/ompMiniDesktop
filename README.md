@@ -15,7 +15,7 @@ oh-my-pi（`omp`）的极简桌面端 —— 左侧项目 / 分支树，右侧 o
 
 ## 功能概览
 
-- **项目 / 工作区**：添加本地目录、移除（仅解绑）、目录缺失标记与重定位；每个项目下列出主目录与全部 git worktree（分支名 + `worktree` 徽章），「新建 worktree」按分支创建（走 `omp worktree add`，clone-first，目录在 `~/.omp/wt/`）。
+- **项目 / 工作区**：添加本地目录、移除（项目行 hover 的「移除项目」——仅解绑 + 该项目会话标记归档，走二次确认）、目录缺失标记与重定位；每个项目下列出主目录与全部 git worktree（分支名 + `worktree` 徽章，**只读展示**：要新建 / 删除 worktree 走 `omp worktree add` / `git worktree remove` 命令行）；项目头的文件夹图标会为「当前打开的项目」上强调色。
 - **终端**：每个标签页 = 一个跑在 PTY 里的 `omp` 交互式会话；多标签、`⌘T` 新建 / `⌘W` 关闭 / `⌘1..9` 切换；关闭运行中的终端二次确认（防误杀进行中的 agent）；进程退出后显示退出码并可重启；omp 的会话名经 OSC 标题更新到标签页。右栏按左栏选中的工作区过滤——只列当前分支的终端（别的分支的照常跑，左栏工作区行上的徽章显示数量，`⌘⇧K` 可全局跳过去）。
 - **会话弹窗**：项目行的「会话」入口列出该项目（含全部 worktree）的会话——点击在新终端 `omp --resume` 接着聊；行内归档 / 恢复 / 删除（删除二次确认）。
 - **已归档对话**（设置 ›）：归档会话的统一管理面（不受列表扫描窗口限制，按项目分组），「打开」= 恢复并在终端里继续；删除真删 jsonl。
@@ -102,7 +102,7 @@ pnpm tauri:build    # 产物见 src-tauri/target/release/bundle/
 ## 架构速览
 
 ```
-左栏：list_workspaces（项目 × `git worktree list --porcelain`；创建走 `omp worktree add`）
+左栏：list_workspaces（项目 × `git worktree list --porcelain`，只读；创建 / 删除走命令行）
 右侧：xterm.js ← Tauri Channel ← PTY 读线程（增量 UTF-8 解码）← `omp --cwd <dir>`（交互式 TUI）
       键盘 pty_write / 尺寸 pty_resize / 关闭 pty_kill →
 会话：~/.omp/agent/sessions/<slug>/*.jsonl（TUI 自己写；壳侧弹窗读同一份真相）
@@ -132,7 +132,6 @@ pnpm tauri:build    # 产物见 src-tauri/target/release/bundle/
 | 终端里 `command not found` / 找不到 node | 终端进程的 PATH 取登录 shell 的探测结果；确认登录 shell 里能跑（`zsh -ilc 'command -v node'`） |
 | 项目「目录缺失」 | 重定位到新路径，或移除项目（会话归档保留） |
 | 会话「已损坏」 | jsonl 头部解析失败，不阻塞列表，可在弹窗或归档页删除 |
-| 新建 worktree 报「already checked out」 | 该分支已在某个工作区（主目录或另一 worktree）检出——直接点那个工作区行即可 |
 | 打开的终端没有响应 | 终端进程退出后浮层会给「重启」；或点 `×` 关闭后重开（运行中关闭会先确认） |
 | 反复弹「“ompMiniDesktop”想访问“桌面”（/文稿/下载）文件夹」，明明已授过权 | macOS 按「签名身份」记授权，本应用目前是 adhoc 签名（`signingIdentity: "-"`），且 `tauri:dev` 每次编译都是新二进制 → 系统认作新应用，旧授权即失效，只能重弹（发版包同理：每次更新弹一次）。已加 `src-tauri/Info.plist` 用量说明，打包后授权框会显示中文用途（只改文案，不解决 adhoc 不持久）。根治需 Apple Developer ID 签名+公证；眼前绕行：把项目移出桌面/文稿/下载（如 `~/Projects`，不在保护目录内），或固定用同一份打包产物少重编。授权状态错乱时可 `tccutil reset SystemPolicyDesktopFolder com.omnidesktop.mini` 后重授（仅对打包产物有效，dev 二进制每次重编身份都变） |
 

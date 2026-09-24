@@ -1,32 +1,26 @@
-//! 壳侧 git 写操作（V19）：变更集读取、勾选 → 暂存区同步、worktree 生命周期。
+//! 壳侧 git 写操作（V19）：变更集读取、勾选 → 暂存区同步。
 //!
 //! 分工（V19 起）：**git 的写操作由壳侧用 git CLI 直接做**——快、可预期、错误就是 git
-//! 原文；`omp` 只负责「用哪个模型、怎么出提交信息」（见 `commit_msg.rs`）以及它自己的
-//! worktree 命名约定（创建仍走 `omp worktree add`）。这替代了 V14「壳只做编排、不碰
-//! git index 语义」的口径，理由就是速度与可控性（V14 每次提交要跑完整条 `omp commit`
-//! agent 流水线，实测 16–35s）。
+//! 原文；`omp` 只负责「用哪个模型、怎么出提交信息」（见 `commit_msg.rs`）。这替代了
+//! V14「壳只做编排、不碰 git index 语义」的口径，理由就是速度与可控性（V14 每次提交
+//! 要跑完整条 `omp commit` agent 流水线，实测 16–35s）。
 //!
 //! 本模块只放「读状态 / 建参数 / 解析输出」的纯函数（全部带单测）与少量 git 调用；
 //! 提交 / 推送的**任务编排**在 `git_commit.rs`。
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::State;
 
-use crate::commands::{cmd_err, AppState, CmdError};
-use crate::git_info::{dir_exists, git_bin, list_worktrees, run_git, run_git_timeout};
+use crate::commands::{cmd_err, CmdError};
+use crate::git_info::{dir_exists, git_bin, run_git, run_git_timeout};
 
 /// 变更集里一个文件的上限保护：超大仓库不把整表塞给前端（够用且不卡界面）。
 const MAX_CHANGE_FILES: usize = 2000;
-/// 大仓库里可能偏慢的 git 操作（status / add / worktree remove）：给 30s，超时才报失败。
+/// 大仓库里可能偏慢的 git 操作（status / add）：给 30s，超时才报失败。
 /// 只读的行徽章那条链路仍用 `git_info::GIT_TIMEOUT`（4s）——那是背景刷新，慢就降级。
 const SLOW: Duration = Duration::from_secs(30);
-/// `git fetch` 要走网络，单独给宽一点。
-const FETCH_TIMEOUT: Duration = Duration::from_secs(120);
-
 // ---------- 类型（与前端 `shared/types.ts` 同构） ----------
 
 /// 一个待提交的文件（`git status --porcelain=v1 -z` 一行 + numstat 的增删行数）。
@@ -79,24 +73,6 @@ impl ChangeSet {
             files: vec![],
         }
     }
-}
-
-/// `omp worktree list --json` 里的孤儿条目（目录还在，但已经不是活 worktree）。
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OrphanWorktree {
-    pub path: String,
-    pub kind: Option<String>,
-    pub parent_repo: Option<String>,
-    pub orphan_reason: String,
-}
-
-/// `omp worktree clear --json` 的结果。
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OrphanClearResult {
-    pub removed: u32,
-    pub failed: u32,
 }
 
 // ---------- 纯函数（全部带单测） ----------
@@ -263,103 +239,6 @@ pub fn push_args(branch: &str, has_upstream: bool, remotes: &[String]) -> Result
     }
 }
 
-/// 新建 worktree 的参数（`omp worktree add`；`-q` 静音、新分支带 `-b`、base 可选）。
-pub fn worktree_add_args(new_branch: bool, branch: &str, wt_path: &str, base: Option<&str>) -> Vec<String> {
-    let mut args: Vec<String> = vec!["worktree".into(), "add".into(), "-q".into()];
-    if new_branch {
-        args.push("-b".into());
-        args.push(branch.to_string());
-        args.push(wt_path.to_string());
-        if let Some(b) = base.map(str::trim).filter(|b| !b.is_empty()) {
-            args.push(b.to_string());
-        }
-    } else {
-        args.push(wt_path.to_string());
-        args.push(branch.to_string());
-    }
-    args
-}
-
-/// `git worktree prune -v` 的输出 → 非空行（每条 = 一条被清掉的失效登记）。
-pub fn parse_prune_verbose(out: &str) -> Vec<String> {
-    out.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect()
-}
-
-/// 选远端：优先 `origin`，否则只有唯一一个 remote 时用它；多个且无 origin 不猜。
-pub fn pick_remote(remotes: &[String]) -> Option<String> {
-    if let Some(origin) = remotes.iter().find(|r| r.as_str() == "origin") {
-        return Some(origin.clone());
-    }
-    match remotes {
-        [only] => Some(only.clone()),
-        _ => None,
-    }
-}
-
-/// 远端默认分支名：`<remote>/HEAD` 的符号引用优先，其次本地已有的 `<remote>/main` / `<remote>/master`。
-pub fn remote_default_branch(remote: &str, symbolic: Option<&str>, refs: &[String]) -> Option<String> {
-    if let Some(sym) = symbolic {
-        let t = sym.trim();
-        if let Some(rest) = t.strip_prefix(&format!("{remote}/")) {
-            if !rest.is_empty() {
-                return Some(rest.to_string());
-            }
-        }
-    }
-    for cand in ["main", "master"] {
-        let full = format!("{remote}/{cand}");
-        if refs.iter().any(|r| r.trim() == full) {
-            return Some(cand.to_string());
-        }
-    }
-    None
-}
-
-/// 「新建分支 + 基于远端最新」用的基线：先 `fetch` 再给出 `<remote>/<branch>`。
-/// 没有远端 / 认不出默认分支都会给出可执行的错误提示（不静默挑一个分支）。
-pub(crate) async fn resolve_remote_base(git: &str, cwd: &str) -> Result<String, CmdError> {
-    let remotes: Vec<String> = run_git(git, cwd, &["remote"])
-        .await
-        .map_err(|e| cmd_err("REMOTE_LIST", e, None))?
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .map(str::to_string)
-        .collect();
-    let remote = pick_remote(&remotes).ok_or_else(|| {
-        cmd_err(
-            "NO_REMOTE",
-            "没有配置远程仓库".into(),
-            Some("在终端里执行 git remote add origin <url>".into()),
-        )
-    })?;
-    let symbolic = run_git(git, cwd, &["symbolic-ref", "--short", "-q", &format!("refs/remotes/{remote}/HEAD")])
-        .await
-        .ok();
-    let refs: Vec<String> = run_git(git, cwd, &["for-each-ref", "--format=%(refname:short)", &format!("refs/remotes/{remote}")])
-        .await
-        .unwrap_or_default()
-        .lines()
-        .map(str::to_string)
-        .collect();
-    let branch = remote_default_branch(&remote, symbolic.as_deref(), &refs).ok_or_else(|| {
-        cmd_err(
-            "UNKNOWN_DEFAULT_BRANCH",
-            "无法确定远端默认分支".into(),
-            Some("先在终端里 git fetch 一次，或改用「当前 HEAD」基线".into()),
-        )
-    })?;
-    run_git_timeout(git, cwd, &["fetch", &remote, &branch], FETCH_TIMEOUT)
-        .await
-        .map_err(|e| cmd_err("FETCH_FAILED", format!("拉取远端失败：{e}"), None))?;
-    Ok(format!("{remote}/{branch}"))
-}
-
-/// 解析 `git status --porcelain` 的非空条目数（worktree 脏检查用）。
-pub fn count_status_entries(out: &str) -> u32 {
-    out.lines().filter(|l| !l.trim().is_empty()).count() as u32
-}
-
 // ---------- git 调用 ----------
 
 /// 读当前已暂存的文件（`git diff --cached --name-only -z`）。
@@ -404,17 +283,6 @@ pub(crate) async fn apply_selection(git: &str, cwd: &str, paths: &[String]) -> R
         ));
     }
     Ok(())
-}
-
-/// 是否同一个路径（git 在 macOS 上会回 `/private/var/…` 这类规范化形式）。
-fn same_path(a: &str, b: &str) -> bool {
-    if a == b {
-        return true;
-    }
-    match (Path::new(a).canonicalize(), Path::new(b).canonicalize()) {
-        (Ok(x), Ok(y)) => x == y,
-        _ => false,
-    }
 }
 
 // ---------- 命令 ----------
@@ -463,160 +331,6 @@ pub async fn get_change_set(cwd: String) -> Result<ChangeSet, CmdError> {
         None
     };
     Ok(ChangeSet { is_repo: true, branch, head, upstream, upstream_gone, ahead, behind, files })
-}
-
-/// 删除一个 worktree（`git worktree remove` + `git worktree prune`）。
-///
-/// - 主目录不能删（`WORKTREE_MAIN`）；
-/// - 有未提交改动且 `force = false` → `WORKTREE_DIRTY`（前端拿到这个码后弹二次确认，再带 force 重试）；
-/// - 同目录有提交任务在跑 → `WORKTREE_BUSY`；
-/// - 目录已经不在了（登记残留）→ 直接跑 `prune`，把失效登记清掉。
-#[tauri::command]
-pub async fn remove_worktree(
-    state: State<'_, AppState>,
-    project_id: String,
-    path: String,
-    force: bool,
-) -> Result<(), CmdError> {
-    let git = git_bin()
-        .await
-        .ok_or_else(|| cmd_err("GIT_MISSING", "未找到 git，无法删除 worktree".into(), None))?;
-    let proj_path = {
-        let ov = state.overlay.lock().await;
-        ov.projects.iter().find(|p| p.id == project_id).map(|p| p.path.clone())
-    }
-    .ok_or_else(|| cmd_err("NOT_FOUND", "项目不存在".into(), None))?;
-    {
-        let tasks = state.commit_tasks.lock().unwrap_or_else(|e| e.into_inner());
-        if tasks.contains_key(&path) {
-            return Err(cmd_err(
-                "WORKTREE_BUSY",
-                "该 worktree 还有提交任务在跑，先等它结束".into(),
-                None,
-            ));
-        }
-    }
-    remove_worktree_core(&git, &proj_path, &path, force).await
-}
-
-/// 删除动作的核心（与命令分开，便于用真实仓库测）：
-/// 主目录拒绝、脏目录需 force、目录已缺失则只 prune。
-pub(crate) async fn remove_worktree_core(
-    git: &str,
-    proj_path: &str,
-    path: &str,
-    force: bool,
-) -> Result<(), CmdError> {
-    let worktrees = list_worktrees(git, proj_path).await;
-    let Some(entry) = worktrees.iter().find(|w| same_path(&w.path, path)) else {
-        // 登记里没有它（可能刚被手工删掉）：跑一次 prune 让两侧都干净
-        run_git(git, proj_path, &["worktree", "prune"])
-            .await
-            .map_err(|e| cmd_err("WORKTREE_PRUNE", e, None))?;
-        return Ok(());
-    };
-    if entry.main {
-        return Err(cmd_err("WORKTREE_MAIN", "主目录不能被删除".into(), None));
-    }
-    if !dir_exists(path) {
-        run_git(git, proj_path, &["worktree", "prune"])
-            .await
-            .map_err(|e| cmd_err("WORKTREE_PRUNE", e, None))?;
-        return Ok(());
-    }
-    if !force {
-        let status = run_git_timeout(git, path, &["status", "--porcelain", "-uall"], SLOW)
-            .await
-            .map_err(|e| cmd_err("STATUS_FAILED", e, None))?;
-        let changed = count_status_entries(&status);
-        if changed > 0 {
-            return Err(cmd_err(
-                "WORKTREE_DIRTY",
-                format!("worktree 里有未提交改动（{changed} 个文件），删除会永久丢失"),
-                Some("确认后再次调用并带上 force".into()),
-            ));
-        }
-    }
-    let mut args: Vec<String> = vec!["worktree".into(), "remove".into()];
-    if force {
-        args.push("--force".into());
-    }
-    args.push(path.to_string());
-    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    run_git_timeout(git, proj_path, &refs, SLOW)
-        .await
-        .map_err(|e| cmd_err("WORKTREE_REMOVE", format!("删除 worktree 失败：{e}"), None))?;
-    // 顺带清掉残留登记（目录已删，git 的 admin 文件可能还没回收）
-    run_git(git, proj_path, &["worktree", "prune"]).await.ok();
-    Ok(())
-}
-
-/// 清理失效登记（`git worktree prune -v`）：目录已被手工删掉、git 还记着的那些。
-/// 返回被清掉的条目（原文行），供界面显示条数。
-#[tauri::command]
-pub async fn prune_worktrees(state: State<'_, AppState>, project_id: String) -> Result<Vec<String>, CmdError> {
-    let git = git_bin().await.ok_or_else(|| cmd_err("GIT_MISSING", "未找到 git".into(), None))?;
-    let proj_path = {
-        let ov = state.overlay.lock().await;
-        ov.projects.iter().find(|p| p.id == project_id).map(|p| p.path.clone())
-    }
-    .ok_or_else(|| cmd_err("NOT_FOUND", "项目不存在".into(), None))?;
-    let out = run_git(&git, &proj_path, &["worktree", "prune", "-v"])
-        .await
-        .map_err(|e| cmd_err("WORKTREE_PRUNE", e, None))?;
-    Ok(parse_prune_verbose(&out))
-}
-
-/// 列孤儿 worktree（`omp worktree list --json` 里带 `orphanReason` 的条目）。
-/// 注意：这是 **agentDir 全域**的清单（`~/.omp/wt` 下所有仓库），不限于某个项目。
-#[tauri::command]
-pub async fn list_orphan_worktrees(state: State<'_, AppState>) -> Result<Vec<OrphanWorktree>, CmdError> {
-    let bin = crate::commands::discover_omp_path(&state)
-        .ok_or_else(|| cmd_err("OMP_MISSING", "未找到 omp".into(), None))?;
-    let out = crate::providers::run_omp(&bin, &["worktree", "list", "--json"])
-        .await
-        .map_err(|e| cmd_err("WORKTREE_LIST", e, None))?;
-    Ok(parse_orphan_worktrees(&out))
-}
-
-/// 清理孤儿 worktree（`omp worktree clear --json`；**不带** `--all`——上游语义 = 只清孤儿）。
-#[tauri::command]
-pub async fn clear_orphan_worktrees(state: State<'_, AppState>) -> Result<OrphanClearResult, CmdError> {
-    let bin = crate::commands::discover_omp_path(&state)
-        .ok_or_else(|| cmd_err("OMP_MISSING", "未找到 omp".into(), None))?;
-    let out = crate::providers::run_omp(&bin, &["worktree", "clear", "--json"])
-        .await
-        .map_err(|e| cmd_err("WORKTREE_CLEAR", e, None))?;
-    Ok(parse_clear_result(&out))
-}
-
-/// 解析 `omp worktree list --json` 的形状（实测：数组，条目含 `path` / `kind` /
-/// `parentRepo` / `orphanReason`）。只保留有 `orphanReason` 的。
-pub fn parse_orphan_worktrees(out: &str) -> Vec<OrphanWorktree> {
-    let Ok(serde_json::Value::Array(items)) = serde_json::from_str::<serde_json::Value>(out.trim()) else {
-        return vec![];
-    };
-    items
-        .into_iter()
-        .filter_map(|it| {
-            let path = it.get("path")?.as_str()?.to_string();
-            let reason = it.get("orphanReason").and_then(|v| v.as_str())?.to_string();
-            Some(OrphanWorktree {
-                path,
-                kind: it.get("kind").and_then(|v| v.as_str()).map(str::to_string),
-                parent_repo: it.get("parentRepo").and_then(|v| v.as_str()).map(str::to_string),
-                orphan_reason: reason,
-            })
-        })
-        .collect()
-}
-
-/// 解析 `omp worktree clear --json`（实测：`{removed, failed, results}`；
-/// 没有可清的条目时是 `{removed: 0, kept: N}`）。
-pub fn parse_clear_result(out: &str) -> OrphanClearResult {
-    let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap_or(serde_json::Value::Null);
-    let num = |key: &str| v.get(key).and_then(|x| x.as_u64()).unwrap_or(0) as u32;
-    OrphanClearResult { removed: num("removed"), failed: num("failed") }
 }
 
 #[cfg(test)]
@@ -729,132 +443,5 @@ mod tests {
         // 多个 remote 且没有 origin：不猜，交给用户
         assert!(push_args("main", false, &["a".into(), "b".into()]).is_err());
         assert!(push_args("main", false, &[]).is_err());
-    }
-
-    #[test]
-    fn worktree_add_args_cover_three_shapes() {
-        assert_eq!(
-            worktree_add_args(true, "feat/x", "/wt/repo-feat-x", None),
-            ["worktree", "add", "-q", "-b", "feat/x", "/wt/repo-feat-x"]
-        );
-        assert_eq!(
-            worktree_add_args(true, "feat/x", "/wt/repo-feat-x", Some("origin/main")),
-            ["worktree", "add", "-q", "-b", "feat/x", "/wt/repo-feat-x", "origin/main"]
-        );
-        assert_eq!(
-            worktree_add_args(false, "feat/x", "/wt/repo-feat-x", Some("origin/main")),
-            ["worktree", "add", "-q", "/wt/repo-feat-x", "feat/x"]
-        );
-    }
-
-    #[test]
-    fn prune_and_status_helpers() {
-        assert_eq!(parse_prune_verbose("Removing worktrees/x: gone\n\n  \n"), ["Removing worktrees/x: gone"]);
-        assert_eq!(parse_prune_verbose(""), Vec::<String>::new());
-        assert_eq!(count_status_entries(" M a.txt\n?? b.txt\n"), 2);
-        assert_eq!(count_status_entries(""), 0);
-    }
-
-    #[test]
-    fn remote_pick_and_default_branch() {
-        assert_eq!(pick_remote(&["backup".into(), "origin".into()]).as_deref(), Some("origin"));
-        assert_eq!(pick_remote(&["solo".into()]).as_deref(), Some("solo"));
-        assert_eq!(pick_remote(&["a".into(), "b".into()]), None);
-        assert_eq!(pick_remote(&[]), None);
-
-        // 符号引用优先（`origin/develop` → develop）
-        assert_eq!(
-            remote_default_branch("origin", Some("origin/develop\n"), &[]).as_deref(),
-            Some("develop")
-        );
-        // 没有符号引用时回退本地已有的 origin/main、origin/master
-        assert_eq!(
-            remote_default_branch("origin", None, &["origin/main".into(), "origin/topic".into()]).as_deref(),
-            Some("main")
-        );
-        assert_eq!(
-            remote_default_branch("origin", None, &["origin/master".into()]).as_deref(),
-            Some("master")
-        );
-        // 符号引用属于别的 remote（或为空）：不认，继续走回退
-        assert_eq!(remote_default_branch("origin", Some("upstream/main"), &["origin/main".into()]).as_deref(), Some("main"));
-        assert_eq!(remote_default_branch("origin", Some("origin/"), &[]), None);
-        assert_eq!(remote_default_branch("origin", None, &["origin/topic".into()]), None);
-    }
-
-    #[tokio::test]
-    async fn real_repo_resolve_remote_base_fetches() {
-        let Some(git) = git_bin().await else { panic!("未找到 git") };
-        let root = std::env::temp_dir().join(format!("omp-mini-v19-remote-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        let src = root.join("src");
-        let bare = root.join("bare");
-        let clone = root.join("clone");
-        std::fs::create_dir_all(&src).unwrap();
-        let run = |dir: &std::path::Path, args: &[&str]| {
-            let out = std::process::Command::new(&git).arg("-C").arg(dir).args(args).output().unwrap();
-            assert!(out.status.success(), "git {args:?} 失败：{}", String::from_utf8_lossy(&out.stderr));
-            String::from_utf8_lossy(&out.stdout).trim().to_string()
-        };
-        run(&src, &["init", "--initial-branch=main", "."]);
-        run(&src, &["config", "user.email", "x@y.z"]);
-        run(&src, &["config", "user.name", "x"]);
-        run(&src, &["commit", "--allow-empty", "-m", "chore: init"]);
-        std::process::Command::new(&git).args(["init", "--bare"]).arg(&bare).output().unwrap();
-        run(&src, &["remote", "add", "origin", bare.to_str().unwrap()]);
-        run(&src, &["push", "-u", "origin", "main"]);
-        // bare 的 HEAD 显式指向 main：`git init --bare` 的默认分支随 init.defaultBranch 走（CI 的
-        // runner 上是 master），HEAD 悬空时 clone 只会警告，不会写 refs/remotes/origin/HEAD。
-        run(&bare, &["symbolic-ref", "HEAD", "refs/heads/main"]);
-        // clone 会自动写 refs/remotes/origin/HEAD（符号引用那条主路径）
-        std::process::Command::new(&git).args(["clone", "-q"]).arg(&bare).arg(&clone).output().unwrap();
-        let clone_s = clone.to_string_lossy().to_string();
-        assert_eq!(resolve_remote_base(&git, &clone_s).await.unwrap(), "origin/main");
-        // 主路径前提：clone 确实写出了符号引用（丢了它，下面删的就是不存在的东西）
-        assert_eq!(
-            run(&clone, &["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"]),
-            "origin/main"
-        );
-
-        // 删掉符号引用：回退到「本地已有 origin/main」
-        run(&clone, &["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"]);
-        assert_eq!(resolve_remote_base(&git, &clone_s).await.unwrap(), "origin/main");
-
-        // 没有远端 → 明确报错（不猜分支）
-        let err = resolve_remote_base(&git, &src.to_string_lossy()).await.is_ok();
-        assert!(err, "src 有 origin，应当能解析");
-        let lonely = root.join("lonely");
-        std::fs::create_dir_all(&lonely).unwrap();
-        run(&lonely, &["init", "--initial-branch=main", "."]);
-        let e = resolve_remote_base(&git, &lonely.to_string_lossy()).await.unwrap_err();
-        assert_eq!(e.code, "NO_REMOTE");
-
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn orphan_parsing_filters_live_entries() {
-        let out = r#"[
-          {"path":"/wt/a","kind":"pr-checkout","parentRepo":"/repo","orphanReason":"parent repo missing"},
-          {"path":"/wt/b","kind":"pr-checkout","parentRepo":"/repo","branch":"main"},
-          {"path":"/wt/c","kind":"empty","orphanReason":"empty directory"}
-        ]"#;
-        let orphans = parse_orphan_worktrees(out);
-        assert_eq!(orphans.len(), 2);
-        assert_eq!(orphans[0].path, "/wt/a");
-        assert_eq!(orphans[0].parent_repo.as_deref(), Some("/repo"));
-        assert_eq!(orphans[1].path, "/wt/c");
-        assert_eq!(orphans[1].parent_repo, None);
-        assert_eq!(parse_orphan_worktrees("not json"), Vec::<OrphanWorktree>::new());
-    }
-
-    #[test]
-    fn clear_result_parses_both_shapes() {
-        let r = parse_clear_result(r#"{"removed":2,"failed":1,"results":[]}"#);
-        assert_eq!((r.removed, r.failed), (2, 1));
-        let r = parse_clear_result(r#"{"removed":0,"kept":3}"#);
-        assert_eq!((r.removed, r.failed), (0, 0));
-        let r = parse_clear_result("");
-        assert_eq!((r.removed, r.failed), (0, 0));
     }
 }

@@ -69,25 +69,6 @@ export type ModelCatalog = {
  error?: string;
 };
 
-/**
- * 工作区（V11 左栏树）：项目主目录或它的一个 git worktree。
- * `get_git_info` 的只读信息之外，工作区清单由 `list_workspaces` 聚合。
- */
-export type GitInfo = {
- isRepo: boolean;
- /** 当前分支名；detached HEAD 时为短 sha；未知 null。 */
- branch: string | null;
- detached: boolean;
- /** 本地分支清单（当前分支置顶，其余按最近提交倒序）。 */
- branches: string[];
- /** 有未提交的已跟踪文件改动；null = 未检测 / 超时。 */
- dirty: boolean | null;
- /** 远端默认分支的本地跟踪名（如 `origin/main`）；没有远端 / 查不到为 null。 */
- remoteDefault: string | null;
- /** 降级原因（tooltip 与日志用）。 */
- error: string | null;
-};
-
 export type OmpInfo = {
  ompPath: string | null;
  ompVersion: string | null;
@@ -417,16 +398,6 @@ export type ChangeSet = {
  behind: number;
  files: ChangeFile[];
 };
-
-/** 孤儿 worktree（`omp worktree list --json` 里带 orphanReason 的条目）。 */
-export type OrphanWorktree = {
- path: string;
- kind: string | null;
- parentRepo: string | null;
- orphanReason: string;
-};
-
-export type OrphanClearResult = { removed: number; failed: number };
 
 /** 提交任务阶段（与 Rust `git_commit::CommitPhase` 同构）。 */
 export type CommitPhase =

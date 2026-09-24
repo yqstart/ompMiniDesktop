@@ -11,7 +11,7 @@ import { LanguageToggle } from "../LanguageToggle";
 import { ThemeToggle } from "../ThemeToggle";
 import { ProjectGroup } from "./ProjectGroup";
 import { SessionPopup } from "./SessionPopup";
-/** 左栏刷新：项目列表 + 工作区清单（项目增删 / worktree 创建后都回这里）。 */
+/** 左栏刷新：项目列表 + 工作区清单（项目增删 / 重定位 / 移除后都回这里）。 */
 async function refreshSidebar(): Promise<{ ok: boolean; message: string | null }> {
  const [projects, workspaces] = await Promise.all([
   api.listProjects().then((list) => ({ ok: true as const, list })).catch((e: unknown) => ({ ok: false as const, message: e instanceof Error ? e.message : String(e) })),

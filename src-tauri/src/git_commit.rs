@@ -1313,42 +1313,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    #[tokio::test]
-    async fn real_repo_worktree_remove_checks_dirty() {
-        let (root, work, _remote) = temp_repo("wt").await;
-        let Some(git) = git_bin().await else { panic!("未找到 git") };
-        let g = |args: &[&str]| {
-            let out = std::process::Command::new(&git).arg("-C").arg(&work).args(args).output().unwrap();
-            assert!(out.status.success(), "git {args:?} 失败：{}", String::from_utf8_lossy(&out.stderr));
-            String::from_utf8_lossy(&out.stdout).trim().to_string()
-        };
-        g(&["commit", "--allow-empty", "-m", "chore: init"]);
-        let wt = root.join("wt-feat");
-        let wt_s = wt.to_string_lossy().to_string();
-        g(&["worktree", "add", "-b", "feat", &wt_s]);
-        std::fs::write(wt.join("dirty.txt"), "x\n").unwrap();
-
-        // 脏目录：不带 force 必须拒绝
-        let err = git_ops::remove_worktree_core(&git, &work, &wt_s, false).await.expect_err("脏目录应被拒绝");
-        assert!(err.message.contains("未提交改动"), "{}", err.message);
-        assert!(wt.exists(), "拒绝时不能删目录");
-
-        // force：删掉目录并清登记
-        git_ops::remove_worktree_core(&git, &work, &wt_s, true).await.expect("force 删除应成功");
-        assert!(!wt.exists(), "目录应被删除");
-        assert!(!g(&["worktree", "list", "--porcelain"]).contains(&wt_s));
-
-        // 目录已手工删掉 → 走 prune 路径，不报错
-        let wt2 = root.join("wt-two");
-        let wt2_s = wt2.to_string_lossy().to_string();
-        g(&["worktree", "add", "-b", "two", &wt2_s]);
-        std::fs::remove_dir_all(&wt2).unwrap();
-        git_ops::remove_worktree_core(&git, &work, &wt2_s, false).await.expect("目录缺失时应走 prune");
-        assert!(!g(&["worktree", "list", "--porcelain"]).contains(&wt2_s));
-
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
     /// 真实 `omp commit`（慢；手动跑：`cargo test --manifest-path src-tauri/Cargo.toml -- --ignored`）。
     ///
     /// 完整轨全链路：把**勾选**同步进暂存区 → `omp commit`（AI 信息 + changelog 维护）→ 读到新提交。

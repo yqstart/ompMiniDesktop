@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { useApp, SIDEBAR_MAX, SIDEBAR_MIN } from "../stores/app";
 import { applyTheme } from "../lib/theme";
 import { useText } from "../lib/useText";
 import { api } from "@shared/api";
-import type { TermTabState } from "@shared/types";
+import { IPC } from "@shared/ipc";
+import type { ModelCatalog, TermTabState } from "@shared/types";
 import { WorkspaceSidebar } from "../components/sidebar/WorkspaceSidebar";
 import { TerminalView } from "../components/terminal/TerminalView";
 import { TerminalTabs } from "../components/terminal/TerminalTabs";
@@ -277,10 +279,25 @@ export function App() {
 
  useEffect(() => {
   // 启动就把模型目录拉进 store（后台、静默、失败无所谓）：设置页模型页签用它。
+  // 后端把拉取收敛成单飞 + 缓存（`omp models --json` 实测 2–10s），这里不阻塞任何界面。
   api
    .getModels()
    .then((models) => set({ models }))
    .catch(() => undefined);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+ }, []);
+
+ useEffect(() => {
+  // 目录快照刷新完成（冷启动真拉 / 过期后台刷新 / 手动刷新）：后端广播整份快照，
+  // 这里直接换掉 store——设置页（模型 / 供应商）据此原地更新，不必自己轮询重拉。
+  let active = true;
+  const un = listen<ModelCatalog>(IPC.modelsRefreshed, (e) => {
+   if (active) set({ models: e.payload });
+  });
+  return () => {
+   active = false;
+   void un.then((dispose) => dispose()).catch(() => undefined);
+  };
   // eslint-disable-next-line react-hooks/exhaustive-deps
  }, []);
 

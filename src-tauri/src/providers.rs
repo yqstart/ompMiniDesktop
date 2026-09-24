@@ -564,48 +564,75 @@ pub(crate) fn omp_bin(state: &tauri::State<'_, AppState>) -> Result<String, CmdE
     })
 }
 
-/// 读 `omp config get <key> --json` 的 `value` 字段。
-async fn config_get(bin: &str, key: &str) -> Result<serde_json::Value, String> {
-    let out = run_omp(bin, &["config", "get", key, "--json"]).await?;
-    let v: serde_json::Value =
-        serde_json::from_str(out.trim()).map_err(|e| format!("配置解析失败：{e}"))?;
-    Ok(v.get("value").cloned().unwrap_or(serde_json::Value::Null))
-}
-
-/// 同上，但**钉住 agentDir**：`omp config get` 读的是「合并项目层覆盖之后」的有效值
-/// （实测：同键在 `<cwd>/.omp/config.yml` 有覆盖时读到项目值），而模型页写的是**全局层**
-/// ——读也钉在 agentDir，才与写入同层，不会出现「界面显示项目覆盖值、改的是全局」的错位。
-/// 写不需要钉（实测 `omp config set` 任何 cwd 下都只写全局 agentDir 的 config.yml）。
-async fn config_get_global(
+/// 一次 `omp config list --json` 读多个键（**钉住 agentDir** → 全局层，与写入同层）。
+///
+/// **为什么不逐键 `config get`**：每个键一次子进程（实测 ~0.17s，冷启动更久），模型页一次
+/// 加载要读 6 个键（modelRoles / modelRoleStorage / cycleOrder / retry.fallbackChains /
+/// retry.modelFallback / retry.fallbackRevertPolicy）——就是 6 个进程。全量 list 一次
+/// 0.14s 拿回 500+ 键，每项的 `{value, type, description}` 与 `config get` 完全同构
+/// （omp 18.3.0 实测），挑出需要的键即可。
+async fn config_values_global(
     state: &tauri::State<'_, AppState>,
     bin: &str,
-    key: &str,
-) -> Result<serde_json::Value, String> {
+    keys: &[&str],
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
     let dir = state.agent_dir.lock().await.clone();
-    let out = run_omp_in(Some(&dir), bin, &["config", "get", key, "--json"]).await?;
-    let v: serde_json::Value =
+    let out = run_omp_in(Some(&dir), bin, &["config", "list", "--json"]).await?;
+    let all: serde_json::Map<String, serde_json::Value> =
         serde_json::from_str(out.trim()).map_err(|e| format!("配置解析失败：{e}"))?;
-    Ok(v.get("value").cloned().unwrap_or(serde_json::Value::Null))
+    Ok(pick_values(&all, keys))
+}
+
+/// 从 `config list --json` 的全量输出里挑出请求的键（纯函数，单测覆盖）。
+/// 上游没有的键**不出现在结果里**——调用方按 omp 的默认语义兜底。
+pub fn pick_values(
+    all: &serde_json::Map<String, serde_json::Value>,
+    keys: &[&str],
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut picked = serde_json::Map::new();
+    for k in keys {
+        if let Some(entry) = all.get(*k) {
+            picked.insert(
+                (*k).to_string(),
+                entry.get("value").cloned().unwrap_or(serde_json::Value::Null),
+            );
+        }
+    }
+    picked
 }
 
 /// 读 retry 组里与转移链有关的三个键（读命令与两个写命令的回读共用）。
 /// `chains` 读失败要冒泡：不能兜底成空表——界面拿空表编辑后写回会把用户的链清空。
-/// 两个开关读不到就按 omp 自己的默认值显示（新 agentDir 下 `config get` 也返回默认值）。
+/// 两个开关读不到就按 omp 自己的默认值显示（新 agentDir 下 `config list` 也返回默认值）。
 async fn read_retry_info(
     state: &tauri::State<'_, AppState>,
     bin: &str,
 ) -> Result<FallbackChainsInfo, String> {
-    let chains = config_get_global(state, bin, "retry.fallbackChains").await?;
-    let model_fallback = config_get_global(state, bin, "retry.modelFallback")
-        .await
-        .unwrap_or(serde_json::Value::Null);
-    let revert = config_get_global(state, bin, "retry.fallbackRevertPolicy")
-        .await
+    let vals = config_values_global(
+        state,
+        bin,
+        &[
+            "retry.fallbackChains",
+            "retry.modelFallback",
+            "retry.fallbackRevertPolicy",
+        ],
+    )
+    .await?;
+    let chains = vals
+        .get("retry.fallbackChains")
+        .cloned()
         .unwrap_or(serde_json::Value::Null);
     Ok(FallbackChainsInfo {
         chains: parse_chains(&chains),
-        model_fallback: model_fallback.as_bool().unwrap_or(true),
-        revert_policy: revert.as_str().unwrap_or(REVERT_POLICIES[0]).to_string(),
+        model_fallback: vals
+            .get("retry.modelFallback")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
+        revert_policy: vals
+            .get("retry.fallbackRevertPolicy")
+            .and_then(|v| v.as_str())
+            .unwrap_or(REVERT_POLICIES[0])
+            .to_string(),
     })
 }
 
@@ -614,18 +641,24 @@ async fn read_retry_info(
 /// 供应商清单：`omp auth-broker list --json` 的全量 OAuth 供应商 + 当前已配置标记。
 #[tauri::command]
 pub async fn list_providers(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<ProviderView>, CmdError> {
     let bin = omp_bin(&state)?;
-    let out = run_omp(&bin, &["auth-broker", "list", "--json"])
-        .await
-        .map_err(|e| {
-            cmd_err(
-                "PROVIDER_LIST_FAILED",
-                format!("读取供应商清单失败：{e}"),
-                None,
-            )
-        })?;
+    // 两个读取**并发**：清单是纯凭证库操作（~0.3s），目录走 SWR（吃缓存，过期只起后台刷新）
+    // ——`omp models --json` 实测 2–10s，供应商页等它只会白等；新快照到达后由
+    // `omp-models://catalog` 事件送回，界面再更新一次已配置标记。
+    let (listed, catalog) = tokio::join!(
+        run_omp(&bin, &["auth-broker", "list", "--json"]),
+        crate::commands::catalog_swr(&state, &app),
+    );
+    let out = listed.map_err(|e| {
+        cmd_err(
+            "PROVIDER_LIST_FAILED",
+            format!("读取供应商清单失败：{e}"),
+            None,
+        )
+    })?;
     let base = parse_providers(&out);
     if base.is_empty() {
         return Err(cmd_err(
@@ -634,24 +667,8 @@ pub async fn list_providers(
             Some("omp 版本可能过旧，升级后再试".into()),
         ));
     }
-    // 已配置标记：直接跑一次模型目录拿真值（不依赖诊断状态里缓存的 omp 路径，
-    // 也不吃 `get_models` 的 5 分钟缓存——供应商页看到的状态必须是当下的）。
-    // 顺带把缓存刷新成这次的结果，`ModelPicker` 下一次读取也就拿到同一份。
-    let configured = match run_omp(&bin, &["models", "--json"]).await {
-        Ok(out) => match serde_json::from_str::<serde_json::Value>(out.trim()) {
-            Ok(v) => {
-                let catalog = serde_json::json!({
-                    "models": v.get("models").cloned().unwrap_or(serde_json::Value::Array(vec![])),
-                    "fetchedAt": chrono::Utc::now().timestamp_millis(),
-                });
-                *state.models_cache.lock().await =
-                    Some((chrono::Utc::now().timestamp_millis(), catalog));
-                configured_set(&v)
-            }
-            Err(_) => HashSet::new(),
-        },
-        Err(_) => HashSet::new(),
-    };
+    // 已配置标记：目录里出现过的供应商（只有从未拉过目录时才会在这里真等一次）
+    let configured = catalog.map(|c| configured_set(&c)).unwrap_or_default();
     Ok(base
         .into_iter()
         .map(|(id, name)| ProviderView {
@@ -824,18 +841,26 @@ pub async fn get_model_roles(
     state: tauri::State<'_, AppState>,
 ) -> Result<ModelRolesInfo, CmdError> {
     let bin = omp_bin(&state)?;
-    let roles = config_get(&bin, "modelRoles")
+    let vals = config_values_global(&state, &bin, &["modelRoles", "modelRoleStorage"])
         .await
         .map_err(|e| cmd_err("ROLES_READ_FAILED", e, None))?;
-    let storage = config_get(&bin, "modelRoleStorage")
-        .await
-        .unwrap_or(serde_json::Value::Null);
-    let roles = roles.as_object().cloned().unwrap_or_default();
-    Ok(ModelRolesInfo {
-        roles,
-        storage: storage.as_str().unwrap_or("global").to_string(),
+    Ok(roles_info(&vals))
+}
+
+/// 从读取结果造角色视图（读与写回读共用同一口径：缺失的键按 omp 的默认语义兜底）。
+fn roles_info(vals: &serde_json::Map<String, serde_json::Value>) -> ModelRolesInfo {
+    ModelRolesInfo {
+        roles: vals
+            .get("modelRoles")
+            .and_then(|v| v.as_object().cloned())
+            .unwrap_or_default(),
+        storage: vals
+            .get("modelRoleStorage")
+            .and_then(|v| v.as_str())
+            .unwrap_or("global")
+            .to_string(),
         builtin: BUILTIN_ROLES.iter().map(|s| s.to_string()).collect(),
-    })
+    }
 }
 
 /// 改一个角色：`selector = Some(模型)` 设置 / 覆盖，`None`（或空白）删除该角色。
@@ -848,10 +873,13 @@ pub async fn set_model_role(
 ) -> Result<ModelRolesInfo, CmdError> {
     let bin = omp_bin(&state)?;
     let _guard = state.roles_edit.lock().await;
-    let current = config_get(&bin, "modelRoles")
+    let vals = config_values_global(&state, &bin, &["modelRoles"])
         .await
         .map_err(|e| cmd_err("ROLES_READ_FAILED", e, None))?;
-    let mut roles = current.as_object().cloned().unwrap_or_default();
+    let mut roles = vals
+        .get("modelRoles")
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
     apply_role_edit(&mut roles, &role, selector.as_deref())
         .map_err(|e| cmd_err("ROLE_INVALID", e, None))?;
     let json = serde_json::to_string(&serde_json::Value::Object(roles))
@@ -860,20 +888,10 @@ pub async fn set_model_role(
         .await
         .map_err(|e| cmd_err("ROLES_WRITE_FAILED", format!("写入角色失败：{e}"), None))?;
     // 回读：写入被 omp 静默丢弃时，界面不该显示一个其实没生效的值
-    let roles = config_get(&bin, "modelRoles")
+    let vals = config_values_global(&state, &bin, &["modelRoles", "modelRoleStorage"])
         .await
-        .map_err(|e| cmd_err("ROLES_READ_FAILED", e, None))?
-        .as_object()
-        .cloned()
-        .unwrap_or_default();
-    let storage = config_get(&bin, "modelRoleStorage")
-        .await
-        .unwrap_or(serde_json::Value::Null);
-    Ok(ModelRolesInfo {
-        roles,
-        storage: storage.as_str().unwrap_or("global").to_string(),
-        builtin: BUILTIN_ROLES.iter().map(|s| s.to_string()).collect(),
-    })
+        .map_err(|e| cmd_err("ROLES_READ_FAILED", e, None))?;
+    Ok(roles_info(&vals))
 }
 
 /// Ctrl+P 快速切换环（`cycleOrder`）：条目是角色 id，顺序即轮换顺序。
@@ -882,10 +900,14 @@ pub async fn get_cycle_order(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<String>, CmdError> {
     let bin = omp_bin(&state)?;
-    let v = config_get_global(&state, &bin, "cycleOrder")
+    let vals = config_values_global(&state, &bin, &["cycleOrder"])
         .await
         .map_err(|e| cmd_err("CYCLE_READ_FAILED", e, None))?;
-    Ok(parse_cycle_order(&v))
+    let order = vals
+        .get("cycleOrder")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    Ok(parse_cycle_order(&order))
 }
 
 /// 整表写回环：array 键直接覆盖写（不是「读-改-写」），空数组 = 清空环。
@@ -905,10 +927,14 @@ pub async fn set_cycle_order(
         .await
         .map_err(|e| cmd_err("CYCLE_WRITE_FAILED", format!("写入切换环失败：{e}"), None))?;
     // 回读：写入被 omp 静默丢弃时，界面不该显示一个其实没生效的环
-    let v = config_get_global(&state, &bin, "cycleOrder")
+    let vals = config_values_global(&state, &bin, &["cycleOrder"])
         .await
         .map_err(|e| cmd_err("CYCLE_READ_FAILED", e, None))?;
-    Ok(parse_cycle_order(&v))
+    let order = vals
+        .get("cycleOrder")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    Ok(parse_cycle_order(&order))
 }
 
 /// 失败转移链表（`retry.fallbackChains`）+ 两个配套开关——模型请求失败时由哪个模型接手。
@@ -932,9 +958,13 @@ pub async fn set_fallback_chain(
 ) -> Result<FallbackChainsInfo, CmdError> {
     let bin = omp_bin(&state)?;
     let _guard = state.retry_edit.lock().await;
-    let current = config_get_global(&state, &bin, "retry.fallbackChains")
+    let vals = config_values_global(&state, &bin, &["retry.fallbackChains"])
         .await
         .map_err(|e| cmd_err("RETRY_READ_FAILED", e, None))?;
+    let current = vals
+        .get("retry.fallbackChains")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
     let mut chains = parse_chains(&current);
     apply_chain_edit(&mut chains, &key, fallbacks.as_deref())
         .map_err(|e| cmd_err("CHAIN_INVALID", e, None))?;
@@ -1345,5 +1375,24 @@ mod tests {
             s.lines.last().unwrap(),
             &format!("line {}", LOGIN_LINES_MAX + 4)
         );
+    }
+
+    /// `config list --json` → 多键挑选：值取 `value` 字段，上游没有的键不出现在结果里。
+    #[test]
+    fn pick_values_selects_requested_keys_only() {
+        let all: serde_json::Map<String, serde_json::Value> = serde_json::from_str(
+            r#"{
+                "modelRoles": {"value": {"default": "a/b"}, "type": "record", "description": ""},
+                "cycleOrder": {"value": ["default"], "type": "array", "description": ""},
+                "retry.modelFallback": {"value": true, "type": "boolean", "description": ""}
+            }"#,
+        )
+        .unwrap();
+        let picked = pick_values(&all, &["modelRoles", "retry.modelFallback", "missing.key"]);
+        assert_eq!(picked.len(), 2, "缺失的键不出现");
+        assert_eq!(picked["modelRoles"], serde_json::json!({"default": "a/b"}));
+        assert_eq!(picked["retry.modelFallback"], serde_json::json!(true));
+        // 空请求 → 空结果（不返回全量）
+        assert!(pick_values(&all, &[]).is_empty());
     }
 }

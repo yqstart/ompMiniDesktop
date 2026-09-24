@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### Added
+- **左栏项目行可移除项目**：项目行 hover 出现「移除项目」（`Trash2`，hover 转 danger），走 `ConfirmDialog` 二次确认（标题带项目名，正文写明「只解除绑定，不删除任何文件；该项目下的会话会被标记为已归档」），确认后调 `remove_project` 并刷新左栏——这条后端命令 V1 起就有，但一直没有 UI 入口。
+- **项目文件夹图标标识「当前打开的项目」**：项目头 24px 的文件夹图标在活动工作区落在本项目里（右栏正在显示它的终端）时上强调色，其余保持灰阶；缺失目录仍走 warn。
+
+### Changed
+- **设置页不再被 `omp models --json` 拖住**：这条命令实测 **2–10s**（上游每次都要拉各供应商的模型目录，抖动大），而设置页会并发触发它三次——启动预取、健康检查、供应商页各一次——模型页还要等它和角色 / 切换环 / 转移链一起返回才渲染，这就是「模型、供应商有时要等 6–7 秒」的来源。现在模型目录只剩**一个读取入口**：单飞（`models_fetch` 锁，同一时刻至多一个进程，其余调用方等同一份结果；阻塞子进程挪进 `spawn_blocking`）+ 5 分钟缓存 + **过期后台刷新**（stale-while-revalidate：先拿旧快照渲染，新快照完成即广播 `omp-models://catalog`，App 换 `store.models`、供应商页重算「已配置」）；健康检查与供应商页直接用快照、不等目录，供应商清单与目录并发。配套：模型页的四个读取**各自到达即渲染**（目录不再拖着角色 / 切换环 / 转移链）；`modelRoles` / `modelRoleStorage` / `cycleOrder` / `retry.*` 六个键的读取从「每键一次 `omp config get`」合并成**一次 `omp config list --json`**（0.14s 拿全量 500+ 键，值与 `config get` 同构），读取统一钉在 agentDir（与写入同层）。
+- **应用图标收敛成单一色相带**：π 字标原来走青绿 → 天蓝 → 紫 → 粉的四色「极光」渐变（色相跨度 158°、含粉色），在 Dock 里跟邻居（无彩立方体、单色紫 M、白 `>_` + 柠檬绿）并排时是一道彩虹，底板还被三处彩色辉光染成偏色。现在 π 改成蓝 → 靛单色带（`#6FB4FF → #9C93FF`，211° → 245°，中点 ≈ 应用强调色），底板换成近中性石墨 + 两处同色微辉光。字形、几何、圆角与 16px 可读性都没动（源仍是 `design-system/icon/omp-mini-icon.svg`，`pnpm icon` 重生成）。
+
+### Removed
+- **壳侧不再管理 worktree（只保留只读展示）**：项目头的「新建 worktree」（分支过滤 + 新建分支 + 基线两档）与「项目操作」（清理失效登记 / 清理孤儿 worktree）、worktree 行 hover 的「删除」（探脏二次确认 + `force` 重删）一起退场，连带删除 6 个后端命令——`create_worktree` / `remove_worktree` / `prune_worktrees` / `list_orphan_worktrees` / `clear_orphan_worktrees` 与 `get_git_info`（唯一使用者是新建面板），以及 `GitInfo` / `OrphanWorktree` / `OrphanClearResult` 类型与 27 个字典键。**展示照旧**：左栏仍列每个项目的全部 git worktree（真相 = `git worktree list`），分支名、worktree 徽章、改动点 / 领先·落后 / 上游缺失徽章与「提交…」入口都在；新建 / 删除 worktree 走 omp 与 git 命令行，worktree 里的会话归属不受影响。
+
 ## [0.3.0] - 2026-09-24
 
 ### Added

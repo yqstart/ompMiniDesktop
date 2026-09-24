@@ -68,6 +68,13 @@ if (!ipc.includes(`providerLogin: "${LOGIN_EVENT}"`)) fail(`ipc.ts 缺少供应�
 if (!providersRs.includes(`PROVIDER_LOGIN_EVENT: &str = "${LOGIN_EVENT}"`)) {
  fail(`providers.rs 的登录事件通道与 ipc.ts 不一致`);
 }
+// 6b) 模型目录刷新事件（后端单飞 + 缓存后广播成绩快照）：常量在 ipc.ts，字面量在 commands/mod.rs
+const commandsRs = rsFiles[0];
+const MODELS_EVENT = "omp-models://catalog";
+if (!ipc.includes(`modelsRefreshed: "${MODELS_EVENT}"`)) fail(`ipc.ts 缺少模型目录事件 ${MODELS_EVENT}`);
+if (!commandsRs.includes(`MODELS_EVENT: &str = "${MODELS_EVENT}"`)) {
+ fail(`commands/mod.rs 的目录事件通道与 ipc.ts 不一致`);
+}
 // 7) 登录 / 登出必须走 auth-broker CLI（RPC 模式在"一个都没登录"的环境里起不来）
 for (const sub of ['"auth-broker", "login"', '"auth-broker", "logout"', '"auth-broker", "list"']) {
  if (!providersRs.includes(sub)) fail(`providers.rs 未按 auth-broker CLI 调 ${sub}`);
@@ -78,4 +85,4 @@ for (const name of ["pty_spawn", "pty_write", "pty_resize", "pty_kill"]) {
  if (!rsFiles[5].includes(`fn ${name}`)) fail(`pty.rs 缺少 fn ${name}`);
 }
 
-console.log(`e2e:ipc 通过：${ipcCmds.size} 命令 × 双向一致（ipc.ts ↔ main.rs ↔ 实现）+ 事件 2 项`);
+console.log(`e2e:ipc 通过：${ipcCmds.size} 命令 × 双向一致（ipc.ts ↔ main.rs ↔ 实现）+ 事件 3 项`);
