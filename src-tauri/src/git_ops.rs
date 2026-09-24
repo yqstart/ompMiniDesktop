@@ -803,10 +803,18 @@ mod tests {
         std::process::Command::new(&git).args(["init", "--bare"]).arg(&bare).output().unwrap();
         run(&src, &["remote", "add", "origin", bare.to_str().unwrap()]);
         run(&src, &["push", "-u", "origin", "main"]);
+        // bare 的 HEAD 显式指向 main：`git init --bare` 的默认分支随 init.defaultBranch 走（CI 的
+        // runner 上是 master），HEAD 悬空时 clone 只会警告，不会写 refs/remotes/origin/HEAD。
+        run(&bare, &["symbolic-ref", "HEAD", "refs/heads/main"]);
         // clone 会自动写 refs/remotes/origin/HEAD（符号引用那条主路径）
         std::process::Command::new(&git).args(["clone", "-q"]).arg(&bare).arg(&clone).output().unwrap();
         let clone_s = clone.to_string_lossy().to_string();
         assert_eq!(resolve_remote_base(&git, &clone_s).await.unwrap(), "origin/main");
+        // 主路径前提：clone 确实写出了符号引用（丢了它，下面删的就是不存在的东西）
+        assert_eq!(
+            run(&clone, &["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"]),
+            "origin/main"
+        );
 
         // 删掉符号引用：回退到「本地已有 origin/main」
         run(&clone, &["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"]);
