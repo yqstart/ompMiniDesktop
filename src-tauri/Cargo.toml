@@ -1,6 +1,6 @@
 [package]
 name = "omp-mini-desktop"
-version = "0.2.1"
+version = "0.3.0"
 description = "oh-my-pi 极简桌面端"
 authors = ["ompMiniDesktop"]
 edition = "2021"
