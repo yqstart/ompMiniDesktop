@@ -2,9 +2,9 @@ import { useState } from "react";
 import { AlertTriangle, ArrowUpCircle, BranchDown, BranchUp, BrowserTerminal, ChevronRight, Clock, DiagramTree, Folder, LinkOff, Loader, Trash2 } from "reicon-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "@shared/api";
-import type { ProjectView, WorkspaceView } from "@shared/types";
+import type { CheckoutView, ProjectView } from "@shared/types";
 import { useApp } from "../../stores/app";
-import { openOrFocusWorkspace } from "../../lib/workspaces";
+import { openOrFocusCheckout } from "../../lib/checkouts";
 import { countRunningTerminalsIn, countTerminalsIn } from "../../lib/terminalScope";
 import { isCommitTaskRunning, openCommitPanel, pushWorkspace } from "../../lib/commitTasks";
 import { ConfirmDialog } from "../ConfirmDialog";
@@ -12,12 +12,11 @@ import { useText } from "../../lib/useText";
 import { fmt } from "../../lib/locale";
 
 /**
- * 左栏项目组（V11）：项目头（折叠 / 会话入口 / 移除项目）+ 工作区行列表。
+ * 左栏项目组：项目头（折叠 / 会话入口 / 移除项目）+ **目录行**列表（主目录 + git worktree）。
  *
- * 工作区行 = 项目主目录或一个 git worktree（**只读展示**：壳侧不创建 / 不删除 worktree，
- * 要建要走 `omp worktree add`）；点击行 = 打开/聚焦该目录的终端。
- * 项目头的文件夹图标在「当前打开的项目」（活动工作区落在本项目里 = 右栏正在显示它的
- * 终端）上给强调色。
+ * 目录行（V21 前叫「工作区行」）= 项目主目录或一个 git worktree（**只读展示**：壳侧不创建 /
+ * 不删除 worktree，要建要走 `omp worktree add`）；点击行 = 打开/聚焦该目录的终端。
+ * 项目头的文件夹图标在「当前打开的项目」（项目落在右栏选中范围里）上给强调色。
  * 目录缺失的项目给一条 warn 行 + 「重定位」（只改覆盖层路径，不动任何会话文件）。
  * 「移除项目」= 覆盖层解绑（后端把该项目会话标记为已归档，不删任何文件），走二次确认。
  */
@@ -29,7 +28,7 @@ export function ProjectGroup({
  onOpenSessions,
 }: {
  project: ProjectView;
- items: WorkspaceView[];
+ items: CheckoutView[];
  onChanged: () => Promise<void>;
  onError: (message: string) => void;
  onOpenSessions: () => void;
@@ -37,9 +36,14 @@ export function ProjectGroup({
  const t = useText();
  const [expanded, setExpanded] = useState(true);
  const [removeOpen, setRemoveOpen] = useState(false);
- const activeWorkspacePath = useApp((s) => s.activeWorkspacePath);
- // 「当前打开的项目」：右栏正在显示它的终端（主目录或它的任一个 worktree 是活动工作区）
- const projectActive = items.some((ws) => ws.path === activeWorkspacePath);
+ const selection = useApp((s) => s.selection);
+ // 「当前打开的项目」：项目落在右栏当前选中范围里——
+ // 工作区视图（含未分组）= 项目的 workspaceId 命中；目录视图 = 它的某个目录被选中。
+ const projectActive = selection?.kind === "group"
+  ? project.workspaceId === selection.id
+  : selection?.kind === "checkout"
+   ? items.some((ws) => ws.path === selection.path)
+   : false;
 
  const relocate = async () => {
   const picked = await open({
@@ -121,7 +125,7 @@ export function ProjectGroup({
    {expanded && (
     <div className="ml-5 mt-1 space-y-1 border-l border-border-soft pl-2">
      {items.map((ws) => (
-      <WorkspaceRow key={ws.path} ws={ws} active={ws.path === activeWorkspacePath} />
+      <CheckoutRow key={ws.path} ws={ws} active={selection?.kind === "checkout" && ws.path === selection.path} />
      ))}
      {items.length === 0 && !project.missing && (
       <p className="px-2 py-2 text-[11px] text-faint">{t.unknownBranch}</p>
@@ -146,18 +150,18 @@ export function ProjectGroup({
  );
 }
 
-/** 一个工作区行：分支名 + 位置徽章 + git 状态（改动点 / 领先·落后远程徽章 / 上游缺失标记）+ 任务徽章；
+/** 一个目录行：分支名 + 位置徽章 + git 状态（改动点 / 领先·落后远程徽章 / 上游缺失标记）+ 任务徽章；
  *  hover 出现「提交…」（打开提交面板）。点击行 = 打开/聚焦该目录的终端。
  *
- *  状态区顺序固定为：终端数（`BrowserTerminal` + 数量，有运行中的上强调色；右栏只看当前工作区，
+ *  状态区顺序固定为：终端数（`BrowserTerminal` + 数量，有运行中的上强调色；右栏只看当前选中范围，
  *  这个徽章是「别的分支还开着几个」的提示）→ dirty 点 → 领先（BranchUp ↑，可点=推）→
  *  落后（BranchDown ↓，只读）→ 上游缺失（LinkOff：无上游 / 上游已被删除）→ 任务徽章
  *  （运行中 / 失败；点击开任务浮层）；有任务记录时 hover 按钮让位（任务态优先，处理入口在浮层里）。 */
-function WorkspaceRow({
+function CheckoutRow({
  ws,
  active,
 }: {
- ws: WorkspaceView;
+ ws: CheckoutView;
  active: boolean;
 }) {
  const t = useText();
@@ -204,7 +208,7 @@ function WorkspaceRow({
     } ${ws.missing ? "opacity-50" : ""}`}
   >
    <button
-    onClick={() => openOrFocusWorkspace(ws)}
+    onClick={() => openOrFocusCheckout(ws)}
     disabled={ws.missing}
     className={`flex min-w-0 flex-1 items-center gap-2 py-1 pl-2 text-left ${ws.missing ? "cursor-default" : "cursor-pointer"}`}
    >

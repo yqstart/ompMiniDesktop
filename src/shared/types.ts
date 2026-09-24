@@ -27,6 +27,8 @@ export type ProjectView = {
  name: string;
  missing: boolean;
  sessionCount: number;
+ /** 所属工作区（V21）；null = 未分组。 */
+ workspaceId: string | null;
 };
 
 export type SessionView = {
@@ -333,10 +335,23 @@ export type OmpSetting = {
  description: string;
 };
 
-// ---------- V11 终端工作区 ----------
+// ---------- V21 左栏：工作区（容器）→ 项目 → 目录行 ----------
 
-/** 左栏工作区行：项目主目录或它的一个 git worktree。 */
+/**
+ * 工作区（V21）：多项目容器——协作的边界。
+ * 成员关系在项目侧（`ProjectView.workspaceId`，一个项目最多属于一个工作区）；
+ * `projectIds` 按项目注册顺序（前端渲染与协作根计算都用这个顺序）。
+ */
 export type WorkspaceView = {
+ id: string;
+ name: string;
+ createdAt: number;
+ /** 成员项目 id；空组合法（先建组、后加项目）。 */
+ projectIds: string[];
+};
+
+/** 左栏目录行（V21 前叫「工作区行」）：项目主目录或它的一个 git worktree。 */
+export type CheckoutView = {
  projectId: string;
  projectName: string;
  /** 工作目录：主目录 = 项目路径；worktree = worktree 路径。 */
@@ -348,6 +363,16 @@ export type WorkspaceView = {
  isMain: boolean;
  missing: boolean;
 };
+
+/**
+ * 左栏选中项（V21）：右栏视图范围的**唯一真相**。
+ * - `group`：工作区视图（`id: null` = 未分组区）——范围 = 组内全部项目的全部目录；
+ * - `checkout`：目录视图——范围 = 该目录。
+ * store 里为 `null` 时表示「一个可用目录都没有」，终端不过滤（与 V11 口径一致）。
+ */
+export type SidebarSelection =
+ | { kind: "group"; id: string | null }
+ | { kind: "checkout"; path: string };
 
 // ---------- 工作区提交 / 推送（V19） ----------
 
@@ -502,6 +527,12 @@ export type TerminalView = {
  exitCode: number | null;
  /** 恢复的历史会话（spawn 时透传 `--resume <id>` 前缀）；null = 新会话。 */
  resume: string | null;
+ /**
+  * 本终端**实际挂上**的工作区协作根（V21；同工作区其他成员项目的主目录，空 = 无）。
+  * spawn 时由 `lib/workspaceGroups.ts` 的 `collabContextFor` 算出并写回 store——
+  * tab 悬停提示展示的是「实际生效的参数」，不是「此刻应生效的参数」。
+  */
+ collab: string[];
  /** 重启计数：每次点「重启」+1，TerminalPane 依赖它重新 spawn。 */
  spawnSeq: number;
  createdAt: number;
@@ -519,6 +550,10 @@ export type PtySpawnOpts = {
  cols: number;
  rows: number;
  resume?: string | null;
+ /** 工作区协作根（V21）：同工作区其他成员项目的**主目录**，逐个 `--add-dir`。 */
+ addDirs?: string[];
+ /** 工作区拓扑说明（V21）：`--append-system-prompt=<文本>`；空 = 不注入。 */
+ appendSystemPrompt?: string | null;
 };
 
 // ---------- 自定义模型配置（设置 › 供应商） ----------

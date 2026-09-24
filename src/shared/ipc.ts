@@ -16,8 +16,13 @@ export const IPC = {
  unarchiveSessions: "unarchive_sessions",
  deleteSessions: "delete_sessions",
  setOmpPath: "set_omp_path",
- // 工作区（V11 左栏树）：项目 → 主目录 + git worktree（只读展示）
+ // 工作区（V21）：多项目容器（左栏顶层单元）
  listWorkspaces: "list_workspaces",
+ createWorkspace: "create_workspace",
+ updateWorkspace: "update_workspace",
+ deleteWorkspace: "delete_workspace",
+ // 目录行（V21 前叫「工作区行」）：项目 → 主目录 + git worktree（只读展示）
+ listCheckouts: "list_checkouts",
  // 工作区提交 / 推送（V19）：默认壳侧快路径（一次 omp -p 生成 + git commit/push），
  // 另有一条可选的完整轨（omp commit，含 CHANGELOG 维护）
  getChangeSet: "get_change_set",

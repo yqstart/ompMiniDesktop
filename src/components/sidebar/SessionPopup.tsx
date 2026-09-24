@@ -3,7 +3,7 @@ import { Clock, X } from "reicon-react";
 import { api } from "@shared/api";
 import type { ProjectView, SessionPage, SessionView } from "@shared/types";
 import { useApp } from "../../stores/app";
-import { resumeSessionInTerminal } from "../../lib/workspaces";
+import { resumeSessionInTerminal } from "../../lib/checkouts";
 import { runSessionBatch } from "../../lib/sessionBatch";
 import { useText } from "../../lib/useText";
 import { TEXT, fmt } from "../../lib/locale";

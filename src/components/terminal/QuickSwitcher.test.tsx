@@ -24,13 +24,16 @@ beforeEach(() => {
     status: "running",
     exitCode: null,
     resume: null,
+    collab: [],
     spawnSeq: 0,
     createdAt: 1,
    },
   ],
   activeTerminalId: "t-login",
-  activeWorkspacePath: "/a/login",
-  workspaces: [
+  selection: { kind: "checkout", path: "/a/login" },
+  workspaceGroups: [],
+  projects: [],
+  checkouts: [
    { projectId: "a", projectName: "Alpha", path: "/a/main", branch: "main", head: null, isMain: true, missing: false },
    { projectId: "a", projectName: "Alpha", path: "/a/login", branch: "login", head: null, isMain: false, missing: false },
    { projectId: "b", projectName: "Beta", path: "/b/gone", branch: "gone", head: null, isMain: false, missing: true },
@@ -101,7 +104,7 @@ describe("快速切换", () => {
   open();
   typeQuery("修复登录");
   act(() => {
-   useApp.setState({ terminals: [], workspaces: [] });
+   useApp.setState({ terminals: [], checkouts: [] });
    container.querySelector("input")?.dispatchEvent(new Event("input", { bubbles: true }));
   });
   // 列表已无可执行结果：回车保持面板并提示无匹配，不关闭也不新建
@@ -122,5 +125,22 @@ describe("快速切换", () => {
   });
   expect(focus).not.toHaveBeenCalled();
   focus.mockRestore();
+ });
+
+ it("工作区项可搜索；回车切到该工作区范围", () => {
+  act(() => {
+   useApp.setState({
+    workspaceGroups: [{ id: "w1", name: "全栈", createdAt: 1, projectIds: ["a"] }],
+    projects: [{ id: "a", path: "/a/main", name: "Alpha", missing: false, sessionCount: 0, workspaceId: "w1" }],
+   });
+  });
+  open();
+  typeQuery("全栈");
+  const input = container.querySelector("input")!;
+  act(() => {
+   input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  });
+  expect(useApp.getState().selection).toEqual({ kind: "group", id: "w1" });
+  expect(useApp.getState().quickSwitcherOpen).toBe(false);
  });
 });

@@ -15,8 +15,9 @@ import { CommitTaskPanel } from "../components/git/CommitTaskPanel";
 import { HealthBanner } from "../components/HealthBanner";
 import { SettingsPage } from "../components/SettingsPage";
 import { UpdateDialog } from "../components/update/UpdateDialog";
-import { newTerminalInActiveWorkspace } from "../lib/workspaces";
-import { terminalsInWorkspace } from "../lib/terminalScope";
+import { newTerminalInSelection } from "../lib/checkouts";
+import { terminalsInScope } from "../lib/terminalScope";
+import { selectionScopePaths } from "../lib/workspaceGroups";
 import { refreshWorkspaceGitState, scheduleWorkspaceGitRefresh, startWorkspaceGitPolling } from "../lib/commitTasks";
 import { autoCheckOnBoot } from "../lib/appUpdate";
 import { syncTitlePromptLanguage } from "../lib/titlePrompt";
@@ -70,13 +71,13 @@ function useTitlePromptSync() {
  * 任务结束后的单点刷新在 `lib/commitTasks.ts` 里；点按钮时的**后端预检**才是最终裁决。
  */
 function useWorkspaceGitRefresh() {
- const workspaces = useApp((s) => s.workspaces);
+ const checkouts = useApp((s) => s.checkouts);
  const terminals = useApp((s) => s.terminals);
  const prevStates = useRef<Map<string, TermTabState>>(new Map());
 
  useEffect(() => {
-  void refreshWorkspaceGitState(workspaces.map((w) => w.path));
- }, [workspaces]);
+  void refreshWorkspaceGitState(checkouts.map((w) => w.path));
+ }, [checkouts]);
 
  useEffect(() => {
   // 转可见与重新获得焦点（点回本应用）都刷一轮：徽章是「现在有没有东西要处理」的提示
@@ -130,7 +131,7 @@ function useTerminalHotkeys() {
    if (e.repeat || hasOpenDialog() || typing) return;
    const s = useApp.getState();
    if (key === "t") {
-    newTerminalInActiveWorkspace();
+    newTerminalInSelection();
    } else if (key === "k") {
     s.set({ quickSwitcherOpen: true });
    } else if (key === "w") {
@@ -142,8 +143,9 @@ function useTerminalHotkeys() {
     if (!s.activeTerminalId) return;
     s.requestCloseTerminal(s.activeTerminalId);
    } else {
-    // ⌘1..9 的序号 = **当前工作区**里的终端顺序（与右栏视图一致的过滤列表）
-    const term = terminalsInWorkspace(s.terminals, s.activeWorkspacePath)[Number(key) - 1];
+    // ⌘1..9 的序号 = **当前选中范围**里的终端顺序（与右栏视图一致的过滤列表）
+    const scope = selectionScopePaths(s.selection, s.workspaceGroups, s.checkouts, s.projects);
+    const term = terminalsInScope(s.terminals, scope)[Number(key) - 1];
     if (!term) return;
     s.focusTerminal(term.id);
    }

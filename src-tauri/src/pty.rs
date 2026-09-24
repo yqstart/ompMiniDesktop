@@ -116,6 +116,36 @@ pub struct PtySpawnOpts {
     /// 恢复历史会话（`omp --resume <id prefix>`）；None = 新会话。
     #[serde(default)]
     pub resume: Option<String>,
+    /// 工作区协作根（V21）：同工作区其他成员项目的**主目录**，逐个 `--add-dir`。
+    /// 空 = 不加（未分组项目 / 单成员工作区）——与 V20 行为一致。
+    #[serde(default)]
+    pub add_dirs: Vec<String>,
+    /// 工作区拓扑说明（V21）：`--append-system-prompt=<文本>`；None / 空白 = 不注入。
+    #[serde(default)]
+    pub append_system_prompt: Option<String>,
+}
+
+/// 组装 `omp` 启动参数（纯函数，单测锁着）。
+///
+/// 为什么用 per-spawn 的 `--add-dir` 而不是全局配置 `workspace.additionalDirectories`：
+/// 后者对**所有**会话生效，会污染用户在终端里自己跑的 omp；前者只在壳内终端生效，无副作用。
+/// `--append-system-prompt` 用 `=` 形式（实测多行文本可原样注入）。
+pub fn build_omp_args(opts: &PtySpawnOpts) -> Vec<String> {
+    let mut args: Vec<String> = vec!["--cwd".into(), opts.cwd.clone()];
+    for dir in &opts.add_dirs {
+        args.push("--add-dir".into());
+        args.push(dir.clone());
+    }
+    if let Some(note) = &opts.append_system_prompt {
+        if !note.trim().is_empty() {
+            args.push(format!("--append-system-prompt={note}"));
+        }
+    }
+    if let Some(r) = &opts.resume {
+        args.push("--resume".into());
+        args.push(r.clone());
+    }
+    args
 }
 
 /// 从缓冲里取出「完整的 UTF-8 前缀」，不完整的尾部留在缓冲里等下一个读块。
@@ -245,11 +275,7 @@ pub async fn pty_spawn(
         }
     }
 
-    let mut args: Vec<String> = vec!["--cwd".into(), opts.cwd.clone()];
-    if let Some(r) = &opts.resume {
-        args.push("--resume".into());
-        args.push(r.clone());
-    }
+    let args = build_omp_args(&opts);
     let size = PtySize { rows: opts.rows.max(2), cols: opts.cols.max(2), pixel_width: 0, pixel_height: 0 };
     let spawned = spawn_pty(&bin, &args, &opts.cwd, size)
         .map_err(|e| cmd_err("PTY_SPAWN", e, None))?;
@@ -450,6 +476,44 @@ mod tests {
         assert!(out.contains("got:ping"), "PTY 读写回环失败：{out:?}");
         let status = p.child.wait().expect("wait 失败");
         assert_eq!(status.exit_code(), 0);
+    }
+
+    /// V21 参数拼装：`--add-dir` 逐个、说明用 `=` 形式、空说明不注入、resume 殿后。
+    #[test]
+    fn build_omp_args_includes_workspace_flags() {
+        let base = PtySpawnOpts {
+            id: "t1".into(),
+            cwd: "/a".into(),
+            cols: 80,
+            rows: 24,
+            resume: None,
+            add_dirs: vec!["/b".into(), "/c".into()],
+            append_system_prompt: Some("工作区说明\n第二行".into()),
+        };
+        assert_eq!(
+            build_omp_args(&base),
+            vec![
+                "--cwd",
+                "/a",
+                "--add-dir",
+                "/b",
+                "--add-dir",
+                "/c",
+                "--append-system-prompt=工作区说明\n第二行",
+            ]
+        );
+        // 空说明不注入；无协作根时参数与 V20 一致
+        let mut o = base.clone();
+        o.add_dirs = vec![];
+        o.append_system_prompt = Some("   ".into());
+        assert_eq!(build_omp_args(&o), vec!["--cwd", "/a"]);
+
+        // resume 追加在最后
+        let mut o = base.clone();
+        o.add_dirs = vec![];
+        o.append_system_prompt = None;
+        o.resume = Some("abc".into());
+        assert_eq!(build_omp_args(&o), vec!["--cwd", "/a", "--resume", "abc"]);
     }
 
     /// kill 路径：**忽略 SIGHUP 的进程**（omp TUI 的真实行为——只发 SIGHUP 会挂住）也必须被

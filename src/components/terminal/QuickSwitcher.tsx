@@ -1,7 +1,8 @@
 import { useId, useMemo, useRef, useState } from "react";
-import type { TerminalView, WorkspaceView } from "@shared/types";
+import { Layers } from "reicon-react";
+import type { CheckoutView, TerminalView } from "@shared/types";
 import { useApp } from "../../stores/app";
-import { describeTerminalWorkspace, openOrFocusWorkspace, workspaceLabel } from "../../lib/workspaces";
+import { checkoutLabel, describeTerminalWorkspace, openOrFocusCheckout } from "../../lib/checkouts";
 import { terminalDisplayName } from "../../lib/termTitle";
 import { useText } from "../../lib/useText";
 import { STATE_TEXT, STATE_TONE } from "../../lib/termState";
@@ -9,26 +10,29 @@ import { DialogShell } from "../settings/DialogShell";
 
 type Match =
  | { kind: "terminal"; id: string; key: string; title: string; subtitle: string }
- | { kind: "workspace"; path: string; key: string; title: string; subtitle: string; disabled: boolean };
+ | { kind: "group"; id: string; key: string; title: string; subtitle: string }
+ | { kind: "checkout"; path: string; key: string; title: string; subtitle: string; disabled: boolean };
 
-function keyOf(term: TerminalView, workspaces: readonly WorkspaceView[]): string {
- return `${terminalDisplayName(term)}\n${term.cwd}\n${describeTerminalWorkspace(term.cwd, workspaces).primary}`;
+function keyOf(term: TerminalView, checkouts: readonly CheckoutView[]): string {
+ return `${terminalDisplayName(term)}\n${term.cwd}\n${describeTerminalWorkspace(term.cwd, checkouts).primary}`;
 }
 
-function workspaceKey(ws: WorkspaceView): string {
+function checkoutKey(ws: CheckoutView): string {
  return `${ws.projectName}\n${ws.branch ?? ""}\n${ws.path}`;
 }
 
 /**
- * 快速切换（终端与工作区导航）：只做已打开终端与工作区的本地搜索与跳转。
+ * 快速切换（终端 / 工作区 / 工作区目录导航）：只做本地搜索与跳转。
  *
- * - 输入不调用 IPC，不扫描会话内容；分组与顺序沿用标签与工作区顺序。
- * - 终端调用 `focusTerminal`，工作区调用 `openOrFocusWorkspace`，执行前重核目标。
+ * - 输入不调用 IPC，不扫描会话内容；分组与顺序沿用标签、工作区与目录顺序。
+ * - 终端 `focusTerminal`、工作区 `selectGroup`、目录 `openOrFocusCheckout`，执行前重核目标。
  */
 export function QuickSwitcher(): React.JSX.Element {
  const t = useText();
  const terminals = useApp((s) => s.terminals);
- const workspaces = useApp((s) => s.workspaces);
+ const checkouts = useApp((s) => s.checkouts);
+ const workspaceGroups = useApp((s) => s.workspaceGroups);
+ const projects = useApp((s) => s.projects);
  const inputRef = useRef<HTMLInputElement>(null);
  const listId = useId();
  const [query, setQuery] = useState("");
@@ -38,9 +42,9 @@ export function QuickSwitcher(): React.JSX.Element {
 
  const cleaned = query.trim().toLowerCase();
  const termMatches = useMemo<Match[]>(() => terminals
-  .filter((term) => !cleaned || keyOf(term, workspaces).toLowerCase().includes(cleaned))
+  .filter((term) => !cleaned || keyOf(term, checkouts).toLowerCase().includes(cleaned))
   .map((term) => {
-   const context = describeTerminalWorkspace(term.cwd, workspaces);
+   const context = describeTerminalWorkspace(term.cwd, checkouts);
    return {
     kind: "terminal" as const,
     id: term.id,
@@ -48,19 +52,35 @@ export function QuickSwitcher(): React.JSX.Element {
     title: terminalDisplayName(term),
     subtitle: context.primary,
    };
-  }), [cleaned, terminals, workspaces]);
- const wsMatches = useMemo<Match[]>(() => workspaces
-  .filter((ws) => !cleaned || workspaceKey(ws).toLowerCase().includes(cleaned))
+  }), [cleaned, terminals, checkouts]);
+ const groupMatches = useMemo<Match[]>(() => workspaceGroups
+  .filter((group) => {
+   if (!cleaned) return true;
+   const names = projects.filter((p) => p.workspaceId === group.id).map((p) => p.name).join(" ");
+   return `${group.name} ${names}`.toLowerCase().includes(cleaned);
+  })
+  .map((group) => ({
+   kind: "group" as const,
+   id: group.id,
+   key: `grp-${group.id}`,
+   title: group.name,
+   subtitle: projects.filter((p) => p.workspaceId === group.id).map((p) => p.name).join(" · "),
+  })), [cleaned, projects, workspaceGroups]);
+ const checkoutMatches = useMemo<Match[]>(() => checkouts
+  .filter((ws) => !cleaned || checkoutKey(ws).toLowerCase().includes(cleaned))
   .map((ws) => ({
-   kind: "workspace" as const,
+   kind: "checkout" as const,
    path: ws.path,
-   key: `ws-${ws.path}`,
-   title: workspaceLabel(ws),
+   key: `ck-${ws.path}`,
+   title: checkoutLabel(ws),
    subtitle: ws.missing ? t.quickSwitcherMissingWorkspace : ws.path,
    disabled: ws.missing,
-  })), [cleaned, t.quickSwitcherMissingWorkspace, workspaces]);
- const matches = useMemo<Match[]>(() => [...termMatches, ...wsMatches], [termMatches, wsMatches]);
- const actionable = useMemo(() => matches.filter((m) => m.kind === "terminal" || !m.disabled), [matches]);
+  })), [cleaned, t.quickSwitcherMissingWorkspace, checkouts]);
+ const matches = useMemo<Match[]>(
+  () => [...termMatches, ...groupMatches, ...checkoutMatches],
+  [termMatches, groupMatches, checkoutMatches],
+ );
+ const actionable = useMemo(() => matches.filter((m) => m.kind !== "checkout" || !m.disabled), [matches]);
  const active = actionable.length > 0 ? actionable[Math.min(cursor, actionable.length - 1)] : null;
 
  const close = () => useApp.getState().set({ quickSwitcherOpen: false });
@@ -75,13 +95,22 @@ export function QuickSwitcher(): React.JSX.Element {
    s.focusTerminal(match.id);
    return;
   }
-  const ws = s.workspaces.find((item) => item.path === match.path);
+  if (match.kind === "group") {
+   if (!s.workspaceGroups.some((group) => group.id === match.id)) {
+    setGone(true);
+    return;
+   }
+   s.set({ quickSwitcherOpen: false, sidebarOpen: false });
+   s.selectGroup(match.id);
+   return;
+  }
+  const ws = s.checkouts.find((item) => item.path === match.path);
   if (!ws || ws.missing) {
    setGone(true);
    return;
   }
   s.set({ quickSwitcherOpen: false, sidebarOpen: false });
-  openOrFocusWorkspace(ws);
+  openOrFocusCheckout(ws);
  };
 
  return (
@@ -169,17 +198,37 @@ export function QuickSwitcher(): React.JSX.Element {
         </button>
        );
       })}
-      {wsMatches.length > 0 && (
+      {groupMatches.length > 0 && (
        <p className="px-2 pt-2 pb-1 text-[11px] font-medium tracking-wide text-faint">{t.quickSwitcherWorkspaces}</p>
       )}
-      {wsMatches.map((match) => (
+      {groupMatches.map((match) => (
        <button
         key={match.key}
         id={`${listId}-${match.key}`}
         type="button"
         role="option"
         aria-selected={active?.key === match.key}
-        disabled={match.kind === "workspace" && match.disabled}
+        onClick={() => choose(match)}
+        className={`flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-left transition-colors duration-100 ${active?.key === match.key ? "bg-active" : "hover:bg-hover"}`}
+       >
+        <Layers size={13} aria-hidden className="shrink-0 text-muted" />
+        <span className="min-w-0 flex-1">
+         <span className="block truncate text-[13px]">{match.title}</span>
+         <span className="block truncate text-[11px] text-faint">{match.subtitle}</span>
+        </span>
+       </button>
+      ))}
+      {checkoutMatches.length > 0 && (
+       <p className="px-2 pt-2 pb-1 text-[11px] font-medium tracking-wide text-faint">{t.quickSwitcherCheckouts}</p>
+      )}
+      {checkoutMatches.map((match) => (
+       <button
+        key={match.key}
+        id={`${listId}-${match.key}`}
+        type="button"
+        role="option"
+        aria-selected={active?.key === match.key}
+        disabled={match.kind === "checkout" && match.disabled}
         onClick={() => choose(match)}
         className={`flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-left transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-50 ${active?.key === match.key ? "bg-active" : "hover:bg-hover"}`}
        >

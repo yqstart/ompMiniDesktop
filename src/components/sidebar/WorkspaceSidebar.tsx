@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { FolderPlus, Search, Settings, X } from "reicon-react";
+import { FolderPlus, Layers, Search, Settings, X } from "reicon-react";
 import { api } from "@shared/api";
-import type { ProjectView } from "@shared/types";
+import type { ProjectView, WorkspaceView } from "@shared/types";
 import { useApp } from "../../stores/app";
-import { loadWorkspaces } from "../../lib/workspaces";
+import { loadCheckouts } from "../../lib/checkouts";
 import { pickAndAddProject } from "../../lib/projects";
 import { isMacKeyboard } from "../../lib/termInput";
 import { useText } from "../../lib/useText";
@@ -11,28 +11,36 @@ import { LanguageToggle } from "../LanguageToggle";
 import { ThemeToggle } from "../ThemeToggle";
 import { ProjectGroup } from "./ProjectGroup";
 import { SessionPopup } from "./SessionPopup";
-/** 左栏刷新：项目列表 + 工作区清单（项目增删 / 重定位 / 移除后都回这里）。 */
+import { WorkspaceGroupDialog } from "./WorkspaceGroupDialog";
+import { WorkspaceGroupSection } from "./WorkspaceGroupSection";
+/** 左栏刷新：项目列表 + 工作区 / 目录行清单（项目增删 / 重定位 / 移除 / 工作区编辑后都回这里）。 */
 async function refreshSidebar(): Promise<{ ok: boolean; message: string | null }> {
- const [projects, workspaces] = await Promise.all([
+ const [projects, checkouts] = await Promise.all([
   api.listProjects().then((list) => ({ ok: true as const, list })).catch((e: unknown) => ({ ok: false as const, message: e instanceof Error ? e.message : String(e) })),
-  loadWorkspaces().then((list) => ({ ok: true as const, list })).catch((e: unknown) => ({ ok: false as const, message: e instanceof Error ? e.message : String(e) })),
+  loadCheckouts().then((list) => ({ ok: true as const, list })).catch((e: unknown) => ({ ok: false as const, message: e instanceof Error ? e.message : String(e) })),
  ]);
  if (projects.ok) useApp.getState().set({ projects: projects.list });
- if (workspaces.ok) useApp.getState().set({ workspaces: workspaces.list });
  const failed: string[] = [];
  if (!projects.ok) failed.push(projects.message);
- if (!workspaces.ok) failed.push(workspaces.message);
+ if (!checkouts.ok) failed.push(checkouts.message);
  return failed.length === 0 ? { ok: true, message: null } : { ok: false, message: failed.join("；") };
 }
 
 export function WorkspaceSidebar() {
  const projects = useApp((s) => s.projects);
- const workspaces = useApp((s) => s.workspaces);
+ const workspaceGroups = useApp((s) => s.workspaceGroups);
+ const checkouts = useApp((s) => s.checkouts);
  const updateReady = useApp((s) => s.update.status === "available" || s.update.status === "ready");
  const t = useText();
  const [error, setError] = useState<string | null>(null);
  const [sessionsFor, setSessionsFor] = useState<ProjectView | null>(null);
+ const [groupDialog, setGroupDialog] = useState<{ group: WorkspaceView | null } | null>(null);
  const [loading, setLoading] = useState(true);
+ const itemsFor = (projectId: string) => checkouts.filter((w) => w.projectId === projectId);
+ const refresh = async () => {
+  const res = await refreshSidebar();
+  setError(res.ok ? null : res.message);
+ };
 
  useEffect(() => {
   void refreshSidebar().then((res) => {
@@ -86,6 +94,14 @@ export function WorkspaceSidebar() {
    <div className="flex shrink-0 items-center gap-2 px-4 pb-2 text-[11px] font-medium tracking-wide text-faint">
     <span className="min-w-0 flex-1 truncate">{t.workspaceTitle}</span>
     <button
+     onClick={() => setGroupDialog({ group: null })}
+     aria-label={t.wsGroupNew}
+     title={t.wsGroupNewTitle}
+     className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+    >
+     <Layers size={14} aria-hidden />
+    </button>
+    <button
      onClick={async () => {
       const res = await pickAndAddProject();
       if (res && !res.ok) setError(res.message);
@@ -104,15 +120,35 @@ export function WorkspaceSidebar() {
       <p role="status" className="mx-1 px-3 py-4 text-[13px] text-muted">{t.archivedLoading}</p>
      ) : (
       <>
-       {projects.map((project) => (
+       {workspaceGroups.map((group) => (
+        <WorkspaceGroupSection
+         key={group.id}
+         group={group}
+         projects={projects.filter((p) => p.workspaceId === group.id)}
+         itemsFor={itemsFor}
+         onEdit={(g) => setGroupDialog({ group: g })}
+         onChanged={refresh}
+         onError={setError}
+         onOpenSessions={setSessionsFor}
+        />
+       ))}
+       {workspaceGroups.length > 0 && projects.some((p) => p.workspaceId === null) && (
+        <WorkspaceGroupSection
+         group={null}
+         projects={projects.filter((p) => p.workspaceId === null)}
+         itemsFor={itemsFor}
+         onEdit={null}
+         onChanged={refresh}
+         onError={setError}
+         onOpenSessions={setSessionsFor}
+        />
+       )}
+       {workspaceGroups.length === 0 && projects.map((project) => (
         <ProjectGroup
          key={project.id}
          project={project}
-         items={workspaces.filter((w) => w.projectId === project.id)}
-         onChanged={async () => {
-          const res = await refreshSidebar();
-          setError(res.ok ? null : res.message);
-         }}
+         items={itemsFor(project.id)}
+         onChanged={refresh}
          onError={setError}
          onOpenSessions={() => setSessionsFor(project)}
         />
@@ -158,6 +194,14 @@ export function WorkspaceSidebar() {
     <LanguageToggle />
     <ThemeToggle />
    </div>
+   {groupDialog && (
+    <WorkspaceGroupDialog
+     key={groupDialog.group?.id ?? "new"}
+     group={groupDialog.group}
+     onClose={() => setGroupDialog(null)}
+     onChanged={refresh}
+    />
+   )}
    {
     sessionsFor && (
      <SessionPopup

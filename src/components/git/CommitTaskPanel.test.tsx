@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChangeFile, CommitTaskView, WorkspaceView } from "@shared/types";
+import type { ChangeFile, CheckoutView, CommitTaskView } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { CommitTaskPanel } from "./CommitTaskPanel";
 
@@ -36,8 +36,8 @@ const internals = globalThis as { __TAURI_INTERNALS__?: unknown };
 
 import { api } from "@shared/api";
 
-/** 提交信息语言的作用域是**项目**：一个项目下挂主目录与 worktree 两个工作区。 */
-const MAIN: WorkspaceView = {
+/** 提交信息语言的作用域是**项目**：一个项目下挂主目录与 worktree 两个目录行。 */
+const MAIN: CheckoutView = {
 	projectId: "p1",
 	projectName: "repo",
 	path: "/repo",
@@ -46,7 +46,7 @@ const MAIN: WorkspaceView = {
 	isMain: true,
 	missing: false,
 };
-const WORKTREE: WorkspaceView = { ...MAIN, path: "/repo/.wt/feat", branch: "feat", isMain: false };
+const WORKTREE: CheckoutView = { ...MAIN, path: "/repo/.wt/feat", branch: "feat", isMain: false };
 
 function file(path: string, extra: Partial<ChangeFile> = {}): ChangeFile {
 	return { path, origPath: null, index: " ", worktree: "M", untracked: false, add: 1, del: 0, ...extra };
@@ -84,7 +84,7 @@ beforeEach(() => {
 	document.body.appendChild(container);
 	useApp.setState({
 		locale: "zh-CN",
-		workspaces: [MAIN, WORKTREE],
+		checkouts: [MAIN, WORKTREE],
 		commitLangPrefs: {},
 		commitTasks: {},
 		activeCommitCwd: null,

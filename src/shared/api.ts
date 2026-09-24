@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
-import type { ChangeSet, CommitEvent, FallbackChainsInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, Overlay, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
+import type { ChangeSet, CheckoutView, CommitEvent, FallbackChainsInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, Overlay, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -48,10 +48,23 @@ export const api = {
   call<{ ok: number; failed: { id: string; message: string }[] }>(IPC.deleteSessions, { ids }),
  setOmpPath: (path: string | null) => call<OmpInfo>(IPC.setOmpPath, { path }),
  /**
-  * 工作区（V11 左栏树）：每个项目 = 主目录 + 它全部 git worktree（只读展示，
-  * 壳侧不创建 / 不删除 worktree）。
+  * 工作区（V21）：多项目容器（左栏顶层单元）。成员关系在项目侧
+  * （`ProjectView.workspaceId`），一个项目最多属于一个工作区。
   */
  listWorkspaces: () => call<WorkspaceView[]>(IPC.listWorkspaces),
+ /** 新建工作区：`name` + `projectIds`（成员重设语义同 `updateWorkspace`）。 */
+ createWorkspace: (name: string, projectIds: string[]) =>
+  call<WorkspaceView>(IPC.createWorkspace, { name, projectIds }),
+ /** 一次写全：改名 + 成员重设（被移出的项目回归未分组；不删项目、不动文件）。 */
+ updateWorkspace: (id: string, name: string, projectIds: string[]) =>
+  call<void>(IPC.updateWorkspace, { id, name, projectIds }),
+ /** 删组：成员回归未分组（不删项目、不杀终端）。 */
+ deleteWorkspace: (id: string) => call<void>(IPC.deleteWorkspace, { id }),
+ /**
+  * 目录行（V21 前叫「工作区行」）：每个项目 = 主目录 + 它全部 git worktree（只读展示，
+  * 壳侧不创建 / 不删除 worktree）。
+  */
+ listCheckouts: () => call<CheckoutView[]>(IPC.listCheckouts),
 
  /**
   * 提交 / 推送（V19）：先取变更集（打开面板），再按轨道发起任务。

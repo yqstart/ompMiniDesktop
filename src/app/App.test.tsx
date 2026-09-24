@@ -28,6 +28,7 @@ vi.mock("@shared/api", () => ({
   ptyResize: vi.fn(async () => undefined),
   ptyKill: vi.fn(async () => undefined),
   listProjects: vi.fn(async () => []),
+  listCheckouts: vi.fn(async () => []),
   listWorkspaces: vi.fn(async () => []),
   getWorkspaceGitState: vi.fn(async () => []),
   syncTitlePrompt: vi.fn(async () => ({ path: "/tmp/TITLE_SYSTEM.md", action: "written" as const })),
@@ -62,7 +63,7 @@ function press(options: KeyboardEventInit) {
 }
 
 const makeTerm = (id: string, cwd: string): TerminalView =>
- ({ id, projectId: null, cwd, label: id, title: id, state: "unknown", status: "running", exitCode: null, resume: null, spawnSeq: 0, createdAt: 1 });
+ ({ id, projectId: null, cwd, label: id, title: id, state: "unknown", status: "running", exitCode: null, resume: null, collab: [], spawnSeq: 0, createdAt: 1 });
 
 /** 快捷键的修饰键按平台分叉（与 `useTerminalHotkeys` 的判定同源）。 */
 const mod = isMacKeyboard() ? { metaKey: true } : { ctrlKey: true };
@@ -83,7 +84,7 @@ beforeEach(() => {
  useApp.setState({
   terminals: [makeTerm("t-1", "/a")],
   activeTerminalId: "t-1",
-  activeWorkspacePath: "/a",
+  selection: { kind: "checkout", path: "/a" },
   closingTerminalId: null,
   settingsTabOpen: false,
   settingsTabActive: false,
@@ -138,15 +139,15 @@ describe("应用外壳快捷键与侧栏", () => {
   expect(container.querySelectorAll('[data-testid="sidebar"]').length).toBe(1);
  });
 
- it("⌘1..9 只在当前工作区的终端里编号", () => {
+ it("⌘1..9 只在当前选中范围的终端里编号", () => {
   act(() => {
    useApp.setState({
     terminals: [makeTerm("t-a", "/a"), makeTerm("t-b1", "/b"), makeTerm("t-b2", "/b")],
     activeTerminalId: "t-b1",
-    activeWorkspacePath: "/b",
+    selection: { kind: "checkout", path: "/b" },
    });
   });
-  // /b 的第一个标签是 t-b1（全局列表里的第一个是别的分支的 t-a）
+  // /b 的第一个标签是 t-b1（全局列表里的第一个是别的范围的 t-a）
   press({ key: "1", ...mod });
   expect(useApp.getState().activeTerminalId).toBe("t-b1");
   press({ key: "2", ...mod });

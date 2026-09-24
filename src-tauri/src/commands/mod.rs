@@ -373,6 +373,9 @@ pub struct ProjectView {
     pub missing: bool,
     #[serde(rename = "sessionCount")]
     pub session_count: usize,
+    /// 所属工作区（V21）；null = 未分组。
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: Option<String>,
 }
 
 fn project_views(state: &State<AppState>) -> Vec<ProjectView> {
@@ -390,7 +393,7 @@ fn project_views(state: &State<AppState>) -> Vec<ProjectView> {
                 .to_string();
             let missing = !std::path::Path::new(&p.path).exists();
             let count = count_sessions_for(&sessions_root, &p.path);
-            ProjectView { id: p.id.clone(), path: p.path.clone(), name, missing, session_count: count }
+            ProjectView { id: p.id.clone(), path: p.path.clone(), name, missing, session_count: count, workspace_id: p.workspace_id.clone() }
         })
         .collect()
 }
@@ -459,7 +462,7 @@ pub async fn add_project(state: State<'_, AppState>, path: String) -> Result<Pro
             return project_views(&state).into_iter().find(|v| v.id == id).ok_or(cmd_err("INTERNAL", "项目状态不一致".into(), None));
         }
         let id = format!("p{}", chrono::Utc::now().timestamp_millis());
-        ov.projects.push(Project { id: id.clone(), path: norm.clone(), added_at: chrono::Utc::now().timestamp_millis(), last_model: None, last_thinking: None });
+        ov.projects.push(Project { id: id.clone(), path: norm.clone(), added_at: chrono::Utc::now().timestamp_millis(), last_model: None, last_thinking: None, workspace_id: None });
     }
     save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
     project_views(&state).into_iter().find(|v| v.path == norm).ok_or(cmd_err("INTERNAL", "项目状态不一致".into(), None))
@@ -526,12 +529,15 @@ pub async fn relocate_project(state: State<'_, AppState>, id: String, path: Stri
     project_views(&state).into_iter().find(|v| v.id == id).ok_or(cmd_err("INTERNAL", "项目状态不一致".into(), None))
 }
 
-// ---------- 工作区（V11 左栏树：项目 → 主目录 + git worktree） ----------
+// ---------- 目录行（V21：项目主目录 + git worktree；原「工作区行」） ----------
 
-/// 左栏工作区行：项目主目录或它的一个 git worktree。
+/// 左栏目录行：项目主目录或它的一个 git worktree。
+///
+/// V21 起「工作区」指多项目容器（见下方 workspace 命令），这里改名为目录行；
+/// 字段与语义与旧 `WorkspaceView` 完全一致（只读展示，真相 = `git worktree list`）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct WorkspaceView {
+pub struct CheckoutView {
     #[serde(rename = "projectId")]
     pub project_id: String,
     #[serde(rename = "projectName")]
@@ -562,13 +568,13 @@ fn project_display_name(path: &str) -> String {
 /// worktree 真相 = `git worktree list --porcelain`（手工 `git worktree add` 的也在），
 /// 而不是 `omp worktree list`（只登记 `~/.omp/wt` 下的）。
 #[tauri::command]
-pub async fn list_workspaces(state: State<'_, AppState>) -> Result<Vec<WorkspaceView>, CmdError> {
+pub async fn list_checkouts(state: State<'_, AppState>) -> Result<Vec<CheckoutView>, CmdError> {
     let projects: Vec<(String, String, String)> = {
         let ov = state.overlay.lock().await;
         ov.projects.iter().map(|p| (p.id.clone(), p.path.clone(), project_display_name(&p.path))).collect()
     };
     let git = crate::git_info::git_bin().await;
-    let mut out: Vec<WorkspaceView> = vec![];
+    let mut out: Vec<CheckoutView> = vec![];
     for (id, path, name) in projects {
         let missing = !std::path::Path::new(&path).is_dir();
         let wts = match (&git, missing) {
@@ -578,7 +584,7 @@ pub async fn list_workspaces(state: State<'_, AppState>) -> Result<Vec<Workspace
         // 主目录行的分支取 porcelain 第一块（git 约定第一块是主 worktree）；
         // 路径仍用项目自己的写法（git 回读的可能是 /private 归一后的形式）。
         let main = wts.first();
-        out.push(WorkspaceView {
+        out.push(CheckoutView {
             project_id: id.clone(),
             project_name: name.clone(),
             path: path.clone(),
@@ -591,7 +597,7 @@ pub async fn list_workspaces(state: State<'_, AppState>) -> Result<Vec<Workspace
             if w.path == path || !std::path::Path::new(&w.path).is_dir() {
                 continue;
             }
-            out.push(WorkspaceView {
+            out.push(CheckoutView {
                 project_id: id.clone(),
                 project_name: name.clone(),
                 path: w.path.clone(),
@@ -603,6 +609,134 @@ pub async fn list_workspaces(state: State<'_, AppState>) -> Result<Vec<Workspace
         }
     }
     Ok(out)
+}
+
+// ---------- 工作区（V21：多项目容器） ----------
+
+/// 左栏工作区：多项目容器。成员关系存在 `Project.workspace_id` 上（唯一归属），
+/// 这里返回的 `project_ids` 按项目注册顺序（前端渲染与「协作根」计算都用这个顺序）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceView {
+    pub id: String,
+    pub name: String,
+    pub created_at: i64,
+    /// 成员项目 id；空组合法（先建组、后加项目）。
+    pub project_ids: Vec<String>,
+}
+
+fn workspace_views(ov: &Overlay) -> Vec<WorkspaceView> {
+    ov.workspaces
+        .iter()
+        .map(|w| WorkspaceView {
+            id: w.id.clone(),
+            name: w.name.clone(),
+            created_at: w.created_at,
+            project_ids: ov
+                .projects
+                .iter()
+                .filter(|p| p.workspace_id.as_deref() == Some(w.id.as_str()))
+                .map(|p| p.id.clone())
+                .collect(),
+        })
+        .collect()
+}
+
+/// 工作区名清洗：去首尾空白；内部换行 / 制表符折成空格（名字会进注入文本与左栏）。
+pub fn clean_workspace_name(raw: &str) -> String {
+    raw.chars()
+        .map(|c| if c == '\n' || c == '\r' || c == '\t' { ' ' } else { c })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+/// 成员重设：`project_ids` 里的项目设为工作区 `wid` 成员，其余原成员移出（回归未分组）。
+/// 不存在的项目 id 静默忽略（前端列表可能过期）；一个项目只会属于一个工作区——
+/// 若它原本在别的组里，归属直接改到本组。
+fn assign_members(ov: &mut Overlay, wid: &str, project_ids: &[String]) {
+    for p in &mut ov.projects {
+        if project_ids.iter().any(|id| id == &p.id) {
+            p.workspace_id = Some(wid.to_string());
+        } else if p.workspace_id.as_deref() == Some(wid) {
+            p.workspace_id = None;
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn list_workspaces(state: State<'_, AppState>) -> Result<Vec<WorkspaceView>, CmdError> {
+    let ov = state.overlay.lock().await;
+    Ok(workspace_views(&ov))
+}
+
+#[tauri::command]
+pub async fn create_workspace(
+    state: State<'_, AppState>,
+    name: String,
+    project_ids: Vec<String>,
+) -> Result<WorkspaceView, CmdError> {
+    let name = clean_workspace_name(&name);
+    if name.is_empty() {
+        return Err(cmd_err("BAD_ARG", "工作区名不能为空".into(), None));
+    }
+    let id = format!("w{}", chrono::Utc::now().timestamp_millis());
+    let view = {
+        let mut ov = state.overlay.lock().await;
+        ov.workspaces.push(Workspace { id: id.clone(), name, created_at: chrono::Utc::now().timestamp_millis() });
+        assign_members(&mut ov, &id, &project_ids);
+        workspace_views(&ov)
+            .into_iter()
+            .find(|w| w.id == id)
+            .ok_or_else(|| cmd_err("INTERNAL", "工作区状态不一致".into(), None))?
+    };
+    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+    Ok(view)
+}
+
+/// 一次写全：改名 + 成员重设（编辑对话框的两个字段同时提交）。
+/// 项目移出本组即回归未分组——不删项目、不动任何文件。
+#[tauri::command]
+pub async fn update_workspace(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+    project_ids: Vec<String>,
+) -> Result<(), CmdError> {
+    let name = clean_workspace_name(&name);
+    if name.is_empty() {
+        return Err(cmd_err("BAD_ARG", "工作区名不能为空".into(), None));
+    }
+    {
+        let mut ov = state.overlay.lock().await;
+        let Some(w) = ov.workspaces.iter_mut().find(|w| w.id == id) else {
+            return Err(cmd_err("NOT_FOUND", "工作区不存在".into(), None));
+        };
+        w.name = name;
+        assign_members(&mut ov, &id, &project_ids);
+    }
+    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+    Ok(())
+}
+
+/// 删组：成员项目回归未分组（不删项目、不删文件、不杀终端）。
+#[tauri::command]
+pub async fn delete_workspace(state: State<'_, AppState>, id: String) -> Result<(), CmdError> {
+    {
+        let mut ov = state.overlay.lock().await;
+        let before = ov.workspaces.len();
+        ov.workspaces.retain(|w| w.id != id);
+        if ov.workspaces.len() == before {
+            return Err(cmd_err("NOT_FOUND", "工作区不存在".into(), None));
+        }
+        for p in &mut ov.projects {
+            if p.workspace_id.as_deref() == Some(id.as_str()) {
+                p.workspace_id = None;
+            }
+        }
+    }
+    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+    Ok(())
 }
 
 /// 归属匹配集：项目路径 ∪ 其全部 worktree 路径（同 project id）。
@@ -980,8 +1114,43 @@ pub fn load_state(app: &AppHandle) -> AppState {
 
 #[cfg(test)]
 mod tests {
-    use super::{catalog_fresh, list_archived_in, load_cached, owner_project, scan_window, MODELS_TTL_MS};
+    use super::{assign_members, catalog_fresh, clean_workspace_name, list_archived_in, load_cached, owner_project, scan_window, MODELS_TTL_MS};
+    use crate::overlay::{Overlay, Project};
     use std::collections::HashMap;
+
+    /// V21 工作区成员重设：在列表里的进组（跨组则改归属），其余原成员回归未分组。
+    #[test]
+    fn assign_members_moves_and_releases() {
+        let mk = |id: &str, ws: Option<&str>| Project {
+            id: id.into(),
+            path: format!("/{id}"),
+            workspace_id: ws.map(|s| s.to_string()),
+            ..Default::default()
+        };
+        let mut ov = Overlay {
+            version: 1,
+            projects: vec![mk("p1", None), mk("p2", Some("w1")), mk("p3", Some("w2"))],
+            ..Default::default()
+        };
+        // p1 进 w1、p2 留在 w1、p3 从 w2 改归 w1；未知 id 静默忽略
+        assign_members(&mut ov, "w1", &["p1".into(), "p2".into(), "p3".into(), "ghost".into()]);
+        assert_eq!(ov.projects[0].workspace_id.as_deref(), Some("w1"));
+        assert_eq!(ov.projects[1].workspace_id.as_deref(), Some("w1"));
+        assert_eq!(ov.projects[2].workspace_id.as_deref(), Some("w1"));
+        // 再用只含 p2 的列表更新 w1：p1 / p3 回归未分组
+        assign_members(&mut ov, "w1", &["p2".into()]);
+        assert_eq!(ov.projects[0].workspace_id, None);
+        assert_eq!(ov.projects[1].workspace_id.as_deref(), Some("w1"));
+        assert_eq!(ov.projects[2].workspace_id, None);
+    }
+
+    /// 工作区名清洗：首尾空白裁掉、内部换行折成空格；全空白 = 空（调用方拒绝）。
+    #[test]
+    fn clean_workspace_name_trims_and_flattens() {
+        assert_eq!(clean_workspace_name("  全栈  "), "全栈");
+        assert_eq!(clean_workspace_name("front\nback"), "front back");
+        assert_eq!(clean_workspace_name(" \t \n "), "");
+    }
 
     /// 会话归属：与 `list_sessions` 同一条规则（真实路径前缀匹配、最长优先）。
     #[test]

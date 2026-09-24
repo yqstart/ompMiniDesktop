@@ -8,6 +8,7 @@ const proj = (id: string, path: string): ProjectView => ({
   name: path.split("/").pop() ?? path,
   missing: false,
   sessionCount: 0,
+  workspaceId: null,
 });
 
 const sess = (id: string, projectId: string | null, archived: boolean): SessionView => ({

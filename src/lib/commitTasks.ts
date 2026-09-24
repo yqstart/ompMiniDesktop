@@ -25,7 +25,7 @@ export function isCommitTaskRunning(phase: CommitPhase): boolean {
  */
 function contextArgFor(cwd: string): string | null {
  const s = useApp.getState();
- const projectId = s.workspaces.find((w) => w.path === cwd)?.projectId;
+ const projectId = s.checkouts.find((w) => w.path === cwd)?.projectId;
  return commitContextArg(projectId ? (s.commitLangPrefs[projectId]?.lang ?? "system") : "system");
 }
 
@@ -233,7 +233,7 @@ let refreshSeq = 0;
 
 /** 批量刷新工作区 git 快照（行徽章）；`paths` 省略 = 全部未缺失的工作区。失败静默。 */
 export async function refreshWorkspaceGitState(paths?: string[]): Promise<void> {
- const list = paths ?? useApp.getState().workspaces.filter((w) => !w.missing).map((w) => w.path);
+ const list = paths ?? useApp.getState().checkouts.filter((w) => !w.missing).map((w) => w.path);
  if (list.length === 0) return;
  const seq = ++refreshSeq;
  try {

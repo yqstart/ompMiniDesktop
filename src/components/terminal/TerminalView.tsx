@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { BrowserTerminal } from "reicon-react";
 import { useApp } from "../../stores/app";
-import { loadWorkspaces, newTerminalInActiveWorkspace, resolveNewTerminalWorkspace } from "../../lib/workspaces";
-import { terminalsInWorkspace } from "../../lib/terminalScope";
+import { loadCheckouts, newTerminalInSelection, resolveNewTerminalCheckout } from "../../lib/checkouts";
+import { terminalsInScope } from "../../lib/terminalScope";
+import { selectionScopePaths } from "../../lib/workspaceGroups";
 import { pickAndAddProject } from "../../lib/projects";
 import { isMacKeyboard } from "../../lib/termInput";
 import { fmt } from "../../lib/locale";
@@ -21,13 +22,17 @@ import { TerminalPane } from "./TerminalPane";
  */
 export function TerminalView({ visible = true }: { visible?: boolean }) {
  const allTerminals = useApp((s) => s.terminals);
+ const checkouts = useApp((s) => s.checkouts);
+ const workspaceGroups = useApp((s) => s.workspaceGroups);
+ const projects = useApp((s) => s.projects);
+ const selection = useApp((s) => s.selection);
  const activeId = useApp((s) => s.activeTerminalId);
- const activeWorkspacePath = useApp((s) => s.activeWorkspacePath);
- const scoped = useMemo(
-  () => terminalsInWorkspace(allTerminals, activeWorkspacePath),
-  [allTerminals, activeWorkspacePath],
+ const scope = useMemo(
+  () => selectionScopePaths(selection, workspaceGroups, checkouts, projects),
+  [selection, workspaceGroups, checkouts, projects],
  );
- // 显示哪个面板：激活终端必须落在当前工作区里，否则这个工作区就是「没有终端」——交回空态。
+ const scoped = useMemo(() => terminalsInScope(allTerminals, scope), [allTerminals, scope]);
+ // 显示哪个面板：激活终端必须落在当前选中范围里，否则这个视图就是「没有终端」——交回空态。
  const inScope = activeId !== null && scoped.some((term) => term.id === activeId);
  const shownId = visible && inScope ? activeId : null;
  return (
@@ -48,12 +53,12 @@ export function TerminalView({ visible = true }: { visible?: boolean }) {
 /** 空态：引导开第一个终端（左栏空态负责引导添加项目）。 */
 function EmptyTerminal() {
  const projects = useApp((s) => s.projects);
- const workspaces = useApp((s) => s.workspaces);
- const activeWorkspacePath = useApp((s) => s.activeWorkspacePath);
+ const checkouts = useApp((s) => s.checkouts);
+ const selection = useApp((s) => s.selection);
  const t = useText();
  const [busy, setBusy] = useState(false);
  const [error, setError] = useState<string | null>(null);
- const target = resolveNewTerminalWorkspace(workspaces, activeWorkspacePath);
+ const target = resolveNewTerminalCheckout(checkouts, selection, projects);
  const shortcut = isMacKeyboard() ? "⌘ T" : "Ctrl+Shift+T";
  const addProject = async () => {
   setBusy(true);
@@ -61,7 +66,7 @@ function EmptyTerminal() {
   try {
    const res = await pickAndAddProject();
    if (res && !res.ok) setError(res.message);
-   if (res?.ok) await loadWorkspaces();
+   if (res?.ok) await loadCheckouts();
   } catch (e) {
    setError(e instanceof Error ? e.message : t.addProjectFailed);
   } finally {
@@ -99,7 +104,7 @@ function EmptyTerminal() {
      </>
     ) : target ? (
      <button
-      onClick={() => newTerminalInActiveWorkspace()}
+      onClick={() => newTerminalInSelection()}
       title={fmt(t.termOpenInHint, target.path)}
       className="mt-7 flex cursor-pointer items-center gap-4 rounded-md border border-accent/25 bg-accent/10 px-4 py-2.5 text-[13px] font-medium text-accent transition-colors duration-100 hover:bg-hover"
      >

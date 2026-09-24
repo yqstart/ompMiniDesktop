@@ -4,7 +4,7 @@ import { api } from "@shared/api";
 import { useApp } from "../stores/app";
 import { groupSessionsByProject } from "../lib/sessions";
 import { runSessionBatch } from "../lib/sessionBatch";
-import { resumeSessionInTerminal } from "../lib/workspaces";
+import { resumeSessionInTerminal } from "../lib/checkouts";
 import { fmt } from "../lib/locale";
 import { useText } from "../lib/useText";
 import { ConfirmDialog } from "./ConfirmDialog";

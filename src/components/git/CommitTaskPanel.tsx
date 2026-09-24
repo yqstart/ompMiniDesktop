@@ -16,7 +16,7 @@ import {
 	setCommitMode,
 } from "../../lib/commitTasks";
 import { COMMIT_LANGS, type CommitLang } from "../../lib/commitLang";
-import { workspaceLabel } from "../../lib/workspaces";
+import { checkoutLabel } from "../../lib/checkouts";
 import { useDialogFocus } from "../../lib/useDropdown";
 import { useText } from "../../lib/useText";
 import { LOCALE_NAMES, type TextKey } from "../../lib/locale";
@@ -82,10 +82,10 @@ export function CommitTaskPanel() {
 function CommitTaskCard({ cwd }: { cwd: string }) {
 	const t = useText();
 	const task = useApp((s) => s.commitTasks[cwd]);
-	const workspace = useApp((s) => s.workspaces.find((w) => w.path === cwd));
+	const workspace = useApp((s) => s.checkouts.find((w) => w.path === cwd));
 	const ahead = useApp((s) => s.workspaceGitStates[cwd]?.ahead ?? 0);
 	// 提交信息语言按**项目**记忆（项目的主目录与全部 worktree 共用一份）
-	const projectId = useApp((s) => s.workspaces.find((w) => w.path === cwd)?.projectId ?? null);
+	const projectId = useApp((s) => s.checkouts.find((w) => w.path === cwd)?.projectId ?? null);
 	const langPref = useApp((s) => (projectId ? s.commitLangPrefs[projectId] : undefined));
 	const setCommitLangPref = useApp((s) => s.setCommitLangPref);
 	const cardRef = useRef<HTMLDivElement>(null);
@@ -167,7 +167,7 @@ function CommitTaskCard({ cwd }: { cwd: string }) {
 					<div className="min-w-0 flex-1">
 						<div className="text-[15px] font-semibold tracking-tight">{t.gitPanelTitle}</div>
 						<div className="mt-1 min-w-0 truncate font-mono text-[12px] text-muted">
-							{workspace ? workspaceLabel(workspace) : cwd}
+							{workspace ? checkoutLabel(workspace) : cwd}
 						</div>
 					</div>
 					<PhaseBadge phase={task.phase} />

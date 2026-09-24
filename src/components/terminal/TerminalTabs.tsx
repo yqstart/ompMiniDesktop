@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboa
 import { Folder, Plus, Search, Settings, X } from "reicon-react";
 import { useApp } from "../../stores/app";
 import type { TerminalView } from "@shared/types";
-import { newTerminalInActiveWorkspace, resolveNewTerminalWorkspace } from "../../lib/workspaces";
-import { terminalsInWorkspace } from "../../lib/terminalScope";
+import { newTerminalInSelection, resolveNewTerminalCheckout } from "../../lib/checkouts";
+import { terminalsInScope } from "../../lib/terminalScope";
+import { selectionScopePaths } from "../../lib/workspaceGroups";
 import { useText } from "../../lib/useText";
+import { fmt } from "../../lib/locale";
 import { STATE_TEXT, STATE_TONE } from "../../lib/termState";
 import { terminalDisplayName } from "../../lib/termTitle";
 import { canRenameSession, renameTerminalSession, sanitizeSessionTitle, SESSION_TITLE_MAX } from "../../lib/termRename";
@@ -27,20 +29,23 @@ import { canRenameSession, renameTerminalSession, sanitizeSessionTitle, SESSION_
  */
 export function TerminalTabs() {
  const allTerminals = useApp((s) => s.terminals);
- const workspaces = useApp((s) => s.workspaces);
+ const checkouts = useApp((s) => s.checkouts);
+ const workspaceGroups = useApp((s) => s.workspaceGroups);
+ const projects = useApp((s) => s.projects);
+ const selection = useApp((s) => s.selection);
  const activeId = useApp((s) => s.activeTerminalId);
  const settingsTabOpen = useApp((s) => s.settingsTabOpen);
  const settingsTabActive = useApp((s) => s.settingsTabActive);
- const activeWorkspacePath = useApp((s) => s.activeWorkspacePath);
  const t = useText();
- const target = resolveNewTerminalWorkspace(workspaces, activeWorkspacePath);
+ const target = resolveNewTerminalCheckout(checkouts, selection, projects);
  const listRef = useRef<HTMLDivElement>(null);
  const [roam, setRoam] = useState<string | null>(null);
- // 只列当前工作区的终端（过滤键 = 左栏选中项；下面整段渲染与键盘导航都走这个列表）
- const terminals = useMemo(
-  () => terminalsInWorkspace(allTerminals, activeWorkspacePath),
-  [allTerminals, activeWorkspacePath],
+ // 只列当前选中范围的终端（范围 = 左栏选中项；下面整段渲染与键盘导航都走这个列表）
+ const scope = useMemo(
+  () => selectionScopePaths(selection, workspaceGroups, checkouts, projects),
+  [selection, workspaceGroups, checkouts, projects],
  );
+ const terminals = useMemo(() => terminalsInScope(allTerminals, scope), [allTerminals, scope]);
  const order = useMemo(() => [...terminals.map((term) => term.id), ...(settingsTabOpen ? ["settings"] : [])], [settingsTabOpen, terminals]);
  const focusedKey = roam && order.includes(roam) ? roam : settingsTabActive ? "settings" : activeId;
  useEffect(() => {
@@ -158,7 +163,13 @@ export function TerminalTabs() {
        aria-controls={`terminal-panel-${term.id}`}
        tabIndex={focusedKey === term.id ? 0 : -1}
        aria-selected={active}
-       title={renaming?.id === term.id ? undefined : `${term.cwd}\n${t.termRenameHint}`}
+       title={
+        renaming?.id === term.id
+         ? undefined
+         : [term.cwd, term.collab.length > 0 ? fmt(t.termCollab, term.collab.join("\n")) : null, t.termRenameHint]
+          .filter(Boolean)
+          .join("\n")
+       }
        onClick={() => useApp.getState().focusTerminal(term.id)}
        onDoubleClick={(e) => {
         e.preventDefault();
@@ -269,7 +280,7 @@ export function TerminalTabs() {
      <Search size={14} aria-hidden />
     </button>
     <button
-     onClick={() => newTerminalInActiveWorkspace()}
+     onClick={() => newTerminalInSelection()}
      disabled={!target}
      aria-label={t.termNew}
      title={target ? target.path : t.termNewHint}

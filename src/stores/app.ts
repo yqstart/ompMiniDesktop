@@ -1,11 +1,12 @@
 import { create } from "zustand";
-import type { CommitOutcome, CommitTaskView, HealthInfo, ModelCatalog, ProjectView, TerminalStatus, TerminalView, UpdateState, WorkspaceGitState, WorkspaceView } from "@shared/types";
+import type { CheckoutView, CommitOutcome, CommitTaskView, HealthInfo, ModelCatalog, ProjectView, SidebarSelection, TerminalStatus, TerminalView, UpdateState, WorkspaceGitState, WorkspaceView } from "@shared/types";
 import type { Locale, LocaleMode } from "../lib/locale";
 import { loadLocaleMode, resolveLocale, saveLocaleMode, systemLang } from "../lib/locale";
 import { applyTheme, loadTheme, saveTheme, type ThemeMode } from "../lib/theme";
 import { loadMyModels, saveMyModels } from "../lib/myModels";
 import { loadCommitLangPrefs, saveCommitLangPrefs, type CommitLangPref } from "../lib/commitLang";
 import { parseTermTitle, isWorkspaceNameFallback } from "../lib/termTitle";
+import { checkoutGroupId, selectionScopePaths } from "../lib/workspaceGroups";
 
 type AppState = {
  health: HealthInfo | null;
@@ -44,18 +45,20 @@ type AppState = {
 
  // ---------- V11 终端工作区 ----------
 
- /** 工作区清单（`lib/workspaces.ts` 的 `loadWorkspaces` 是唯一刷新入口）。 */
- workspaces: WorkspaceView[];
+ /** 工作区清单（V21 多项目容器；`lib/checkouts.ts` 的 `loadCheckouts` 是唯一刷新入口，与目录行一起拉）。 */
+ workspaceGroups: WorkspaceView[];
+ /** 目录行清单（项目主目录 + git worktree；同上，唯一刷新入口）。 */
+ checkouts: CheckoutView[];
  /** 打开中的终端（tab 元数据；PTY 进程与高频字节流都不进 store）。 */
  terminals: TerminalView[];
  /** 终端标签里当前激活的那个（切去设置标签时保持不变，回来就是「上次的终端」）。
-  *  不变式：它**要么是 null，要么落在 `activeWorkspacePath` 目录里**——右栏视图按工作区过滤，
-  *  跨工作区的激活项会让标签栏与面板同时空掉。`openTerminal` / `focusTerminal` / `closeTerminal` /
-  *  `loadWorkspaces` 四处负责维持。 */
+  *  不变式：它**要么是 null，要么落在 `selection` 的范围里**——右栏视图按选中项过滤，
+  *  范围外的激活项会让标签栏与面板同时空掉。`openTerminal` / `focusTerminal` / `closeTerminal` /
+  *  `loadCheckouts` 四处负责维持。 */
  activeTerminalId: string | null;
- /** 左栏选中的工作区（按 `path` 标识）。三重身份：右栏终端视图的**过滤键**（只列 cwd 命中它的终端，
-  *  见 `lib/terminalScope.ts`）、`＋` 新建终端的目录、左栏高亮。跟随 `openTerminal` / `focusTerminal` 走。 */
- activeWorkspacePath: string | null;
+ /** 左栏选中项（V21）：右栏终端视图的**范围真相**（`lib/workspaceGroups.ts` 的
+  *  `selectionScopePaths`）、`＋` 新建终端的目标、左栏高亮。跟随 `openTerminal` / `focusTerminal` 走。 */
+ selection: SidebarSelection | null;
  /** 快速切换面板是否打开（不持久化；仅在打开时挂载，关闭即卸载）。 */
  quickSwitcherOpen: boolean;
  /** 终端聚焦序号：每次成功打开或聚焦终端 +1，让选择同一终端也能恢复 xterm 焦点。 */
@@ -68,6 +71,8 @@ type AppState = {
   resume?: string | null;
  }) => string;
  focusTerminal: (id: string) => void;
+ /** 选中工作区（V21；`id: null` = 未分组区）：范围切到整组，激活终端收敛到范围内最近一个。 */
+ selectGroup: (id: string | null) => void;
  closeTerminal: (id: string) => void;
  setTerminalStatus: (id: string, status: TerminalStatus, code: number | null) => void;
  /**
@@ -76,12 +81,12 @@ type AppState = {
   * 标题帧率很高（工作态转轮每 80ms 一帧），解析后只有「名字或状态真的变了」才写 store。
   */
  setTerminalTitle: (id: string, title: string) => void;
+ /** spawn 时把「实际挂上的协作根」写回（V21；tab 悬停提示用；无变化不写，避免多余渲染）。 */
+ setTerminalCollab: (id: string, dirs: string[]) => void;
  /** 启动失败（omp 缺失 / cwd 不存在等）：进程没起来，π 直接落失败态。 */
  failTerminal: (id: string) => void;
  /** 重启已退出的终端：`spawnSeq + 1` 触发 TerminalPane 重新 spawn；状态回落未知（新进程还没开口）。 */
  restartTerminal: (id: string) => void;
- /** 项目被移除时解除终端的归属（tab 与进程保留，继续可用）。 */
- detachTerminalProject: (projectId: string) => void;
  /** 等待确认关闭的终端 id（运行中终端的 × / ⌘W 都先落到这里，由 ConfirmDialog 收口）。 */
  closingTerminalId: string | null;
  /** 请求关闭：运行中 → 弹出确认；已退出 → 直接关。 */
@@ -207,10 +212,11 @@ export const useApp = create<AppState>((set, get) => ({
 
  // ---------- V11 终端工作区 ----------
 
- workspaces: [],
+ workspaceGroups: [],
+ checkouts: [],
  terminals: [],
  activeTerminalId: null,
- activeWorkspacePath: null,
+ selection: null,
  quickSwitcherOpen: false,
  terminalFocusSeq: 0,
  openTerminal: ({ projectId, cwd, label, resume = null }) => {
@@ -225,43 +231,65 @@ export const useApp = create<AppState>((set, get) => ({
    status: "running",
    exitCode: null,
    resume,
+   collab: [],
    spawnSeq: 0,
    createdAt: Date.now(),
   };
-  set((s) => ({
+  const s = get();
+  // 工作区视图里开的终端保持组视图（范围不缩窄——组内别的目录的终端不该从标签栏消失）；
+  // 其余情况切到目录视图。未分组项目（group = null）与工作区一样按「组」比对。
+  const keepGroup = s.selection?.kind === "group" && s.selection.id === checkoutGroupId(cwd, s.checkouts, s.projects)
+   ? s.selection
+   : null;
+  set({
    terminals: [...s.terminals, term],
    activeTerminalId: id,
-   activeWorkspacePath: cwd,
+   selection: keepGroup ?? { kind: "checkout", path: cwd },
    terminalFocusSeq: s.terminalFocusSeq + 1,
    // 新终端必然切回终端视图（设置标签留在标签栏里）
    settingsTabActive: false,
-  }));
+  });
   return id;
  },
  focusTerminal: (id) =>
   set((s) => {
    const hit = s.terminals.find((t) => t.id === id);
    if (!hit) return {};
+   // 终端已在当前范围里 → 只切激活（工作区视图点组内终端不缩窄视图）；
+   // 范围外（⌘⇧K 跨组跳转）→ 切到它的目录视图。`scope === null`（不过滤）时不算越界。
+   const scope = selectionScopePaths(s.selection, s.workspaceGroups, s.checkouts, s.projects);
+   const inScope = scope === null || scope.has(hit.cwd);
    return {
     activeTerminalId: id,
-    activeWorkspacePath: hit.cwd,
+    selection: inScope ? s.selection : { kind: "checkout", path: hit.cwd },
     terminalFocusSeq: s.terminalFocusSeq + 1,
     settingsTabActive: false,
    };
+  }),
+ selectGroup: (id) =>
+  set((s) => {
+   const scope = selectionScopePaths({ kind: "group", id }, s.workspaceGroups, s.checkouts, s.projects);
+   const scoped = scope === null ? s.terminals : s.terminals.filter((t) => scope.has(t.cwd));
+   // 激活终端收敛到新范围内最近一个（在范围内就保持不动——不让视图跳来跳去）
+   const keep = s.activeTerminalId !== null && scoped.some((t) => t.id === s.activeTerminalId)
+    ? s.activeTerminalId
+    : scoped[scoped.length - 1]?.id ?? null;
+   return { selection: { kind: "group", id }, activeTerminalId: keep };
   }),
  closeTerminal: (id) =>
   set((s) => {
    const idx = s.terminals.findIndex((t) => t.id === id);
    if (idx < 0) return {};
-   const closing = s.terminals[idx];
+   const scope = selectionScopePaths(s.selection, s.workspaceGroups, s.checkouts, s.projects);
+   const inScope = (t: TerminalView) => scope === null || scope.has(t.cwd);
    const terminals = s.terminals.filter((t) => t.id !== id);
-   // 关闭当前 tab 后聚焦**同一工作区**里相邻的一个（优先右邻，退回左邻）：
-   // 右栏视图按工作区过滤，跳到别的分支的终端等于把人从当前视图里踢出去；
-   // 同工作区都关完就交回空态（`activeWorkspacePath` 不动，空态里能接着新建）。
+   // 关闭当前 tab 后聚焦**同一范围**里相邻的一个（优先右邻，退回左邻）：
+   // 右栏视图按选中项过滤，跳到范围外的终端等于把人从当前视图里踢出去；
+   // 范围内都关完就交回空态（`selection` 不动，空态里能接着新建）。
    let activeTerminalId = s.activeTerminalId;
    if (activeTerminalId === id) {
-    const siblings = terminals.filter((t) => t.cwd === closing.cwd);
-    const at = s.terminals.slice(0, idx).filter((t) => t.cwd === closing.cwd).length;
+    const siblings = terminals.filter(inScope);
+    const at = s.terminals.slice(0, idx).filter(inScope).length;
     const next = siblings[Math.min(at, siblings.length - 1)] ?? null;
     activeTerminalId = next ? next.id : null;
    }
@@ -296,6 +324,13 @@ export const useApp = create<AppState>((set, get) => ({
    if (t.title === nextTitle && t.state === phase) return {};
    return { terminals: s.terminals.map((x) => (x.id === id ? { ...x, title: nextTitle, state: phase } : x)) };
   }),
+ setTerminalCollab: (id, dirs) =>
+  set((s) => {
+   const t = s.terminals.find((x) => x.id === id);
+   if (!t) return {};
+   if (t.collab.length === dirs.length && t.collab.every((d, i) => d === dirs[i])) return {};
+   return { terminals: s.terminals.map((x) => (x.id === id ? { ...x, collab: dirs } : x)) };
+  }),
  failTerminal: (id) =>
   set((s) => ({
    terminals: s.terminals.map((t) =>
@@ -308,10 +343,6 @@ export const useApp = create<AppState>((set, get) => ({
     // 重启 = 新进程（可能带 --resume）：清掉旧会话标题，等新的 OSC 标题到达（回退到工作区名）
     t.id === id ? { ...t, title: null, status: "running", exitCode: null, spawnSeq: t.spawnSeq + 1, state: "unknown" } : t,
    ),
-  })),
- detachTerminalProject: (projectId) =>
-  set((s) => ({
-   terminals: s.terminals.map((t) => (t.projectId === projectId ? { ...t, projectId: null } : t)),
   })),
  closingTerminalId: null,
  requestCloseTerminal: (id) => {

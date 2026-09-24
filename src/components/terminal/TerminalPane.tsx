@@ -6,6 +6,7 @@ import "@xterm/xterm/css/xterm.css";
 import { api } from "@shared/api";
 import type { PtyEvent, TerminalView } from "@shared/types";
 import { useApp } from "../../stores/app";
+import { collabContextFor } from "../../lib/workspaceGroups";
 import { readTermTheme } from "../../lib/termTheme";
 import { hasOpenDialog } from "../../lib/useDropdown";
 import { TEXT, fmt } from "../../lib/locale";
@@ -106,7 +107,23 @@ export function TerminalPane({ term, active }: { term: TerminalView; active: boo
     }
    };
    try {
-    await api.ptySpawn({ id: term.id, cwd: term.cwd, cols, rows, resume: term.resume }, channel);
+    // 工作区协作根（V21，全自动）：cwd 所属项目在多成员工作区里时，每次 spawn 都按**当时**
+    // 的成员重算（用户改了分组，重启即生效）；算出的根同时写回 store（tab 悬停提示用实际值）。
+    const s = useApp.getState();
+    const collab = collabContextFor(term.cwd, s.workspaceGroups, s.checkouts, s.projects, s.locale);
+    s.setTerminalCollab(term.id, collab.addDirs);
+    await api.ptySpawn(
+     {
+      id: term.id,
+      cwd: term.cwd,
+      cols,
+      rows,
+      resume: term.resume,
+      addDirs: collab.addDirs,
+      appendSystemPrompt: collab.note,
+     },
+     channel,
+    );
    } catch (err) {
     if (!alive) return;
     // 数据层展示文本取「当次调用」的语言（与既有口径一致），不进 effect 依赖
