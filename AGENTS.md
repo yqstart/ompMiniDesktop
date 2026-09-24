@@ -151,6 +151,8 @@ appUpdate.ts     # 应用内更新状态机
 - **左栏选中态**：工作区行 = `bg-active` 填充 + 左侧 2px accent 线 + 等宽加粗分支名；`DiagramTree` 区分主目录与 worktree（主目录强调色、普通 worktree 灰色），与项目行共用悬浮语言。
 - **终端关闭语义**：`requestCloseTerminal` 统一收口（running → ConfirmDialog 确认；exited → 直关）；关 = 从 store 移除 → 组件卸载 → kill 进程。重启 = `restartTerminal`（spawnSeq+1，TerminalPane 重新 spawn，xterm 实例与滚动缓冲保留）。
 - **皮肤与语言仍是纯展示层偏好**：三档分段控件挂在左栏底部「设置」行右侧（语言在左、皮肤在右），不写 omp 配置、不进设置页；`--term-*` 两套色板跟着这两个开关走。深浅色不准用 Tailwind `dark:` 变体绕开 token；终端色值只准放 `index.css` 的 `--term-*`（`lib/termTheme.ts` 运行时读取）。
+- **全 app 不显示滚动条**（2026-09-24 口径）：任何滚动容器都只滚动、不画滑块——`index.css` 里 `*::-webkit-scrollbar { display:none }`（WebKit / WKWebView 只认这条伪元素规则）+ `scrollbar-width: none`；终端 xterm 是自绘 overlay 滑块，另有单独规则。滚动照常（滚轮 / 触控 / 键盘 / 程序化），也不再需要 `scrollbar-gutter` 占位（相关类与 `.no-scrollbar` 已删，别再引入）。
+- **行尾下拉（`EnumSelect`）宽度按最长选项撑开、文本不截断**：面板 `width: max-content`，装不下时换行，`max-width` 夹在视口内——别退回「面板窄 + 选项 `truncate`」（WKWebView 下会把选项切成 `mini…`）。
 - **终端图标字体是壳的资源**（V16）：`--font-mono` 末尾的 "OMP Nerd Icons"（`public/fonts/omp-nerd-icons.woff2`，Nerd Fonts Symbols Only 派生、横向压到 0.6 em = 1 个终端 cell；重新生成走 `scripts/build-nerd-icons-font.py`）**只补图标码点**，ASCII / 中文仍走系统字体；`main.tsx` 启动预热。设置 ›「常用设置」的 `symbolPreset` 是**唯一进白名单的外观键**（nerd 档能不能渲染由壳决定）。omp 欢迎头那条「Please use nerdfont 😭.」是上游行为（unicode 档 + 每会话 10% 概率，见 `docs/v16-schedule.md`）——**不许在壳侧过滤终端输出**，消除它靠切 `symbolPreset`。
 - **界面文案一律走字典**（`src/lib/locale.ts` 的 `TEXT`）：组件内 `useText()`、非组件模块 `TEXT[useApp.getState().locale]`；插值 `fmt(t.key, v1)`（占位 `{0}`）；**上游数据不进字典**（会话标题、omp 输出、后端错误原样透传）。设置项 label 是动态键（`s_` + 点换下划线 / 分组 `sg_` / 值标签 `sv*`）——**这批前缀的键不许被「未使用键清理」误删**（有单测守着）。
 - 左侧栏宽度 **292–480px（默认 292，localStorage 持久化）**；下限由底部行内容决定（改 `SIDEBAR_MIN` 前先量那一行）。窄窗 <768px 收抽屉。

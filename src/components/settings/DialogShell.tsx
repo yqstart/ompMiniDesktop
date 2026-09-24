@@ -53,7 +53,7 @@ export function DialogShell({
       <X size={12} aria-hidden />
      </button>
     </div>
-    <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 [overflow-wrap:anywhere] [scrollbar-gutter:stable] sm:p-5">{children}</div>
+    <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 [overflow-wrap:anywhere] sm:p-5">{children}</div>
    </div>
   </div>
  );

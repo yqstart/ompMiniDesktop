@@ -188,7 +188,7 @@ export function SessionPopup({
        </div>
       )}
      </div>
-     <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3 [scrollbar-gutter:stable]">
+     <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
       {sessions === null && (loadError ? (
        <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
         <p role="alert" className="text-[13px] text-danger">{loadError}</p>

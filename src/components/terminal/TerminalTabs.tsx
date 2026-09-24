@@ -112,7 +112,7 @@ export function TerminalTabs() {
     ref={listRef}
     role="tablist"
     aria-label={t.termPaneAria}
-    className="no-scrollbar flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-2 py-2"
+    className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-2 py-2"
     onKeyDown={(e) => {
      const el = e.target as HTMLElement;
      const key = el.closest<HTMLElement>("[data-tab-key]")?.dataset.tabKey;

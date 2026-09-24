@@ -165,46 +165,26 @@ body {
  font-variant-numeric: tabular-nums;
 }
 
-/* 细滚动条：平时几乎看不见，hover 才显形 */
-* {
- scrollbar-width: thin;
- scrollbar-color: color-mix(in srgb, var(--foreground) 16%, transparent) transparent;
-}
-
-*::-webkit-scrollbar {
- width: 9px;
- height: 9px;
-}
-
-*::-webkit-scrollbar-thumb {
- background: color-mix(in srgb, var(--foreground) 14%, transparent);
- border-radius: 8px;
- border: 3px solid transparent;
- background-clip: content-box;
-}
-
-*::-webkit-scrollbar-track {
- background: transparent;
-}
-
-/* 滚动但不显示滚动条（滚轮/触控/键盘/程序化滚动照常工作）：标签栏等横向溢出处用。
+/* 全应用不显示滚动条（滚动照常：滚轮 / 触控 / 键盘 / 程序化滚动都与滑块无关）。
+   口径：壳里任何滚动容器（设置页、左栏、标签栏、弹窗列表、代码块…）都不画滑块——
+   滚动条在这些窄容器里既占宽又和卡片边框打架；可滚动性由内容裁切 + 滚动行为本身表达。
    注意：WebKit（含 Tauri 的 WKWebView）里仅 `::-webkit-scrollbar { display:none }` 可靠，
-   `scrollbar-width: none` 是 Firefox 专用，在 WKWebView 下无效——之前只靠后者所以没生效。 */
-.no-scrollbar {
+   `scrollbar-width: none` 是 Firefox 专用，在 WKWebView 下无效——只写后者不会生效。 */
+* {
  scrollbar-width: none;
  -ms-overflow-style: none;
 }
 
-.no-scrollbar::-webkit-scrollbar {
- width: 0 !important;
- height: 0 !important;
- display: none !important;
+*::-webkit-scrollbar {
+ width: 0;
+ height: 0;
+ display: none;
 }
 
-.no-scrollbar::-webkit-scrollbar-thumb,
-.no-scrollbar::-webkit-scrollbar-track {
- display: none !important;
- background: transparent !important;
+*::-webkit-scrollbar-thumb,
+*::-webkit-scrollbar-track {
+ display: none;
+ background: transparent;
 }
 
 /* 终端不显示滚动条（滚动照常：滚轮/键盘/scrollback/程序化滚动都走 xterm 核心，与滑块无关）。

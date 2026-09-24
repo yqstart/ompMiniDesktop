@@ -186,7 +186,7 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
     role="tabpanel"
     tabIndex={0}
     aria-labelledby={`settings-tab-${tab}`}
-    className="@container/panel flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto pb-1 [overflow-wrap:anywhere] [scrollbar-gutter:stable]"
+    className="@container/panel flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto pb-1 [overflow-wrap:anywhere]"
    >
     {tab === "archived" ? (
      <ArchivedSessions />

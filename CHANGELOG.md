@@ -15,6 +15,10 @@
 ### Removed
 - **壳侧不再管理 worktree（只保留只读展示）**：项目头的「新建 worktree」（分支过滤 + 新建分支 + 基线两档）与「项目操作」（清理失效登记 / 清理孤儿 worktree）、worktree 行 hover 的「删除」（探脏二次确认 + `force` 重删）一起退场，连带删除 6 个后端命令——`create_worktree` / `remove_worktree` / `prune_worktrees` / `list_orphan_worktrees` / `clear_orphan_worktrees` 与 `get_git_info`（唯一使用者是新建面板），以及 `GitInfo` / `OrphanWorktree` / `OrphanClearResult` 类型与 27 个字典键。**展示照旧**：左栏仍列每个项目的全部 git worktree（真相 = `git worktree list`），分支名、worktree 徽章、改动点 / 领先·落后 / 上游缺失徽章与「提交…」入口都在；新建 / 删除 worktree 走 omp 与 git 命令行，worktree 里的会话归属不受影响。
 
+### Fixed
+- **设置页的下拉不再截断选项文字**：`EnumSelect` 的面板宽度此前由「收缩到内容」算出来、选项又带 `truncate`，在 WKWebView 下宽度被算成触发按钮宽的量级（实测 66px），`minimal` / `medium` 这类稍长的取值只剩 `mini…` / `me…`。现在面板按最长选项撑开（`width: max-content`），选项不再截断——宽度不够时换行而不是隐藏，`max-width` 始终把它夹在视口内（右对齐时按到视口左缘的可用宽度收缩）。真机 WKWebView 实测：7 个思考档全部完整显示；超长文本只会换行、面板不出界。
+- **全应用不再显示滚动条**：以前是「细滚动条」（`scrollbar-width: thin` + 9px `::-webkit-scrollbar`），设置页、左栏、弹窗列表、代码块、标签栏都会画出滑块。现在全局隐藏（`*::-webkit-scrollbar { display:none }` + `scrollbar-width: none`；终端 xterm 的自绘 overlay 滑块沿用原有单独规则）——滚动照常（滚轮 / 触控 / 键盘 / 程序化滚动都与滑块无关）。滑块宽度归零后 `scrollbar-gutter: stable` 不再有任何预留效果，相关类与已被全局规则取代的 `.no-scrollbar` 一并删除。
+
 ## [0.3.0] - 2026-09-24
 
 ### Added

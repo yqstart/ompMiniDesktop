@@ -98,8 +98,7 @@ export function WorkspaceSidebar() {
      <FolderPlus size={14} aria-hidden />
     </button>
    </div>
-   {/* 滚动容器：`scrollbar-gutter:stable` 恒定预留滚动条宽度，有无滚动条不横跳 */}
-   <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-3 [scrollbar-gutter:stable]">
+   <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-3">
     <div aria-busy={loading}>
      {loading ? (
       <p role="status" className="mx-1 px-3 py-4 text-[13px] text-muted">{t.archivedLoading}</p>

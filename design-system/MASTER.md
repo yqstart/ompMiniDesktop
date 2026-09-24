@@ -60,12 +60,12 @@
 ## 4. 布局
 
 - V11 两栏：左栏可拖拽（**292–480px，默认 292**，`sidebarWidth` 存 Zustand + localStorage 持久化；窄窗 <768px 收抽屉）→ 右侧工作区（**常驻标签栏**：终端标签 + 设置标签；xterm 全尺寸铺满）。**下限 = 左栏底部那一行的内容宽度**（设置全称 + 语言 + 皮肤并排不挤压，按最宽的英文界面算；实测 288px 临界 + 4px 字体余量），不为审美而定——改它之前先量那一行。
-- 左栏：40px macOS 红绿灯占位 → ompMiniDesktop 字标 → 36px 添加项目按钮 → 工作区标题与项目树 → 固定底栏。字标区同样支持拖窗；滚动区预留滚动条槽位。
+- 左栏：40px macOS 红绿灯占位 → ompMiniDesktop 字标 → 36px 添加项目按钮 → 工作区标题与项目树 → 固定底栏。字标区同样支持拖窗；滚动区不画滚动条（全 app 口径，见 §7）。
 - 项目组：36px 折叠头（chevron + 24px 文件夹图标底 + 项目名）与 hover/focus 操作槽（会话、移除项目）；**文件夹图标即「当前打开的项目」**——活动工作区落在本项目（右栏正在显示它的终端）时用 `accent`，否则 `muted`，缺失目录优先 `warn`。「移除项目」走 `ConfirmDialog`（解绑 + 会话标记归档，不删文件）；缺失目录给 warning 修复条。
 - 工作区：32px 行，`DiagramTree` + 等宽分支名 + worktree 徽章；选中左线、填充与加粗。主目录图标 accent，普通 worktree faint；缺失目录禁用。从属关系用弱引导线表达。worktree **只读展示**（V20：壳侧不创建 / 不删除，行上没有删除按钮）。
-- 右侧工作面：桌面端外沿 8px 留白、16px 圆角与轻描边；终端本身无额外 padding。48px 常驻标签栏（即便没有任何标签也保留工作区标题与新建入口）——**终端标签按左栏选中的工作区过滤**（只列当前分支的终端，别的分支的终端照常跑、不在这个视图里），激活标签 surface 填充与细边框；窄窗左端显示项目抽屉按钮。标题截断、关闭入口和常驻 `＋` 行为不变；标签溢出时栏内横向滚动、隐藏滚动条（`.no-scrollbar`，垂直滚轮映射为横向）；终端和设置面板只切显隐，不卸载。
+- 右侧工作面：桌面端外沿 8px 留白、16px 圆角与轻描边；终端本身无额外 padding。48px 常驻标签栏（即便没有任何标签也保留工作区标题与新建入口）——**终端标签按左栏选中的工作区过滤**（只列当前分支的终端，别的分支的终端照常跑、不在这个视图里），激活标签 surface 填充与细边框；窄窗左端显示项目抽屉按钮。标题截断、关闭入口和常驻 `＋` 行为不变；标签溢出时栏内横向滚动、不显示滚动条（全 app 口径见 §7；垂直滚轮映射为横向）；终端和设置面板只切显隐，不卸载。
 - **终端标签 = π 状态标 + 会话标题**（`π` 是 omp 血统；标签上不再用终端图标）：π 用 mono 14px，**颜色即 omp 的运行状态**（`lib/termTitle.ts` 从 OSC 标题读）：工作中 `accent` + `animate-pulse` 呼吸、等待确认 `warn`、等待输入与正常退出 `ok`、异常退出与启动失败 `danger`、未知 `faint`。颜色不是唯一信号——状态文字进 `sr-only`（屏幕阅读器）并作为 π 的 `title` 悬停提示；π 的呼吸动画在 `prefers-reduced-motion` 下由全局规则关掉（§5 动效）。名字位显示**会话标题**；omp 在会话还没有标题时广播的是 cwd 末段目录名（回退值）——壳侧识别后不显示，退回工作区显示名「项目 · 分支」。**标签只占一行**（V18）：不显示 cwd 第二行（工作目录由左栏选中项与标签栏的工作区过滤表达，完整 cwd 留在悬停提示里）；会话标题的语言随界面语言（V18 写 `<agentDir>/TITLE_SYSTEM.md`，见 `AGENTS.md` 数据流）。**双击标签 = 改名**（V17）：内联输入框替换名字行（draft 初值 = 当前会话标题，Enter 提交 / Esc / 失焦取消），提交走 omp 原生命令 `/rename`（`lib/termRename.ts`）；失败（标题为空 / 含控制字符，或会话不在等待输入）时留在编辑态、输入框描边转 danger 并在名字行下方显示 danger 文案（编辑期标签高度自适应，常态 36px 单行）。
-- 终端面板：xterm 全尺寸铺满（`FitAddon` 跟随容器；隐藏面板不与后端同步尺寸），**不显示滚动条**（xterm 6 自绘 overlay，`index.css` 全局 `display:none`；滚轮/键盘/回看照常）。omp 退出后浮层 = `bg-background/75` 遮罩 + `bg-elevated` 小卡（13px muted「omp 已退出」；异常退出显示「omp 意外退出（退出代码 N）」+「重启」accent 实心键 +「关闭」描边键）。**终端自己就是内容面**——不再套卡片、边框或内边距。
+- 终端面板：xterm 全尺寸铺满（`FitAddon` 跟随容器；隐藏面板不与后端同步尺寸），**不显示滚动条**（xterm 6 自绘 overlay，`index.css` 里对它单独隐藏；滚轮/键盘/回看照常。全 app 口径见 §7）。omp 退出后浮层 = `bg-background/75` 遮罩 + `bg-elevated` 小卡（13px muted「omp 已退出」；异常退出显示「omp 意外退出（退出代码 N）」+「重启」accent 实心键 +「关闭」描边键）。**终端自己就是内容面**——不再套卡片、边框或内边距。
 - 终端空态：64px 图标盒、等宽终端标识、24/28px 邀请式标题、限宽说明、稀释强调色新建按钮与快捷键提示；无项目时提示先添加项目。
 - 圆角：`rounded-sm` 5px / `rounded-md` 8px / `rounded-lg` 12px / `rounded-xl` 16px / `rounded-2xl` 20px。圆角全局 token 驱动，不现场定第二套。
 - 边框：默认 `border-border`；分组内的弱分隔用 `border-border-soft`。禁止 `border-border/60`、`/70` 这类透明度档现场手调。
@@ -95,7 +95,7 @@
 
 - icon-only 按钮必须 `aria-label`；图片/fileMention 芯片有文字替代；表单/select 有 label。
 - 颜色不作唯一信号：状态同时有文字（运行中/成功/失败/等待审批）。
-- 异步内容预留占位，禁止内容跳动（content-jumping）。**滚动条也要占位**：左栏会话列表 `[scrollbar-gutter:stable]`——列表从「不满一屏」长到「有滚动条」时，内容宽度不变、横向不跳一下。
+- 异步内容预留占位，禁止内容跳动（content-jumping）。**全 app 不显示滚动条**：任何滚动容器都不画滑块——`index.css` 里 `*::-webkit-scrollbar { display:none }`（WebKit，含 WKWebView，只认这条伪元素规则）+ `scrollbar-width: none`（Firefox）；可滚动性由内容裁切与滚动本身表达。因此也不存在"滚动条占位"问题（滑块 0 宽时 `scrollbar-gutter` 无预留，相关类与 `.no-scrollbar` 已删）。
 
 ## 8. 组件速查（V11 终端工作区 + 设置页七项菜单）
 
@@ -123,7 +123,7 @@
 - `ThemeToggle`（`src/components/ThemeToggle.tsx`）= 皮肤三档分段控件（跟随系统 / 深色 / 浅色），**只挂在左栏底部「设置」行右侧**：`role="radiogroup"` + 三个 `role="radio"`（`aria-checked`），左右方向键组内循环；选中 `bg-active`。只切 `<html class="dark">`（localStorage `omp.theme.v1`），不写 omp 配置。终端配色跟着它换（`--term-*`）。
 - `LanguageToggle`（`src/components/LanguageToggle.tsx`）= 界面语言三档分段控件（跟随系统 / 简体中文 / English），**只挂在左栏底部、`ThemeToggle` 左侧**，样式同款。语言名是自称（`LOCALE_NAMES` / `LOCALE_SHORT` 不进字典）；`system` 档实际语言由 `resolveLocale` 解析（`zh*` → 中文）。偏好存 localStorage `omp.locale.v1`。
 - `SettingsPage` = 设置标签面板，左侧**七项**图标导航分**两组**（**omp**：常用设置 / 模型 / 记忆 / 供应商用量；**本应用**：关于 / 使用统计 / 已归档对话），组标题是 11px `faint` 小字（**无标题行，菜单从顶端开始**）+ 组间分隔线；窄导航（44px）下组标题与页签名一起收进 `sr-only`（`not-sr-only` 在容器 ≥640px 恢复）。右侧为唯一滚动内容区，宽窗 176px 导航 / 紧凑 44px 图标导航（保留可访问名称与 title）；44px 导航行。七个入口与隐藏保活语义不变，**页内不再有快捷定位 chips**（左栏切页即导航）；组件用 `@container/settings` / `@container/panel` 随可用空间换行，不按全窗口宽度猜测面板宽度。
-- `GeneralSettingsPanel`（`src/components/settings/GeneralSettingsPanel.tsx`）= 「设置 › 常用设置」的「omp 常用设置」：**41 个常用键**（白名单 / 分组 / 枚举取值表在 `src/lib/ompSettings.ts`；V11 起含 `tools.approvalMode`）的读写面。折叠分组 + 开关 / 枚举下拉（行尾按钮弹出浮层，`EnumSelect`——选项不进设置页文档流）/ 数字框 + 行尾「恢复 omp 默认值」；写入乐观更新、失败回滚；整行 `title` 是上游英文说明。**V11 的 V11 键块（`s_tools_approvalMode` 等）与值标签（`svApproval*`）是动态字典键，不许被"未使用键"清理误删。**
+- `GeneralSettingsPanel`（`src/components/settings/GeneralSettingsPanel.tsx`）= 「设置 › 常用设置」的「omp 常用设置」：**41 个常用键**（白名单 / 分组 / 枚举取值表在 `src/lib/ompSettings.ts`；V11 起含 `tools.approvalMode`）的读写面。折叠分组 + 开关 / 枚举下拉（行尾按钮弹出浮层，`EnumSelect`——选项不进设置页文档流；面板宽度按最长选项撑开、**文本不截断**，装不下时换行，`max-width` 把它夹在视口内）/ 数字框 + 行尾「恢复 omp 默认值」；写入乐观更新、失败回滚；整行 `title` 是上游英文说明。**V11 的 V11 键块（`s_tools_approvalMode` 等）与值标签（`svApproval*`）是动态字典键，不许被"未使用键"清理误删。**
 - `ProviderPicker` / `CustomProviderEditForm` / `ProviderModelsDialog` / `DialogShell`（`src/components/settings/`）= 「添加供应商」与「挑选模型」两个模态（V12c）：选择器（搜索 + 已配置置顶 + 首项「自定义」）、models.yml 表单（名称可改 / 接口类型两档 / 只有 API Key / 模型列表）、供应商模型星标列表（全选 / 清空作用于过滤结果）、模态壳（`fixed` 全屏遮罩 + 居中卡片，Esc / 遮罩 / × 关）。`StarToggle`（`src/components/settings/StarToggle.tsx`）= 共享挑选星标（挑选面板 / 我的模型列表共用一份）；`Switch`（`src/components/settings/Switch.tsx`）= 共享开关（通用设置行、自定义模型表单、提交浮层的「记住选择」共用一份，不许各写一份）。
 - `ModelsPanel`（`src/components/settings/ModelsPanel.tsx`）= 「设置 › 模型」的页壳（V12b 起为**唯一模型管理面**，四区块顺序：**供应商 → 我的模型 → 模型角色 → 失败转移**——供应商置顶，因为「先添加供应商、再在弹窗里挑模型」是使用动线）；`ProvidersSection`（登录 / 登出 + 已添加列表 + 「添加供应商」/「挑选模型」两个弹窗）/ `FallbackChains` / `ModelPickList` / `MemoryPanel` / `ArchivedSessions` / `UsagePanel` / `ProviderUsagePanel`：设置页其余区块 / 页签，口径同各自排期文档（v3 / v4 / v5 / v9 / v12 §6 / v15）。其中 `ArchivedSessions`（`src/components/ArchivedSessions.tsx`）= 「已归档对话」：标题行（计数 + 刷新）→ 口径说明 → 按项目分组（组头 = 折叠 + 名称 + 路径 + 计数 + 恢复全部 / 删除全部）→ 会话行（**点击 = 恢复并在终端里继续**（V11：unarchive + 新终端 resume；旧「只读回放」已随聊天界面退场）+ 日期 + 恢复 / 删除）。删除走 `ConfirmDialog`。数据来自 `list_archived_sessions`（不看扫描窗口）。
 - 新增组件先查此表，禁止同义重复（如第二种 confirm 框、第二种标签栏）。

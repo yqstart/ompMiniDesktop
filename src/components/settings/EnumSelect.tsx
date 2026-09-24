@@ -64,6 +64,13 @@ export function EnumSelect({
    list.style.top = `${up ? Math.max(MARGIN, rect.top - GAP - Math.min(height, room)) : rect.bottom + GAP}px`;
    list.style.right = `${Math.max(MARGIN, window.innerWidth - rect.right)}px`;
    list.style.minWidth = `${Math.round(rect.width)}px`;
+   // 宽度按最长选项撑开（`w-max`），但要夹在「右对齐后不会越过视口左缘」的范围内：
+   // 面板右缘贴着触发按钮右缘，可用宽度 = 到左缘的距离；不够时收窄（选项换行，仍不截断）。
+   // `min-width` 优先于 `max-width`，所以最窄也就是触发按钮自身的宽度。
+   list.style.maxWidth = `${Math.max(
+    Math.round(rect.width),
+    Math.min(window.innerWidth - 2 * MARGIN, rect.right - MARGIN),
+   )}px`;
    list.style.maxHeight = `${Math.min(height, room)}px`;
    list.style.visibility = "visible";
   };
@@ -95,7 +102,7 @@ export function EnumSelect({
      ref={listRef}
      aria-label={label}
      style={{ visibility: "hidden" }}
-     className="fixed z-10 max-w-[16rem] overflow-y-auto rounded-md border border-border bg-elevated p-1 shadow-pop"
+     className="fixed z-10 w-max max-w-[calc(100vw-1rem)] overflow-y-auto rounded-md border border-border bg-elevated p-1 shadow-pop"
     >
      {choices.map((choice) => (
       <button
@@ -106,7 +113,7 @@ export function EnumSelect({
        }}
        aria-current={choice.value === value}
        title={choice.label}
-       className={`block w-full cursor-pointer truncate rounded px-2 py-1 text-left text-[13px] transition-colors duration-100 hover:bg-hover ${choice.value === value ? "text-accent" : ""
+       className={`block w-full cursor-pointer rounded px-2 py-1 text-left text-[13px] break-words transition-colors duration-100 hover:bg-hover ${choice.value === value ? "text-accent" : ""
         }`}
       >
        {choice.label}

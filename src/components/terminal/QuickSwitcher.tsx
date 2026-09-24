@@ -140,7 +140,7 @@ export function QuickSwitcher(): React.JSX.Element {
       </button>
      </div>
     ) : (
-     <div role="listbox" id={listId} aria-label={t.quickSwitcherTitle} className="max-h-80 overflow-y-auto [scrollbar-gutter:stable]">
+     <div role="listbox" id={listId} aria-label={t.quickSwitcherTitle} className="max-h-80 overflow-y-auto">
       {termMatches.length > 0 && (
        <p className="px-2 pt-1 pb-1 text-[11px] font-medium tracking-wide text-faint">{t.quickSwitcherTerminals}</p>
       )}
