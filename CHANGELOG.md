@@ -12,6 +12,9 @@
 - **「工作区」命名归位（V21）**：代码里旧的 `WorkspaceView`（目录行：主目录 / worktree）改名 `CheckoutView`、命令 `list_workspaces` 改名 `list_checkouts`；`WorkspaceView` 让位给工作区容器，新增 `list_workspaces` / `create_workspace` / `update_workspace` / `delete_workspace` 四个命令（IPC 面 52 → 56）。左栏选中项从 `activeWorkspacePath`（单个目录）升级为 `selection`（`group` 工作区视图，含 `id: null` 未分组 / `checkout` 目录视图）：右栏终端范围、`＋` 新建目标、`⌘1..9` 编号与快速切换跟随同一份范围；从工作区视图开终端或点组内终端**不会缩窄视图**，⌘⇧K 跳到范围外的终端才会切到它的目录视图。快速切换面板相应变成三分组（终端 / 工作区 / 工作区目录）。
 - **覆盖层新增 `workspaces`**：`overlay.json` 多一个工作区列表（id / 名字 / 创建时间），项目侧多一个 `workspaceId`（`null` = 未分组；一个项目最多属于一个工作区）。旧文件自动兼容（缺字段 = 无工作区），归一化清掉指向已删工作区的悬空归属。
 
+### Fixed
+- **提交面板在失败态下按钮不再掉出弹窗**：卡片此前只有 `max-h`，既没有裁剪也没有滚动容器——快速轨一旦出现错误块（error + hint）把内容撑过上限，底部按钮行与语言设置就从卡片底部溢出（落在圆角之外；实测 760px 高的窗口里溢出 145px）。现在改成**三段式**：弹窗头（标题 / 阶段徽章 / 轨道选择）与弹窗尾（按钮行）固定不动，**弹窗体是唯一纵向滚动区**（卡片补 `overflow-hidden`，中间内容区 `min-h-0 flex-1 overflow-y-auto`）；完整轨日志的自动滚底相应改为滚这个内容区。
+
 ## [0.4.0] - 2026-09-24
 
 ### Added

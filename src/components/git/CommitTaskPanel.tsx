@@ -89,12 +89,13 @@ function CommitTaskCard({ cwd }: { cwd: string }) {
 	const langPref = useApp((s) => (projectId ? s.commitLangPrefs[projectId] : undefined));
 	const setCommitLangPref = useApp((s) => s.setCommitLangPref);
 	const cardRef = useRef<HTMLDivElement>(null);
-	const logRef = useRef<HTMLDivElement>(null);
+	// 弹窗体（唯一滚动区）：日志到达新行时自动滚底
+	const bodyRef = useRef<HTMLDivElement>(null);
 	useDialogFocus(cardRef, true, closeCommitPanel);
 
 	// 日志自动滚底（新行到达时）
 	useEffect(() => {
-		const el = logRef.current;
+		const el = bodyRef.current;
 		if (el) el.scrollTop = el.scrollHeight;
 	}, [task?.log.length]);
 
@@ -160,10 +161,11 @@ function CommitTaskCard({ cwd }: { cwd: string }) {
 				role="dialog"
 				aria-modal="true"
 				aria-label={t.gitPanelTitle}
-				className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-xl border border-border bg-elevated shadow-dialog"
+				className="flex max-h-[85dvh] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-border bg-elevated shadow-dialog"
 				onClick={(e) => e.stopPropagation()}
 			>
-				<div className="flex items-start gap-3 border-b border-border-soft p-5 pb-4">
+				{/* 弹窗头：标题 + 阶段徽章（固定不滚动） */}
+				<div className="flex shrink-0 items-start gap-3 border-b border-border-soft p-5 pb-4">
 					<div className="min-w-0 flex-1">
 						<div className="text-[15px] font-semibold tracking-tight">{t.gitPanelTitle}</div>
 						<div className="mt-1 min-w-0 truncate font-mono text-[12px] text-muted">
@@ -174,7 +176,7 @@ function CommitTaskCard({ cwd }: { cwd: string }) {
 				</div>
 
 				{/* 轨道选择：快速（默认）/ 完整（omp commit，含 CHANGELOG） */}
-				<div className="flex items-center justify-between gap-3 border-b border-border-soft px-5 py-2.5">
+				<div className="flex shrink-0 items-center justify-between gap-3 border-b border-border-soft px-5 py-2.5">
 					<span className="text-[12px] text-muted">{t.gitPanelModeLabel}</span>
 					<div
 						role="radiogroup"
@@ -202,167 +204,168 @@ function CommitTaskCard({ cwd }: { cwd: string }) {
 					</div>
 				</div>
 
-				{mode === "full" && (
-					<div className="border-b border-border-soft px-5 py-2 text-[11px] leading-4 text-faint">
-						{t.gitFullCommitHint}
-						{task.selected.length === 0 && hasFiles ? ` · ${t.gitFullCommitNoSelection}` : ""}
-					</div>
-				)}
+				{/* 弹窗体：唯一纵向滚动区（头尾固定） */}
+				<div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto">
+					{mode === "full" && (
+						<div className="border-b border-border-soft px-5 py-2 text-[11px] leading-4 text-faint">
+							{t.gitFullCommitHint}
+							{task.selected.length === 0 && hasFiles ? ` · ${t.gitFullCommitNoSelection}` : ""}
+						</div>
+					)}
 
-				{/* 快速轨：文件勾选 */}
-				{mode === "fast" && (
-					<div className="border-b border-border-soft px-5 py-3">
-						<div className="mb-1.5 flex items-center justify-between gap-3">
-							<span className="text-[11px] font-medium tracking-wide text-faint">{t.gitPanelFiles}</span>
-							{hasFiles && (
-								<button
-									type="button"
-									disabled={running}
-									onClick={() => selectAllCommitFiles(cwd, !allSelected)}
-									className="cursor-pointer rounded-sm px-1.5 py-0.5 text-[11px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-								>
-									{allSelected ? t.gitPanelSelectNone : t.gitPanelSelectAll}
-								</button>
+					{/* 快速轨：文件勾选 */}
+					{mode === "fast" && (
+						<div className="border-b border-border-soft px-5 py-3">
+							<div className="mb-1.5 flex items-center justify-between gap-3">
+								<span className="text-[11px] font-medium tracking-wide text-faint">{t.gitPanelFiles}</span>
+								{hasFiles && (
+									<button
+										type="button"
+										disabled={running}
+										onClick={() => selectAllCommitFiles(cwd, !allSelected)}
+										className="cursor-pointer rounded-sm px-1.5 py-0.5 text-[11px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+									>
+										{allSelected ? t.gitPanelSelectNone : t.gitPanelSelectAll}
+									</button>
+								)}
+							</div>
+							{hasFiles ? (
+								<ul className="max-h-44 space-y-0.5 overflow-y-auto">
+									{files.map((file) => {
+										const on = task.selected.includes(file.path);
+										const label = file.origPath ? `${file.origPath} → ${file.path}` : file.path;
+										return (
+											<li key={file.path}>
+												<div className="flex min-h-7 items-center gap-2 rounded-sm px-1 text-[12px] hover:bg-hover">
+													<button
+														type="button"
+														role="checkbox"
+														aria-checked={on}
+														aria-label={label}
+														disabled={running}
+														onClick={() => setCommitFileSelected(cwd, file.path, !on)}
+														className={`flex size-3.5 shrink-0 cursor-pointer items-center justify-center rounded-sm border transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-40 ${on ? "border-accent bg-accent text-accent-foreground" : "border-border bg-surface"
+															}`}
+													>
+														{on && <Check size={9} aria-hidden />}
+													</button>
+													<span className="w-4 shrink-0 text-center font-mono text-[10px] text-faint">
+														{statusChip(file)}
+													</span>
+													<span className="min-w-0 flex-1 truncate font-mono" title={label}>
+														{file.path}
+													</span>
+													{!file.untracked && (file.add > 0 || file.del > 0) && (
+														<span className="shrink-0 font-mono text-[10px] leading-none">
+															<span className="text-ok">+{file.add}</span>{" "}
+															<span className="text-danger">−{file.del}</span>
+														</span>
+													)}
+												</div>
+											</li>
+										);
+									})}
+								</ul>
+							) : (
+								<p className="px-1 py-1 text-[12px] text-faint">
+									{ahead > 0 ? t.gitPanelAheadOnly.replace("{0}", String(ahead)) : t.gitPanelNoFiles}
+								</p>
 							)}
 						</div>
-						{hasFiles ? (
-							<ul className="max-h-44 space-y-0.5 overflow-y-auto">
-								{files.map((file) => {
-									const on = task.selected.includes(file.path);
-									const label = file.origPath ? `${file.origPath} → ${file.path}` : file.path;
+					)}
+
+					{/* 快速轨：可编辑的提交信息 */}
+					{mode === "fast" && (
+						<div className="border-b border-border-soft px-5 py-3">
+							<textarea
+								value={task.message}
+								onChange={(e) => setCommitMessage(cwd, e.target.value)}
+								readOnly={running}
+								rows={4}
+								spellCheck={false}
+								placeholder={t.gitMsgPlaceholder}
+								aria-label={t.gitMsgPlaceholder}
+								className="w-full resize-y rounded-md border border-border bg-surface px-2.5 py-2 font-mono text-[12px] leading-5 break-words outline-none focus:border-accent read-only:opacity-70"
+							/>
+							<p className="mt-1.5 text-[11px] leading-4 text-faint">{t.gitPanelNote}</p>
+						</div>
+					)}
+
+					{/* 完整轨：`omp commit` 的流式日志 */}
+					{mode === "full" && (
+						<div className="min-h-[120px] bg-surface/40 px-5 py-4 font-mono text-[12px] leading-5 break-words whitespace-pre-wrap text-muted">
+							{task.log.map((line, i) => (
+								// 日志是追加流，index 即身份（内容可能重复，不能用内容当 key）
+								<div key={i}>{line}</div>
+							))}
+							{task.log.length === 0 && <div className="text-faint">…</div>}
+						</div>
+					)}
+
+					{task.commits.length > 0 && (
+						<div className="border-t border-border-soft px-5 py-3">
+							<div className="mb-1.5 text-[11px] font-medium tracking-wide text-faint">{t.gitResultCommits}</div>
+							<ul className="space-y-1">
+								{task.commits.map((c) => (
+									<li key={c.sha} className="flex items-baseline gap-2 text-[12px]">
+										<span className="shrink-0 font-mono text-faint">{c.sha}</span>
+										<span className="min-w-0 flex-1 break-words">{c.subject}</span>
+									</li>
+								))}
+							</ul>
+						</div>
+					)}
+
+					{task.error && (
+						<div className="border-t border-border-soft px-5 py-3">
+							<pre className="max-h-32 overflow-y-auto font-mono text-[11.5px] leading-5 break-words whitespace-pre-wrap text-muted">
+								{task.error}
+							</pre>
+							{task.hint && <p className="mt-2 text-[12px] leading-5 text-warn">{task.hint}</p>}
+						</div>
+					)}
+
+					<div className="border-t border-border-soft px-5 py-3">
+						<div className="flex items-center justify-between gap-3">
+							<span className="text-[12px] text-muted">{t.gitMsgLangLabel}</span>
+							<div
+								role="radiogroup"
+								aria-label={t.gitMsgLangLabel}
+								onKeyDown={onLangKeyDown}
+								className="flex shrink-0 items-center gap-0.5 rounded-md border border-border bg-surface/60 p-0.5"
+							>
+								{COMMIT_LANGS.map((value) => {
+									const selected = value === lang;
 									return (
-										<li key={file.path}>
-											<div className="flex min-h-7 items-center gap-2 rounded-sm px-1 text-[12px] hover:bg-hover">
-												<button
-													type="button"
-													role="checkbox"
-													aria-checked={on}
-													aria-label={label}
-													disabled={running}
-													onClick={() => setCommitFileSelected(cwd, file.path, !on)}
-													className={`flex size-3.5 shrink-0 cursor-pointer items-center justify-center rounded-sm border transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-40 ${on ? "border-accent bg-accent text-accent-foreground" : "border-border bg-surface"
-														}`}
-												>
-													{on && <Check size={9} aria-hidden />}
-												</button>
-												<span className="w-4 shrink-0 text-center font-mono text-[10px] text-faint">
-													{statusChip(file)}
-												</span>
-												<span className="min-w-0 flex-1 truncate font-mono" title={label}>
-													{file.path}
-												</span>
-												{!file.untracked && (file.add > 0 || file.del > 0) && (
-													<span className="shrink-0 font-mono text-[10px] leading-none">
-														<span className="text-ok">+{file.add}</span>{" "}
-														<span className="text-danger">−{file.del}</span>
-													</span>
-												)}
-											</div>
-										</li>
+										<button
+											key={value}
+											type="button"
+											role="radio"
+											aria-checked={selected}
+											disabled={langLocked}
+											onClick={() => pickLang(value)}
+											className={`h-6 cursor-pointer rounded-sm px-2 text-[12px] transition-colors duration-100 ${selected ? "bg-active text-accent" : "text-muted hover:bg-hover hover:text-foreground"
+												} disabled:cursor-not-allowed disabled:opacity-40`}
+										>
+											{langLabels[value]}
+										</button>
 									);
 								})}
-							</ul>
-						) : (
-							<p className="px-1 py-1 text-[12px] text-faint">
-								{ahead > 0 ? t.gitPanelAheadOnly.replace("{0}", String(ahead)) : t.gitPanelNoFiles}
-							</p>
-						)}
-					</div>
-				)}
-
-				{/* 快速轨：可编辑的提交信息 */}
-				{mode === "fast" && (
-					<div className="border-b border-border-soft px-5 py-3">
-						<textarea
-							value={task.message}
-							onChange={(e) => setCommitMessage(cwd, e.target.value)}
-							readOnly={running}
-							rows={4}
-							spellCheck={false}
-							placeholder={t.gitMsgPlaceholder}
-							aria-label={t.gitMsgPlaceholder}
-							className="w-full resize-y rounded-md border border-border bg-surface px-2.5 py-2 font-mono text-[12px] leading-5 break-words outline-none focus:border-accent read-only:opacity-70"
-						/>
-						<p className="mt-1.5 text-[11px] leading-4 text-faint">{t.gitPanelNote}</p>
-					</div>
-				)}
-
-				{/* 完整轨：`omp commit` 的流式日志 */}
-				{mode === "full" && (
-					<div
-						ref={logRef}
-						className="min-h-[120px] flex-1 overflow-y-auto bg-surface/40 px-5 py-4 font-mono text-[12px] leading-5 break-words whitespace-pre-wrap text-muted"
-					>
-						{task.log.map((line, i) => (
-							// 日志是追加流，index 即身份（内容可能重复，不能用内容当 key）
-							<div key={i}>{line}</div>
-						))}
-						{task.log.length === 0 && <div className="text-faint">…</div>}
-					</div>
-				)}
-
-				{task.commits.length > 0 && (
-					<div className="border-t border-border-soft px-5 py-3">
-						<div className="mb-1.5 text-[11px] font-medium tracking-wide text-faint">{t.gitResultCommits}</div>
-						<ul className="space-y-1">
-							{task.commits.map((c) => (
-								<li key={c.sha} className="flex items-baseline gap-2 text-[12px]">
-									<span className="shrink-0 font-mono text-faint">{c.sha}</span>
-									<span className="min-w-0 flex-1 break-words">{c.subject}</span>
-								</li>
-							))}
-						</ul>
-					</div>
-				)}
-
-				{task.error && (
-					<div className="border-t border-border-soft px-5 py-3">
-						<pre className="max-h-32 overflow-y-auto font-mono text-[11.5px] leading-5 break-words whitespace-pre-wrap text-muted">
-							{task.error}
-						</pre>
-						{task.hint && <p className="mt-2 text-[12px] leading-5 text-warn">{task.hint}</p>}
-					</div>
-				)}
-
-				<div className="border-t border-border-soft px-5 py-3">
-					<div className="flex items-center justify-between gap-3">
-						<span className="text-[12px] text-muted">{t.gitMsgLangLabel}</span>
-						<div
-							role="radiogroup"
-							aria-label={t.gitMsgLangLabel}
-							onKeyDown={onLangKeyDown}
-							className="flex shrink-0 items-center gap-0.5 rounded-md border border-border bg-surface/60 p-0.5"
-						>
-							{COMMIT_LANGS.map((value) => {
-								const selected = value === lang;
-								return (
-									<button
-										key={value}
-										type="button"
-										role="radio"
-										aria-checked={selected}
-										disabled={langLocked}
-										onClick={() => pickLang(value)}
-										className={`h-6 cursor-pointer rounded-sm px-2 text-[12px] transition-colors duration-100 ${selected ? "bg-active text-accent" : "text-muted hover:bg-hover hover:text-foreground"
-											} disabled:cursor-not-allowed disabled:opacity-40`}
-									>
-										{langLabels[value]}
-									</button>
-								);
-							})}
+							</div>
 						</div>
+						<div className="mt-2.5 flex items-center justify-between gap-3">
+							<span className="text-[12px] text-muted" title={t.gitMsgLangRememberTitle}>
+								{t.gitMsgLangRemember}
+							</span>
+							<Switch on={remembered} disabled={langLocked} label={t.gitMsgLangRemember} onToggle={toggleRemember} />
+						</div>
+						{lang === "zh" && <p className="mt-2 text-[11px] leading-4 text-faint">{t.gitMsgLangZhNote}</p>}
+						{running && <p className="mt-2 text-[11px] leading-4 text-faint">{t.gitMsgLangLocked}</p>}
 					</div>
-					<div className="mt-2.5 flex items-center justify-between gap-3">
-						<span className="text-[12px] text-muted" title={t.gitMsgLangRememberTitle}>
-							{t.gitMsgLangRemember}
-						</span>
-						<Switch on={remembered} disabled={langLocked} label={t.gitMsgLangRemember} onToggle={toggleRemember} />
-					</div>
-					{lang === "zh" && <p className="mt-2 text-[11px] leading-4 text-faint">{t.gitMsgLangZhNote}</p>}
-					{running && <p className="mt-2 text-[11px] leading-4 text-faint">{t.gitMsgLangLocked}</p>}
 				</div>
 
-				<div className="flex justify-end gap-2 p-4 pt-2">
+				{/* 弹窗尾：按钮行（固定不滚动） */}
+				<div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-border-soft p-4 pt-3">
 					{running ? (
 						<>
 							<button type="button" onClick={() => cancelCommitTask(cwd)} className={plainBtn}>
