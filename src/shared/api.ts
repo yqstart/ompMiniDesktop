@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
-import type { ChangeSet, CheckoutView, CommitEvent, FallbackChainsInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, Overlay, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
+import type { ChangeSet, CheckoutView, CommitEvent, FallbackChainsInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, Overlay, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, SkillFileContent, SkillsView, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -200,6 +200,52 @@ export const api = {
  readModelsConfig: () => call<ModelsConfigFile>(IPC.readModelsConfig),
  writeModelsConfig: (text: string, expectHash: string | null) =>
   call<ModelsConfigFile>(IPC.writeModelsConfig, { text, expectHash }),
+ /**
+  * 插件（设置 ›「插件」）：omp 的插件管理（`omp plugin`）。
+  *
+  * `cwd` = 这次读取 / 操作钉的工作目录：**项目级可见范围**由它决定（项目 package.json 里装的
+  * 插件、项目级市场插件都按 cwd 解析）；缺省 = 用户级视图（钉 agentDir）。
+  */
+ listPlugins: (cwd?: string | null) => call<PluginsView>(IPC.listPlugins, { cwd }),
+ /** 启用 / 禁用（npm / link 插件不给 scope；市场插件同 id 双份时必须给对应的那份）。 */
+ setPluginEnabled: (name: string, enabled: boolean, scope?: string | null, cwd?: string | null) =>
+  call<PluginsView>(IPC.setPluginEnabled, { name, enabled, scope: scope ?? null, cwd: cwd ?? null }),
+ /**
+  * 写一个插件的特性集合（**整组覆盖**）。上游 `enabledFeatures` 为 `null` 时按每个特性的
+  * `default` 生效——传「当前生效的集合」即可保持语义；一旦写过就是显式列表（不再回落默认）。
+  *
+  * 注意层级：特性状态存在**用户插件目录**的运行态登记里，与「可见范围 cwd」无关（项目级只影响
+  * 市场插件的发现位置），所以这个命令不接受 cwd。
+  */
+ setPluginFeatures: (plugin: string, features: string[]) =>
+  call<PluginFeatures>(IPC.setPluginFeatures, { plugin, features }),
+ /**
+  * 安装一个插件（源 = npm 包 / git 仓库 / 本地目录 / `名字@市场名`）。
+  * 壳侧不提供「预览」：上游 `--dry-run` 对市场条目**会照装**（文档明说不适用），
+  * 界面上用信任提示 + 二次确认替代。
+  */
+ installPlugin: (source: string, scope?: string | null, cwd?: string | null) =>
+  call<PluginsView>(IPC.installPlugin, { source, scope: scope ?? null, cwd: cwd ?? null }),
+ /** 卸载一个插件（市场插件双份时用 `scope` 指定那一份）。 */
+ uninstallPlugin: (id: string, scope?: string | null, cwd?: string | null) =>
+  call<PluginsView>(IPC.uninstallPlugin, { id, scope: scope ?? null, cwd: cwd ?? null }),
+ /** 插件体检（`fix` = 让上游尝试修复；只读检查不写任何东西）。 */
+ pluginDoctor: (fix: boolean) => call<PluginDoctorFinding[]>(IPC.pluginDoctor, { fix }),
+ /**
+  * 技能（设置 ›「技能」）：omp 的技能发现结果 + 逐项启停。
+  *
+  * `cwd` = 发现范围（项目目录；缺省 = 家目录 = 只看用户级技能）。项目级技能来自
+  * `.omp/skills` 等目录、由 omp 从该目录向上走到仓库根逐级发现。
+  */
+ listSkills: (cwd?: string | null) => call<SkillsView>(IPC.listSkills, { cwd }),
+ /**
+  * 启用 / 停用一项技能：写 omp 全局配置的 `disabledExtensions`（加 / 删 `skill:<名字>`，**按名字全局生效**）。
+  * 返回**回读后**的停用技能名——停用后上游不再列出该技能，界面靠这份名单画「已停用」行。
+  */
+ setSkillEnabled: (name: string, enabled: boolean) =>
+  call<string[]>(IPC.setSkillEnabled, { name, enabled }),
+ /** 读一个 `SKILL.md` 的正文（只允许 `SKILL.md`，超上限截断）。 */
+ readSkillFile: (path: string) => call<SkillFileContent>(IPC.readSkillFile, { path }),
  /**
   * 会话标题语言（V18）：把壳的界面语言同步成 omp 的 `<agentDir>/TITLE_SYSTEM.md`
   * （标题生成 prompt）——上游没有 CLI / 设置项改标题 prompt，写该文件是唯一路径。

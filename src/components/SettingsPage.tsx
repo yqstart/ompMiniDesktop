@@ -1,4 +1,4 @@
-import { Archive, ChartBar, Check, Copy, FolderError, Gauge, InfoCircle, Key, Loader, Notebook, Refresh, Sliders } from "reicon-react";
+import { Archive, ChartBar, Check, Copy, FolderError, Gauge, InfoCircle, Key, Loader, Notebook, Plug, Puzzle, Refresh, Sliders } from "reicon-react";
 import { useApp } from "../stores/app";
 import { checkForUpdate, getAppVersion, openUpdateDialog } from "../lib/appUpdate";
 import { pickOmpExecutable, refreshOmpHealth } from "../lib/ompDiag";
@@ -8,15 +8,19 @@ import { useEffect, useRef, useState } from "react";
 import { ArchivedSessions } from "./ArchivedSessions";
 import { GeneralSettingsPanel } from "./settings/GeneralSettingsPanel";
 import { MemoryPanel } from "./settings/MemoryPanel";
+import { PluginsPanel } from "./settings/PluginsPanel";
+import { SkillsPanel } from "./settings/SkillsPanel";
 import { ModelsPanel } from "./settings/ModelsPanel";
 import { ProviderUsagePanel } from "./settings/ProviderUsagePanel";
 import { UsagePanel } from "./settings/UsagePanel";
 
 /** 设置页分页签；顺序即界面顺序。 */
-type SettingsTab = "general" | "models" | "memories" | "providerUsage" | "about" | "usage" | "archived";
+type SettingsTab = "general" | "models" | "plugins" | "skills" | "memories" | "providerUsage" | "about" | "usage" | "archived";
 const TAB_ICONS = {
  general: Sliders,
  models: Key,
+ plugins: Plug,
+ skills: Puzzle,
  memories: Notebook,
  providerUsage: Gauge,
  about: InfoCircle,
@@ -29,7 +33,7 @@ const TAB_ICONS = {
  * 页内的快捷定位 chips 已删——区块不多，左栏切页就是唯一导航。
  */
 const TAB_GROUPS: { label: "settingsGroupOmp" | "settingsGroupApp"; tabs: SettingsTab[] }[] = [
- { label: "settingsGroupOmp", tabs: ["general", "models", "memories", "providerUsage"] },
+ { label: "settingsGroupOmp", tabs: ["general", "models", "plugins", "skills", "memories", "providerUsage"] },
  { label: "settingsGroupApp", tabs: ["about", "usage", "archived"] },
 ];
 
@@ -119,8 +123,10 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
           （44px）下收进 sr-only，组间分隔线保留。设置是标签栏里的标签——关闭走标签栏的 × / ⌘W
           （`closeSettingsTab`，回到上次的终端标签），页内不放第二个关闭入口。
           omp 组：常用设置（`omp config` 白名单 41 项）、模型（**omp 模型相关唯一管理面**：
-          供应商 / 我的模型 / 模型角色 / 快速切换环 / 失败转移）、记忆（omp 项目记忆的
-          查看 / 删除）、供应商用量（omp usage 的滚动窗口，只读）。
+          供应商 / 我的模型 / 模型角色 / 快速切换环 / 失败转移）、插件（V23：`omp plugin` 的
+          清单 / 启停 / 特性 / 安装 / 卸载 / 体检）、技能（V23：`omp skill list` 的发现结果 +
+          逐项启停 + SKILL.md 预览）、记忆（omp 项目记忆的查看 / 删除）、
+          供应商用量（omp usage 的滚动窗口，只读）。
           本应用组：关于（本应用更新与 omp 运行环境诊断；
           界面语言与皮肤是纯展示层偏好，入口在左栏底部「设置」行，这里不重复放）、
           使用统计（会话 jsonl 的用量聚合，只读）、已归档对话（归档管理面，归档会话不在左栏出现）。 */}
@@ -154,7 +160,24 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
        </p>
        {tabs.map((k) => {
         const Icon = TAB_ICONS[k];
-        const label = k === "general" ? t.tabGeneral : k === "models" ? t.tabModels : k === "memories" ? t.tabMemories : k === "providerUsage" ? t.tabProviderUsage : k === "about" ? t.tabAbout : k === "usage" ? t.tabUsage : t.tabArchived;
+        const label =
+         k === "general"
+          ? t.tabGeneral
+          : k === "models"
+           ? t.tabModels
+           : k === "plugins"
+            ? t.tabPlugins
+            : k === "skills"
+             ? t.tabSkills
+             : k === "memories"
+              ? t.tabMemories
+              : k === "providerUsage"
+               ? t.tabProviderUsage
+               : k === "about"
+                ? t.tabAbout
+                : k === "usage"
+                 ? t.tabUsage
+                 : t.tabArchived;
         return (
          <button
           key={k}
@@ -192,6 +215,10 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
      <ArchivedSessions />
     ) : tab === "models" ? (
      <ModelsPanel />
+    ) : tab === "plugins" ? (
+     <PluginsPanel />
+    ) : tab === "skills" ? (
+     <SkillsPanel />
     ) : tab === "memories" ? (
      <MemoryPanel />
     ) : tab === "usage" ? (

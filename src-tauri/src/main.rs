@@ -7,12 +7,14 @@ mod git_ops;
 mod memories;
 mod models_config;
 mod overlay;
+mod plugins;
 mod project_files;
 mod provider_usage;
 mod providers;
 mod pty;
 mod session_scan;
 mod settings;
+mod skills;
 mod title_prompt;
 mod usage;
 
@@ -59,6 +61,15 @@ fn main() {
             git_commit::cancel_commit_task,
             git_ops::get_change_set,
             project_files::list_project_files,
+            plugins::list_plugins,
+            plugins::set_plugin_enabled,
+            plugins::set_plugin_features,
+            plugins::install_plugin,
+            plugins::uninstall_plugin,
+            plugins::plugin_doctor,
+            skills::list_skills,
+            skills::set_skill_enabled,
+            skills::read_skill_file,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,

@@ -71,6 +71,17 @@ export const IPC = {
  // 自定义模型（设置 › 供应商）：omp `models.yml` 的读写——上游没有 CLI 写入口，写文件是唯一路径
  readModelsConfig: "read_models_config",
  writeModelsConfig: "write_models_config",
+ // 插件（设置 ›「插件」）：omp 插件清单 / 启停 / 特性 / 安装 / 卸载 / 体检（全部经 `omp plugin`）
+ listPlugins: "list_plugins",
+ setPluginEnabled: "set_plugin_enabled",
+ setPluginFeatures: "set_plugin_features",
+ installPlugin: "install_plugin",
+ uninstallPlugin: "uninstall_plugin",
+ pluginDoctor: "plugin_doctor",
+ // 技能（设置 ›「技能」）：`omp skill list` 的发现结果 + `disabledExtensions` 的逐项启停
+ listSkills: "list_skills",
+ setSkillEnabled: "set_skill_enabled",
+ readSkillFile: "read_skill_file",
  // 会话标题语言（V18）：把界面语言同步成 omp 的 `<agentDir>/TITLE_SYSTEM.md`（标题生成 prompt）
  syncTitlePrompt: "sync_title_prompt",
  // events

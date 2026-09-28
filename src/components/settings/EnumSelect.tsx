@@ -91,6 +91,8 @@ export function EnumSelect({
     onClick={() => setOpen((v) => !v)}
     disabled={busy || disabled}
     aria-expanded={open}
+    aria-haspopup="listbox"
+    aria-label={label}
     className="flex min-h-8 max-w-full cursor-pointer items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-[12px] transition-colors duration-100 hover:bg-hover disabled:opacity-40"
    >
     {busy ? <Loader size={11} className="animate-spin" aria-hidden /> : null}
@@ -100,6 +102,7 @@ export function EnumSelect({
    {open && createPortal(
     <div
      ref={listRef}
+     role="listbox"
      aria-label={label}
      style={{ visibility: "hidden" }}
      className="fixed z-10 w-max max-w-[calc(100vw-1rem)] overflow-y-auto rounded-md border border-border bg-elevated p-1 shadow-pop"
@@ -111,7 +114,8 @@ export function EnumSelect({
         close();
         if (choice.value !== value) onPick(choice.value);
        }}
-       aria-current={choice.value === value}
+       role="option"
+       aria-selected={choice.value === value}
        title={choice.label}
        className={`block w-full cursor-pointer rounded px-2 py-1 text-left text-[13px] break-words transition-colors duration-100 hover:bg-hover ${choice.value === value ? "text-accent" : ""
         }`}

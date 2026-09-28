@@ -8,6 +8,7 @@ import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { MarkdownLink } from "../MarkdownLink";
 import type { MemoryFileContent, MemoryFileKind, MemoryFileView, MemoryProjectView } from "@shared/types";
 
 /** 待确认的删除：文件级与项目级共用一个浮层实例（一次只确认一件事）。 */
@@ -203,6 +204,7 @@ export function MemoryPanel() {
          <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
+          components={{ a: MarkdownLink }}
          >
           {preview.content.text}
          </ReactMarkdown>

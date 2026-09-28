@@ -28,6 +28,10 @@ pub struct AppState {
     /// 自定义模型配置（`models.yml`）的读写锁：写入含「预校验 + 备份 + 替换」多步，
     /// 并发保存会互相覆盖（见 `models_config.rs`）。
     pub models_edit: Mutex<()>,
+    /// 扩展（设置 ›「插件」/「技能」）写操作的串行锁：插件 install / uninstall 会动
+    /// 同一个插件目录与 lock 文件；技能的 `disabledExtensions` 是读-改-写同一份 config.yml
+    /// （见 `plugins.rs` / `skills.rs`）。能力少、争用低，共用一个锁就够。
+    pub extensions_edit: Mutex<()>,
     /// V11 终端工作区：per-终端 `omp` TUI 进程表（PTY，见 `pty.rs`）。
     pub pty: crate::pty::PtyMap,
     /// V14 工作区「提交并推送」：cwd → 任务句柄（同一工作区拒绝重入，不同工作区可并行，
@@ -1107,6 +1111,7 @@ pub fn load_state(app: &AppHandle) -> AppState {
         roles_edit: Mutex::new(()),
         retry_edit: Mutex::new(()),
         models_edit: Mutex::new(()),
+        extensions_edit: Mutex::new(()),
         pty: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
         commit_tasks: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
     }

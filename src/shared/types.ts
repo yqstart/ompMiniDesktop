@@ -595,3 +595,104 @@ export type TitlePromptOutcome = {
  path: string;
  action: "written" | "unchanged" | "skipped";
 };
+
+// ---------- 插件（设置 ›「插件」） ----------
+
+/**
+ * 插件声明的一个可选特性（omp manifest 的 `features`）。
+ * `enabled` 是**当前生效**值（显式列表说了算，没写列表就按 `defaultEnabled`）——界面直接照着画。
+ */
+export type PluginFeature = {
+ name: string;
+ /** manifest 里的说明（上游英文，原样透传）。 */
+ description: string;
+ defaultEnabled: boolean;
+ enabled: boolean;
+};
+
+/** 一个 npm / link 插件（`omp plugin list --json` 的 `npm` 条目）。 */
+export type PluginItem = {
+ name: string;
+ version: string;
+ /** 安装路径（link 的是软链目标）。 */
+ path: string;
+ description: string;
+ features: PluginFeature[];
+ /** `enabledFeatures` 已被显式写过 = 不再回落 manifest 默认（界面标「已自定义」）。 */
+ featuresCustomized: boolean;
+ enabled: boolean;
+};
+
+/** 一个市场插件（`omp plugin list --json` 的 `marketplace` 条目）。 */
+export type MarketPluginItem = {
+ /** `名字@市场名`（卸载 / 启停都要原样回传）。 */
+ id: string;
+ version: string;
+ scope: "user" | "project";
+ /** 被项目级同名安装遮住时的说明。 */
+ shadowedBy: string | null;
+ enabled: boolean;
+};
+
+/** 插件清单。`cwd` = 本次读取钉的工作目录（决定项目级可见范围）。 */
+export type PluginsView = {
+ cwd: string;
+ npm: PluginItem[];
+ marketplace: MarketPluginItem[];
+};
+
+/** 一个插件的特性集合（写回后回读）。 */
+export type PluginFeatures = {
+ plugin: string;
+ enabledFeatures: string[];
+ availableFeatures: string[];
+};
+
+/** 插件体检的一行（`status` 上游值原样）。 */
+export type PluginDoctorFinding = {
+ name: string;
+ status: string;
+ message: string;
+ fixed: boolean;
+};
+
+// ---------- 技能（设置 ›「技能」） ----------
+
+/** 一个被 omp 发现到的技能（`omp skill list --json` 的一条）。 */
+export type SkillItem = {
+ name: string;
+ /** frontmatter 的 `description`（上游 / 用户自写，原样透传）。 */
+ description: string;
+ filePath: string;
+ /** `SKILL.md` 所在目录。 */
+ baseDir: string;
+ /** `<provider>:<level>`（如 `native:project`、`agents:user`、`omp-plugins:user`）。 */
+ source: string;
+ /** `hide` / `disable-model-invocation`：不参与自动匹配，只能显式调用。 */
+ hide: boolean;
+};
+
+/** 发现过程中的警告（同名冲突等）。 */
+export type SkillWarning = {
+ skillPath: string;
+ message: string;
+};
+
+/**
+ * 技能清单：`cwd` = 本次发现钉的范围（家目录 = 只看用户级）。
+ * `disabled` 是 `disabledExtensions` 里的技能名——**被停用的技能上游不再列出来**，
+ * 「已停用」行只能从这份配置读（拿不到描述与路径，上游行为）。
+ */
+export type SkillsView = {
+ cwd: string;
+ skills: SkillItem[];
+ disabled: string[];
+ warnings: SkillWarning[];
+};
+
+/** `SKILL.md` 的正文（`truncated` = 超过后端上限被截断）。 */
+export type SkillFileContent = {
+ text: string;
+ bytes: number;
+ truncated: boolean;
+};

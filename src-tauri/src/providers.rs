@@ -529,24 +529,53 @@ pub(crate) async fn run_omp_in(
     bin: &str,
     args: &[&str],
 ) -> Result<String, String> {
+    run_omp_in_timeout(dir, bin, args, CLI_TIMEOUT).await
+}
+
+/// 同上，但显式给超时。**插件安装**这类没有可预期上界的命令走它（见 `plugins.rs`）。
+pub(crate) async fn run_omp_in_timeout(
+    dir: Option<&std::path::Path>,
+    bin: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<String, String> {
+    let (out, err, code) = run_omp_capture(dir, bin, args, timeout).await?;
+    if code == Some(0) {
+        return Ok(out);
+    }
+    let lines: Vec<&str> = err.lines().filter(|l| !l.trim().is_empty()).collect();
+    let tail = lines[lines.len().saturating_sub(4)..].join("\n");
+    Err(if tail.trim().is_empty() {
+        match code {
+            Some(c) => format!("omp 退出码 {c}"),
+            None => "omp 被信号终止".into(),
+        }
+    } else {
+        tail
+    })
+}
+
+/// 跑一次 omp CLI，**不看退出码**，返回 `(stdout, stderr, 退出码)`。
+///
+/// 给「上游把结论写在 stdout、退出码另有语义」的命令用（`omp plugin doctor --json`）；
+/// 只在进程起不来 / 超时时返回 Err。
+pub(crate) async fn run_omp_capture(
+    dir: Option<&std::path::Path>,
+    bin: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<(String, String, Option<i32>), String> {
     let mut cmd = tokio::process::Command::new(bin);
-    cmd.args(args).stdin(Stdio::null());
+    cmd.args(args).stdin(Stdio::null()).kill_on_drop(true);
     if let Some(d) = dir {
         cmd.current_dir(d);
     }
-    let fut = cmd.output();
-    match tokio::time::timeout(CLI_TIMEOUT, fut).await {
-        Ok(Ok(o)) if o.status.success() => Ok(String::from_utf8_lossy(&o.stdout).to_string()),
-        Ok(Ok(o)) => {
-            let err = String::from_utf8_lossy(&o.stderr);
-            let lines: Vec<&str> = err.lines().filter(|l| !l.trim().is_empty()).collect();
-            let tail = lines[lines.len().saturating_sub(4)..].join("\n");
-            Err(if tail.trim().is_empty() {
-                format!("omp 退出码 {}", o.status)
-            } else {
-                tail
-            })
-        }
+    match tokio::time::timeout(timeout, cmd.output()).await {
+        Ok(Ok(o)) => Ok((
+            String::from_utf8_lossy(&o.stdout).to_string(),
+            String::from_utf8_lossy(&o.stderr).to_string(),
+            o.status.code(),
+        )),
         Ok(Err(e)) => Err(e.to_string()),
         Err(_) => Err("omp 命令超时".into()),
     }
@@ -571,7 +600,8 @@ pub(crate) fn omp_bin(state: &tauri::State<'_, AppState>) -> Result<String, CmdE
 /// retry.modelFallback / retry.fallbackRevertPolicy）——就是 6 个进程。全量 list 一次
 /// 0.14s 拿回 500+ 键，每项的 `{value, type, description}` 与 `config get` 完全同构
 /// （omp 18.3.0 实测），挑出需要的键即可。
-async fn config_values_global(
+/// `pub(crate)`：技能页的 `disabledExtensions`（设置 ›「技能」）读的也是同一层。
+pub(crate) async fn config_values_global(
     state: &tauri::State<'_, AppState>,
     bin: &str,
     keys: &[&str],
