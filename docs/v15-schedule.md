@@ -137,3 +137,37 @@ ProviderUsagePanel（设置页页签）
 | 前端 | `UsageLimit` 类型扩字段；`lib/providerUsage.ts` 加 `fmtAmount` / `usedLimitText` / `remainingText` / `hasBar`；面板加金额 / 余额行与「查询失败」块；字典 3 键 × 2 语言 |
 | 验证 | `pnpm check` 全绿（**142 前端单测**，本轮新增 6 项；`e2e:ipc` 50 命令不变）；`cargo test` 全绿（lib 88 + 主二进制 114，`extra_usage` 7 项单测）；**真实慢测试** `real_commandcode_probe` 通过——真实 `omp token` + 真实 HTTP 拉回 `5h=$0.31/$14（2.19%）、weekly=$15.23/$35（43.5%）、月度剩余 $54.77`；浏览器 CDP main-world 全流程核对（金额窗口 / 余额行 / 查询失败块 / 停用块 / 无数据块各就各位，进度条宽度 2.187% / 43.5% 与数据一致）+ 深浅两套截图 |
 | 未覆盖 | deepseek 的真实端到端（本机无 deepseek 凭据；解析用官方文档结构 + 单测覆盖，字段漂移由结构与测试共同守护）；真机 WebView（同一环境权限限制） |
+
+## 7. 第三轮：同窗口 id 多池子的行名动态化（2026-09-28）
+
+> 用户口径：「cursor 的用量展示没有 5 小时、每周，只有 Cursor 池子和 API 池子，需要调整一下，是否能够动态调整，Cursor 的 API 中是否支持」。
+
+### 7.1 上游实测（omp 18.3.5）
+
+**Cursor 的接口没有 5 小时 / 每周窗口**——两个数据源都实测过（omp 的 cursor 探针正是这两个端口的组合，源码见二进制里 `packages/ai/src/usage/cursor.ts`）：
+
+| 来源 | 认证 | 原始返回（2026-09-28 实测） |
+|---|---|---|
+| `GET https://api2.cursor.sh/auth/usage` | `Authorization: Bearer <token>`（omp 探针） | `{"gpt-4":{"numRequests":0,"numRequestsTotal":0,"numTokens":0,"maxTokenUsage":null,"maxRequestUsage":null},"startOfMonth":"2026-09-23T07:28:29.000Z"}`——**只有请求计数与月初锚点** |
+| `GET https://cursor.com/api/usage-summary` | `WorkosCursorSessionToken` cookie（omp 探针） | `billingCycleStart/End`（订阅周期）+ `individualUsage.plan{autoPercentUsed, apiPercentUsed, totalPercentUsed}` + `individualUsage.onDemand`——**月度订阅周期 + 两类池子，没有任何 5h / 周字段** |
+
+- Cursor 的计量维度就是**订阅月**（`billingCycleEnd` = 下月同日重置，实测还有 25 天）；`autoPercentUsed` / `apiPercentUsed` 是**共用同一月窗的两个池子**（included 额度 / API 额度），不是两个时间窗。5 小时 / 每周是别的供应商（Claude Code / OpenCode 等）的产品口径。
+- omp 探针把 cursor 的每条窗口都标 `window: {id: "monthly", label: "Monthly"}`，与事实一致；`omp usage --json` 给 cursor 的三条 limit（label 各异）：`cursor:requests:gpt-4`（`gpt-4 requests`，无上限 → `unit: requests`）、`cursor:usd:individual-auto`（`Cursor Models`，percent 型）、`cursor:usd:individual-api`（`Other Models`，`$0.22 / $20.00`）。
+- 壳侧缺陷：`windowName` 只按 `windowId` 走字典 → 三行全显示「每月」，分不清是哪个池子（用户看到的截图现象）。
+
+### 7.2 修正（展示层；后端解析字段已足够，无 Rust 改动）
+
+- `lib/providerUsage.ts` 新增 `windowNames(t, limits)`（**整组一起算**）：同一报告里出现 ≥2 个相同 `windowId`、且上游给了比通用窗口名更具体的 label（`label !== windowLabel`）时，行名用上游 label；否则维持原口径（5h/7d/monthly/balance 走字典、未知 windowId 回退上游）。
+  - **动态**：未来 Cursor 真加了窗口、或别的供应商出现同 id 多池子，壳侧不改代码就能显示；字典只管通用窗口名的本地化。
+  - 重复但上游也没给具体名（label = windowLabel）时回退字典名，不制造噪音。
+- `ProviderUsagePanel`：行名渲染改走 `windowNames`（名字列 `w-16` → `w-28`，容纳上游英文名；notes 缩进同步为 `pl-[7.5rem]`）；**无比例、无上限的计数型窗口**（`gpt-4 requests`）读数显示「`0 requests`」而不是缺省 `usedFraction` 换算的「0.0%」（没有上限就没有百分比可谈）。
+- 测试：`windowNames` 3 项单测（字典 / cursor 三池子 / 回退）+ 面板 1 项（三行名字精确匹配 + 计数读数）。
+
+### 7.3 验证
+
+- `pnpm check` 全绿（前端单测 **269 项**通过，本轮新增 4 项：lib +3、面板 +1；`e2e:ipc` 57 命令 × 双向一致）；`cargo test` 不受影响（无 Rust 改动）。
+- **真实 Chromium 界面核对**（本项目 vite dev + 注入 `__TAURI_INTERNALS__` mock；fixture = cursor 三池子 + opencode-go 三窗口 + commandcode 金额三窗口 + deepseek 余额，中英双语各跑一轮）：
+  - cursor 三行渲染为 `gpt-4 requests`（读数 `0 requests`）/ `Cursor Models`（`13%`）/ `Other Models`（`1.1%`），**不再出现三行「每月」**；
+  - 通用供应商不受影响：opencode-go / commandcode 仍是「5 小时 / 每周 / 每月」（英文 `5 hours / Weekly / Monthly`）、deepseek 余额行不变（`¥110.00 剩余`）；
+  - 名字列加宽后进度条起点对齐，卡片布局无溢出（截图核对）。
+- Cursor 无 5h / 周窗口为**上游事实**（见 §7.1 两个端口的原始返回），壳侧不代偿、不造窗口。

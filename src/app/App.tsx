@@ -10,6 +10,7 @@ import { WorkspaceSidebar } from "../components/sidebar/WorkspaceSidebar";
 import { TerminalView } from "../components/terminal/TerminalView";
 import { TerminalTabs } from "../components/terminal/TerminalTabs";
 import { QuickSwitcher } from "../components/terminal/QuickSwitcher";
+import { ReferencePicker } from "../components/terminal/ReferencePicker";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CommitTaskPanel } from "../components/git/CommitTaskPanel";
 import { HealthBanner } from "../components/HealthBanner";
@@ -111,7 +112,7 @@ function useWorkspaceGitRefresh() {
  }, [terminals]);
 }
 
-/** 终端快捷键（V11）：⌘T 新建 / ⌘W 关闭当前 / ⌘1..9 切标签（非 mac 平台用 Ctrl）。 */
+/** 终端快捷键（V11）：⌘T 新建 / ⌘W 关闭当前 / ⌘1..9 切标签 / ⌘⇧K 快速切换 / ⌘⇧P 引用工作区文件（非 mac 平台用 Ctrl）。 */
 function useTerminalHotkeys() {
  useEffect(() => {
   const onKey = (e: KeyboardEvent) => {
@@ -119,8 +120,8 @@ function useTerminalHotkeys() {
    const mod = isMacKeyboard() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
    if (!mod) return;
    const key = e.key.toLowerCase();
-   const owned = key === "t" || key === "w" || key === "k" || /^[1-9]$/.test(key);
-   if (!owned || (key === "k" && !e.shiftKey) || (key !== "k" && e.shiftKey)) return;
+   const owned = key === "t" || key === "w" || key === "k" || key === "p" || /^[1-9]$/.test(key);
+   if (!owned || ((key === "k" || key === "p") && !e.shiftKey) || (key !== "k" && key !== "p" && e.shiftKey)) return;
    const el = document.activeElement;
    const typing = el instanceof HTMLElement
     && !el.closest(".xterm-helper-textarea")
@@ -134,6 +135,10 @@ function useTerminalHotkeys() {
     newTerminalInSelection();
    } else if (key === "k") {
     s.set({ quickSwitcherOpen: true });
+   } else if (key === "p") {
+    // ⌘⇧P 引用工作区文件（V22）：设置标签激活 / 没有终端时不触发
+    if (s.settingsTabActive || !s.activeTerminalId) return;
+    s.set({ refPickerTerminalId: s.activeTerminalId });
    } else if (key === "w") {
     // 设置标签激活时，⌘W 关的是设置标签（终端标签的关闭语义不变）
     if (s.settingsTabActive) {
@@ -266,7 +271,7 @@ function SidebarShell({
  );
 }
 export function App() {
- const { settingsTabOpen, settingsTabActive, closingTerminalId, set, sidebarWidth, setSidebarWidth, updateDialogOpen, sidebarOpen, quickSwitcherOpen } = useApp();
+ const { settingsTabOpen, settingsTabActive, closingTerminalId, set, sidebarWidth, setSidebarWidth, updateDialogOpen, sidebarOpen, quickSwitcherOpen, refPickerTerminalId } = useApp();
  const t = useText();
  useTheme();
  useLocale();
@@ -352,6 +357,7 @@ export function App() {
    <CommitTaskPanel />
    {updateDialogOpen && <UpdateDialog />}
    {quickSwitcherOpen && <QuickSwitcher />}
+   {refPickerTerminalId && <ReferencePicker />}
   </div>
  );
 }

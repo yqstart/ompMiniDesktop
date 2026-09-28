@@ -23,6 +23,8 @@ export const IPC = {
  deleteWorkspace: "delete_workspace",
  // 目录行（V21 前叫「工作区行」）：项目 → 主目录 + git worktree（只读展示）
  listCheckouts: "list_checkouts",
+ // 引用工作区文件（V22）：工作区成员项目的文件列表（git ls-files；只读）
+ listProjectFiles: "list_project_files",
  // 工作区提交 / 推送（V19）：默认壳侧快路径（一次 omp -p 生成 + git commit/push），
  // 另有一条可选的完整轨（omp commit，含 CHANGELOG 维护）
  getChangeSet: "get_change_set",

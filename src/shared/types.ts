@@ -365,6 +365,18 @@ export type CheckoutView = {
 };
 
 /**
+ * 引用浮层（V22）：一个项目的文件列表（`git ls-files -c -o --exclude-standard` 的只读投影）。
+ * 路径是**相对该项目目录**的 POSIX 形式；`error` 非空 = 这个项目列不出文件
+ * （非 git 仓库 / 目录不存在 / git 缺失），浮层只对它显示一行提示。
+ */
+export type ProjectFiles = {
+ path: string;
+ files: string[];
+ truncated: boolean;
+ error: string | null;
+};
+
+/**
  * 左栏选中项（V21）：右栏视图范围的**唯一真相**。
  * - `group`：工作区视图（`id: null` = 未分组区）——范围 = 组内全部项目的全部目录；
  * - `checkout`：目录视图——范围 = 该目录。

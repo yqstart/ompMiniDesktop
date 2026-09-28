@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
-import type { ChangeSet, CheckoutView, CommitEvent, FallbackChainsInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, Overlay, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
+import type { ChangeSet, CheckoutView, CommitEvent, FallbackChainsInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, Overlay, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -65,6 +65,11 @@ export const api = {
   * 壳侧不创建 / 不删除 worktree）。
   */
  listCheckouts: () => call<CheckoutView[]>(IPC.listCheckouts),
+ /**
+  * 引用浮层（V22）：批量列项目文件（`git ls-files`；只读、60s 后端缓存）。
+  * 每项失败只落 `error` 字段（非 git 目录不拖垮整表）。
+  */
+ listProjectFiles: (paths: string[]) => call<ProjectFiles[]>(IPC.listProjectFiles, { paths }),
 
  /**
   * 提交 / 推送（V19）：先取变更集（打开面板），再按轨道发起任务。

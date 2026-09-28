@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { useApp } from "../stores/app";
 import { isMacKeyboard } from "../lib/termInput";
+import { TEXT } from "../lib/locale";
 import { api } from "@shared/api";
 import { IPC } from "@shared/ipc";
 import type { ModelInfo, TerminalView } from "@shared/types";
@@ -30,6 +31,7 @@ vi.mock("@shared/api", () => ({
   listProjects: vi.fn(async () => []),
   listCheckouts: vi.fn(async () => []),
   listWorkspaces: vi.fn(async () => []),
+  listProjectFiles: vi.fn(async () => []),
   getWorkspaceGitState: vi.fn(async () => []),
   syncTitlePrompt: vi.fn(async () => ({ path: "/tmp/TITLE_SYSTEM.md", action: "written" as const })),
  },
@@ -90,6 +92,7 @@ beforeEach(() => {
   settingsTabActive: false,
   sidebarOpen: false,
   quickSwitcherOpen: false,
+  refPickerTerminalId: null,
   terminalFocusSeq: 0,
   localeMode: "system",
   locale: "zh-CN",
@@ -152,6 +155,40 @@ describe("应用外壳快捷键与侧栏", () => {
   expect(useApp.getState().activeTerminalId).toBe("t-b1");
   press({ key: "2", ...mod });
   expect(useApp.getState().activeTerminalId).toBe("t-b2");
+ });
+});
+
+describe("引用工作区文件快捷键（V22）", () => {
+ it("⌘⇧P 在终端标签上打开引用浮层并快照目标终端", async () => {
+  press({ key: "p", ...mod, shiftKey: true });
+  await act(async () => {
+   await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(useApp.getState().refPickerTerminalId).toBe("t-1");
+  expect(container.textContent).toContain(TEXT["zh-CN"].refPickTitle);
+ });
+
+ it("设置标签激活时 ⌘⇧P 不触发", () => {
+  act(() => useApp.setState({ settingsTabActive: true }));
+  press({ key: "p", ...mod, shiftKey: true });
+  expect(useApp.getState().refPickerTerminalId).toBeNull();
+ });
+
+ it("⌘P（不带 shift）不触发引用浮层", () => {
+  press({ key: "p", ...mod });
+  expect(useApp.getState().refPickerTerminalId).toBeNull();
+ });
+
+ it("浮层打开时 ⌘T / ⌘⇧P 被对话框守卫挡住（不新建终端、不叠加浮层）", async () => {
+  press({ key: "p", ...mod, shiftKey: true });
+  await act(async () => {
+   await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  const before = useApp.getState().terminals.length;
+  press({ key: "t", ...mod });
+  press({ key: "p", ...mod, shiftKey: true });
+  expect(useApp.getState().terminals.length).toBe(before);
+  expect(useApp.getState().refPickerTerminalId).toBe("t-1");
  });
 });
 

@@ -7,6 +7,7 @@ mod git_ops;
 mod memories;
 mod models_config;
 mod overlay;
+mod project_files;
 mod provider_usage;
 mod providers;
 mod pty;
@@ -57,6 +58,7 @@ fn main() {
             git_commit::push_workspace,
             git_commit::cancel_commit_task,
             git_ops::get_change_set,
+            project_files::list_project_files,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,

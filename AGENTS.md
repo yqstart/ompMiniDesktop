@@ -21,6 +21,7 @@ Tauri v2 + React + TS + Tailwind v4 + Zustand，包管理 pnpm。
 |git 工作流（现行）|`docs/v19-schedule.md`|提交 / 推送 / 提交信息的重构（V19）：壳侧快路径（一次 `omp -p`）+ 可选的完整轨（`omp commit`，含 CHANGELOG）、文件勾选、一键提交并推送——**改 git 这块前先读**（worktree 生命周期已由 V20 移除）|
 |左栏精简（现行）|`docs/v20-schedule.md`|去 worktree 管理入口（新建 / 删除 / 清理退场，worktree 只读展示）、项目行「移除项目」、活动项目文件夹标识（V20）——**改左栏前先读**|
 |工作区重定义（现行）|`docs/v21-schedule.md`|「工作区」= 多项目容器（工作区 → 项目 → 目录行）+ 全自动协作根（`--add-dir` 挂其余成员主目录 + `--append-system-prompt` 注入工作区拓扑，三组真实 omp 实测）+ 选中模型 `selection`——**改左栏 / 终端 spawn 前先读**|
+|跨项目文件引用（现行）|`docs/v22-schedule.md`|⌘⇧P「引用工作区文件」浮层：搜索工作区成员项目文件（`list_project_files` = git ls-files + 60s 缓存）→ bracketed paste 注入 `@<绝对路径>`——含 omp 的 `@` 补全单根实测与注入实测——**改引用 / 注入这块前先读**|
 |工作区提交并推送（历史）|`docs/v14-schedule.md`|V14 的 `omp commit` 两段式封装（形态已被 V19 取代，仅作历史参考）|
 |供应商用量（现行）|`docs/v15-schedule.md`|设置 ›「供应商用量」（`omp usage --json` 的滚动窗口：5 小时 / 每周 / 每月）的上游实测、设计与完成口径（含「能否自定义配置取用量」的结论）|
 |终端图标字体（现行）|`docs/v16-schedule.md`|终端 nerd 图标：内嵌单宽图标字体（Nerd Fonts Symbols Only 派生）+ 设置 ›「图标符号集」（`symbolPreset`）的上游实测、设计与完成口径|
@@ -61,6 +62,7 @@ src/
     TerminalView.tsx       # 终端面板区：全部终端面板（隐藏不销毁）+ 当前工作区空态（标签栏与关闭确认归 App）
     TerminalTabs.tsx       # 标签栏（常驻）：当前工作区的终端标签（π 状态标 + 会话标题 + 关闭；双击改名）+ 设置标签（单例）+ ＋
     TerminalPane.tsx       # 单个终端：xterm 实例 + PTY 管道（Channel）+ fit/resize + 退出浮层（重启/关闭）
+    ReferencePicker.tsx    # 引用工作区文件浮层（V22）：⌘⇧P 搜索**其他**成员项目文件（资源管理器式目录树：chevron 折叠 + 目录/文件类型图标；当前项目不列）→ Enter 注入 `@<绝对路径> `（bracketed paste、不发送；忙碌时提示不注入）
   components/settings/     # GeneralSettingsPanel（常用设置）/ ModelsPanel（模型页壳：我的模型 / 供应商 / 角色 / 快速切换环 / 转移）/ CycleOrderSection（快速切换环：Ctrl+P 轮换序）/ ProvidersSection（供应商合并区块：已添加列表 + 两个弹窗）/ ProviderPicker（提供商搜索选择器）/ ProviderModelsDialog（挑选模型弹窗 + 列表）/ CustomProviderEditForm（models.yml 表单）/ DialogShell（设置页模态壳）/ EnumSelect（枚举下拉浮层：设置页的枚举值选择器）/ FallbackChains / ModelPickList / MemoryPanel / UsagePanel（使用统计：tokens 用量 / Cache 命中率 / 活跃天数三张卡，默认「今日」+「Token 活动」热力图：每日 / 每周 / 累计三档、悬停浮层给按模型拆分、底部「少 ▢▢▢▢▢ 多」对照条）/ ProviderUsagePanel（供应商用量：各供应商滚动窗口的进度条 + 重置倒计时 + 无数据 / 停用凭据块；V15）/ StarToggle + Switch（共享小件）
   components/update/       # UpdateDialog（App 常驻挂载，updateDialogOpen 控制；有更新的提醒在左栏设置入口小点）
   components/git/
@@ -77,6 +79,7 @@ src-tauri/src/
   git_info.rs              # git 子命令执行 + git 路径探测缓存 + **worktree list 解析**（左栏树与会话归属共用；含单测）
   git_commit.rs            # 提交 / 推送的任务编排（V19）：按 cwd 的任务表 + Channel 事件 + CancelToken 取消 + 子进程泵；`git commit`/`git push` 与完整轨 `omp commit` 的执行器（含单测与真实仓库测试）
   git_ops.rs               # 壳侧 git 写操作（V19）：变更集读取（porcelain -z + numstat）、勾选 → 暂存区同步（含子集复查）、提交 / 推送参数构造（含单测）
+  project_files.rs         # 引用浮层的文件列表（V22）：`git ls-files -c -o --exclude-standard` 并发逐项目拉取 + 60s 缓存（5 万/项目上限、逐项 error 降级；含单测与真实仓库测试）
   commit_msg.rs            # 提交信息快路径（V19）：一次 `omp -p` 单轮生成——参数序列 / diff 截断 / 提示词 / 输出解析 / 模型角色读取（含单测）
   settings.rs              # 设置 ›「常用设置」后端：`omp config list/set/reset` 三个命令（含单测）
   models_config.rs         # 设置 › 供应商 ›「自定义模型」后端：`<agentDir>/models.yml` 的读 / 写（保真文本由前端给，后端做 hash 乐观锁 + 预校验 + 备份 + 原子写；含单测）
@@ -98,12 +101,14 @@ theme.ts         # 皮肤三档归一 + localStorage + resolveTheme + applyTheme
 termTheme.ts     # 终端配色：从 CSS `--term-*` 读值喂给 xterm（组件不写死色值）
 termTitle.ts     # 终端标签的 π 状态标与展示名：解析 omp 窗口标题 `π <状态> <会话名>` → 状态 + 会话标题；识别 omp 的「会话还没有标题」回退名（cwd 末段目录名不许当标题）、`terminalDisplayName`（title ?? label）（含单测）
 termRename.ts    # 会话改名：清洗标题（去控制字符 / 长度上限）→ 只在 π=等待输入时经 PTY 注入 omp 原生命令 `/rename`（先 Ctrl+U 清草稿；壳侧零本地状态）（含单测）
+termRef.ts       # 引用注入（V22）：可注入判定（同 termRename 口径）+ bracketed paste 注入 `@<路径> `（不回车、不触发补全浮层）（含单测）
 termInput.ts     # macOS WKWebView 漏键补丁（上游 #5374）：只补 xterm 自身去重规则会拒绝、且 keypress 没发的那一次 input（`isDroppedInput` 镜像其 `_inputEvent` 接受条件，与真实 xterm 对拍）；正常按键、IME 组字、读屏一律不动（含单测）
 useText.ts       # 组件取文案的唯一入口
 useDropdown.ts   # 下拉与共用 useDialogFocus：最上层 Esc、Tab 圈定、焦点恢复、隐藏面板隔离
 checkouts.ts     # 目录行逻辑（V21 前叫 workspaces.ts）：loadCheckouts（唯一刷新入口）/ 显示名 / 点目录开终端 / ＋ 新建 / resume 到终端
 workspaceGroups.ts # 工作区容器逻辑（V21，纯函数）：选中范围 selectionScopePaths / 协作上下文 collabContextFor（addDirs + 注入文本）/ cwd→项目→组解析（含单测）
 terminalScope.ts # 右栏终端范围：terminalsInScope（按选中范围过滤，null 不过滤）+ 目录行徽章计数（含单测）
+workspaceFiles.ts # 引用浮层纯逻辑（V22）：范围 referenceScope（其他成员项目主目录；primary/others）/ 候选 buildRefItems / 查询分词与词边界打分 rankRefItems（含子序列约束）/ 目录树 buildRefTree + flattenRefTree（含折叠回调与搜索态名次排序）/ 命中高亮 highlightName / 注入文本 referenceInsertText（含单测）
 commitTasks.ts   # 提交 / 推送前端编排（V19）：打开面板与变更集 / 勾选与消息编辑 / 生成 / 提交（可选推送）/ 完整轨 / 只推送 / 取消 / 关闭语义 / git 快照刷新时机
 commitLang.ts    # 提交信息语言偏好（系统默认 / 中文 / 英文，localStorage 按项目存 → 两轨共用的要求文本；V14 增补、V19 扩展到快路径；含单测）
 titlePrompt.ts   # 会话标题语言（V18）：把界面语言同步成 omp 的标题生成 prompt（`<agentDir>/TITLE_SYSTEM.md`，失败静默；判定「谁的文件」在后端）
@@ -129,6 +134,7 @@ appUpdate.ts     # 应用内更新状态机
 - **会话标题语言 = 壳的界面语言（V18；`title_prompt.rs` + `lib/titlePrompt.ts`）**：omp 的自动标题 prompt 可用 `TITLE_SYSTEM.md` 覆盖——**项目级 `<cwd>/.omp/TITLE_SYSTEM.md` 优先，其次用户级 `<agentDir>/TITLE_SYSTEM.md`**；上游**没有** CLI / 设置项能改它（`omp --help` 只有 `--no-title`，`omp config list` 只有 `title.refreshOnReplan`），写用户级文件是壳侧唯一路径（继 `models.yml` 之后第二个「无 CLI 入口只能写文件」的例外）。壳在健康检查解析出 `agentDir` 后同步一次、界面语言每变一次再同步：**只在文件不存在或内容恰好是壳的中文 / 英文文本时才写**；用户自写的同名文件一律跳过（`skipped`）永不覆盖，写入是原子写、失败静默。**生效范围 = 该 agentDir 下所有新会话**（不止壳内；项目级文件存在时项目级优先）——omp 只在**会话启动**时读它，所以切语言对**新开的终端**生效、已开会话保持原语言（上游口径，壳侧不代偿）。`~/.omp/agent/pi-session-title.json` + `title-prompt.txt` 是 Pi 时代遗留（omp 18.2.10 二进制 0 命中，不再读），壳侧不碰。实测见 `docs/v18-schedule.md` §1.2。
 - **左栏 = 工作区（V21 多项目容器）→ 项目 → 目录行**：`list_workspaces` 返回工作区容器（id / 名字 / `projectIds`），`list_checkouts` 返回目录行（每个项目一次 `git worktree list --porcelain` 聚合；porcelain 第一块是主目录）。**归属唯一**（`overlay.projects[].workspaceId`，null = 未分组；一个项目最多属于一个工作区），成员编辑只改覆盖层、**不碰文件**。有自定义工作区时左栏按组分段（组头 = 折叠 / 点击选中 / hover `＋`（组内首项目主目录开终端）与 `PenLine`（编辑对话框）），其余项目收进「未分组」区；没有自定义组时项目平铺（单项目用户无感）。**worktree 真相 = git**（手工 `git worktree add` 的也列出）、**V20 起只读展示**：壳侧不创建 / 不删除 worktree（新建走 `omp worktree add`、清理走 `git worktree remove/prune`），项目头 hover 的「移除项目」= `remove_project`（解绑覆盖层 + 该项目会话标记归档，不删任何文件）走 `ConfirmDialog` 二次确认；项目头的文件夹图标在项目落在右栏选中范围里时上 accent 色。点击目录行：该目录已有终端 → 聚焦最近一个；否则新建。行尾状态区的**终端数徽章**（`BrowserTerminal` + 数量，有进程在跑时上 accent）是「别的分支还开着几个」的提示，另有 dirty 点 / ahead（可点推送）/ behind / 上游缺失 / 任务徽章（顺序与口径见 `design-system/MASTER.md` §8）。
 - **工作区协作 = 全自动多根（V21 的根）**：终端 spawn 时按 cwd 找到所属项目的工作区，成员 ≥ 2 就追加 `--add-dir <其余成员项目主目录>`（**可读写**，各项目自己的 AGENTS.md 规则自动生效）与 `--append-system-prompt=<工作区拓扑说明>`（界面语言：成员清单 + 当前主目录标记 + 跨项目同时验证的约定 + 「需要并行时用 task 子代理」）。**只挂主目录**（worktree 是分支工作态，不进协作集）；单成员工作区 / 未分组项目**不追加任何参数**（与 V20 一致）。参数在**每次 spawn 重算**（改分组后重启即生效），`lib/workspaceGroups.ts` 的 `collabContextFor` 是唯一构造入口，算完把实际挂上的根写回 `TerminalView.collab`（标签悬停提示）。**不用全局 `workspace.additionalDirectories`**——那会影响用户在终端里自己跑的 omp。实测与取舍见 `docs/v21-schedule.md`。
+- **跨项目文件引用 = ⌘⇧P 引用浮层（V22；`docs/v22-schedule.md`）**：omp 的 `@` 补全只索引会话 cwd（上游 `packages/tui/src/autocomplete.ts` 单根；`--add-dir` 挂的成员根只对工具可见、**不进补全**——实测同工作区其他项目的文件在 `@` 候选里看不到）。壳侧补「挑选」环节：⌘⇧P 打开 `ReferencePicker`，**只列「其他」成员项目**（当前项目排除——本项目文件在输入框里用 omp 原生 `@` 直接可补全；范围 = `lib/workspaceFiles.ts` 的 `referenceScope` 返回 `{primary, others}`，未分组 / 单成员 → 提示行、不发请求），结果按项目分组、以**资源管理器式目录树**展示（`buildRefTree` + `flattenRefTree`：chevron 点击折叠整棵子树、目录行 accent 文件夹图标、文件行按扩展名给图标、只显示末段名、光标序号与渲染顺序一致）；数据 = `list_project_files`（`git ls-files -c -o --exclude-standard -z`，逐项并发 + 60s 缓存 + 逐项 error 降级），Enter 把 `@<绝对路径> ` 经 **bracketed paste**（`\u001b[200~…\u001b[201~`，与 omp 自己的 `pasteToEditor` 同序列；实测不残留补全浮层）注入终端输入框——**只在 π=等待输入时**（同改名口径）、**不回车**（用户接着写需求，发送时 omp 预读该文件进上下文）；含空白的路径走 `@"…"` 形式（上游提及语法）。
 - **会话归属扩展到 worktree**：`ownership_scope(projects)` = 项目路径 ∪ 各项目全部 worktree 路径（`git worktree list` 求得）——`list_sessions` / `list_archived_sessions` / `list_memories` 的归属**全部走它**。worktree 里跑的会话（jsonl cwd = worktree 目录）必须归到所属项目，不许掉「未归属」。`owner_project` 仍是唯一判定入口（真实路径前缀匹配、最长优先）。
 - **左栏刷新入口唯一**：`lib/checkouts.ts` 的 `loadCheckouts()`（拉工作区 + 目录行、落 store、失效选中项回退、激活终端收敛）。项目增删 / 工作区编辑后都调它（`refreshSidebar`）。
 - **提交 / 推送（V19）= 两轨并存**（`docs/v19-schedule.md`）：左栏工作区行 hover 的「提交…」**打开提交面板**（`activeCommitCwd` 单例浮层），面板里先勾选文件（勾选 = 本次提交包含哪些文件；默认 = 已暂存的那批，一个都没暂存则全选）。

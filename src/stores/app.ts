@@ -61,6 +61,8 @@ type AppState = {
  selection: SidebarSelection | null;
  /** 快速切换面板是否打开（不持久化；仅在打开时挂载，关闭即卸载）。 */
  quickSwitcherOpen: boolean;
+ /** 引用工作区文件浮层（V22）的目标终端 id（null = 关闭；同样只在打开时挂载）。 */
+ refPickerTerminalId: string | null;
  /** 终端聚焦序号：每次成功打开或聚焦终端 +1，让选择同一终端也能恢复 xterm 焦点。 */
  terminalFocusSeq: number;
  /** 打开一个新终端并聚焦（返回新 id）。`resume` = 以 `omp --resume` 恢复历史会话。 */
@@ -218,6 +220,7 @@ export const useApp = create<AppState>((set, get) => ({
  activeTerminalId: null,
  selection: null,
  quickSwitcherOpen: false,
+ refPickerTerminalId: null,
  terminalFocusSeq: 0,
  openTerminal: ({ projectId, cwd, label, resume = null }) => {
   const id = crypto.randomUUID();

@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { api } from "@shared/api";
 import type { ProviderUsage, ProviderUsageReport, UsageLimit } from "@shared/types";
-import type { Locale } from "./locale";
+import type { Locale, Text } from "./locale";
 
 /**
  * 供应商用量（设置 ›「供应商用量」）的数据层：拉取（节流 + 单飞）、模块级快照订阅、
@@ -148,6 +148,32 @@ export function remainingText(l: UsageLimit): string | null {
 /** 该行要不要画进度条：百分比窗口（用 usedFraction）或带上限的金额窗口都画；纯余额不画。 */
 export function hasBar(l: UsageLimit): boolean {
  return l.unit === "percent" || (l.used !== null && l.limit !== null);
+}
+
+/**
+ * 一份报告内逐窗口的显示名（整组一起算，不能只看单个窗口）。
+ *
+ * 同一报告里多个窗口共享一个 windowId 时（omp 给 cursor 的 `monthly` 上挂着
+ * `Cursor Models` / `Other Models` / `gpt-4 requests` 三个池子），行名一律用**上游 label**
+ * 区分——否则三行都显示「每月」，分不清哪个是哪个池子；上游也没给具体名
+ * （label 与 windowLabel 相同）时回退字典名，保持通用供应商的本地化口径。
+ */
+export function windowNames(t: Text, limits: UsageLimit[]): string[] {
+ // 先找出重复出现的 windowId（动态 membership，Set 的用途正当）
+ const seen = new Set<string>();
+ const repeated = new Set<string>();
+ for (const l of limits) {
+  if (seen.has(l.windowId)) repeated.add(l.windowId);
+  seen.add(l.windowId);
+ }
+ return limits.map((l) => {
+  if (repeated.has(l.windowId) && l.label !== l.windowLabel) return l.label;
+  if (l.windowId === "5h") return t.pusageWindow5h;
+  if (l.windowId === "7d") return t.pusageWindow7d;
+  if (l.windowId === "monthly") return t.pusageWindowMonthly;
+  if (l.windowId === "balance") return t.pusageWindowBalance;
+  return l.windowLabel || l.label;
+ });
 }
 
 /**

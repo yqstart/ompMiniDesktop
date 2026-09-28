@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderUsage, ProviderUsageReport, UsageLimit } from "@shared/types";
+import { TEXT } from "./locale";
 import {
  fmtAmount,
  fmtPercent,
@@ -12,6 +13,7 @@ import {
  providersWithoutUsage,
  remainingText,
  usedLimitText,
+ windowNames,
  type ProviderUsageSnapshot,
 } from "./providerUsage";
 
@@ -168,6 +170,44 @@ describe("相对时间文案", () => {
  it("formatAgo：中文「N前」、英文 «N ago»", () => {
   expect(formatAgo(5 * 60_000, "zh-CN")).toBe("5 分钟前");
   expect(formatAgo(5 * 60_000, "en")).toBe("5m ago");
+ });
+});
+
+describe("windowNames", () => {
+ const t = TEXT["zh-CN"];
+
+ it("通用窗口走字典（5 小时 / 每周 / 每月 / 余额）", () => {
+  const limits = [
+   limit({ id: "rolling-5h", label: "5 Hour limit", windowId: "5h", windowLabel: "5 Hour" }),
+   limit({ id: "weekly", label: "Weekly limit", windowId: "7d", windowLabel: "Weekly" }),
+   limit({ id: "monthly", label: "Monthly limit", windowId: "monthly", windowLabel: "Monthly" }),
+   limit({ id: "balance", label: "Balance", windowId: "balance", windowLabel: "Balance" }),
+  ];
+  expect(windowNames(t, limits)).toEqual([
+   t.pusageWindow5h,
+   t.pusageWindow7d,
+   t.pusageWindowMonthly,
+   t.pusageWindowBalance,
+  ]);
+ });
+
+ it("同一 windowId 挂多个池子时用上游 label 区分（omp 给 cursor 的三个 monthly 池子）", () => {
+  const limits = [
+   limit({ id: "cursor:requests:gpt-4", label: "gpt-4 requests", windowId: "monthly", windowLabel: "Monthly" }),
+   limit({ id: "cursor:usd:individual-auto", label: "Cursor Models", windowId: "monthly", windowLabel: "Monthly" }),
+   limit({ id: "cursor:usd:individual-api", label: "Other Models", windowId: "monthly", windowLabel: "Monthly" }),
+  ];
+  expect(windowNames(t, limits)).toEqual(["gpt-4 requests", "Cursor Models", "Other Models"]);
+ });
+
+ it("重复但上游也没给具体名（label = windowLabel）回退字典；未知 windowId 回退上游 windowLabel 再 label", () => {
+  const limits = [
+   limit({ id: "a", label: "Monthly", windowId: "monthly", windowLabel: "Monthly" }),
+   limit({ id: "b", label: "Monthly", windowId: "monthly", windowLabel: "Monthly" }),
+   limit({ id: "c", label: "Custom", windowId: "custom-x", windowLabel: "Custom X" }),
+   limit({ id: "d", label: "Only label", windowId: "custom-y", windowLabel: "Only label" }),
+  ];
+  expect(windowNames(t, limits)).toEqual([t.pusageWindowMonthly, t.pusageWindowMonthly, "Custom X", "Only label"]);
  });
 });
 

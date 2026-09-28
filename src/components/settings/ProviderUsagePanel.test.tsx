@@ -226,4 +226,57 @@ describe("供应商用量面板", () => {
   expect(text).toContain("HTTP 401：Invalid API key");
   expect(text).not.toContain("以下供应商没有用量数据");
  });
+
+ it("同一 windowId 下多个池子用上游 label 区分（cursor）；计数型窗口显示数量而不是 0.0%", async () => {
+  setSnapshot({
+   data: usage({
+    reports: [
+     report("cursor", {
+      planType: "Pro",
+      limits: [
+       limit({
+        id: "cursor:requests:gpt-4",
+        label: "gpt-4 requests",
+        windowId: "monthly",
+        windowLabel: "Monthly",
+        usedFraction: 0,
+        percent: 0,
+        used: 0,
+        limit: null,
+        remaining: null,
+        unit: "requests",
+       }),
+       limit({
+        id: "cursor:usd:individual-auto",
+        label: "Cursor Models",
+        windowId: "monthly",
+        windowLabel: "Monthly",
+        usedFraction: 0.1317,
+        percent: 13.168,
+       }),
+       limit({
+        id: "cursor:usd:individual-api",
+        label: "Other Models",
+        windowId: "monthly",
+        windowLabel: "Monthly",
+        usedFraction: 0.0109,
+        percent: 1.088,
+        used: 0.2178,
+        limit: 20,
+        remaining: 19.78,
+        unit: "usd",
+       }),
+      ],
+     }),
+    ],
+   }),
+  });
+  const text = await renderPanel();
+  expect(text).toContain("0 requests"); // 计数型窗口：不拿缺省的 usedFraction 显示 0.0%
+  expect(text).toContain("13%");
+  expect(text).toContain("1.1%");
+  // 三行名字精确匹配（名字列 = w-28 的 span）：不再出现三行「每月」
+  const names = [...container.querySelectorAll("span.w-28")].map((s) => s.textContent);
+  expect(names).toEqual(["gpt-4 requests", "Cursor Models", "Other Models"]);
+ });
 });

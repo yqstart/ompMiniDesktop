@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { Gauge, Loader, Refresh } from "reicon-react";
 import type { ProviderUsageDisabled, UsageLimit } from "@shared/types";
-import { fmt, type Locale, type Text } from "../../lib/locale";
+import { fmt, type Locale } from "../../lib/locale";
 import { useText } from "../../lib/useText";
 import { useApp } from "../../stores/app";
 import {
+ fmtAmount,
  fmtPercent,
  formatAgo,
  formatDuration,
@@ -17,6 +18,7 @@ import {
  remainingText,
  usedLimitText,
  useProviderUsage,
+ windowNames,
  type ProviderGroup,
 } from "../../lib/providerUsage";
 
@@ -154,16 +156,19 @@ function ProviderCard({ group, now, locale }: { group: ProviderGroup; now: numbe
     {first.planType && <span className="font-mono text-[11px] text-faint">{first.provider}</span>}
     {multi && <span className="ml-auto text-[11px] text-faint">{fmt(t.pusageAccounts, group.reports.length)}</span>}
    </div>
-   {group.reports.map((r, i) => (
-    <div key={`${r.provider}#${i}`} className="mt-2">
-     {multi && <div className="mb-0.5 text-[11px] text-muted">{r.accountLabel ?? fmt(t.pusageAccountN, i + 1)}</div>}
-     {r.limits.length === 0 ? (
-      <p className="py-1 text-[12px] text-faint">{t.pusageNoData}</p>
-     ) : (
-      r.limits.map((l) => <LimitRow key={l.id} limit={l} now={now} locale={locale} />)
-     )}
-    </div>
-   ))}
+   {group.reports.map((r, i) => {
+    const names = windowNames(t, r.limits);
+    return (
+     <div key={`${r.provider}#${i}`} className="mt-2">
+      {multi && <div className="mb-0.5 text-[11px] text-muted">{r.accountLabel ?? fmt(t.pusageAccountN, i + 1)}</div>}
+      {r.limits.length === 0 ? (
+       <p className="py-1 text-[12px] text-faint">{t.pusageNoData}</p>
+      ) : (
+       r.limits.map((l, j) => <LimitRow key={l.id} limit={l} name={names[j]} now={now} locale={locale} />)
+      )}
+     </div>
+    );
+   })}
   </div>
  );
 }
@@ -172,9 +177,21 @@ function ProviderCard({ group, now, locale }: { group: ProviderGroup; now: numbe
  * 一个窗口一行：窗口名 + 进度条 + 数值 + 重置倒计时。
  *
  * 数值与 commandcode 官方页面同口径——**有比例的窗口显示百分比**（金额细节进悬停提示：
- * `$0.31 / $14.00`）；纯余额窗口（没有上限）显示「N 剩余」。颜色旁边永远有文字读数。
+ * `$0.31 / $14.00`）；纯余额窗口（没有上限）显示「N 剩余」；无比例也无上限的计数型窗口
+ * （cursor 的 `gpt-4 requests`）显示「N requests」——percent 字段缺省是 0，拿它当读数
+ * 等于编造「0.0%」。颜色旁边永远有文字读数。
  */
-function LimitRow({ limit, now, locale }: { limit: UsageLimit; now: number; locale: Locale }) {
+function LimitRow({
+ limit,
+ name,
+ now,
+ locale,
+}: {
+ limit: UsageLimit;
+ name: string;
+ now: number;
+ locale: Locale;
+}) {
  const t = useText();
  const level = levelOf(limit);
  const state = level === "danger" ? t.pusageStateDanger : level === "warn" ? t.pusageStateWarn : t.pusageStateOk;
@@ -183,12 +200,18 @@ function LimitRow({ limit, now, locale }: { limit: UsageLimit; now: number; loca
  const money = usedLimitText(limit);
  const remaining = remainingText(limit);
  const bar = hasBar(limit);
- const main = bar ? fmtPercent(limit.percent) : remaining !== null ? fmt(t.pusageRemaining, remaining) : fmtPercent(limit.percent);
+ const main = bar
+  ? fmtPercent(limit.percent)
+  : remaining !== null
+   ? fmt(t.pusageRemaining, remaining)
+   : limit.used !== null
+    ? fmtAmount(limit.unit, limit.used)
+    : fmtPercent(limit.percent);
  const title = bar && money !== null ? `${state} · ${money}` : state;
  return (
   <div className="py-1.5">
    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-    <span className="w-16 shrink-0 text-[12px] text-muted">{windowName(t, limit)}</span>
+    <span className="w-28 shrink-0 text-[12px] text-muted">{name}</span>
     {bar && <LimitBar limit={limit} className="min-w-24 flex-1" />}
     <span className="ml-auto shrink-0 text-right font-mono text-[12px] tabular-nums" title={title}>
      {main}
@@ -197,7 +220,7 @@ function LimitRow({ limit, now, locale }: { limit: UsageLimit; now: number; loca
     <span className="sr-only">{state}</span>
    </div>
    {limit.notes.length > 0 && (
-    <p className="mt-0.5 pl-[4.5rem] text-[11px] text-faint">{limit.notes.join(" · ")}</p>
+    <p className="mt-0.5 pl-[7.5rem] text-[11px] text-faint">{limit.notes.join(" · ")}</p>
    )}
   </div>
  );
@@ -237,13 +260,4 @@ function DisabledBlock({ items }: { items: ProviderUsageDisabled[] }) {
    </ul>
   </div>
  );
-}
-
-/** 窗口名：已知窗口走字典（本应用的口径），未知窗口回退上游原文。 */
-function windowName(t: Text, l: UsageLimit): string {
- if (l.windowId === "5h") return t.pusageWindow5h;
- if (l.windowId === "7d") return t.pusageWindow7d;
- if (l.windowId === "monthly") return t.pusageWindowMonthly;
- if (l.windowId === "balance") return t.pusageWindowBalance;
- return l.windowLabel || l.label;
 }
