@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertTriangle, ArrowUpCircle, BranchDown, BranchUp, BrowserTerminal, ChevronRight, Clock, DiagramTree, Folder, LinkOff, Loader, Trash2 } from "reicon-react";
+import { AlertTriangle, ArrowUpCircle, BranchDown, BranchUp, BrowserTerminal, Clock, DiagramTree, Folder, LinkOff, Loader, Trash2 } from "reicon-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "@shared/api";
 import type { CheckoutView, ProjectView } from "@shared/types";
@@ -16,7 +16,8 @@ import { fmt } from "../../lib/locale";
  *
  * 目录行（V21 前叫「工作区行」）= 项目主目录或一个 git worktree（**只读展示**：壳侧不创建 /
  * 不删除 worktree，要建要走 `omp worktree add`）；点击行 = 打开/聚焦该目录的终端。
- * 项目头的文件夹图标在「当前打开的项目」（项目落在右栏选中范围里）上给强调色。
+ * 折叠头没有独立箭头：点击（拖柄区，未拖动时）即展开/收起；文件夹图标 = 展开状态与「当前打开
+ * 的项目」（项目落在右栏选中范围里）的高亮——两者任一成立用强调色，缺失目录优先 warn。
  * 目录缺失的项目给一条 warn 行 + 「重定位」（只改覆盖层路径，不动任何会话文件）。
  * 「移除项目」= 覆盖层解绑（后端把该项目会话标记为已归档，不删任何文件），走二次确认。
  */
@@ -89,12 +90,7 @@ export function ProjectGroup({
      aria-expanded={expanded}
      title={`${project.path}\n${t.projDragHint}`}
     >
-     <ChevronRight
-      size={12}
-      aria-hidden
-      className={`shrink-0 text-faint transition-transform duration-100 ${expanded ? "rotate-90" : ""}`}
-     />
-     <span className={`flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface ${project.missing ? "text-warn" : projectActive ? "text-accent" : "text-muted"}`}>
+     <span className={`flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface ${project.missing ? "text-warn" : projectActive || expanded ? "text-accent" : "text-muted"}`}>
       <Folder size={14} aria-hidden />
      </span>
      <span className="min-w-0 flex-1 truncate">{project.name}</span>
