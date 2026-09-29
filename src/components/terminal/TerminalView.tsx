@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { BrowserTerminal } from "reicon-react";
 import { useApp } from "../../stores/app";
 import { loadCheckouts, newTerminalInSelection, resolveNewTerminalCheckout } from "../../lib/checkouts";
 import { terminalsInScope } from "../../lib/terminalScope";
@@ -8,6 +7,7 @@ import { pickAndAddProject } from "../../lib/projects";
 import { isMacKeyboard } from "../../lib/termInput";
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
+import { OmpPiMark } from "../OmpPiMark";
 import { TerminalPane } from "./TerminalPane";
 
 /**
@@ -77,7 +77,7 @@ function EmptyTerminal() {
   <div className="flex h-full flex-col items-center justify-center overflow-y-auto px-6 py-10">
    <div className="flex w-full max-w-md flex-col items-center text-center">
     <div className="mb-7 flex size-16 items-center justify-center rounded-2xl border border-border bg-surface text-accent">
-     <BrowserTerminal size={28} aria-hidden />
+     <OmpPiMark className="w-10" />
     </div>
     <p className="mb-3 font-mono text-[11px] tracking-[0.16em] text-faint">omp / {t.termPaneAria}</p>
     <h2 className="text-[24px] leading-tight font-semibold tracking-tight sm:text-[28px]">{t.termEmptyTitle}</h2>

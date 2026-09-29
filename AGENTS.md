@@ -51,6 +51,7 @@ Tauri v2 + React + TS + Tailwind v4 + Zustand，包管理 pnpm。
 src/
   app/App.tsx              # 顶层装配：左栏（可拖宽/窄窗抽屉）+ 标签栏（终端 + 设置）+ 面板区 + 终端关闭确认 + 全局快捷键（⌘T/⌘W/⌘1..9）
   components/health…       # HealthBanner（omp 不可用横幅）
+  components/OmpPiMark.tsx # omp 的 π 字标（品牌件，几何与应用图标同源）：终端空态图标，描画入场 + 辉光呼吸
   components/SettingsPage.tsx        # 设置页外壳（左栏竖向菜单两组：omp = 常用设置 / 模型 / 记忆 / 供应商用量；本应用 = 关于 / 使用统计 / 已归档对话 + 右侧内容区）
   components/ArchivedSessions.tsx    # 设置 ›「已归档对话」：恢复（= 取消归档 + 终端 resume）/ 删除，行级与分组级
   components/ConfirmDialog.tsx       # 通用二次确认浮层（跨分组危险操作用它）
@@ -180,6 +181,7 @@ ompUpdate.ts     # omp 运行时更新数据层（V24）：检查（派生状态
 - **终端关闭语义**：`requestCloseTerminal` 统一收口（running → ConfirmDialog 确认；exited → 直关）；关 = 从 store 移除 → 组件卸载 → kill 进程。重启 = `restartTerminal`（spawnSeq+1，TerminalPane 重新 spawn，xterm 实例与滚动缓冲保留）。
 - **皮肤与语言仍是纯展示层偏好**：三档分段控件挂在左栏底部「设置」行右侧（语言在左、皮肤在右），不写 omp 配置、不进设置页；`--term-*` 两套色板跟着这两个开关走。深浅色不准用 Tailwind `dark:` 变体绕开 token；终端色值只准放 `index.css` 的 `--term-*`（`lib/termTheme.ts` 运行时读取）。
 - **全 app 不显示滚动条**（2026-09-24 口径）：任何滚动容器都只滚动、不画滑块——`index.css` 里 `*::-webkit-scrollbar { display:none }`（WebKit / WKWebView 只认这条伪元素规则）+ `scrollbar-width: none`；终端 xterm 是自绘 overlay 滑块，另有单独规则。滚动照常（滚轮 / 触控 / 键盘 / 程序化），也不再需要 `scrollbar-gutter` 占位（相关类与 `.no-scrollbar` 已删，别再引入）。
+- **`.xterm` 必须裁剪自己的溢出（2026-09-29 IME 修复，别删）**：xterm 的 IME 合成视图（`.composition-view`，未确认的预编辑文字）按「光标列 × cell 宽」绝对定位又 `nowrap`，**在行尾打中文时会伸出终端盒子**，把面板与文档的滚动区一起撑大（实测「面板 898 → 1378、文档滚动区 1200 → 3372」，WKWebView 与 Chromium 同）——表现为整个工作区被横向推偏、会话挤到左边。修法只有一条：`index.css` 的 `.xterm { overflow: hidden }`（合成视图仍照常可见，只有越过终端右缘的部分被裁掉；`src/lib/termViewport.test.ts` 钉住这条规则）。改终端这块别把这条裁剪去掉。
 - **行尾下拉（`EnumSelect`）宽度按最长选项撑开、文本不截断**：面板 `width: max-content`，装不下时换行，`max-width` 夹在视口内——别退回「面板窄 + 选项 `truncate`」（WKWebView 下会把选项切成 `mini…`）。
 - **终端图标字体是壳的资源**（V16）：`--font-mono` 末尾的 "OMP Nerd Icons"（`public/fonts/omp-nerd-icons.woff2`，Nerd Fonts Symbols Only 派生、横向压到 0.6 em = 1 个终端 cell；重新生成走 `scripts/build-nerd-icons-font.py`）**只补图标码点**，ASCII / 中文仍走系统字体；`main.tsx` 启动预热。设置 ›「常用设置」的 `symbolPreset` 是**唯一进白名单的外观键**（nerd 档能不能渲染由壳决定）。omp 欢迎头那条「Please use nerdfont 😭.」是上游行为（unicode 档 + 每会话 10% 概率，见 `docs/v16-schedule.md`）——**不许在壳侧过滤终端输出**，消除它靠切 `symbolPreset`。
 - **界面文案一律走字典**（`src/lib/locale.ts` 的 `TEXT`）：组件内 `useText()`、非组件模块 `TEXT[useApp.getState().locale]`；插值 `fmt(t.key, v1)`（占位 `{0}`）；**上游数据不进字典**（会话标题、omp 输出、后端错误原样透传）。设置项 label 是动态键（`s_` + 点换下划线 / 分组 `sg_` / 值标签 `sv*`）——**这批前缀的键不许被「未使用键清理」误删**（有单测守着）。

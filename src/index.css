@@ -195,6 +195,15 @@ body {
  display: none !important;
 }
 
+/* 终端裁剪自己的溢出（V27 IME 修复）：xterm 的合成视图（`.composition-view`，IME 预编辑）
+   按「光标列 × cell 宽」绝对定位且 nowrap，没有右边界——在行尾打中文时它会伸出面板，
+   撑大面板／文档的滚动区（实测 main.scrollWidth 898 → 1378），WKWebView 下还会把界面
+   整体推偏。给 xterm 根元素上裁剪后这些滚动区回到面板宽度；终端里的预编辑文字照常可见
+   （只有超出终端宽度的部分被裁掉，这与视觉边界一致）。 */
+.xterm {
+ overflow: hidden;
+}
+
 /* 可见焦点环（MASTER §5）。输入框类由容器接管焦点样式，此处排除避免生硬外框。 */
 :where(button, a, select, [tabindex]):focus-visible {
  outline: 2px solid color-mix(in srgb, var(--accent) 75%, transparent);
@@ -224,6 +233,54 @@ summary::-webkit-details-marker {
  display: none;
 }
 
+/* ---- omp π 字标（空态 `OmpPiMark`）：描画入场 + 辉光呼吸 ----
+   三道笔画用归一化的 dash 描画（`pathLength=1`，dasharray / dashoffset 都是 1 单位）：
+   横杠先写、两腿稍后跟上，内圆角在笔画落定后淡入，之后两层同形描边缓慢呼吸。
+   `prefers-reduced-motion` 由下面的全局规则收敛：描画立即完成、呼吸只留静态辉光。 */
+.pi-mark .pi-stroke {
+ stroke-dasharray: 1;
+ stroke-dashoffset: 1;
+ animation: pi-draw 620ms cubic-bezier(0.33, 1, 0.68, 1) both;
+}
+
+.pi-mark .pi-leg {
+ animation-delay: 170ms;
+ animation-duration: 460ms;
+}
+
+.pi-mark .pi-fillet {
+ opacity: 0;
+ animation: pi-fillet 280ms ease-out 620ms both;
+}
+
+.pi-mark .pi-halo {
+ animation: pi-breathe 3.8s ease-in-out 1s infinite;
+}
+
+@keyframes pi-draw {
+ to {
+  stroke-dashoffset: 0;
+ }
+}
+
+@keyframes pi-fillet {
+ to {
+  opacity: 1;
+ }
+}
+
+@keyframes pi-breathe {
+
+ 0%,
+ 100% {
+  opacity: 0.5;
+ }
+
+ 50% {
+  opacity: 1;
+ }
+}
+
 @media (prefers-reduced-motion: reduce) {
 
  *,
@@ -231,6 +288,8 @@ summary::-webkit-details-marker {
  *::after {
   animation-duration: 0.01ms !important;
   animation-iteration-count: 1 !important;
+  /* 连入场错峰也免掉（π 字标的描画延迟）：降低动效偏好的用户不该看到半截字形挂着 */
+  animation-delay: 0.01ms !important;
   transition-duration: 0.01ms !important;
  }
 }

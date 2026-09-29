@@ -77,7 +77,9 @@ export function WorkspaceGroupSection({
       <Layers size={14} aria-hidden />
      </span>
      <span className={`min-w-0 flex-1 truncate transition-colors duration-100 ${expanded ? "text-accent" : ""}`}>{group?.name ?? t.wsGroupUngrouped}</span>
-     <span className="shrink-0 font-mono text-[10px] leading-none text-faint">{projects.length}</span>
+     <span className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-sm bg-surface px-1 font-mono text-[10px] leading-none text-faint">
+      {projects.length}
+     </span>
     </button>
     {group && onEdit && (
      <span className="flex shrink-0 items-center opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100">
