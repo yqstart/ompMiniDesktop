@@ -8,7 +8,7 @@ import { roleLabel } from "../../lib/roleNames";
 import { thinkingLevelsOf, THINKING_ORDER } from "../../lib/thinking";
 import { useDropdown } from "../../lib/useDropdown";
 import { useText } from "../../lib/useText";
-import { ModelPickList } from "./ModelPickList";
+import { ModelPickerDialog } from "./ModelPickList";
 
 /** 键的形态（只影响徽章与新建时的候选来源，不影响读写）：`*` 结尾 = 供应商通配、含 `/` = 模型 selector、其余 = 角色名。 */
 type ChainKind = "role" | "model" | "provider";
@@ -357,9 +357,10 @@ function ChainEditor({
  const [key, setKey] = useState(initialKey);
  const [list, setList] = useState<string[]>(initialTargets);
  const [adding, setAdding] = useState(false);
+ /** 新建链的「模型对象」挑选弹窗（模型太多，芯片排铺不下——与角色行同款弹窗）。 */
+ const [keyPickerOpen, setKeyPickerOpen] = useState(false);
  /** 正在选档的目标下标（null = 没开）。 */
  const [levelAt, setLevelAt] = useState<number | null>(null);
- const addRef = useDropdown(adding, () => setAdding(false));
  const lvRef = useDropdown(levelAt !== null, () => setLevelAt(null));
 
  const providers = useMemo(
@@ -472,9 +473,15 @@ function ChainEditor({
        </div>
       )}
       {kind === "model" && (
-       <div className="rounded-md border border-border bg-surface p-2">
-        <ModelPickList models={models.filter((m) => !usedKeys.has(m.selector))} selected={key} onPick={(m) => setKey(m.selector)} />
-       </div>
+       <button
+        type="button"
+        onClick={() => setKeyPickerOpen(true)}
+        aria-haspopup="dialog"
+        aria-label={t.pickModelTitle}
+        className="cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover"
+       >
+        {t.pickModelTitle}
+       </button>
       )}
       {key && <p className="mt-2 break-all font-mono text-xs text-muted">{key}</p>}
       {key && usedKeys.has(key) && <p role="alert" className="mt-1 text-xs text-warn">{t.fallbackKeyInUse}</p>}
@@ -577,26 +584,14 @@ function ChainEditor({
      {list.length === 0 && <p className="py-1 text-[13px] text-warn">{t.fallbackNeedTarget}</p>}
     </div>
 
-    {/* 添加目标：就地展开模型选择器（选中即追加，档位随后在行上改） */}
-    {adding ? (
-     <div ref={addRef} className="mt-1.5 rounded-md border border-border bg-surface p-2">
-      <ModelPickList
-       models={models}
-       onPick={(m) => {
-        setList([...list, m.selector]);
-        setAdding(false);
-       }}
-      />
-     </div>
-    ) : (
-     <button
-      type="button"
-      onClick={() => setAdding(true)}
-      className="mt-1.5 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover"
-     >
-      {t.fallbackAddTarget}
-     </button>
-    )}
+    {/* 添加目标：开模型选择弹窗（选中即追加，档位随后在行上改） */}
+    <button
+     type="button"
+     onClick={() => setAdding(true)}
+     className="mt-1.5 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover"
+    >
+     {t.fallbackAddTarget}
+    </button>
 
     <div className="mt-2 flex items-center gap-2 border-t border-border-soft pt-2">
      <button
@@ -618,6 +613,31 @@ function ChainEditor({
      {writing && <Loader size={12} className="animate-spin text-muted" aria-hidden />}
     </div>
    </fieldset>
+
+   {/* 弹窗挂在 fieldset 外：fieldset disabled（写入中）会连弹窗里的按钮一起禁掉 */}
+   {keyPickerOpen && (
+    <ModelPickerDialog
+     title={t.pickModelTitle}
+     models={models.filter((m) => !usedKeys.has(m.selector))}
+     selected={key}
+     onPick={(m) => {
+      setKey(m.selector);
+      setKeyPickerOpen(false);
+     }}
+     onClose={() => setKeyPickerOpen(false)}
+    />
+   )}
+   {adding && (
+    <ModelPickerDialog
+     title={t.fallbackAddTarget}
+     models={models}
+     onPick={(m) => {
+      setList([...list, m.selector]);
+      setAdding(false);
+     }}
+     onClose={() => setAdding(false)}
+    />
+   )}
   </div>
  );
 }

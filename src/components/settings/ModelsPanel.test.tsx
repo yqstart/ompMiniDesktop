@@ -38,6 +38,15 @@ vi.mock("@shared/api", () => ({
    h.cycleOrder = order;
    return [...order];
   }),
+  setModelRole: vi.fn(async (role: string, selector: string | null) => {
+   if (selector) h.roles[role] = selector;
+   else delete h.roles[role];
+   return {
+    roles: { ...h.roles },
+    storage: "global",
+    builtin: ["default", "smol", "slow", "vision", "plan", "commit", "tiny", "task", "advisor"],
+   };
+  }),
   getModels: vi.fn(async () => ({ models: h.models, fetchedAt: 0 })),
   refreshModels: vi.fn(async () => ({ models: h.models, fetchedAt: 0 })),
   setRetryOptions: vi.fn(async (modelFallback: boolean, revertPolicy: string) => ({ chains: h.chains, modelFallback, revertPolicy })),
@@ -122,8 +131,28 @@ describe("ModelsPanel 的 omp 侧识别", () => {
   await flush();
   expect(container.querySelector('[aria-label="设置 默认 的思考档位"]')).toBeNull();
   act(() => (container.querySelector('[aria-label="选择 默认"]') as HTMLButtonElement).click());
-  expect(container.querySelector('[title="demo/reason"]')).not.toBeNull();
-  expect(container.querySelector('[title="demo/plain"]')).toBeNull();
+  // 模型列表以模态弹窗呈现（内嵌展开会把下方角色整体推下去）
+  const dialog = container.querySelector('[role="dialog"][aria-modal="true"]');
+  expect(dialog).not.toBeNull();
+  expect(dialog!.querySelector('[title="demo/reason"]')).not.toBeNull();
+  expect(dialog!.querySelector('[title="demo/plain"]')).toBeNull();
+ });
+
+ it("角色行挑模型：弹窗点选即写回并收起，行上显示新 selector", async () => {
+  h.models = [
+   { provider: "demo", id: "plain", selector: "demo/plain", name: "Plain", contextWindow: 1000, maxTokens: 100, reasoning: false, thinking: [], input: ["text"] },
+  ];
+  h.roles = {};
+  act(() => root.render(<ModelsPanel />));
+  await flush();
+  act(() => (container.querySelector('[aria-label="选择 默认"]') as HTMLButtonElement).click());
+  const dialog = container.querySelector('[role="dialog"][aria-modal="true"]')!;
+  act(() => (dialog.querySelector('[title="demo/plain"]') as HTMLButtonElement).click());
+  await flush();
+  const calls = vi.mocked(api.setModelRole).mock.calls;
+  expect(calls[calls.length - 1]).toEqual(["default", "demo/plain"]);
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  expect(container.textContent).toContain("demo/plain");
  });
 
  it("较早的角色读取晚返回时不能覆盖重新激活后的配置", async () => {
@@ -200,10 +229,12 @@ describe("ModelsPanel 的 omp 侧识别", () => {
   const clickText = (text: string) => act(() => [...section.querySelectorAll("button")].find((b) => b.textContent?.trim() === text)!.click());
   clickText("添加转移链");
   act(() => (section.querySelector('fieldset [role="radio"][aria-checked="false"]') as HTMLButtonElement).click());
-  expect(section.querySelector('[title="demo/first"]')).toBeNull();
-  act(() => (section.querySelector('[title="demo/second"]') as HTMLButtonElement).click());
+  // 模型对象走弹窗（已配置的 demo/first 不在候选里）
+  act(() => (section.querySelector('[aria-haspopup="dialog"]') as HTMLButtonElement).click());
+  expect(container.querySelector('[role="dialog"] [title="demo/first"]')).toBeNull();
+  act(() => (container.querySelector('[role="dialog"] [title="demo/second"]') as HTMLButtonElement).click());
   clickText("添加目标");
-  act(() => (section.querySelector('[title="demo/first"]') as HTMLButtonElement).click());
+  act(() => (container.querySelector('[role="dialog"] [title="demo/first"]') as HTMLButtonElement).click());
   act(() => (section.querySelector('[role="switch"]') as HTMLButtonElement).click());
   await flush();
   expect(section.querySelector("fieldset")?.textContent).toContain("demo/second");

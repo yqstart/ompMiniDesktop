@@ -12,7 +12,7 @@ import { useText } from "../../lib/useText";
 import { useDropdown } from "../../lib/useDropdown";
 import { CycleOrderSection } from "./CycleOrderSection";
 import { FallbackChainsSection } from "./FallbackChains";
-import { ModelPickList } from "./ModelPickList";
+import { ModelPickerDialog } from "./ModelPickList";
 import { ProvidersSection } from "./ProvidersSection";
 import { StarToggle } from "./StarToggle";
 
@@ -344,8 +344,8 @@ export function ModelsPanel() {
  );
 }
 
-/** 一行角色：角色名 + 当前 selector（模型 + 档位）+ 档位按钮 + 内联展开的模型选择器。
- *  撑开布局、不做浮层——设置页是可滚动容器，浮层会被裁掉。 */
+/** 一行角色：角色名 + 当前 selector（模型 + 档位）+ 档位按钮 + 「选择」按钮（开模型选择弹窗）。
+ *  模型列表走 `ModelPickerDialog`——行内展开会把下方角色整体推下去（点开 / 关上时页面跳动）。 */
 function RoleRow({
  role,
  label,
@@ -364,10 +364,9 @@ function RoleRow({
  onSave: (role: string, selector: string | null) => Promise<void>;
 }) {
  const t = useText();
- const [open, setOpen] = useState(false);
+ const [pickerOpen, setPickerOpen] = useState(false);
  const [levelOpen, setLevelOpen] = useState(false);
  const [saving, setSaving] = useState(false);
- const ref = useDropdown(open, () => setOpen(false));
  const lvRef = useDropdown(levelOpen, () => setLevelOpen(false));
 
  // 角色值 = 模型 selector + 可选的 `:思考档` 后缀；两截分开显示、分开改
@@ -380,7 +379,7 @@ function RoleRow({
  const canLevel = current !== null && levels.length > 1;
 
  const pick = async (m: ModelInfo) => {
-  setOpen(false);
+  setPickerOpen(false);
   setSaving(true);
   await onSave(role, m.selector);
   setSaving(false);
@@ -418,7 +417,7 @@ function RoleRow({
     </div>
     {canLevel && (
      <button
-      onClick={() => { setOpen(false); setLevelOpen((v) => !v); }}
+      onClick={() => { setPickerOpen(false); setLevelOpen((v) => !v); }}
       disabled={saving || disabled}
       className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
       aria-label={fmt(t.roleLevelAria, label)}
@@ -429,11 +428,11 @@ function RoleRow({
      </button>
     )}
     <button
-     onClick={() => { setLevelOpen(false); setOpen((v) => !v); }}
+     onClick={() => { setLevelOpen(false); setPickerOpen(true); }}
      disabled={saving || disabled}
      className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
      aria-label={fmt(t.rolePick + " {0}", label)}
-     aria-expanded={open}
+     aria-haspopup="dialog"
     >
      {t.rolePick}
     </button>
@@ -481,10 +480,14 @@ function RoleRow({
     </div>
    )}
 
-   {open && (
-    <div ref={ref} className="mt-2 rounded-md border border-border bg-background p-2">
-     <ModelPickList models={models} selected={base} onPick={(m) => void pick(m)} />
-    </div>
+   {pickerOpen && (
+    <ModelPickerDialog
+     title={fmt(t.pickModelTitle + " · {0}", label)}
+     models={models}
+     selected={base}
+     onPick={(m) => void pick(m)}
+     onClose={() => setPickerOpen(false)}
+    />
    )}
   </div>
  );

@@ -481,6 +481,7 @@ const ZH = {
  roleUnset: "未配置",
  rolePick: "选择",
  roleClear: "清除",
+ pickModelTitle: "选择模型",
  roleSearchPlaceholder: "搜索模型…",
  roleSetFailed: "写入角色失败",
  roleStorageProject:
@@ -1273,6 +1274,7 @@ const EN: Record<TextKey, string> = {
  roleUnset: "Not set",
  rolePick: "Choose",
  roleClear: "Clear",
+ pickModelTitle: "Choose a model",
  roleSearchPlaceholder: "Search models…",
  roleSetFailed: "Failed to write role",
  roleStorageProject:
