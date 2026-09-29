@@ -160,6 +160,10 @@ export function ProjectGroup({
 /** 一个目录行：分支名 + 位置徽章 + git 状态（改动点 / 领先·落后远程徽章 / 上游缺失标记）+ 任务徽章；
  *  hover 出现「提交…」（打开提交面板）。点击行 = 打开/聚焦该目录的终端。
  *
+ *  **行标记**（同款：左侧 2px 强调竖条 + `bg-active` 填充 + 加粗分支名 + `aria-current`）两处来源：
+ *  ①选中（目录视图的范围真相）；②**承载激活终端**——工作区视图下选中态在组头上，这一处是唯一能
+ *  回答「现在这个终端在哪个项目的哪个分支」的信号（点组内终端不缩窄视图，V21 口径）。
+ *
  *  状态区顺序固定为：终端数（`BrowserTerminal` + 数量，有运行中的上强调色；右栏只看当前选中范围，
  *  这个徽章是「别的分支还开着几个」的提示）→ dirty 点 → 领先（BranchUp ↑，可点=推）→
  *  落后（BranchDown ↓，只读）→ 上游缺失（LinkOff：无上游 / 上游已被删除）→ 任务徽章
@@ -177,6 +181,9 @@ function CheckoutRow({
  // 右栏终端视图只显示当前工作区的终端，这里的徽章是「别的分支还开着几个」的入口提示
  const termCount = useApp((s) => countTerminalsIn(s.terminals, ws.path));
  const runningTerms = useApp((s) => countRunningTerminalsIn(s.terminals, ws.path));
+ // 「终端在这里」：激活终端正落在本目录（工作区视图下凭它定位当前会话的分支；目录视图下与选中行重合）
+ const hostsActiveTerminal = useApp((s) => s.terminals.find((t) => t.id === s.activeTerminalId)?.cwd === ws.path);
+ const marked = active || hostsActiveTerminal;
  const termBadge = termCount === 0
   ? null
   : runningTerms > 0
@@ -210,8 +217,8 @@ function CheckoutRow({
  return (
   <div
    title={ws.path}
-   aria-current={active ? "location" : undefined}
-   className={`group/row flex min-h-8 w-full items-center rounded-md border-l-2 text-[13px] transition-colors duration-100 ${active ? "border-accent bg-active text-foreground" : "border-transparent text-muted hover:bg-hover hover:text-foreground"
+   aria-current={marked ? "location" : undefined}
+   className={`group/row flex min-h-8 w-full items-center rounded-md border-l-2 text-[13px] transition-colors duration-100 ${marked ? "border-accent bg-active text-foreground" : "border-transparent text-muted hover:bg-hover hover:text-foreground"
     } ${ws.missing ? "opacity-50" : ""}`}
   >
    <button
@@ -219,10 +226,10 @@ function CheckoutRow({
     disabled={ws.missing}
     className={`flex min-w-0 flex-1 items-center gap-2 py-1 pl-2 text-left ${ws.missing ? "cursor-default" : "cursor-pointer"}`}
    >
-    <span className={`flex size-5 shrink-0 items-center justify-center rounded-sm bg-surface ${ws.isMain || active ? "text-accent" : "text-faint"}`}>
+    <span className={`flex size-5 shrink-0 items-center justify-center rounded-sm bg-surface ${ws.isMain || marked ? "text-accent" : "text-faint"}`}>
      <DiagramTree size={13} aria-hidden />
     </span>
-    <span className={`min-w-0 flex-1 truncate font-mono ${active ? "font-semibold" : ""}`}>{label}</span>
+    <span className={`min-w-0 flex-1 truncate font-mono ${marked ? "font-semibold" : ""}`}>{label}</span>
     {!ws.isMain && (
      <span className="shrink-0 rounded-sm border border-border-soft bg-surface/60 px-1.5 py-px text-[10px] leading-4 text-faint">
       worktree
