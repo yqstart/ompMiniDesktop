@@ -1,7 +1,7 @@
 # V25 终端「回到最新输出」悬浮键
 
 > 目标：omp 的流式输出很快，用户向上回看时输出已经走了很远，滚回去要滚很久——
-> 终端面板右下角浮出一枚向下箭头的悬浮键，点击直接回到最新位置。
+> 终端面板**底部居中**浮出一枚向下箭头的悬浮键，点击直接回到最新位置。
 > 上游口径与实测见 §1（`@xterm/xterm` 6 本机实测，2026-09-28）。
 
 ## 1. 上游事实与实测（xterm 6）
@@ -18,7 +18,7 @@
 
 - **状态**：组件内 `atBottom`（初值 `true`）；`syncAtBottom()` 读 `buffer.active` 两个字段比对，**只有布尔翻转才写 React state**——流式输出时写入事件很密，不能每次回调都渲染。
 - **浮出条件**：`!atBottom && term.status === "running"`。贴底时不渲染；omp 退出（退出浮层的遮罩态）时也不渲染。
-- **外观**：32px 圆形（`size-8` + `rounded-full`），`border-border` + `bg-elevated` + `shadow-pop`，图标 `ChevronDown`（`reicon-react`，16px），`text-muted` → hover `bg-hover` + `text-foreground`；定位 `absolute right-3 bottom-3 z-10`（压在终端内容之上、不参与布局）。`aria-label` / `title` = 字典键 `termScrollToBottom`（中文「回到最新输出」/ 英文 "Jump to latest output"）。
+- **外观**：32px 圆形（`size-8` + `rounded-full`），`border-border` + `bg-elevated` + `shadow-pop`，图标 `ChevronDown`（`reicon-react`，16px），`text-muted` → hover `bg-hover` + `text-foreground`；定位 `absolute bottom-3 left-1/2 z-10 -translate-x-1/2`（**底部居中**——压在终端内容之上、不参与布局；补记见 §3）。`aria-label` / `title` = 字典键 `termScrollToBottom`（中文「回到最新输出」/ 英文 "Jump to latest output"）。
 - **点击**：`term.scrollToBottom()` + `focus()`——回底后立刻能继续输入，按钮随状态翻转自动消失，不额外维护「已点击」这类本地态。
 - **不动的地方**：不碰 omp、不碰 PTY 与字节流、不写 Zustand（仍是每个终端组件的局部状态，与「高频字节流不进 store」的口径一致）。
 
@@ -32,6 +32,16 @@
   - 点击按钮：视口回到最新（末行 = 当前输出末行 0351）、按钮消失、`document.activeElement` 回到 `xterm-helper-textarea`；
   - 进程退出（mock 发 `exit`）：退出浮层出现，按钮不渲染；
   - 重启（退出浮层的「重启」）后再回看：按钮照常浮出。
+
+**补记（2026-09-29）：回底键从右下角挪到底部居中。** 定位 `right-3` → `bottom-3 left-1/2 -translate-x-1/2`（32px 圆形、配色、显隐条件都不动）；上面 §3 的实测记录是改动前那次核对的原文，其中「右下角」已不适用。复测（`pnpm check` 全绿 + 同款 mock 推 320 行、真实滚轮事件）：
+
+| 场景 | 结果 |
+|---|---|
+| 贴底 | `button[aria-label="回到最新输出"]` 不存在 |
+| 上滚后 | 按钮 32×32；**中心 X 与终端面板中心 X 完全重合（offset 0）**；距定位父级（`relative h-full w-full` 面板容器）底 12px = `bottom-3`；右边距 473px（= 不再贴右） |
+| 点击 | 视口回底、按钮消失、键盘焦点回 `xterm-helper-textarea` |
+
+一个既有的量测细节（改动前也一样，不是本次引入）：xterm 的 `.xterm` 元素比面板容器矮约 10px（按整行高吸附），所以按钮到**终端内容底边**的可见间距约 2px、到面板底边才是 12px——垂直位置与改动前一致。
 
 ## 4. 边界（明确不做）
 

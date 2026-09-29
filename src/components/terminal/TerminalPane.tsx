@@ -216,7 +216,7 @@ export function TerminalPane({ term, active }: { term: TerminalView; active: boo
      }}
      aria-label={t.termScrollToBottom}
      title={t.termScrollToBottom}
-     className="absolute right-3 bottom-3 z-10 flex size-8 cursor-pointer items-center justify-center rounded-full border border-border bg-elevated text-muted shadow-pop transition-colors duration-100 hover:bg-hover hover:text-foreground"
+     className="absolute bottom-3 left-1/2 z-10 flex size-8 -translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-border bg-elevated text-muted shadow-pop transition-colors duration-100 hover:bg-hover hover:text-foreground"
     >
      <ChevronDown className="size-4" />
     </button>
