@@ -66,7 +66,7 @@ export function projectIdForPath(
 
 /** 一个终端 spawn 时要挂的工作区上下文（V21 全自动口径）。 */
 export type CollabContext = {
- /** 协作根：同工作区其他成员项目的**主目录**（注册顺序；空 = 不加 `--add-dir`）。 */
+ /** 协作根：同工作区其他成员项目的**主目录**（左栏顺序；空 = 不加 `--add-dir`）。 */
  addDirs: string[];
  /** 注入会话的工作区拓扑说明（界面语言）；null = 不注入。 */
  note: string | null;

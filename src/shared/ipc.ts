@@ -21,6 +21,8 @@ export const IPC = {
  createWorkspace: "create_workspace",
  updateWorkspace: "update_workspace",
  deleteWorkspace: "delete_workspace",
+ // 左栏拖拽（V26）：项目排序 + 拖进 / 拖出工作区（归属与全局顺序一次写完）
+ moveProject: "move_project",
  // 目录行（V21 前叫「工作区行」）：项目 → 主目录 + git worktree（只读展示）
  listCheckouts: "list_checkouts",
  // 引用工作区文件（V22）：工作区成员项目的文件列表（git ls-files；只读）
@@ -84,6 +86,10 @@ export const IPC = {
  readSkillFile: "read_skill_file",
  // 会话标题语言（V18）：把界面语言同步成 omp 的 `<agentDir>/TITLE_SYSTEM.md`（标题生成 prompt）
  syncTitlePrompt: "sync_title_prompt",
+ // omp 运行时更新（`omp update --check` 只检查；`omp update` 才是真安装）
+ checkOmpUpdate: "check_omp_update",
+ startOmpUpdate: "start_omp_update",
+ cancelOmpUpdate: "cancel_omp_update",
  // events
  /** 供应商登录进度（payload = 全量 ProviderLoginStatus 快照）。 */
  providerLogin: "omp-provider://login",

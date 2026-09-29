@@ -18,7 +18,7 @@ export type RefScope = {
 /**
  * cwd → 可引用的项目集合：
  * - `primary` 找不到 / 目录丢失 → 两个字段都空（调用方提示「找不到所属项目」）；
- * - 工作区里的其他有效成员（存在且未丢失）→ `others`（保持注册顺序，**不含 worktree**）；
+ * - 工作区里的其他有效成员（存在且未丢失）→ `others`（保持左栏顺序，**不含 worktree**）；
  * - 未分组 / 单成员工作区 → `others` 为空（调用方提示「没有可引用的其他项目」）。
  */
 export function referenceScope(

@@ -324,6 +324,62 @@ export type UpdateState =
  | { status: "error"; message: string };
 
 /**
+ * omp 运行时更新检查（`omp update --check` 的回包）：当前版本 / 新版本号 / 渠道。
+ * `latest` 为 null = 上游判定「已是最新」；这是 **omp 自己**的更新，与本应用的更新
+ * （`UpdateState`，走 Tauri updater）是两条独立链路。
+ */
+export type OmpUpdateStatus = {
+ current: string | null;
+ latest: string | null;
+ /** `stable` / `canary`（上游只在 canary 档打印渠道标签，缺省即 stable）。 */
+ channel: string;
+};
+
+/** 前端持有的 omp 更新检查状态（`lib/ompUpdate.ts` 从回包派生 + 时间戳）。 */
+export type OmpUpdate = {
+ status: "idle" | "checking" | "available" | "latest" | "error";
+ current: string | null;
+ latest: string | null;
+ channel: string | null;
+ /** 失败原因（上游 stderr 原文，原样透传，不进字典）。 */
+ message: string | null;
+ /** 上次检查完成时间（epoch ms）；null = 本次运行还没检查过。 */
+ checkedAt: number | null;
+};
+
+/**
+ * 执行更新（`omp update`）的终局阶段。`running` 是**前端本地态**——后端只在结束时发终态
+ * （与 Rust `omp_update::OmpUpdatePhase` 同构）。
+ */
+export type OmpUpdatePhase = "running" | "done" | "failed" | "canceled";
+
+/** 一次 `omp update` 的终局（Channel 的 `exit` 事件 payload）。 */
+export type OmpUpdateOutcome = {
+ phase: OmpUpdatePhase;
+ /** 更新前的版本（后端跑更新前探的 `omp --version`）。 */
+ from: string | null;
+ /** 失败原因（两路输出尾行摘要）；成功 / 取消时为 null。 */
+ error: string | null;
+};
+
+/** `start_omp_update` → 前端事件（与 Rust `omp_update::OmpUpdateEvent` 同构，tag 为 `type`）。 */
+export type OmpUpdateEvent =
+ | { type: "line"; text: string }
+ | { type: "exit"; outcome: OmpUpdateOutcome };
+
+/** 前端持有的更新任务（store 里的 `ompUpdateRun`；日志有上限，见 `lib/ompUpdate.ts`）。 */
+export type OmpUpdateRun = {
+ phase: OmpUpdatePhase;
+ lines: string[];
+ from: string | null;
+ /** 更新后的版本：成功时等健康检查刷新后回填（拿不到就 null，界面退到通用文案）。 */
+ to: string | null;
+ error: string | null;
+ /** 任务发起时间（epoch ms）：慢网络下界面要显示「已用时 N」，让人知道它还在跑。 */
+ startedAt: number | null;
+};
+
+/**
  * omp 设置项（设置 ›「常用设置」）：值来自 `omp config list --json`。
  * `kind` 是 omp 的 schema 类型（boolean / number / enum / …），`description` 是上游英文说明
  * （原样透传，不翻译）；上游没有这个键时它整个缺席，界面据此显示「当前 omp 版本没有这个设置」。
@@ -340,7 +396,7 @@ export type OmpSetting = {
 /**
  * 工作区（V21）：多项目容器——协作的边界。
  * 成员关系在项目侧（`ProjectView.workspaceId`，一个项目最多属于一个工作区）；
- * `projectIds` 按项目注册顺序（前端渲染与协作根计算都用这个顺序）。
+ * `projectIds` 按左栏顺序（`overlay.projects` 的数组顺序；V26 起可在左栏拖拽调整）。
  */
 export type WorkspaceView = {
  id: string;

@@ -37,6 +37,9 @@ pub struct AppState {
     /// V14 工作区「提交并推送」：cwd → 任务句柄（同一工作区拒绝重入，不同工作区可并行，
     /// 见 `git_commit.rs`）。
     pub commit_tasks: crate::git_commit::CommitMap,
+    /// V24 omp 运行时更新：**全局单槽**任务句柄（一台机器只有一份 omp 安装，两次更新互斥；
+    /// 见 `omp_update.rs`）。
+    pub omp_update_task: crate::omp_update::UpdateSlot,
 }
 
 #[derive(Debug, Serialize)]
@@ -618,7 +621,7 @@ pub async fn list_checkouts(state: State<'_, AppState>) -> Result<Vec<CheckoutVi
 // ---------- 工作区（V21：多项目容器） ----------
 
 /// 左栏工作区：多项目容器。成员关系存在 `Project.workspace_id` 上（唯一归属），
-/// 这里返回的 `project_ids` 按项目注册顺序（前端渲染与「协作根」计算都用这个顺序）。
+/// 这里返回的 `project_ids` 按左栏顺序（`overlay.projects` 的数组顺序；V26 起可在左栏拖拽调整）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceView {
@@ -741,6 +744,52 @@ pub async fn delete_workspace(state: State<'_, AppState>, id: String) -> Result<
     }
     save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
     Ok(())
+}
+
+/// 左栏拖拽落地（V26）：把一个项目移动到目标工作区（`workspace_id = None` = 未分组）并同步全局顺序。
+///
+/// `order` = 拖拽后的**全部项目 id 顺序**（左栏顺序 = 覆盖层 `projects` 的数组顺序）：
+/// 认不得的 id 忽略、缺席的项目按原相对顺序补到末尾——任何输入都不丢项目（前端传的是全量列表）。
+/// 归属与顺序一次写完：拖进 / 拖出工作区与组内排序是同一次操作的两个面。
+#[tauri::command]
+pub async fn move_project(
+    state: State<'_, AppState>,
+    id: String,
+    workspace_id: Option<String>,
+    order: Vec<String>,
+) -> Result<Vec<ProjectView>, CmdError> {
+    {
+        let mut ov = state.overlay.lock().await;
+        if !ov.projects.iter().any(|p| p.id == id) {
+            return Err(cmd_err("NOT_FOUND", "项目不存在".into(), None));
+        }
+        if let Some(w) = &workspace_id {
+            if !ov.workspaces.iter().any(|g| &g.id == w) {
+                return Err(cmd_err("NOT_FOUND", "工作区不存在".into(), None));
+            }
+        }
+        let projects = std::mem::take(&mut ov.projects);
+        let mut projects = apply_project_order(projects, &order);
+        if let Some(p) = projects.iter_mut().find(|p| p.id == id) {
+            p.workspace_id = workspace_id;
+        }
+        ov.projects = projects;
+    }
+    save_overlay(&state).map_err(|e| cmd_err("OVERLAY_WRITE", e, None))?;
+    Ok(project_views(&state))
+}
+
+/// 按 `order` 重排项目：认得的 id 按序在前，缺席的按原相对顺序补末尾（防御脏输入，不丢项目）。
+fn apply_project_order(projects: Vec<Project>, order: &[String]) -> Vec<Project> {
+    let mut rest = projects;
+    let mut out: Vec<Project> = Vec::with_capacity(rest.len());
+    for id in order {
+        if let Some(pos) = rest.iter().position(|p| p.id == *id) {
+            out.push(rest.remove(pos));
+        }
+    }
+    out.extend(rest);
+    out
 }
 
 /// 归属匹配集：项目路径 ∪ 其全部 worktree 路径（同 project id）。
@@ -1114,12 +1163,13 @@ pub fn load_state(app: &AppHandle) -> AppState {
         extensions_edit: Mutex::new(()),
         pty: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
         commit_tasks: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
+        omp_update_task: std::sync::Arc::new(std::sync::Mutex::new(None)),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{assign_members, catalog_fresh, clean_workspace_name, list_archived_in, load_cached, owner_project, scan_window, MODELS_TTL_MS};
+    use super::{apply_project_order, assign_members, catalog_fresh, clean_workspace_name, list_archived_in, load_cached, owner_project, scan_window, MODELS_TTL_MS};
     use crate::overlay::{Overlay, Project};
     use std::collections::HashMap;
 
@@ -1147,6 +1197,21 @@ mod tests {
         assert_eq!(ov.projects[0].workspace_id, None);
         assert_eq!(ov.projects[1].workspace_id.as_deref(), Some("w1"));
         assert_eq!(ov.projects[2].workspace_id, None);
+    }
+
+    /// 左栏拖拽排序（V26）：`order` 认得的按序在前、认不得的忽略、缺席的按原相对顺序补末尾。
+    #[test]
+    fn apply_project_order_keeps_every_project() {
+        let mk = |id: &str| Project { id: id.into(), path: format!("/{id}"), ..Default::default() };
+        let out = apply_project_order(
+            vec![mk("a"), mk("b"), mk("c")],
+            &["c".into(), "ghost".into(), "a".into()],
+        );
+        let ids: Vec<&str> = out.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, vec!["c", "a", "b"]);
+        // 空 order 原样返回
+        let same = apply_project_order(vec![mk("a"), mk("b")], &[]);
+        assert_eq!(same.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), vec!["a", "b"]);
     }
 
     /// 工作区名清洗：首尾空白裁掉、内部换行折成空格；全空白 = 空（调用方拒绝）。

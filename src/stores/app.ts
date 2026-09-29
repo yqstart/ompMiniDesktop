@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CheckoutView, CommitOutcome, CommitTaskView, HealthInfo, ModelCatalog, ProjectView, SidebarSelection, TerminalStatus, TerminalView, UpdateState, WorkspaceGitState, WorkspaceView } from "@shared/types";
+import type { CheckoutView, CommitOutcome, CommitTaskView, HealthInfo, ModelCatalog, OmpUpdate, OmpUpdateRun, ProjectView, SidebarSelection, TerminalStatus, TerminalView, UpdateState, WorkspaceGitState, WorkspaceView } from "@shared/types";
 import type { Locale, LocaleMode } from "../lib/locale";
 import { loadLocaleMode, resolveLocale, saveLocaleMode, systemLang } from "../lib/locale";
 import { applyTheme, loadTheme, saveTheme, type ThemeMode } from "../lib/theme";
@@ -30,6 +30,19 @@ type AppState = {
  updateDismissedVersion: string | null;
  /** 更新弹窗显隐（available 常驻入口，弹窗可单独关闭=稍后）。 */
  updateDialogOpen: boolean;
+ /**
+  * omp 运行时更新检查状态（`lib/ompUpdate.ts`；左栏字标行的版本 chip 与详情弹窗用）。
+  * 与本应用的 `update` 互不相干：那条走 Tauri updater，这条跑 `omp update --check`。
+  */
+ ompUpdate: OmpUpdate;
+ /** omp 更新详情弹窗显隐（App 常驻挂载，由字标行的版本 chip 打开）。 */
+ ompUpdateDialogOpen: boolean;
+ /**
+  * 正在跑 / 刚跑完的 `omp update`（V24；null = 本次运行还没发起过）。
+  * 日志有上限（见 `lib/ompUpdate.ts` 的 `OMP_UPDATE_LOG_MAX`）；终态保留到下次发起，
+  * 失败 / 取消可以直接重试。
+  */
+ ompUpdateRun: OmpUpdateRun | null;
  /** 界面语言偏好三档（跟随系统 / 简体中文 / English；只作用于本应用展示，localStorage 持久化）。 */
  localeMode: LocaleMode;
  /** 实际生效的语言（`localeMode` 解析后的结果；字典与 `<html lang>` 用它）。 */
@@ -181,6 +194,9 @@ export const useApp = create<AppState>((set, get) => ({
  update: { status: "idle" },
  updateDismissedVersion: null,
  updateDialogOpen: false,
+ ompUpdate: { status: "idle", current: null, latest: null, channel: null, message: null, checkedAt: null },
+ ompUpdateDialogOpen: false,
+ ompUpdateRun: null,
  localeMode: INITIAL_LOCALE_MODE,
  locale: resolveLocale(INITIAL_LOCALE_MODE, systemLang()),
  setLocaleMode: (mode) => {

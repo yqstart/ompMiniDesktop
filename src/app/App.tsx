@@ -16,11 +16,13 @@ import { CommitTaskPanel } from "../components/git/CommitTaskPanel";
 import { HealthBanner } from "../components/HealthBanner";
 import { SettingsPage } from "../components/SettingsPage";
 import { UpdateDialog } from "../components/update/UpdateDialog";
+import { OmpUpdateDialog } from "../components/update/OmpUpdateDialog";
 import { newTerminalInSelection } from "../lib/checkouts";
 import { terminalsInScope } from "../lib/terminalScope";
 import { selectionScopePaths } from "../lib/workspaceGroups";
 import { refreshWorkspaceGitState, scheduleWorkspaceGitRefresh, startWorkspaceGitPolling } from "../lib/commitTasks";
 import { autoCheckOnBoot } from "../lib/appUpdate";
+import { autoCheckOmpUpdate } from "../lib/ompUpdate";
 import { syncTitlePromptLanguage } from "../lib/titlePrompt";
 import { hasOpenDialog, useDialogFocus } from "../lib/useDropdown";
 import { isMacKeyboard } from "../lib/termInput";
@@ -271,7 +273,7 @@ function SidebarShell({
  );
 }
 export function App() {
- const { settingsTabOpen, settingsTabActive, closingTerminalId, set, sidebarWidth, setSidebarWidth, updateDialogOpen, sidebarOpen, quickSwitcherOpen, refPickerTerminalId } = useApp();
+ const { settingsTabOpen, settingsTabActive, closingTerminalId, set, sidebarWidth, setSidebarWidth, updateDialogOpen, ompUpdateDialogOpen, sidebarOpen, quickSwitcherOpen, refPickerTerminalId } = useApp();
  const t = useText();
  useTheme();
  useLocale();
@@ -311,7 +313,11 @@ export function App() {
  useEffect(() => {
   api
    .getHealth()
-   .then((health) => set({ health }))
+   .then((health) => {
+    set({ health });
+    // omp 在就顺手静默查一次它的新版本（单飞 + 5 分钟冷却在 lib 里；失败只落状态不打扰）
+    if (health.omp.ompPath) void autoCheckOmpUpdate();
+   })
    .catch(() =>
     set({
      health: {
@@ -356,6 +362,7 @@ export function App() {
    </main>
    <CommitTaskPanel />
    {updateDialogOpen && <UpdateDialog />}
+   {ompUpdateDialogOpen && <OmpUpdateDialog />}
    {quickSwitcherOpen && <QuickSwitcher />}
    {refPickerTerminalId && <ReferencePicker />}
   </div>

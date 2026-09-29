@@ -23,15 +23,21 @@ import { fmt } from "../../lib/locale";
 export function ProjectGroup({
  project,
  items,
+ dragging,
  onChanged,
  onError,
  onOpenSessions,
+ onDragStart,
 }: {
  project: ProjectView;
  items: CheckoutView[];
+ /** 这个项目正在被拖拽（留在原地但压暗；落点由指示线表达）。 */
+ dragging: boolean;
  onChanged: () => Promise<void>;
  onError: (message: string) => void;
  onOpenSessions: () => void;
+ /** 项目头按下（左键）：由左栏的拖拽控制器决定何时真的开始拖（移动超过阈值才算）。 */
+ onDragStart: (projectId: string, e: React.PointerEvent<HTMLElement>) => void;
 }) {
  const t = useText();
  const [expanded, setExpanded] = useState(true);
@@ -70,13 +76,18 @@ export function ProjectGroup({
  };
 
  return (
-  <div className="relative mb-3">
+  <div
+   className={`relative mb-3 transition-opacity duration-100 ${dragging ? "opacity-40" : ""}`}
+   data-proj-row={project.id}
+  >
    <div className="group flex min-h-9 items-center gap-1 rounded-md px-1 py-1 text-[13px] font-semibold text-foreground transition-colors duration-100 hover:bg-hover">
     <button
+     data-project-drag
+     onPointerDown={(e) => onDragStart(project.id, e)}
      onClick={() => setExpanded((v) => !v)}
      className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md text-left"
      aria-expanded={expanded}
-     title={project.path}
+     title={`${project.path}\n${t.projDragHint}`}
     >
      <ChevronRight
       size={12}

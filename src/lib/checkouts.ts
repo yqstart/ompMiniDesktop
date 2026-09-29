@@ -71,7 +71,7 @@ export function newTerminalInSelection(): CheckoutView | null {
 /** 新建终端的目标选择（侧栏 / 空态 / 标签栏按钮共用同一顺序，不各自猜测）。
  *
  * - 目录视图：该目录（失效则落兜底）；
- * - 工作区视图：组内**第一个可用项目的主目录**（成员顺序 = 项目注册顺序）；
+ * - 工作区视图：组内**第一个可用项目的主目录**（成员顺序 = 左栏顺序，可拖拽调整）；
  * - 没有选中项：第一个可用项目的主目录。 */
 export function resolveNewTerminalCheckout(
  checkouts: readonly CheckoutView[],

@@ -344,7 +344,8 @@ pub(crate) struct RunSignals {
 
 impl RunSignals {
     /// 失败摘要：stderr 优先，其次 stdout（git 的错误在 stderr，omp 的进度在 stdout）。
-    fn error_text(&self) -> String {
+    /// `pub(crate)`：omp 更新任务（`omp_update.rs`）复用同一套摘要口径。
+    pub(crate) fn error_text(&self) -> String {
         let mut parts: Vec<String> = vec![];
         if !self.err_tail.is_empty() {
             parts.push(self.err_tail.join("\n"));

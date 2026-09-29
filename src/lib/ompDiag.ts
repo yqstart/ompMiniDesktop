@@ -1,6 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "@shared/api";
 import { useApp } from "../stores/app";
+import { autoCheckOmpUpdate } from "./ompUpdate";
 import { TEXT } from "./locale";
 
 /**
@@ -16,7 +17,10 @@ export type DiagResult = { ok: true } | { ok: false; message: string };
 
 export async function refreshOmpHealth(): Promise<DiagResult> {
  try {
-  useApp.getState().set({ health: await api.getHealth() });
+  const health = await api.getHealth();
+  useApp.getState().set({ health });
+  // 「重新检测 omp」也在意它是不是新版：顺手静默查一次（单飞 + 冷却见 lib/ompUpdate.ts）
+  if (health.omp.ompPath) void autoCheckOmpUpdate();
   return { ok: true };
  } catch (e) {
   return { ok: false, message: e instanceof Error ? e.message : TEXT[useApp.getState().locale].diagFailed };

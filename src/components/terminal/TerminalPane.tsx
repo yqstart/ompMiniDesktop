@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown } from "reicon-react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Channel } from "@tauri-apps/api/core";
@@ -23,6 +24,9 @@ import { installWkInputFallback } from "../../lib/termInput";
  *
  * 隐藏态（`display:none`）测不到尺寸，所有 fit 都只在可见时做；可见性用 ref 追踪，
  * 避免 ResizeObserver 因 `active` 变化被反复重建。
+ *
+ * 回看辅助：视口离开滚动缓冲底部时浮出「回到最新输出」键（`atBottom` 由 xterm 的
+ * 滚动 / 写入解析事件同步，只有布尔翻转才写 React state——流式输出时不额外渲染）。
  */
 export function TerminalPane({ term, active }: { term: TerminalView; active: boolean }) {
  const hostRef = useRef<HTMLDivElement>(null);
@@ -33,6 +37,8 @@ export function TerminalPane({ term, active }: { term: TerminalView; active: boo
  const sidebarOpen = useApp((s) => s.sidebarOpen);
  const quickSwitcherOpen = useApp((s) => s.quickSwitcherOpen);
  const t = useText();
+ /** 视口是否停在滚动缓冲底部（`viewportY === baseY`）——「回到最新输出」悬浮键的唯一显隐信号。 */
+ const [atBottom, setAtBottom] = useState(true);
 
  // xterm 实例（仅随 id 建立/销毁）
  useEffect(() => {
@@ -63,6 +69,15 @@ export function TerminalPane({ term, active }: { term: TerminalView; active: boo
   });
   // OSC 0/2 标题（omp TUI 发「π <状态> 会话名」）→ store 解析出展示名与 π 的状态
   const titleSub = x.onTitleChange((title) => useApp.getState().setTerminalTitle(term.id, title));
+  // 视口贴底跟踪：滚动（用户滚 / 程序化滚动）与每次写入解析后各判一次——贴底时新输出会把
+  // viewportY 推着走，只有写入事件能捕捉到；每次只读两个字段，布尔翻转才写 React state。
+  const syncAtBottom = () => {
+   const buf = x.buffer.active;
+   const bottom = buf.viewportY >= buf.baseY;
+   setAtBottom((cur) => (cur === bottom ? cur : bottom));
+  };
+  const scrollSub = x.onScroll(syncAtBottom);
+  const parsedSub = x.onWriteParsed(syncAtBottom);
   // 皮肤切换（<html class="dark">）→ 跟 token 换色
   const mo = new MutationObserver(() => {
    if (termRef.current) termRef.current.options.theme = readTermTheme();
@@ -71,6 +86,8 @@ export function TerminalPane({ term, active }: { term: TerminalView; active: boo
   return () => {
    dataSub.dispose();
    titleSub.dispose();
+   scrollSub.dispose();
+   parsedSub.dispose();
    releaseWkInput();
    mo.disconnect();
    x.dispose();
@@ -187,6 +204,23 @@ export function TerminalPane({ term, active }: { term: TerminalView; active: boo
  return (
   <div className="relative h-full w-full">
    <div ref={hostRef} className="h-full w-full" aria-label={t.termPaneAria} />
+   {/* 回看中（视口离开底部）浮出「回到最新输出」键：一键回底再把键盘焦点交还终端 */}
+   {!atBottom && term.status === "running" && (
+    <button
+     type="button"
+     onClick={() => {
+      const x = termRef.current;
+      if (!x) return;
+      x.scrollToBottom();
+      x.focus();
+     }}
+     aria-label={t.termScrollToBottom}
+     title={t.termScrollToBottom}
+     className="absolute right-3 bottom-3 z-10 flex size-8 cursor-pointer items-center justify-center rounded-full border border-border bg-elevated text-muted shadow-pop transition-colors duration-100 hover:bg-hover hover:text-foreground"
+    >
+     <ChevronDown className="size-4" />
+    </button>
+   )}
    {term.status === "exited" && (
     <div className="absolute inset-0 flex items-center justify-center bg-background/75">
      <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-elevated px-6 py-5 shadow-pop">

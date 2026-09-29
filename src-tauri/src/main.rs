@@ -6,6 +6,7 @@ mod git_info;
 mod git_ops;
 mod memories;
 mod models_config;
+mod omp_update;
 mod overlay;
 mod plugins;
 mod project_files;
@@ -47,6 +48,7 @@ fn main() {
             create_workspace,
             update_workspace,
             delete_workspace,
+            move_project,
             list_checkouts,
             list_sessions,
             list_archived_sessions,
@@ -98,7 +100,10 @@ fn main() {
             settings::reset_omp_setting,
             models_config::read_models_config,
             models_config::write_models_config,
-            title_prompt::sync_title_prompt
+            title_prompt::sync_title_prompt,
+            omp_update::check_omp_update,
+            omp_update::start_omp_update,
+            omp_update::cancel_omp_update
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -108,6 +113,7 @@ fn main() {
                 let state = app.state::<AppState>();
                 pty::kill_all(&state.pty);
                 git_commit::kill_all(&state.commit_tasks);
+                omp_update::kill_update(&state.omp_update_task);
             }
         });
 }

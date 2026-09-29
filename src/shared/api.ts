@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
-import type { ChangeSet, CheckoutView, CommitEvent, FallbackChainsInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, Overlay, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, SkillFileContent, SkillsView, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
+import type { ChangeSet, CheckoutView, CommitEvent, FallbackChainsInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpUpdateEvent, OmpUpdateStatus, Overlay, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, SkillFileContent, SkillsView, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -60,6 +60,13 @@ export const api = {
   call<void>(IPC.updateWorkspace, { id, name, projectIds }),
  /** 删组：成员回归未分组（不删项目、不杀终端）。 */
  deleteWorkspace: (id: string) => call<void>(IPC.deleteWorkspace, { id }),
+ /**
+  * 左栏拖拽落地（V26）：把一个项目移动到目标工作区（`workspaceId = null` = 未分组）并同步全局顺序。
+  * `order` = 拖拽后的**全部项目 id 顺序**（左栏顺序 = 覆盖层 `projects` 的数组顺序）；
+  * 返回新顺序的项目清单（前端直接落 store，不必再拉一次 `list_projects`）。
+  */
+ moveProject: (id: string, workspaceId: string | null, order: string[]) =>
+  call<ProjectView[]>(IPC.moveProject, { id, workspaceId, order }),
  /**
   * 目录行（V21 前叫「工作区行」）：每个项目 = 主目录 + 它全部 git worktree（只读展示，
   * 壳侧不创建 / 不删除 worktree）。
@@ -253,4 +260,17 @@ export const api = {
   */
  syncTitlePrompt: (lang: TitlePromptLang) =>
   call<TitlePromptOutcome>(IPC.syncTitlePrompt, { lang }),
+ /**
+  * omp 运行时更新检查（左栏字标行的版本 chip）：跑一次 `omp update --check`
+  * ——上游只检查不安装（结论 = 当前版本 / 新版本号 / 渠道）。失败抛 Error（原因 = 上游 stderr）。
+  */
+ checkOmpUpdate: () => call<OmpUpdateStatus>(IPC.checkOmpUpdate),
+ /**
+  * 执行更新（真安装）：`omp update`——上游自己识别安装方式（brew / npm / bun / 独立二进制）
+  * 再选路。**命令立刻返回**，过程与终局走 Channel（`line` 流式日志 + `exit` 终局）；
+  * 同一时刻只允许一个更新（后端返回 BUSY）。
+  */
+ startOmpUpdate: (onEvent: Channel<OmpUpdateEvent>) => call<void>(IPC.startOmpUpdate, { onEvent }),
+ /** 取消进行中的更新（杀进程组；终局经 Channel 的 `exit` 到达，phase = canceled）。 */
+ cancelOmpUpdate: () => call<void>(IPC.cancelOmpUpdate),
 };
