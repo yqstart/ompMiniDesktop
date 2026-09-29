@@ -146,7 +146,11 @@ body {
 
 #root {
  height: 100%;
+ /* `clip` 而非 `hidden`：应用外壳是终端越界时祖先链上**唯一**的可滚动容器（终端面板与它之间
+    没有别的滚动容器），`hidden` 下浏览器为露出输入法光标会把整窗 scrollLeft 推进去——表现就是
+    整个工作区被横向推偏（左栏一起走）。`clip` 不产生滚动容器，谁也推不动。 */
  overflow: hidden;
+ overflow: clip;
 }
 
 /* 锁死视口：窗口级永远不滚，滚动只发生在消息列内部 */
@@ -195,13 +199,70 @@ body {
  display: none !important;
 }
 
-/* 终端裁剪自己的溢出（V27 IME 修复）：xterm 的合成视图（`.composition-view`，IME 预编辑）
-   按「光标列 × cell 宽」绝对定位且 nowrap，没有右边界——在行尾打中文时它会伸出面板，
-   撑大面板／文档的滚动区（实测 main.scrollWidth 898 → 1378），WKWebView 下还会把界面
-   整体推偏。给 xterm 根元素上裁剪后这些滚动区回到面板宽度；终端里的预编辑文字照常可见
-   （只有超出终端宽度的部分被裁掉，这与视觉边界一致）。 */
+/* ---- 终端里的 IME 预编辑（V27）-----------------------------------------------------------
+   xterm 的合成视图（`.composition-view`，未确认的预编辑文字）按「光标列 × cell 宽」绝对定位
+   又 `nowrap`，并把隐藏的 textarea 同步成同一尺寸——行尾打拼音时两者一起伸出终端右缘；
+   此后浏览器为了把输入法光标拉回可视区，会沿祖先链把每个可滚动容器的 scrollLeft 推着走。
+   **`.xterm` 上的 `overflow: hidden` 挡不住**：`hidden` 仍是可滚动容器，实测真 Chromium
+   （CDP Input.imeSetComposition）下 `.xterm.scrollLeft` 234 → 313，终端网格被整体左推
+   ——这正是「行尾打中文把 omp 终端挤到左侧」的现象。
+   现在的口径：合成期把合成视图与 textarea 一起钉在整行宽度里换行（首行缩到光标列、续行回到
+   第 0 列，与真实终端的换行一致），祖先一律 `overflow: clip`（`clip` 不产生滚动容器 →
+   谁也推不动）。挂类与镜像 xterm inline 几何的代码在 `src/lib/termIme.ts`。 */
+.xterm .xterm-helpers {
+ /* 辅助层本身没有宽度（子元素全是绝对定位 → shrink-to-fit = 0）：合成视图 / 输入框的
+    right 与百分比都无从解析，先把它钉成与 `.xterm-screen` 同宽。 */
+ left: 0;
+ right: 0;
+}
+
+.xterm.ime-composing .composition-view,
+.xterm.ime-composing .xterm-helper-textarea {
+ /* left / right / width 都会被 xterm 写成 inline 样式（光标列 / 合成尺寸），只能 `!important` 压 */
+ left: 0 !important;
+ right: 0 !important;
+ width: auto !important;
+ /* 整行宽度里换行；`text-indent` 由 `--ime-indent`（= xterm 原本写的光标列）给出首行缩进，
+    续行自然回到第 0 列——`white-space: pre-wrap` 是必需的（xterm.css 给的是 nowrap） */
+ white-space: pre-wrap !important;
+ overflow-wrap: anywhere;
+ word-break: break-all;
+ text-indent: var(--ime-indent, 0px);
+}
+
+.xterm.ime-composing .composition-view {
+ /* 高度必须 auto：xterm 写的 inline 高是单行 cell 高，换行后的行数不会进 rect，
+    而 textarea 的尺寸正是照 rect 来的 */
+ height: auto !important;
+ background: transparent;
+ color: var(--term-foreground);
+}
+
+.xterm.ime-composing .composition-view>span {
+ /* 预编辑文字自己上底：`box-decoration-break: clone` 让每个换行片段各画一块，
+    提示行与已输入的文字不被遮住（`slice` 会画成一整块矩形）。`padding: 2px 0` 只把底色
+    撑到整行高——纵向内边距不进行框，换行点与 xterm 量的尺寸都不变。 */
+ background: var(--term-background);
+ -webkit-box-decoration-break: clone;
+ box-decoration-break: clone;
+ padding: 2px 0;
+}
+
+.xterm.ime-composing .xterm-helper-textarea {
+ /* xterm 把输入框的行高写成合成视图的**总高**（`updateCompositionElements`），多行合成时
+    会让输入框自己内部滚动（实测 scrollTop 25 / scrollHeight 74 / clientHeight 37）——
+    钉回 cell 高，光标才落在换行后的那一行里。
+    字体也必须跟合成视图一致：xterm 从不给 textarea 设字体（它落在 body 的无衬线栈上），
+    字体不同 → 换行点不同 → 输入法候选窗跟着错行。 */
+ line-height: var(--ime-line-height, normal) !important;
+ font-family: var(--ime-font, var(--font-mono));
+ font-size: var(--ime-font-size, inherit);
+}
+
 .xterm {
+ /* `clip` 不产生滚动容器（`hidden` 会）：即便还有别的越界来源，祖先链上也没有谁可以被推 */
  overflow: hidden;
+ overflow: clip;
 }
 
 /* 可见焦点环（MASTER §5）。输入框类由容器接管焦点样式，此处排除避免生硬外框。 */

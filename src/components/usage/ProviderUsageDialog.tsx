@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Gauge, Loader, Refresh } from "reicon-react";
+import { Loader, Refresh } from "reicon-react";
 import type { ProviderUsageDisabled, UsageLimit } from "@shared/types";
 import { fmt, type Locale } from "../../lib/locale";
 import { useText } from "../../lib/useText";
 import { useApp } from "../../stores/app";
+import { DialogShell } from "../settings/DialogShell";
 import {
  fmtAmount,
  fmtPercent,
@@ -23,25 +24,25 @@ import {
 } from "../../lib/providerUsage";
 
 /**
- * 设置 ›「供应商用量」：各供应商侧的滚动窗口（5 小时 / 每周 / 每月…）。
+ * 「供应商用量」弹窗（标签栏右上角 `Gauge` 键的落点）：各供应商侧的滚动窗口（5 小时 / 每周 / 每月…）。
  *
  * 数据只由 omp 拿得到（后端跑 `omp usage --json` 解析后返回，见 `provider_usage.rs`）：
  * 本应用不直连供应商接口、不碰凭证库，**只读**。这里与「使用统计」（本地 jsonl 的
  * token 聚合）是两份不同的东西：那边统计「花了多少」，这边看「还剩多少额度」。
  *
- * - 刷新：进入页签拉一次（60s 内复用模块缓存，切页签回来不重拉）+ 面板上的手动刷新；
+ * - 打开拉一次（60s 内复用模块缓存，反复开合不重拉）+ 面板上的手动刷新；
  * - 失败保留上一份数据（旧值 + 一行错误），不闪空；
  * - 「配了但上游拿不到用量」的供应商显式列出并写明原因——静默少一块比一行说明糟糕得多；
  * - 相对时间（更新于 N 前 / N 后重置）每 30 秒推进一次，不随渲染乱跳。
  */
-export function ProviderUsagePanel() {
+export function ProviderUsageDialog() {
  const t = useText();
  const locale = useApp((s) => s.locale);
  const { data, error, loading } = useProviderUsage();
  /** 「现在」走 state：相对时间不在 render 里读时钟（与 V6 用量浮层同口径）；0 = 还没校准。 */
  const [now, setNow] = useState(0);
 
- // 进入页签拉一次（节流内直接复用缓存）；失败由快照里的 error 呈现
+ // 打开拉一次（节流内直接复用缓存）；失败由快照里的 error 呈现
  useEffect(() => {
   void loadProviderUsage();
  }, []);
@@ -62,13 +63,12 @@ export function ProviderUsagePanel() {
  const updated = fetched && now ? fmt(t.pusageUpdatedAgo, formatAgo(now - fetched, locale)) : "";
 
  return (
-  <section
-   aria-label={t.tabProviderUsage}
-   className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5"
+  <DialogShell
+   title={t.pusageTitle}
+   width="max-w-2xl"
+   onClose={() => useApp.getState().set({ providerUsageOpen: false })}
   >
    <div className="flex flex-wrap items-center gap-2">
-    <Gauge size={16} aria-hidden className="text-muted" />
-    <h2 className="text-sm font-semibold">{t.tabProviderUsage}</h2>
     {updated && <span className="font-mono text-[11px] text-faint">{updated}</span>}
     <button
      onClick={() => void loadProviderUsage(true)}
@@ -140,7 +140,7 @@ export function ProviderUsagePanel() {
    )}
 
    <p className="mt-3 text-[13px] leading-relaxed text-faint">{t.pusageFoot}</p>
-  </section>
+  </DialogShell>
  );
 }
 

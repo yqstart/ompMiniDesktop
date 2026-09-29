@@ -6,10 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderUsage, ProviderUsageReport, UsageLimit } from "@shared/types";
 import { useApp } from "../../stores/app";
 import type { ProviderUsageSnapshot } from "../../lib/providerUsage";
-import { ProviderUsagePanel } from "./ProviderUsagePanel";
+import { ProviderUsageDialog } from "./ProviderUsageDialog";
 
 /**
- * 「供应商用量」面板的口径：
+ * 「供应商用量」弹窗的口径：
  * - 每个供应商一张卡（套餐名 + provider id），窗口行 = 窗口名 + 进度条 + 百分比 + 重置倒计时；
  * - 上游 `exhausted` / `warning` 也要反映成状态（sr-only 文本，颜色不是唯一信号）；
  * - 「配了但无用量数据」与「已停用的凭据」显式列出；空报告给空态；
@@ -88,10 +88,10 @@ afterEach(() => {
  container.remove();
 });
 
-/** 渲染面板并让「现在」校准的 setTimeout(0) 跑掉（重置倒计时/更新于 N 前才会出现）。 */
-async function renderPanel(): Promise<string> {
+/** 渲染弹窗并让「现在」校准的 setTimeout(0) 跑掉（重置倒计时/更新于 N 前才会出现）。 */
+async function renderDialog(): Promise<string> {
  await act(async () => {
-  root.render(<ProviderUsagePanel />);
+  root.render(<ProviderUsageDialog />);
  });
  await act(async () => {
   await delay(5);
@@ -99,7 +99,7 @@ async function renderPanel(): Promise<string> {
  return container.textContent ?? "";
 }
 
-describe("供应商用量面板", () => {
+describe("供应商用量弹窗", () => {
  it("渲染供应商卡片与窗口行（套餐名 / provider id / 百分比 / 状态文本）", async () => {
   setSnapshot({
    data: usage({
@@ -115,7 +115,7 @@ describe("供应商用量面板", () => {
     ],
    }),
   });
-  const text = await renderPanel();
+  const text = await renderDialog();
   expect(text).toContain("OpenCode Go");
   expect(text).toContain("opencode-go");
   expect(text).toContain("5 小时");
@@ -137,7 +137,7 @@ describe("供应商用量面板", () => {
     ],
    }),
   });
-  const text = await renderPanel();
+  const text = await renderDialog();
   expect(text).toContain("2 个账号");
   expect(text).toContain("a@example.com");
   expect(text).toContain("b@example.com");
@@ -145,7 +145,7 @@ describe("供应商用量面板", () => {
 
  it("空报告给空态；配了但上游没探针的供应商显式列出", async () => {
   setSnapshot({ data: usage({ configuredProviders: ["commandcode"] }) });
-  const text = await renderPanel();
+  const text = await renderDialog();
   expect(text).toContain("还没有可显示的用量");
   expect(text).toContain("以下供应商没有用量数据");
   expect(text).toContain("commandcode");
@@ -161,7 +161,7 @@ describe("供应商用量面板", () => {
     accountsWithoutUsage: [{ provider: "cursor", kind: "oauth", email: null, accountId: "acc-1" }],
    }),
   });
-  const text = await renderPanel();
+  const text = await renderDialog();
   expect(text).toContain("已停用的凭据");
   expect(text).toContain("me@example.com");
   expect(text).toContain("refresh failed");
@@ -173,12 +173,12 @@ describe("供应商用量面板", () => {
    data: usage({ reports: [report("opencode-go", { planType: "OpenCode Go", limits: [limit()] })] }),
    error: "读取供应商用量失败：omp 命令超时",
   });
-  let text = await renderPanel();
+  let text = await renderDialog();
   expect(text).toContain("读取供应商用量失败：omp 命令超时");
   expect(text).toContain("OpenCode Go");
 
   setSnapshot({ error: "读取供应商用量失败：omp 命令超时" });
-  text = await renderPanel();
+  text = await renderDialog();
   expect(text).toContain("读取供应商用量失败：omp 命令超时");
   expect(text).not.toContain("OpenCode Go");
  });
@@ -199,7 +199,7 @@ describe("供应商用量面板", () => {
     ],
    }),
   });
-  await renderPanel();
+  await renderDialog();
   const text = container.textContent ?? "";
   expect(text).toContain("2.2%");
   expect(text).toContain("22%");
@@ -220,7 +220,7 @@ describe("供应商用量面板", () => {
     extraFailures: [{ provider: "commandcode", message: "HTTP 401：Invalid API key" }],
    }),
   });
-  const text = await renderPanel();
+  const text = await renderDialog();
   expect(text).toContain("以下供应商查询失败");
   expect(text).toContain("commandcode");
   expect(text).toContain("HTTP 401：Invalid API key");
@@ -271,7 +271,7 @@ describe("供应商用量面板", () => {
     ],
    }),
   });
-  const text = await renderPanel();
+  const text = await renderDialog();
   expect(text).toContain("0 requests"); // 计数型窗口：不拿缺省的 usedFraction 显示 0.0%
   expect(text).toContain("13%");
   expect(text).toContain("1.1%");

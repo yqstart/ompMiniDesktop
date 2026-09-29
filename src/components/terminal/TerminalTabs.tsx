@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { Folder, Plus, Search, Settings, X } from "reicon-react";
+import { Folder, Gauge, Plus, Settings, X } from "reicon-react";
 import { useApp } from "../../stores/app";
 import type { TerminalView } from "@shared/types";
 import { newTerminalInSelection, resolveNewTerminalCheckout } from "../../lib/checkouts";
@@ -25,6 +25,9 @@ import { canRenameSession, renameTerminalSession, sanitizeSessionTitle, SESSION_
  *   还没来过就是工作区名（store 保证初始值）；
  * - 运行中终端的关闭走 `requestCloseTerminal`（弹确认，防误杀进行中的 agent）；
  * - 设置标签的关闭 = `closeSettingsTab`（回到上次的终端标签），不进确认流程；
+ * - 右上角两枚键：**左 `＋`**（在当前选中范围开终端）、**右 `Gauge`**（打开「供应商用量」弹窗，
+ *   V15 从设置页挪来的入口）——此前的「快速切换」搜索键已退场（快速切换仍可从左栏底部行与
+ *   `⌘⇧K` 打开，见 `App.tsx` 的快捷键与 `WorkspaceSidebar`）；
  * - 整栏挂 `data-tauri-drag-region`：空白处可以拖窗口（按钮自身的 mousedown 不触发拖拽）。
  */
 export function TerminalTabs() {
@@ -272,14 +275,6 @@ export function TerminalTabs() {
    </div>
    <div className="flex items-center gap-1 px-2">
     <button
-     onClick={() => useApp.getState().set({ quickSwitcherOpen: true })}
-     aria-label={t.quickSwitcherAria}
-     title={t.quickSwitcherTitle}
-     className="flex size-8 cursor-pointer items-center justify-center rounded-md border border-border-soft bg-surface text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
-    >
-     <Search size={14} aria-hidden />
-    </button>
-    <button
      onClick={() => newTerminalInSelection()}
      disabled={!target}
      aria-label={t.termNew}
@@ -287,6 +282,14 @@ export function TerminalTabs() {
      className="flex size-8 cursor-pointer items-center justify-center rounded-md border border-border-soft bg-surface text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
     >
      <Plus className="size-4" />
+    </button>
+    <button
+     onClick={() => useApp.getState().set({ providerUsageOpen: true })}
+     aria-label={t.pusageTitle}
+     title={t.pusageTitle}
+     className="flex size-8 cursor-pointer items-center justify-center rounded-md border border-border-soft bg-surface text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+    >
+     <Gauge size={14} aria-hidden />
     </button>
    </div>
   </div >

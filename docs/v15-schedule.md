@@ -48,13 +48,32 @@
 
 ### 2.1 位置与入口
 
-设置页左栏菜单第 5 项（**使用统计之下、已归档对话之上**），图标 `Gauge`，字典键 `tabProviderUsage`
-（「供应商用量」/ "Provider usage"）。设置页从五个页签变六个。
+**现址（2026-09-29）**：**标签栏右上角的 `Gauge` 键**（`TerminalTabs`，`＋` 在它左侧）→ `ProviderUsageDialog` 弹窗
+（`DialogShell` 承载，`stores/app.ts` 的 `providerUsageOpen` 控制挂载；组件从 `components/settings/ProviderUsagePanel.tsx`
+挪到 `components/usage/ProviderUsageDialog.tsx`）；字典键 `pusageTitle`（「供应商用量」/ "Provider usage"）。
+设置页不再有这一页签（**九页签 → 八页签**）——那里的「刷新」与「更新于 N 前」进了弹窗正文首行，其余展示口径不动。
+标签栏原先的「快速切换」搜索键被这一枚替换（用户口径），快速切换仍可从左栏底部行与 `⌘⇧K` 打开。
+
+**原始口径（V15 交付时，留档）**：设置页左栏菜单第 5 项（**使用统计之下、已归档对话之上**），图标 `Gauge`，
+字典键 `tabProviderUsage`（「供应商用量」/ "Provider usage"）。设置页从五个页签变六个。
+
+**入口搬迁实测（2026-09-29，`pnpm build` + `vite preview` + Chromium 注入 `__TAURI_INTERNALS__` mock，
+1568×1176 视口，mock 覆盖 `get_health` / `get_models` / `list_projects` / `list_workspaces` / `list_checkouts` /
+`get_workspace_git_state` / `check_omp_update` / `sync_title_prompt` / `get_provider_usage`，启动零 missing 命令）**：
+
+| 检查 | 结果 |
+|---|---|
+| 标签栏右端两枚键 | DOM 顺序 = `新建终端` → `供应商用量`（`aria-label` 序列末两位），截图核对：`＋` 在左、`Gauge` 在右（最右格） |
+| 原搜索键 | 已不在标签栏（`aria-label` 序列里只有左栏底部行的「快速切换」） |
+| 快速切换可达性 | 左栏底部行照常；`⌘⇧K` 实测打开 QuickSwitcher（`aria-label="Switch terminals or workspaces"`） |
+| 点 `Gauge` | `[role="dialog"][aria-label="Provider usage"]` 打开：`updated <1m ago` + `Refresh` + 两张卡（OpenCode Go `5h 5.0% / Weekly 2.0% / Monthly 73%`、deepseek `¥12.19 left`）+ 页脚说明 |
+| 关闭 | `Esc` 后 `[role="dialog"]` 消失（`DialogShell` / `useDialogFocus` 既有口径） |
+| 回归 | `pnpm check` 全绿：typecheck + lint（0 警告）+ **308 项前端单测**（新增 `TerminalTabs.test.tsx` 2 项：入口打开弹窗 + 顺序钉死）+ `e2e:ipc` 70 命令双向一致 |
 
 ### 2.2 数据流
 
 ```
-ProviderUsagePanel（设置页页签）
+ProviderUsageDialog（弹窗；V15 交付时是设置页页签 ProviderUsagePanel，2026-09-29 见 §2.1）
   → lib/providerUsage.ts（模块级快照 store：节流 60s + 单飞 + 失败保留旧值）
     → api.getProviderUsage() → Tauri command get_provider_usage
       → providers.rs::run_omp 跑 `omp usage --json`（30s 超时、stderr 尾部报错）
@@ -80,9 +99,9 @@ ProviderUsagePanel（设置页页签）
 | 注册 | `main.rs` + `scripts/e2e-ipc-selfcheck.mjs` | 注册命令；自检文件清单加入 `provider_usage.rs` |
 | 契约 | `shared/ipc.ts` / `types.ts` / `api.ts` | `getProviderUsage` 常量 + `UsageLimit` / `ProviderUsageReport` / `ProviderUsageAccount` / `ProviderUsageDisabled` / `ProviderUsage` 类型 + API 方法 |
 | 前端 | `src/lib/providerUsage.ts`（新） | 模块级快照（`useSyncExternalStore`，不占全局 Zustand）+ 节流 / 单飞 / 失败保留；纯函数 `groupReports` / `levelOf` / `latestFetchedAt` / `providersWithoutUsage` / `fmtPercent` / `formatDuration` / `formatAgo` |
-| 前端 | `src/components/settings/ProviderUsagePanel.tsx`（新） + `SettingsPage.tsx` | 页签接入（TABS / TAB_ICONS / label 映射 / 渲染分支）+ 面板（卡片 / 窗口行 / 无数据块 / 停用块） |
-| 字典 | `locale.ts` | 新增 22 键 × 2 语言（`tabProviderUsage`、`pusage*`） |
-| 测试 | `src/lib/providerUsage.test.ts`（11 项）、`src/components/settings/ProviderUsagePanel.test.tsx`（5 项） | 纯函数 / 数据层行为（节流、单飞、失败保留）+ UI 映射（卡片、状态、空态、错误、多账号） |
+| 前端 | `src/components/usage/ProviderUsageDialog.tsx`（V15 时在 `src/components/settings/ProviderUsagePanel.tsx`；2026-09-29 入口从设置页签挪到标签栏右上角，见 §2.1） + `SettingsPage.tsx` | 面板（卡片 / 窗口行 / 无数据块 / 停用块）+ `DialogShell` 弹窗壳与 `providerUsageOpen` 挂载（V15 时是页签接入，已退场） |
+| 字典 | `locale.ts` | 新增 22 键 × 2 语言（`tabProviderUsage`、`pusage*`；`tabProviderUsage` 于 2026-09-29 改名 `pusageTitle`） |
+| 测试 | `src/lib/providerUsage.test.ts`（11 项）、`src/components/usage/ProviderUsageDialog.test.tsx`（V15 时 5 项，现 8 项；文件原名 `ProviderUsagePanel.test.tsx`） | 纯函数 / 数据层行为（节流、单飞、失败保留）+ UI 映射（卡片、状态、空态、错误、多账号） |
 
 ## 4. 完成口径（2026-09-18 收口）
 

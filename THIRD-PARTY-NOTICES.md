@@ -78,7 +78,7 @@
 ### reqwest / rustls（HTTP 客户端）
 - 仓库：https://github.com/seanmonstar/reqwest · https://github.com/rustls/rustls
 - 许可证：Apache-2.0 / MIT（reqwest）；Apache-2.0 / ISC / MIT（rustls）
-- 说明：设置 ›「供应商用量」的**补充探针**——对 omp 没有用量探针、但上游提供「API key 可用」查询接口的供应商（commandcode / deepseek）做只读 GET；TLS 走 rustls + webpki-roots（纯 Rust，无系统依赖，四平台构建一致）。
+- 说明：「供应商用量」弹窗（入口在标签栏右上角；V15 交付时是设置页签）的**补充探针**——对 omp 没有用量探针、但上游提供「API key 可用」查询接口的供应商（commandcode / deepseek）做只读 GET；TLS 走 rustls + webpki-roots（纯 Rust，无系统依赖，四平台构建一致）。
 
 ## 字体资源（随本应用分发）
 

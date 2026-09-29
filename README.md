@@ -17,10 +17,11 @@ oh-my-pi（`omp`）的极简桌面端 —— 左侧项目 / 分支树，右侧 o
 
 - **工作区（多项目容器）**：把一个或多个项目组成「工作区」（左栏标题行的 `Layers` 按钮新建；组头 `PenLine` 编辑名字与成员、删除组——成员回归「未分组」，不删项目与文件）。工作区成员 ≥ 2 时，在其中任何目录开的终端会**自动把其余成员项目的主目录挂进这个 omp 会话**（可跨项目读写，各项目自己的 AGENTS.md 规则同样生效），并注入一段工作区拓扑说明——给一个需求，前端与后端可以同时改、各自验证。组头点击 = 切到该工作区的终端视图；组头 `＋` 在组内首个项目的主目录开终端。
 - **项目 / 目录**：添加本地目录、移除（项目行 hover 的「移除项目」——仅解绑 + 该项目会话标记归档，走二次确认）、目录缺失标记与重定位；每个项目下列出主目录与全部 git worktree（分支名 + `worktree` 徽章，**只读展示**：要新建 / 删除 worktree 走 `omp worktree add` / `git worktree remove` 命令行）；项目头的文件夹图标会为「当前打开的项目」上强调色。没有自定义工作区时项目在左栏平铺（单项目用户无感）。
-- **终端**：每个标签页 = 一个跑在 PTY 里的 `omp` 交互式会话；多标签、`⌘T` 新建 / `⌘W` 关闭 / `⌘1..9` 切换；关闭运行中的终端二次确认（防误杀进行中的 agent）；进程退出后显示退出码并可重启；omp 的会话名经 OSC 标题更新到标签页。右栏按左栏选中范围过滤——工作区视图列出组内全部目录的终端、目录视图只列该目录的终端（别的范围的照常跑，左栏目录行上的徽章显示数量，`⌘⇧K` 可全局跳过去；快速切换面板三分组：终端 / 工作区 / 工作区目录）。
+- **终端**：每个标签页 = 一个跑在 PTY 里的 `omp` 交互式会话；多标签、`⌘T` 新建 / `⌘W` 关闭 / `⌘1..9` 切换；关闭运行中的终端二次确认（防误杀进行中的 agent）；进程退出后显示退出码并可重启；omp 的会话名经 OSC 标题更新到标签页。右栏按左栏选中范围过滤——工作区视图列出组内全部目录的终端、目录视图只列该目录的终端（别的范围的照常跑，左栏目录行上的徽章显示数量，`⌘⇧K` 可全局跳过去；快速切换面板三分组：终端 / 工作区 / 工作区目录）。标签栏右上角常驻两枚键：`＋`（新建终端）与 `Gauge`（供应商用量，见下）。
 - **会话弹窗**：项目行的「会话」入口列出该项目（含全部 worktree）的会话——点击在新终端 `omp --resume` 接着聊；行内归档 / 恢复 / 删除（删除二次确认）。
 - **已归档对话**（设置 ›）：归档会话的统一管理面（不受列表扫描窗口限制，按项目分组），「打开」= 恢复并在终端里继续；删除真删 jsonl。
-- **设置页（七个页签，左栏分 omp / 本应用两组）**：**omp 组**——**常用设置**（omp 常用设置 41 项：含工具审批档、上下文与压缩、工具开关、LSP、记忆后端、任务并发等）、**模型**（omp 模型相关的唯一管理面：我的模型 → 供应商 → 模型角色 → 失败转移；「添加供应商」弹窗先选提供商（可搜索、已配置置顶）——登录型走 `omp auth-broker`（API key / OAuth），首项「自定义」写 `models.yml`；「挑选模型」弹窗带搜索过滤，星标进「我的模型」）、记忆（omp 项目记忆的查看与删除）、**供应商用量**（各供应商侧的滚动窗口——5 小时 / 每周 / 每月限额的进度、重置倒计时与停用凭据提示；数据来自 omp 自己的 `omp usage` 查询，omp 未覆盖的 commandcode / deepseek 由壳侧补充查询——commandcode 额度接口与 deepseek 官方余额接口，凭据只经 `omp token` 在内存中传递、只读）；**本应用组**——**关于**（应用更新 + omp 运行环境诊断：路径 / 版本 / agentDir 展示与复制、重新检测、手动指定可执行文件）、使用统计（本机会话 jsonl 的 tokens / 缓存命中率 / 活跃天数与「Token 活动」热力图）、已归档对话（归档的统一管理面）。
+- **供应商用量**（标签栏右上角的 `Gauge` 键）：各供应商侧的滚动窗口——5 小时 / 每周 / 每月限额的进度、重置倒计时与停用凭据提示；数据来自 omp 自己的 `omp usage` 查询，omp 未覆盖的 commandcode / deepseek 由壳侧补充查询——commandcode 额度接口与 deepseek 官方余额接口，凭据只经 `omp token` 在内存中传递、只读。本应用只读取，不直连供应商接口、不碰凭证；只读弹窗，不占设置页签。
+- **设置页（八个页签，左栏分 omp / 本应用两组）**：**omp 组**——**常用设置**（omp 常用设置 41 项：含工具审批档、上下文与压缩、工具开关、LSP、记忆后端、任务并发等）、**模型**（omp 模型相关的唯一管理面：我的模型 → 供应商 → 模型角色 → 失败转移；「添加供应商」弹窗先选提供商（可搜索、已配置置顶）——登录型走 `omp auth-broker`（API key / OAuth），首项「自定义」写 `models.yml`；「挑选模型」弹窗带搜索过滤，星标进「我的模型」）、**插件**（omp 插件的清单 / 启停 / 可选特性 / 安装 / 卸载 / 体检）、**技能**（技能发现 / `SKILL.md` 预览 / 逐项启停）、记忆（omp 项目记忆的查看与删除）；**本应用组**——**关于**（应用更新 + omp 运行环境诊断：路径 / 版本 / agentDir 展示与复制、重新检测、手动指定可执行文件）、使用统计（本机会话 jsonl 的 tokens / 缓存命中率 / 活跃天数与「Token 活动」热力图）、已归档对话（归档的统一管理面）。
 - **界面语言**（跟随系统 / 简体中文 / English）与**皮肤**（跟随系统 / 深色 / 浅色）：左栏底部「设置」行右侧的两个分段控件，纯展示层偏好；终端配色跟随皮肤。
 
 **明确不做**：编辑器 / 文件树 / diff 审查 / 内置浏览器 / SSH / 移动端 / PR 集成 / 终端滚动缓冲持久化 / 分屏 / 多窗口。
@@ -146,11 +147,13 @@ Minimal Tauri v2 + React desktop shell for `omp`: a left sidebar of projects and
 worktrees, and a right pane of omp terminals — each tab is an interactive `omp` TUI
 session running in a real PTY, so approvals, model switching and slash commands happen
 where they always did: inside omp. A per-project session popup lists chats (click to
-resume in a new terminal via `omp --resume`; archive / restore / delete inline), and
-Settings ships six tabs — General (41 curated omp settings), Providers, Models (roles +
-fallback chains), Memories, Usage stats, Archived chats — plus omp diagnostics and
-in-app updates. Only the General / Providers / Models tabs write omp state (global
-`config.yml`, credentials, `modelRoles`); everything else is read-only.
+resume in a new terminal via `omp --resume`; archive / restore / delete inline), a tab-bar
+provider-usage popup (per-provider rolling windows), and Settings ships eight tabs —
+General (41 curated omp settings), Models (providers / models / roles + fallback chains),
+Plugins, Skills, Memories, About, Usage stats, Archived chats. Only the General / Models /
+Plugins / Skills tabs write omp state (global `config.yml`, credentials, `modelRoles`,
+plugin & skill toggles); everything else is read-only, and the provider-usage popup only
+reads `omp usage`.
 Contributions welcome — please read [CONTRIBUTING.md](CONTRIBUTING.md) first,
 and report vulnerabilities privately per [SECURITY.md](SECURITY.md).
 

@@ -13,6 +13,7 @@ import { hasOpenDialog } from "../../lib/useDropdown";
 import { TEXT, fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
 import { installWkInputFallback } from "../../lib/termInput";
+import { installImeCompositionWrap } from "../../lib/termIme";
 
 /**
  * 一个终端 tab 的渲染核心：xterm.js 实例 + 到后端 PTY 的双向管道。
@@ -62,6 +63,8 @@ export function TerminalPane({ term, active }: { term: TerminalView; active: boo
   x.open(host);
   // macOS WKWebView 漏键补丁：只补 xterm 按自身接受条件会丢、且 keypress 也没发的那一次（见 lib/termInput.ts）
   const releaseWkInput = installWkInputFallback(x);
+  // 行尾中文预编辑不再把工作区推偏：合成视图 / textarea 在整行宽度里换行（见 lib/termIme.ts）
+  const releaseImeWrap = installImeCompositionWrap(x);
   termRef.current = x;
   fitRef.current = fit;
   const dataSub = x.onData((d) => {
@@ -89,6 +92,7 @@ export function TerminalPane({ term, active }: { term: TerminalView; active: boo
    scrollSub.dispose();
    parsedSub.dispose();
    releaseWkInput();
+   releaseImeWrap();
    mo.disconnect();
    x.dispose();
    termRef.current = null;

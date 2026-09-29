@@ -356,8 +356,8 @@ const ZH = {
  usageHeatModelsRest: "另有 {0} 个模型",
  usageHeatUnknownModel: "未知模型",
 
- // 设置 ›「供应商用量」：各供应商侧的滚动窗口（omp usage）
- tabProviderUsage: "供应商用量",
+ // 「供应商用量」弹窗（标签栏右上角入口）：各供应商侧的滚动窗口（omp usage）
+ pusageTitle: "供应商用量",
  pusageHint:
   "各供应商侧的滚动用量（5 小时 / 每周 / 每月等窗口）。数据来自 omp 自己的用量查询——本应用只读取，不直连供应商接口、不碰凭证；窗口由各供应商定义，额度以供应商为准。",
  pusageLoading: "正在读取用量…",
@@ -1150,8 +1150,8 @@ const EN: Record<TextKey, string> = {
  usageHeatModelsRest: "{0} more models",
  usageHeatUnknownModel: "Unknown model",
 
- // Settings › Provider usage: per-provider rolling windows (omp usage)
- tabProviderUsage: "Provider usage",
+ // Provider usage dialog (tab bar entry, top right): per-provider rolling windows (omp usage)
+ pusageTitle: "Provider usage",
  pusageHint:
   "Rolling usage windows (5-hour / weekly / monthly…) as reported by each provider. Data comes from omp's own usage query — this app only reads it; it never calls provider APIs or touches credentials. Windows and quotas are defined by each provider.",
  pusageLoading: "Reading usage…",

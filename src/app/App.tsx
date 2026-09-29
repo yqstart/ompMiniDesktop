@@ -17,6 +17,7 @@ import { HealthBanner } from "../components/HealthBanner";
 import { SettingsPage } from "../components/SettingsPage";
 import { UpdateDialog } from "../components/update/UpdateDialog";
 import { OmpUpdateDialog } from "../components/update/OmpUpdateDialog";
+import { ProviderUsageDialog } from "../components/usage/ProviderUsageDialog";
 import { newTerminalInSelection } from "../lib/checkouts";
 import { terminalsInScope } from "../lib/terminalScope";
 import { selectionScopePaths } from "../lib/workspaceGroups";
@@ -273,7 +274,7 @@ function SidebarShell({
  );
 }
 export function App() {
- const { settingsTabOpen, settingsTabActive, closingTerminalId, set, sidebarWidth, setSidebarWidth, updateDialogOpen, ompUpdateDialogOpen, sidebarOpen, quickSwitcherOpen, refPickerTerminalId } = useApp();
+ const { settingsTabOpen, settingsTabActive, closingTerminalId, set, sidebarWidth, setSidebarWidth, updateDialogOpen, ompUpdateDialogOpen, sidebarOpen, quickSwitcherOpen, providerUsageOpen, refPickerTerminalId } = useApp();
  const t = useText();
  useTheme();
  useLocale();
@@ -364,6 +365,7 @@ export function App() {
    {updateDialogOpen && <UpdateDialog />}
    {ompUpdateDialogOpen && <OmpUpdateDialog />}
    {quickSwitcherOpen && <QuickSwitcher />}
+   {providerUsageOpen && <ProviderUsageDialog />}
    {refPickerTerminalId && <ReferencePicker />}
   </div>
  );
