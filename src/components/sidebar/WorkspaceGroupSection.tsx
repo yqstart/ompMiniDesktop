@@ -73,8 +73,10 @@ export function WorkspaceGroupSection({
      title={t.wsGroupCollabHint}
      className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 py-1 pl-1.5 text-left text-[13px] font-semibold text-foreground"
     >
-     <Layers size={13} aria-hidden className={`shrink-0 ${expanded ? "text-accent" : "text-muted"}`} />
-     <span className="min-w-0 flex-1 truncate">{group?.name ?? t.wsGroupUngrouped}</span>
+     <span className={`flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface ${expanded ? "text-accent" : "text-muted"}`}>
+      <Layers size={14} aria-hidden />
+     </span>
+     <span className={`min-w-0 flex-1 truncate transition-colors duration-100 ${expanded ? "text-accent" : ""}`}>{group?.name ?? t.wsGroupUngrouped}</span>
      <span className="shrink-0 font-mono text-[10px] leading-none text-faint">{projects.length}</span>
     </button>
     {group && onEdit && (

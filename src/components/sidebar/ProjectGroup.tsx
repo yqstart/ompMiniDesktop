@@ -219,7 +219,7 @@ function CheckoutRow({
     disabled={ws.missing}
     className={`flex min-w-0 flex-1 items-center gap-2 py-1 pl-2 text-left ${ws.missing ? "cursor-default" : "cursor-pointer"}`}
    >
-    <span className={`flex size-5 shrink-0 items-center justify-center ${ws.isMain || active ? "text-accent" : "text-faint"}`}>
+    <span className={`flex size-5 shrink-0 items-center justify-center rounded-sm bg-surface ${ws.isMain || active ? "text-accent" : "text-faint"}`}>
      <DiagramTree size={13} aria-hidden />
     </span>
     <span className={`min-w-0 flex-1 truncate font-mono ${active ? "font-semibold" : ""}`}>{label}</span>
@@ -235,13 +235,17 @@ function CheckoutRow({
      <span
       title={termBadge}
       aria-label={termBadge}
-      className={`flex h-5 items-center gap-0.5 px-0.5 ${runningTerms > 0 ? "text-accent" : "text-faint"}`}
+      className={`flex h-5 items-center gap-0.5 rounded-sm bg-surface px-1 ${runningTerms > 0 ? "text-accent" : "text-faint"}`}
      >
       <BrowserTerminal size={11} aria-hidden />
       <span className="font-mono text-[10px] leading-none">{termCount}</span>
      </span>
     )}
-    {dirty && <span className="size-1.5 rounded-full bg-accent" title={t.gitDirtyTitle} aria-label={t.gitDirtyTitle} />}
+    {dirty && (
+     <span className="flex size-5 items-center justify-center rounded-sm bg-surface" title={t.gitDirtyTitle} aria-label={t.gitDirtyTitle}>
+      <span className="size-1.5 rounded-full bg-accent" aria-hidden />
+     </span>
+    )}
     {ahead > 0 && (
      <button
       onClick={(e) => {
@@ -250,7 +254,7 @@ function CheckoutRow({
       }}
       title={fmt(t.gitPushTitle, ahead)}
       aria-label={fmt(t.gitPushTitle, ahead)}
-      className="flex h-5 cursor-pointer items-center gap-0.5 rounded-sm px-0.5 text-accent transition-colors duration-100 hover:bg-hover"
+      className="flex h-5 cursor-pointer items-center gap-0.5 rounded-sm bg-surface px-1 text-accent transition-colors duration-100 hover:bg-hover"
      >
       <BranchUp size={11} aria-hidden />
       <span className="font-mono text-[10px] leading-none">{ahead}</span>
@@ -260,14 +264,14 @@ function CheckoutRow({
      <span
       title={fmt(t.gitBehindTitle, behind)}
       aria-label={fmt(t.gitBehindTitle, behind)}
-      className="flex h-5 items-center gap-0.5 px-0.5 text-warn"
+      className="flex h-5 items-center gap-0.5 rounded-sm bg-surface px-1 text-warn"
      >
       <BranchDown size={11} aria-hidden />
       <span className="font-mono text-[10px] leading-none">{behind}</span>
      </span>
     )}
     {upstreamNote && (
-     <span title={upstreamNote} aria-label={upstreamNote} className="flex size-5 items-center justify-center text-faint">
+     <span title={upstreamNote} aria-label={upstreamNote} className="flex size-5 items-center justify-center rounded-sm bg-surface text-faint">
       <LinkOff size={12} aria-hidden />
      </span>
     )}
@@ -279,7 +283,7 @@ function CheckoutRow({
       }}
       title={t.gitRunningTitle}
       aria-label={t.gitRunningTitle}
-      className="flex size-5 cursor-pointer items-center justify-center rounded-sm text-accent transition-colors duration-100 hover:bg-hover"
+      className="flex size-5 cursor-pointer items-center justify-center rounded-sm bg-surface text-accent transition-colors duration-100 hover:bg-hover"
      >
       <Loader size={12} aria-hidden className="animate-spin" />
      </button>
@@ -292,7 +296,7 @@ function CheckoutRow({
       }}
       title={t.gitFailedTitle}
       aria-label={t.gitFailedTitle}
-      className="flex size-5 cursor-pointer items-center justify-center rounded-sm text-danger transition-colors duration-100 hover:bg-hover"
+      className="flex size-5 cursor-pointer items-center justify-center rounded-sm bg-surface text-danger transition-colors duration-100 hover:bg-hover"
      >
       <AlertTriangle size={12} aria-hidden />
      </button>
@@ -306,7 +310,7 @@ function CheckoutRow({
       disabled={!canStart}
       title={startTitle}
       aria-label={startTitle}
-      className={`flex size-5 items-center justify-center rounded-sm opacity-0 transition-opacity duration-100 group-hover/row:opacity-100 group-focus-within/row:opacity-100 ${canStart ? "cursor-pointer text-muted hover:bg-hover hover:text-foreground" : "cursor-not-allowed text-faint"
+      className={`flex size-5 items-center justify-center rounded-sm bg-surface opacity-0 transition-opacity duration-100 group-hover/row:opacity-100 group-focus-within/row:opacity-100 ${canStart ? "cursor-pointer text-muted hover:bg-hover hover:text-foreground" : "cursor-not-allowed text-faint"
        }`}
      >
       <ArrowUpCircle size={13} aria-hidden />
