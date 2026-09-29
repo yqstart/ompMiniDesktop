@@ -724,6 +724,7 @@ const ZH = {
  wsGroupDeleteBody: "成员项目会回到「未分组」；不删除任何项目与文件。",
  wsGroupFailed: "工作区操作失败",
  wsGroupCollabHint: "工作区内的终端会自动挂上各成员项目的目录（跨项目读写）",
+ wsGroupCount: "{0} 个项目",
  // 左栏拖拽（V26）：项目排序 + 拖进 / 拖出工作区
  projDragHint: "拖拽调整顺序：拖进工作区 = 加入成员，拖到「未分组」= 移出工作区",
  projDragInto: "拖到这里加入",
@@ -1508,6 +1509,7 @@ const EN: Record<TextKey, string> = {
  wsGroupDeleteBody: "Member projects return to Ungrouped. No projects or files are deleted.",
  wsGroupFailed: "Workspace operation failed",
  wsGroupCollabHint: "Terminals inside a workspace automatically mount every member project's folders (cross-project read/write)",
+ wsGroupCount: "{0} projects",
  // Sidebar drag (V26): reorder projects, drag into / out of a workspace
  projDragHint: "Drag to reorder — drop into a workspace to add it, or into Ungrouped to remove it",
  projDragInto: "Drop here to add",

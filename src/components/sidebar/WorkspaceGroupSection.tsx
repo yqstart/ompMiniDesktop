@@ -13,7 +13,8 @@ import { ProjectGroup } from "./ProjectGroup";
  *
  * - 组头点击 = 选中工作区（右栏范围切到组内全部目录的终端，激活终端自动收敛）+ 展开/收起
  *  （没有独立折叠箭头；`Layers` 图标在展开时上强调色）；
- * - hover：`PenLine` 打开编辑对话框；
+ * - hover：`PenLine` 打开编辑对话框（在成员计数左侧，`opacity` 切换，槽位常占位不抖动）；
+ * - 行尾是成员项目计数小盒（24px `bg-surface`，`title` / `aria-label` = 「N 个项目」）；
  * - `group = null` 是「未分组」区：不可编辑、不可删，只做收纳与选中。
  *
  * 拖拽（V26）：整段是**落点容器**（`data-group-drop`）——拖项目进来 = 加入本组（落在末尾）；
@@ -77,9 +78,6 @@ export function WorkspaceGroupSection({
       <Layers size={14} aria-hidden />
      </span>
      <span className={`min-w-0 flex-1 truncate transition-colors duration-100 ${expanded ? "text-accent" : ""}`}>{group?.name ?? t.wsGroupUngrouped}</span>
-     <span className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-sm bg-surface px-1 font-mono text-[10px] leading-none text-faint">
-      {projects.length}
-     </span>
     </button>
     {group && onEdit && (
      <span className="flex shrink-0 items-center opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100">
@@ -93,6 +91,13 @@ export function WorkspaceGroupSection({
       </button>
      </span>
     )}
+    <span
+     title={fmt(t.wsGroupCount, projects.length)}
+     aria-label={fmt(t.wsGroupCount, projects.length)}
+     className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-sm bg-surface px-1 font-mono text-[10px] leading-none text-faint"
+    >
+     {projects.length}
+    </span>
    </div>
    {expanded && (
     <div className="ml-2 mt-0.5 border-l border-border-soft pl-1">
