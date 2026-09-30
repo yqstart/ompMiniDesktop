@@ -16,6 +16,7 @@ mod pty;
 mod session_scan;
 mod settings;
 mod skills;
+mod themes;
 mod title_prompt;
 mod usage;
 
@@ -95,9 +96,10 @@ fn main() {
             memories::delete_memory_project,
             usage::get_usage_stats,
             provider_usage::get_provider_usage,
-            settings::get_omp_settings,
+            settings::get_omp_settings_catalog,
             settings::set_omp_setting,
             settings::reset_omp_setting,
+            themes::list_omp_themes,
             models_config::read_models_config,
             models_config::write_models_config,
             title_prompt::sync_title_prompt,

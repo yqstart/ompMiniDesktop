@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
-import type { ChangeSet, CheckoutView, CommitEvent, FallbackChainsInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpUpdateEvent, OmpUpdateStatus, Overlay, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, SkillFileContent, SkillsView, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
+import type { ChangeSet, CheckoutView, CommitEvent, FallbackChainsInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, SkillFileContent, SkillsView, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -187,16 +187,23 @@ export const api = {
   */
  getProviderUsage: () => call<ProviderUsage>(IPC.getProviderUsage),
  /**
-  * omp 常用设置（设置 ›「常用设置」）：白名单键的**批量读**（一次 `omp config list --json`，
-  * 不逐键 spawn 进程）+ 单键写 / 恢复默认。写的是 omp **全局层**
-  * （`~/.omp/agent/config.yml`，`<cwd>/.omp/config.yml` 的项目覆盖优先于它），
-  * 不动覆盖层、不碰凭证库；上游没有的键整个缺席（界面据此显示「没有这个设置」）。
+  * omp 设置目录（设置 ›「常用设置」）：上游 `omp config list` 的完整目录——文本 + JSON 两路
+  * 合并（文本给分组与枚举取值表，JSON 给类型化值与说明）。**只读**；页面按壳侧展示清单
+  * （`lib/settingsList.ts`）过滤显示；写入走下面的
+  * `setOmpSetting` / `resetOmpSetting`（omp 全局层：`~/.omp/agent/config.yml`，
+  * `<cwd>/.omp/config.yml` 的项目覆盖优先于它；不碰覆盖层与凭证库）。
   */
- getOmpSettings: (keys: string[]) => call<OmpSetting[]>(IPC.getOmpSettings, { keys }),
+ getOmpSettingsCatalog: () => call<OmpSettingsCatalog>(IPC.getOmpSettingsCatalog),
  /** 写一个设置项；返回值是**写入后回读**的真相（omp 静默丢弃写入时界面不该显示假值）。 */
  setOmpSetting: (key: string, value: unknown) => call<OmpSetting>(IPC.setOmpSetting, { key, value }),
  /** 恢复该键的 schema 默认值（`omp config reset`，把默认值写回全局配置）。 */
  resetOmpSetting: (key: string) => call<OmpSetting>(IPC.resetOmpSetting, { key }),
+ /**
+  * 本机 omp 的主题列表（「常用设置」的深色 / 浅色主题下拉用；**只读**）。
+  * 与 omp TUI 的 `availableThemes` 同口径：内置注册表（本机 18.4.4 = 102 个）∪
+  * `<agentDir>/themes/*.json`（去后缀），排序；目录不存在 = 只有内置。
+  */
+ listOmpThemes: () => call<string[]>(IPC.listOmpThemes),
  /**
   * 自定义模型接入（设置 › 供应商）：读 / 写 `<agentDir>/models.yml`
   * ——omp 用户级自定义供应商 / 模型的唯一入口（上游没有 CLI 写入口，写文件是唯一路径）。

@@ -8,13 +8,14 @@
 //! 本模块只放「读状态 / 建参数 / 解析输出」的纯函数（全部带单测）与少量 git 调用；
 //! 提交 / 推送的**任务编排**在 `git_commit.rs`。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use serde::Serialize;
 
 use crate::commands::{cmd_err, CmdError};
 use crate::git_info::{dir_exists, git_bin, run_git, run_git_timeout};
+use crate::project_files::parse_ls_files_z;
 
 /// 变更集里一个文件的上限保护：超大仓库不把整表塞给前端（够用且不卡界面）。
 const MAX_CHANGE_FILES: usize = 2000;
@@ -209,6 +210,28 @@ pub fn add_args(paths: &[String]) -> Vec<String> {
     args
 }
 
+/// 一条勾选是否覆盖某个具体文件路径：精确相等，或勾选是未跟踪目录（`dir/`，porcelain
+/// 对未跟踪目录的输出形态）且路径在它下面。目录勾选连带的文件是用户的显式意图。
+pub fn selection_covers(selected: &str, path: &str) -> bool {
+    selected == path || (selected.ends_with('/') && path.starts_with(selected))
+}
+
+/// 从 [`ls_files_visible`] 的结果里保留 git 仍可暂存的路径（其余剔除）。
+///
+/// 三类「已无内容可暂」的勾选路径会让**整条** `git add -A -- <paths>` 报错并全批失败：
+/// 已暂存的删除条目（porcelain `D `，索引与工作区都已不存在——面板默认勾选就含它）、
+/// 面板打开后又被删除 / 改名的未跟踪文件（`fatal: pathspec ... did not match any files`）、
+/// 面板打开后新被 `.gitignore` 规则覆盖的未跟踪文件（ignored 错误）。跳过都没有副作用：
+/// 删除状态本来就在暂存区里，另两类已无内容可暂（与不带 pathspec 的 `git add -A` 一致）。
+pub fn retain_addable(selected: &[String], listed: &[String]) -> Vec<String> {
+    let set: HashSet<&str> = listed.iter().map(String::as_str).collect();
+    selected
+        .iter()
+        .filter(|p| set.contains(p.as_str()) || (p.ends_with('/') && listed.iter().any(|f| selection_covers(p, f))))
+        .cloned()
+        .collect()
+}
+
 /// `modelRoles.commit`（如 `commandcode/deepseek/deepseek-v4.1-flash:low`）
 /// → `(模型选择器, 思考档)`。按**最后一个** `:` 切；层不是已知档位时整串当选择器。
 pub fn commit_model_args(role: Option<&str>) -> (Option<String>, Option<String>) {
@@ -241,41 +264,73 @@ pub fn push_args(branch: &str, has_upstream: bool, remotes: &[String]) -> Result
 
 // ---------- git 调用 ----------
 
+/// 仓库根（`rev-parse --show-toplevel`）：变更集与暂存区都是**根基准**（porcelain 与
+/// `diff --cached` 都从根算路径），而 git 的 pathspec 相对自己的 cwd——项目目录是仓库
+/// 子目录时两者对不上，写操作必须统一到根下跑。拿不到根（极端情形）退回 cwd。
+async fn work_root(git: &str, cwd: &str) -> String {
+    match run_git(git, cwd, &["rev-parse", "--show-toplevel"]).await {
+        Ok(out) if !out.trim().is_empty() => out.trim().to_string(),
+        _ => cwd.to_string(),
+    }
+}
+
 /// 读当前已暂存的文件（`git diff --cached --name-only -z`）。
+///
+/// 输出是**根基准**路径——调用方要么传仓库根，要么保证 cwd 下基准一致。
 pub(crate) async fn staged_paths(git: &str, cwd: &str) -> Result<Vec<String>, String> {
     let out = run_git_timeout(git, cwd, &["diff", "--cached", "--name-only", "-z"], SLOW).await?;
     Ok(out.split('\0').filter(|s| !s.is_empty()).map(str::to_string).collect())
+}
+
+/// 列出勾选路径里「索引中」或「工作区未跟踪且未被忽略」的文件（文件级，不折叠目录）。
+/// 非空即证明该 pathspec 仍能被 `git add` 接受；调用方在仓库根下跑（根基准）。
+async fn ls_files_visible(git: &str, root: &str, paths: &[String]) -> Result<Vec<String>, String> {
+    let mut args: Vec<String> = vec!["ls-files".into(), "-c".into(), "-o".into(), "--exclude-standard".into(), "-z".into(), "--".into()];
+    args.extend(paths.iter().cloned());
+    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    run_git_timeout(git, root, &refs, SLOW).await.map(|out| parse_ls_files_z(&out))
 }
 
 /// 把勾选同步到暂存区（**生成 / 提交都先做这一步**）：
 /// 未选中的取消暂存、选中的全量 `add -A`，最后复查「暂存集合 ⊆ 勾选集合」。
 ///
 /// 只做**子集**校验：选中但没有改动的文件不会出现在暂存区，等值校验会误报。
+/// 勾选集是根基准（来自变更集），git 调用统一在仓库根下跑；已无内容可暂的路径
+/// （已暂存的删除条目 / 被删的未跟踪文件 / 新被忽略的文件）先剔除，不让整批 add 失败。
 pub(crate) async fn apply_selection(git: &str, cwd: &str, paths: &[String]) -> Result<(), CmdError> {
     let selected: Vec<String> = paths.iter().map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect();
     if selected.is_empty() {
         return Err(cmd_err("NO_SELECTION", "请至少勾选一个文件".into(), None));
     }
-    let staged = staged_paths(git, cwd)
+    let root = work_root(git, cwd).await;
+    let staged = staged_paths(git, &root)
         .await
         .map_err(|e| cmd_err("STATUS_FAILED", e, None))?;
     let (to_add, to_unstage) = stage_plan(&selected, &staged);
     if !to_unstage.is_empty() {
-        let has_head = run_git(git, cwd, &["rev-parse", "--verify", "-q", "HEAD"]).await.is_ok();
+        let has_head = run_git(git, &root, &["rev-parse", "--verify", "-q", "HEAD"]).await.is_ok();
         let args = unstage_args(has_head, &to_unstage);
         let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-        run_git_timeout(git, cwd, &refs, SLOW).await.map_err(|e| cmd_err("STAGE_FAILED", e, None))?;
+        run_git_timeout(git, &root, &refs, SLOW).await.map_err(|e| cmd_err("STAGE_FAILED", e, None))?;
     }
     if !to_add.is_empty() {
-        let args = add_args(&to_add);
-        let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-        run_git(git, cwd, &refs).await.map_err(|e| cmd_err("STAGE_FAILED", e, None))?;
+        // 探测失败不拦路（退回旧行为）：照旧 add，错误由 git 原文上报
+        let addable = match ls_files_visible(git, &root, &to_add).await {
+            Ok(listed) => retain_addable(&to_add, &listed),
+            Err(_) => to_add.clone(),
+        };
+        if !addable.is_empty() {
+            let args = add_args(&addable);
+            let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+            run_git(git, &root, &refs).await.map_err(|e| cmd_err("STAGE_FAILED", e, None))?;
+        }
     }
-    // 复查：暂存区不能出现勾选之外的文件（那是「提交了没勾的东西」，必须挡住）
-    let after = staged_paths(git, cwd)
+    // 复查：暂存区不能出现勾选之外的文件（那是「提交了没勾的东西」，必须挡住）；
+    // 覆盖判定含目录勾选（`dir/` 下的文件都算被覆盖）
+    let after = staged_paths(git, &root)
         .await
         .map_err(|e| cmd_err("STATUS_FAILED", e, None))?;
-    if let Some(extra) = after.iter().find(|p| !selected.iter().any(|s| s == *p)) {
+    if let Some(extra) = after.iter().find(|p| !selected.iter().any(|s| selection_covers(s, p))) {
         return Err(cmd_err(
             "STAGE_MISMATCH",
             "暂存区与勾选不一致（文件在操作期间被改动），请重试".into(),
@@ -411,6 +466,26 @@ mod tests {
     #[test]
     fn add_args_are_force_all_with_pathspec() {
         assert_eq!(add_args(&["a.txt".into(), "b/c.txt".into()]), ["add", "-A", "--", "a.txt", "b/c.txt"]);
+    }
+
+    #[test]
+    fn retain_addable_drops_vanished_and_ignored_paths() {
+        let selected = vec![
+            "src/a.ts".to_string(),     // 工作区仍存在（listed 里有）
+            "src/ghost.ts".to_string(), // 面板打开后消失 / 新被忽略（listed 里没有）
+            "docs/".to_string(),        // 未跟踪目录：listed 里是文件级路径，按前缀保留
+            "empty/".to_string(),       // 已空 / 已删的目录：listed 无前缀
+            "src/ab.ts".to_string(),    // 前缀不得误伤同级文件（exact 匹配）
+        ];
+        let listed = vec!["src/a.ts".to_string(), "docs/readme.md".to_string()];
+        assert_eq!(retain_addable(&selected, &listed), vec!["src/a.ts", "docs/"]);
+        // 全被剔除（都已无内容可暂）时不 panic，返回空
+        assert!(retain_addable(&["gone.txt".to_string()], &[]).is_empty());
+        // 覆盖判定：精确、目录、以及不得误放行同前缀的兄弟路径
+        assert!(selection_covers("docs/", "docs/readme.md"));
+        assert!(selection_covers("src/a.ts", "src/a.ts"));
+        assert!(!selection_covers("docs", "docs/readme.md"), "没有尾随斜杠不是目录勾选");
+        assert!(!selection_covers("src/", "srcx/a.ts"), "前缀必须落在目录边界上");
     }
 
     #[test]

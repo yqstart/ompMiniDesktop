@@ -120,7 +120,8 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
    {/* 左栏：竖向菜单（无标题行，菜单从顶端开始），分「omp」与「本应用」两组——组标题在窄导航
           （44px）下收进 sr-only，组间分隔线保留。设置是标签栏里的标签——关闭走标签栏的 × / ⌘W
           （`closeSettingsTab`，回到上次的终端标签），页内不放第二个关闭入口。
-          omp 组：常用设置（`omp config` 白名单 41 项）、模型（**omp 模型相关唯一管理面**：
+          omp 组：常用设置（omp 配置在本应用的唯一设置面——`lib/settingsList.ts` 的 117 项
+          展示清单，按上游分组；三稿把原「更多设置」页并入）、模型（**omp 模型相关唯一管理面**：
           供应商 / 我的模型 / 模型角色 / 快速切换环 / 失败转移）、插件（V23：`omp plugin` 的
           清单 / 启停 / 特性 / 安装 / 卸载 / 体检）、技能（V23：`omp skill list` 的发现结果 +
           逐项启停 + SKILL.md 预览）、记忆（omp 项目记忆的查看 / 删除）。
@@ -168,11 +169,11 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
              ? t.tabSkills
              : k === "memories"
               ? t.tabMemories
-               : k === "about"
-                ? t.tabAbout
-                : k === "usage"
-                 ? t.tabUsage
-                 : t.tabArchived;
+              : k === "about"
+               ? t.tabAbout
+               : k === "usage"
+                ? t.tabUsage
+                : t.tabArchived;
         return (
          <button
           key={k}

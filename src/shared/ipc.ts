@@ -66,10 +66,13 @@ export const IPC = {
  getUsageStats: "get_usage_stats",
  // 供应商用量（设置 › 供应商用量）：`omp usage --json` 的各供应商滚动窗口（只读）
  getProviderUsage: "get_provider_usage",
- // omp 常用设置（设置 ›「常用设置」）：白名单键的批量读 / 单键写 / 恢复默认（写 omp 全局配置）
- getOmpSettings: "get_omp_settings",
+ // omp 设置目录（设置 ›「常用设置」）：上游完整目录（文本 + JSON 两路 config list 的合并，只读）
+ getOmpSettingsCatalog: "get_omp_settings_catalog",
+ // 写一个设置项 / 恢复默认（cwd 钉 agentDir，写 omp 全局配置）
  setOmpSetting: "set_omp_setting",
  resetOmpSetting: "reset_omp_setting",
+ // omp 主题列表（「常用设置」深色 / 浅色主题下拉用）：内置注册表 ∪ <agentDir>/themes/*.json（只读）
+ listOmpThemes: "list_omp_themes",
  // 自定义模型（设置 › 供应商）：omp `models.yml` 的读写——上游没有 CLI 写入口，写文件是唯一路径
  readModelsConfig: "read_models_config",
  writeModelsConfig: "write_models_config",

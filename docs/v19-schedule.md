@@ -81,6 +81,14 @@ omp -p --no-session --no-tools --no-lsp --no-extensions --no-rules \
 - 提交前**复查**「暂存集合 ⊆ 勾选集合」——出现勾选之外的文件就报 `STAGE_MISMATCH` 并中止（宁可不提交，也不能提交用户没勾的东西）；
 - 生成用的 diff 就是暂存区的内容（`git diff --cached`），所以「看到的 == 提交的」。
 
+**后续修正（0.8.0 之后）——勾选同步的三个 pathspec 坑**：
+
+- **路径基准统一钉仓库根**：变更集（`status --porcelain`）与暂存区（`diff --cached`）的输出都是**根基准**，而 git 的 pathspec 相对自己的 cwd——项目目录是仓库子目录时，写操作直接拿根基准路径当 pathspec 会整批失配（`fatal: pathspec ... did not match any files`）。`apply_selection` 现在先 `rev-parse --show-toplevel`（`work_root`），全部读写调用下沉到根下跑。
+- **已无内容可暂的勾选路径先剔除**：**默认勾选（= 已暂存的文件）里包含已暂存的删除条目**（porcelain `D `，改名 / 删除后很常见）——该路径在索引与工作区都已不存在；面板打开后文件被删 / 改名（用户实测 `src/lib/ompSettings.test.ts` 就是改名残留的 `D ` 条目）同属一类。`git add -A -- <paths>` 是**整批原子**的，只要有一条这样的路径就全批失败、别的文件也不再进暂存区。暂存前先 `git ls-files -c -o --exclude-standard -z -- <paths>` 探测（与 add 同一 pathspec 语义），只 add 仍可见的；探测失败退回旧行为（不拦截，错误照报）。新被 `.gitignore` 覆盖的未跟踪路径同理剔除（旧行为报 ignored 错误）。
+- **勾选目录的覆盖判定**：未跟踪目录的勾选项是 `docs/`（porcelain 对未跟踪目录的输出形态），暂存区里是文件级 `docs/a.md`——`retain_addable` 与暂存区复查共用 `selection_covers`（精确，或勾选以 `/` 结尾且路径在其下）。此前勾一个未跟踪目录**必然**误报 `STAGE_MISMATCH`。
+
+真实仓库回归测试：`real_repo_selection_keeps_staged_deletion`（已暂存的 `D ` 条目）/ `real_repo_selection_skips_vanished_and_ignored_paths`（消失 + 忽略 + 目录勾选）/ `real_repo_selection_stages_from_repo_root_base_in_subdir`（子目录 cwd）（`git_commit.rs`）。
+
 ### 2.3 命令面（IPC）
 
 | 命令 | 干什么 |

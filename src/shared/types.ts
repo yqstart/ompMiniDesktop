@@ -391,6 +391,29 @@ export type OmpSetting = {
  description: string;
 };
 
+/**
+ * 设置目录里的一项（设置页用；与 Rust `settings::CatalogItem` 同构）：在 `OmpSetting` 之上带了
+ * **分组**（上游人读清单的 `[appearance]` …，空 = 只在 JSON 里出现）与 **enum 取值表**
+ * （JSON 不给枚举取值，只能从人读文本解析）。
+ * `value === null` 有两种含义，靠 `redacted` 区分：未设置（上游没有显式值）/ 值被上游隐藏
+ * （令牌类键——`config get` 能读回，但 `config list` 一律脱敏）。
+ */
+export type OmpCatalogItem = {
+ key: string;
+ value: unknown;
+ kind: string;
+ description: string;
+ section: string;
+ options: string[];
+ redacted: boolean;
+};
+
+/** 上游设置目录（分组顺序 + 全部项，顺序照上游清单；页面按精选清单过滤后显示）。 */
+export type OmpSettingsCatalog = {
+ sections: string[];
+ items: OmpCatalogItem[];
+};
+
 // ---------- V21 左栏：工作区（容器）→ 项目 → 目录行 ----------
 
 /**

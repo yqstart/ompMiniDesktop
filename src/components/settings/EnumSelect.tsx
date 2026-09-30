@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { ChevronDown, Loader } from "reicon-react";
 import { useDropdown } from "../../lib/useDropdown";
 
-/** 下拉里的一项（`label` 已经是界面文本——取值表与 label 解析在 `lib/ompSettings.ts`）。 */
+/** 下拉里的一项（`label` 已经是界面文本——取值表与 label 解析在 `lib/settingsList.ts` 的 `OPTION_LABELS`）。 */
 export type EnumChoice = { value: string; label: string };
 
 /** 列表与视口边缘的间距 / 触发按钮与列表的间距 / 列表高度上限 / 压缩后的最小高度。 */

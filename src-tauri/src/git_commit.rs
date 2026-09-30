@@ -1251,6 +1251,104 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn real_repo_selection_skips_vanished_and_ignored_paths() {
+        let (root, work, _remote) = temp_repo("skip-dead").await;
+        let Some(git) = git_bin().await else { panic!("未找到 git") };
+        let g = |args: &[&str]| {
+            let out = std::process::Command::new(&git).arg("-C").arg(&work).args(args).output().unwrap();
+            assert!(out.status.success(), "git {args:?} 失败：{}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        g(&["commit", "--allow-empty", "-m", "chore: init"]);
+        std::fs::write(format!("{work}/kept.txt"), "k\n").unwrap();
+        // 面板打开后消失的未跟踪文件（曾经的坑：整批 `git add` 报
+        // `fatal: pathspec 'ghost.txt' did not match any files`）
+        std::fs::write(format!("{work}/ghost.txt"), "g\n").unwrap();
+        std::fs::remove_file(format!("{work}/ghost.txt")).unwrap();
+        // 面板打开后新被 .gitignore 覆盖的未跟踪文件（旧实现在 add 时报 ignored 错误）
+        std::fs::write(format!("{work}/.gitignore"), "*.log\n").unwrap();
+        std::fs::write(format!("{work}/trace.log"), "l\n").unwrap();
+        // 未跟踪目录（porcelain 给 `docs/`）：按其下文件前缀保留
+        std::fs::create_dir_all(format!("{work}/docs")).unwrap();
+        std::fs::write(format!("{work}/docs/a.md"), "d\n").unwrap();
+
+        git_ops::apply_selection(
+            &git,
+            &work,
+            &["kept.txt".into(), "ghost.txt".into(), "trace.log".into(), "docs/".into()],
+        )
+        .await
+        .expect("消失 / 被忽略的路径不该拖垮整批暂存");
+        assert_eq!(
+            git_ops::staged_paths(&git, &work).await.unwrap(),
+            vec!["docs/a.md", "kept.txt"]
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn real_repo_selection_keeps_staged_deletion() {
+        let (root, work, _remote) = temp_repo("staged-delete").await;
+        let Some(git) = git_bin().await else { panic!("未找到 git") };
+        let g = |args: &[&str]| {
+            let out = std::process::Command::new(&git).arg("-C").arg(&work).args(args).output().unwrap();
+            assert!(out.status.success(), "git {args:?} 失败：{}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        g(&["commit", "--allow-empty", "-m", "chore: init"]);
+        std::fs::write(format!("{work}/gone.txt"), "g\n").unwrap();
+        g(&["add", "gone.txt"]);
+        g(&["commit", "-m", "chore: add gone"]);
+        // 已暂存的删除条目（porcelain `D `，面板默认勾选就包含它）：该路径在索引与工作区
+        // 都已不存在，旧实现 `git add -A -- gone.txt` 报 pathspec 并拖垮整批（用户实测：
+        // 改名后的 `src/lib/ompSettings.test.ts`）
+        std::fs::remove_file(format!("{work}/gone.txt")).unwrap();
+        g(&["add", "-A", "--", "gone.txt"]);
+        std::fs::write(format!("{work}/kept.txt"), "k\n").unwrap();
+
+        git_ops::apply_selection(&git, &work, &["gone.txt".into(), "kept.txt".into()])
+            .await
+            .expect("已暂存的删除条目不该让暂存同步失败");
+        assert_eq!(
+            git_ops::staged_paths(&git, &work).await.unwrap(),
+            vec!["gone.txt", "kept.txt"],
+            "删除保留在暂存区、别的文件照常暂存"
+        );
+        // 再跑一次（幂等）：仍成功且暂停的删除没被退回
+        git_ops::apply_selection(&git, &work, &["gone.txt".into(), "kept.txt".into()])
+            .await
+            .unwrap();
+        assert_eq!(git_ops::staged_paths(&git, &work).await.unwrap(), vec!["gone.txt", "kept.txt"]);
+        // 取消勾选它：删除退回未暂存（`restore --staged` 对 `D ` 条目正常）
+        git_ops::apply_selection(&git, &work, &["kept.txt".into()]).await.unwrap();
+        assert_eq!(git_ops::staged_paths(&git, &work).await.unwrap(), vec!["kept.txt"]);
+        assert_eq!(g(&["diff", "--name-only", "--", "gone.txt"]), "gone.txt", "删除应退回未暂存");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn real_repo_selection_stages_from_repo_root_base_in_subdir() {
+        let (root, work, _remote) = temp_repo("subdir-base").await;
+        let Some(git) = git_bin().await else { panic!("未找到 git") };
+        let g = |args: &[&str]| {
+            let out = std::process::Command::new(&git).arg("-C").arg(&work).args(args).output().unwrap();
+            assert!(out.status.success(), "git {args:?} 失败：{}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        g(&["commit", "--allow-empty", "-m", "chore: init"]);
+        let sub = format!("{work}/sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(format!("{sub}/n.txt"), "n\n").unwrap();
+        // 项目目录是仓库子目录：勾选路径是根基准（porcelain 口径），git 的 pathspec 却
+        // 相对 cwd——旧实现把它当子目录相对路径解析，整批 add 失配
+        git_ops::apply_selection(&git, &sub, &["sub/n.txt".into()])
+            .await
+            .expect("子目录 cwd 不该让 pathspec 失配");
+        assert_eq!(git_ops::staged_paths(&git, &work).await.unwrap(), vec!["sub/n.txt"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
     async fn real_repo_unstage_removes_previously_staged_files() {
         let (root, work, _remote) = temp_repo("unstage").await;
         let Some(git) = git_bin().await else { panic!("未找到 git") };

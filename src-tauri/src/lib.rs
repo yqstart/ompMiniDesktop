@@ -7,6 +7,7 @@ pub mod memories;
 pub mod omp_update;
 pub mod overlay;
 pub mod plugins;
+pub mod project_files;
 pub mod providers;
 pub mod pty;
 pub mod session_scan;
