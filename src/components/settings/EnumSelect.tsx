@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, Loader } from "reicon-react";
-import { useDropdown } from "../../lib/useDropdown";
+import { topDialog, useDropdown } from "../../lib/useDropdown";
 
 /** 下拉里的一项（`label` 已经是界面文本——取值表与 label 解析在 `lib/settingsList.ts` 的 `OPTION_LABELS`）。 */
 export type EnumChoice = { value: string; label: string };
@@ -16,9 +16,14 @@ const MIN_HEIGHT = 96;
  * 枚举设置的浮层下拉（`GeneralSettingsPanel` 用）。
  *
  * 为什么不做行内展开：设置页的内容区是唯一滚动容器（`SettingsPage`），行内展开会把后面
- * 几十行设置整体推走，也把「这块区域」变成页面里的一块常驻内容。所以列表 `portal` 到
- * `body`、用 `fixed` 定位贴着触发按钮（`fixed` 不受滚动容器裁剪）：滚动 / 改窗时重算，
+ * 几十行设置整体推走，也把「这块区域」变成页面里的一块常驻内容。所以列表 `portal` 出去、
+ * 用 `fixed` 定位贴着触发按钮（`fixed` 不受滚动容器裁剪）：滚动 / 改窗时重算，
  * 下方放不下且上方更宽裕时向上弹，量到位置前先 `visibility: hidden`（不闪左上一帧）。
+ *
+ * 挂载层 = 最上层的模态弹窗（没有则 `document.body`）：弹窗遮罩是 `z-30`，挂在 body 的
+ * 列表（`z-10`）会被整个盖住——**「安装插件」弹窗里的项目下拉看不见就是这个**；而且
+ * `useDropdown` 只把模态内的浮层当生效浮层（不挂进去就不自动聚焦、Esc 也不先关它）。
+ * `fixed` 定位的列表不受弹窗卡片 `overflow-hidden` 裁剪，量出的位置照常可用。
  *
  * 位置直接写 `style`（effect 的职责就是同步 DOM，不为此 setState）：列表只在打开时由
  * React 渲染，`top` / `right` / `maxHeight` 不参与 React 的 style diff，后续重渲染不会
@@ -48,6 +53,8 @@ export function EnumSelect({
  const triggerRef = useRef<HTMLButtonElement>(null);
  const close = useCallback(() => setOpen(false), []);
  const listRef = useDropdown(open, close, triggerRef);
+ // 打开那一帧解析挂载层：触发按钮就在弹窗里，此刻弹窗必定已在 DOM 中
+ const layer = open ? topDialog() ?? document.body : null;
 
  useLayoutEffect(() => {
   const trigger = triggerRef.current;
@@ -99,7 +106,7 @@ export function EnumSelect({
     {typeof value === "string" ? value : "—"}
     <ChevronDown size={11} aria-hidden />
    </button>
-   {open && createPortal(
+   {layer && createPortal(
     <div
      ref={listRef}
      role="listbox"
@@ -124,7 +131,7 @@ export function EnumSelect({
       </button>
      ))}
     </div>,
-    document.body,
+    layer,
    )}
   </>
  );

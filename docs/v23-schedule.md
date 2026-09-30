@@ -142,7 +142,9 @@ install（`if (a) continue` 在上游返回 undefined 时不生效）。壳侧�
 - **安装弹窗**：源输入 + 范围（用户级 / 项目级；项目级时给项目下拉，没有项目就禁用并说明）+
   信任提示（插件以你的身份运行）+ 市场提示（需要先 `omp plugin marketplace add`）；
   完成后关弹窗、用新清单替换、顶部给一行「已安装 xxx」+**生效时机**（新终端；已开会话要
-  `/reload-plugins` 或重启）。
+  `/reload-plugins` 或重启）。弹窗里的项目下拉是 `EnumSelect` 唯一出现在模态内的用法：
+  它的列表必须挂进弹窗（挂 `document.body` 会被 `z-30` 遮罩盖住，`lib/useDropdown.ts`
+  的 `topDialog()` 解析挂载层；规则见 `AGENTS.md` 的前端约定与 `design-system/MASTER.md` §4）。
 - **体检**：按钮 → `plugin_doctor(false)` → 结论块（`n 项正常 / n 项警告 / n 项错误`，已修复另计）；
   有 error 时出现「尝试修复」（`plugin_doctor(true)`）；结论块可关闭，不占常驻版面。
 

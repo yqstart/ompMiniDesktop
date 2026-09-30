@@ -8,7 +8,14 @@ function isVisible(element: HTMLElement) {
  return true;
 }
 
-function topDialog() {
+/**
+ * 最上层的可见模态弹窗（`role="dialog"` + `aria-modal="true"`），没有则 `null`。
+ *
+ * 弹窗内的浮层用它挑挂载层：弹窗遮罩是 `z-30`，挂 `document.body` 的浮层（`z-10`）会被盖住；
+ * 且下面 `useDropdown` 的 `active()` 只把「在模态弹窗里」的浮层当生效浮层——所以弹窗内的浮层
+ * 要挂进弹窗（浮层是 `fixed` 定位，祖先的 `overflow` 裁不到它）。
+ */
+export function topDialog() {
  const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]');
  for (let i = dialogs.length - 1; i >= 0; i--) {
   if (isVisible(dialogs[i])) return dialogs[i];

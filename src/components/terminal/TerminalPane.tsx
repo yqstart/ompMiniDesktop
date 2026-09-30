@@ -14,6 +14,7 @@ import { TEXT, fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
 import { installWkInputFallback } from "../../lib/termInput";
 import { installImeCompositionWrap } from "../../lib/termIme";
+import { notifyTerminalAppearance } from "../../lib/termAppearance";
 
 /**
  * 一个终端 tab 的渲染核心：xterm.js 实例 + 到后端 PTY 的双向管道。
@@ -81,9 +82,13 @@ export function TerminalPane({ term, active }: { term: TerminalView; active: boo
   };
   const scrollSub = x.onScroll(syncAtBottom);
   const parsedSub = x.onWriteParsed(syncAtBottom);
-  // 皮肤切换（<html class="dark">）→ 跟 token 换色
+  // 皮肤切换（<html class="dark">）→ 跟 token 换色；换完再通知运行中的 omp 重新探测
+  // （它只在启动时问一次终端背景，不问就会继续用旧深浅色的显式色值画卡片，亮底留深块）。
   const mo = new MutationObserver(() => {
-   if (termRef.current) termRef.current.options.theme = readTermTheme();
+   if (!termRef.current) return;
+   termRef.current.options.theme = readTermTheme();
+   const cur = useApp.getState().terminals.find((x) => x.id === term.id);
+   if (cur && cur.status === "running") notifyTerminalAppearance(cur.id);
   });
   mo.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
   return () => {
