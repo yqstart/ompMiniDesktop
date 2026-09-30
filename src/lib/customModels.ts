@@ -20,13 +20,14 @@ import { isMap, isScalar, isSeq, parseDocument, type Document, type YAMLMap, typ
  * 写入的最后一公里（预校验 / 备份 / 原子写 / 乐观锁）在后端 `src-tauri/src/models_config.rs`。
  */
 
-/** 界面提供的接口类型（两档，覆盖绝大多数自建端点）：`openai-completions` = OpenAI 兼容
- *  （/chat/completions，网关与本地推理引擎的通用协议）、`anthropic-messages` = Claude 的
- *  Messages 协议。omp 的 schema 还认其它 wire API（`omp://models.md` 的允许值），但界面
- *  不再列出——既有文件里写了别的值也不受影响：`apiOptionsFor` 把当前值一并列出，保存原样写回。 */
-export const API_OPTIONS = ["openai-completions", "anthropic-messages"] as const;
+/** 界面提供的接口类型（三档，覆盖绝大多数自建端点）：`openai-completions` = OpenAI 兼容
+ *  （/chat/completions，网关与本地推理引擎的通用协议）、`openai-responses` = OpenAI 的
+ *  Responses 协议（/responses，新网关与“只开 /v1/responses”的端点要用它）、`anthropic-messages`
+ *  = Claude 的 Messages 协议。omp 的 schema 还认其它 wire API（`omp://models.md` 的允许值），
+ *  但界面不再列出——既有文件里写了别的值也不受影响：`apiOptionsFor` 把当前值一并列出，保存原样写回。 */
+export const API_OPTIONS = ["openai-completions", "openai-responses", "anthropic-messages"] as const;
 
-/** 接口类型下拉的候选：两档 + 当前值（属于界面之外的档时原样保留，保证不改动也能保存）。 */
+/** 接口类型下拉的候选：三档 + 当前值（属于界面之外的档时原样保留，保证不改动也能保存）。 */
 export function apiOptionsFor(current: string): string[] {
  const v = current.trim();
  return v && !(API_OPTIONS as readonly string[]).includes(v) ? [...API_OPTIONS, v] : [...API_OPTIONS];

@@ -318,7 +318,7 @@ Paste your DeepSeek API key (sk-...):
   （§2 的「名称（新建可改、编辑锁定）」口径由本节取代）。改名撞已有 id：UI 拦（`isDuplicateProviderId`，
   编辑保留原名不算冲突）+ 保存按钮禁用 + 提示「名称已被别的供应商占用」；库层兜底（目标键已存在则
   不改名）保证**绝不写出重复键**（此前「新建撞名会覆盖已有块」的缺陷一并收口）。
-- **接口类型两档**：`API_OPTIONS` 收窄为 `openai-completions`（OpenAI 兼容）/ `anthropic-messages`
+- **接口类型两档**（2026-09-30 修订为三档、增列 `openai-responses`，见 §9）：`API_OPTIONS` 收窄为 `openai-completions`（OpenAI 兼容）/ `anthropic-messages`
   （Claude 协议）；既有文件里写了别的 wire API（如 `google-vertex`）时由 `apiOptionsFor` 把当前值
   追加进下拉——**不改动也能保存**，保真口径不破。
 - **认证只有 API Key**：删掉「API Key / 无需鉴权」分段控件（`Switch` 的 auth 档位状态一并删除；
@@ -377,3 +377,24 @@ Paste your DeepSeek API key (sk-...):
 - 浏览器隔离 IPC 核对：过滤批量挑选仅修改匹配项；重复转移键不能新建、切开关保留草稿后可保存；自定义 URL 字段报错、保存失败保留输入并聚焦诊断；保存中控件禁用且 Esc 不关闭；模型改 id 的写出文本保留 headers/cost；登录启动失败可见并可重试。
 - 中文双主题和英文表单在 375/768/1440px 无横向溢出，截图核对浅色窄窗与深色工作面；共享弹层验证嵌套 Esc、Tab 圈定、隐藏焦点隔离、设置方向键导航及会话删除防重入。
 - 终端验证：设置隐藏期间追加的输出返回后完整显示，切换前后 `pty_kill` 计数不变。验证使用浏览器与隔离 IPC，不宣称原生 Tauri WebView 或真实供应商认证已实测；未修改用户真实 omp 配置。
+
+## 9. 修订（2026-09-30）：自定义供应商接口类型增列 `openai-responses`
+
+> 用户口径：「添加自定义供应商的接口类型要添加一种类型 openai-responses」。
+
+- `API_OPTIONS` 由两档扩为三档：`openai-completions` / **`openai-responses`**（新）/ `anthropic-messages`，
+  顺序照上游允许值清单排（§1 的「`api` 允许值」原地未动）。上游口径（`omp://models.md`）：
+  `openai-completions` 走 `/v1/chat/completions`，「暴露 `/v1/responses` 的服务要用 `openai-responses`」；
+  上游给 `ollama` / `llama.cpp` / `litellm` 的运行时发现与内置预设也标这个 api。
+- 写回链路零改动：`upsertProvider` 把 `api` 当自由文本原样写 YAML（`apiOptionsFor` 只决定候选列表），
+  后端仍是「预校验（临时 agentDir 跑 `omp models`）→ 备份 → 原子写」；「界面之外的档原样保留」的
+  保真口径不破（既有 `google-vertex` 块的候选 = 三档 + 当前值）。
+- 验证：`pnpm check` 全绿（47 个测试文件 / 338 项单测；`customModels.test.ts` 的候选断言改三档 +
+  新增「选 `openai-responses` 写进 YAML 并能读回」）。
+- 界面核对（`pnpm build` + `vite preview` + 注入 `__TAURI_INTERNALS__` mock 的真实 Chromium）：
+  设置 › 模型 › 「Add provider」→ 「custom」表单 → 「API」下拉**三项**
+  （`openai-completions` / `openai-responses` / `anthropic-messages`，当前值 `aria-current="true"`）；
+  选中 `openai-responses` 后字段显示该值、列表收起；填名称 / 地址 / 模型 id 后保存，
+  写入载荷（`write_models_config` 的 `text`）为 `providers:\n  resp-gw:\n    baseUrl: …\n    api: openai-responses\n    auth: none\n    models:\n      - id: gpt-x`。
+- 文档同步：本文件 §7.5 的「接口类型两档」加修订指向；`AGENTS.md` 的模型段与 `CHANGELOG.md` 的
+  Unreleased › Added 各记一条。

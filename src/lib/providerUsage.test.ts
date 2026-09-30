@@ -176,18 +176,20 @@ describe("相对时间文案", () => {
 describe("windowNames", () => {
  const t = TEXT["zh-CN"];
 
- it("通用窗口走字典（5 小时 / 每周 / 每月 / 余额）", () => {
+ it("通用窗口走字典（5 小时 / 每周 / 每月 / 余额 / 已消费）", () => {
   const limits = [
    limit({ id: "rolling-5h", label: "5 Hour limit", windowId: "5h", windowLabel: "5 Hour" }),
    limit({ id: "weekly", label: "Weekly limit", windowId: "7d", windowLabel: "Weekly" }),
    limit({ id: "monthly", label: "Monthly limit", windowId: "monthly", windowLabel: "Monthly" }),
    limit({ id: "balance", label: "Balance", windowId: "balance", windowLabel: "Balance" }),
+   limit({ id: "spent", label: "Spent", windowId: "spent", windowLabel: "Spent" }),
   ];
   expect(windowNames(t, limits)).toEqual([
    t.pusageWindow5h,
    t.pusageWindow7d,
    t.pusageWindowMonthly,
    t.pusageWindowBalance,
+   t.pusageWindowSpent,
   ]);
  });
 

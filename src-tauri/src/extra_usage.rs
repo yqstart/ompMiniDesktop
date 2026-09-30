@@ -1,30 +1,47 @@
-//! 补充用量探针（壳侧）：对 **omp 没有实现探针**、但上游提供「API key 可用」的官方 / 可用
-//! 查询接口的供应商做一次只读查询，把结果映射成与 `omp usage --json` 相同的
-//! [`UsageLimit`] 结构——设置 ›「供应商用量」页因此能把它们与 omp 报的供应商并排展示。
+//! 补充用量探针（壳侧）：对 **omp 没有实现探针** 的供应商，凡上游提供「API key 可用」的
+//! 用量 / 余额查询接口，就由壳侧做一次只读查询，把结果映射成与 `omp usage --json` 相同的
+//! [`UsageLimit`] 结构——「供应商用量」面板因此能把它们与 omp 报的供应商并排展示。
+//!
+//! **两类查询模式**（用户口径）：
+//!
+//! - **plan 型**：订阅 / 滚动窗口额度（百分比 + 重置时刻）——commandcode、minimax-code-cn。
+//! - **余额型**：按量计费余额（金额 / 货币）——deepseek、openrouter、vercel-ai-gateway、
+//!   moonshot、siliconflow、stepfun、novita、deepinfra、aimlapi、aiand、nanogpt、kilo、
+//!   venice、zenmux。
+//!
+//! **没有 API key 查询路径的供应商不做代偿**（2026-09-30 全量调研，4 组并行 + 本机复测）：
+//! xiaomi（MiMo：API 网关与 token-plan 三区网关逐路径 404、控制台接口只认 Cookie、
+//! 官方文档只给控制台用量页，社区同结论）、siliconflow-cn（官方 2026-08-14 下线
+//! `/v1/user/info`，替代接口未公布）、zhipu-coding-plan（只有未文档化的控制台内部路由，
+//! 涉及把 API token 发往非文档端点）、xai / minimax / minimax-cn（推理 key 无余额接口；
+//! minimax 的 token-plan 仅 coding 档且有上游探针）、opencode-zen、alibaba-coding-plan、
+//! qwen-portal、gitlab-duo、mistral / groq / cerebras / together / fireworks / baseten /
+//! coreweave / huggingface / nvidia / gmi-cloud / firepass / sakana / qianfan / meta /
+//! wafer-serverless / yolo-auto / singularityapi-*、google / openai / azure / amazon-bedrock /
+//! google-vertex 等——界面按「无用量数据」直接提示（文案见字典 `pusageNoDataHint`）。
 //!
 //! 上游事实（2026-09-18 实测，omp 18.2.5 / 本机 commandcode 凭据）：
 //!
-//! - **omp 的用量探针清单**（`packages/ai/src/usage/`）里没有 `commandcode` 与 `deepseek`——
-//!   全量 `omp usage --json` 会把它们从 `accountsWithoutUsage` 里也滤掉（静默缺席）。
+//! - **omp 的用量探针清单**（`packages/ai/src/usage/`）里没有下面这些 provider——全量
+//!   `omp usage --json` 会把它们从 `accountsWithoutUsage` 里也滤掉（静默缺席）。
 //! - **commandcode**：官方文档只描述滚动窗口，没有文档化的用量 API；但
 //!   `GET https://api.commandcode.ai/alpha/billing/credits`（Bearer = Provider API key）实测
-//!   **可用**（alpha 前缀即「API key 通道」）；同域 `/internal/billing/*` 只认网页会话 cookie
-//!   （API key 打过去 401）。响应（实测）：
-//!   `{credits:{monthlyCredits,purchasedCredits,…}, windowLimits:{fiveHour:{used,cap,exceeded,resetAt},weekly:{…}}}`
-//!   —— `cap`/`used` 是美元 credits，`resetAt` 是 epoch 毫秒；`monthlyCredits` 是**剩余**月度 credits
-//!   （与 CodexBar 的 `monthlyCreditsRemaining` 同口径）。alpha 是未文档化端点：解析全容错、
-//!   失败只报一行「查询失败」，绝不影响 omp 探针的数据。
+//!   **可用**（alpha 前缀即「API key 通道」）。配套 `/alpha/billing/subscriptions` 给月度重置
+//!   时刻；月度总额按 5h/weekly 的 cap 组合反查官方套餐表（反查不到只给剩余额，不猜）。
 //! - **deepseek**：官方文档化接口 `GET https://api.deepseek.com/user/balance`（Bearer = API key；
 //!   api-docs.deepseek.com/zh-cn/api/get-user-balance）返回
 //!   `{is_available, balance_infos:[{currency,total_balance,granted_balance,topped_up_balance}]}`；
 //!   余额是**字符串**，有 CNY / USD 两种币种。deepseek 没有公开的滚动窗口 / 用量明细接口
 //!   （平台网页才能看），所以这里只展示余额。
+//! - 各新端点的响应形状与出处见每个解析函数上方的注释；全部来自 2026-09-30 的官方文档
+//!   （少数标注社区实证），解析一律全容错：字段漂移只报「查询失败」，不伪造 0。
 //!
 //! **凭证边界**：key 只经 `omp token <provider> --raw`（omp 官方 CLI，只读）取出，
 //! 存于内存、仅用于本次请求头；不落盘、不打印、不进错误消息、不回传前端。凭据不存在 /
 //! 端点失败都只产出一行失败记录，界面按「查询失败」展示。
 //!
-//! **只读**：全部是 GET；不发任何写请求、不动 omp 状态。
+//! **只读**：除 nanogpt 的 `POST /api/check-balance`（语义为查询、无副作用）外全部是 GET；
+//! 不发任何写请求、不动 omp 状态。
 
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -32,7 +49,57 @@ use std::time::Duration;
 use crate::provider_usage::{ExtraProbeFailure, ProviderUsage, ProviderUsageReport, UsageLimit};
 
 /// 注册了补充探针的供应商（只在「已配置且 omp 没给报告」时触发）。
-pub const EXTRA_PROBES: [&str; 2] = ["commandcode", "deepseek"];
+pub const EXTRA_PROBES: [&str; 16] = [
+    "commandcode",
+    "deepseek",
+    "openrouter",
+    "vercel-ai-gateway",
+    "moonshot",
+    "siliconflow",
+    "stepfun",
+    "novita",
+    "deepinfra",
+    "aimlapi",
+    "aiand",
+    "nanogpt",
+    "kilo",
+    "venice",
+    "zenmux",
+    "minimax-code-cn",
+];
+
+// ---------- 端点常量（出处见各解析函数注释） ----------
+
+/// openrouter：key 自查（普通 key 可用）与账户 credits（仅管理密钥，403 时静默回退）。
+const OPENROUTER_KEY_URL: &str = "https://openrouter.ai/api/v1/key";
+const OPENROUTER_CREDITS_URL: &str = "https://openrouter.ai/api/v1/credits";
+/// vercel-ai-gateway：团队 AI Gateway credits 余额。
+const VERCEL_CREDITS_URL: &str = "https://ai-gateway.vercel.sh/v1/credits";
+/// moonshot：两个站点各自独立（key 不通用）——`.ai` 为 omp 默认域，`.cn` 为国内站。
+const MOONSHOT_BALANCE_URL_US: &str = "https://api.moonshot.ai/v1/users/me/balance";
+const MOONSHOT_BALANCE_URL_CN: &str = "https://api.moonshot.cn/v1/users/me/balance";
+/// siliconflow（国际站；国内站 `siliconflow-cn` 的该接口已下线，不注册）。
+const SILICONFLOW_USER_URL: &str = "https://api.siliconflow.com/v1/user/info";
+/// stepfun：账户信息（预付费 / 后付费余额，人民币）。
+const STEPFUN_ACCOUNTS_URL: &str = "https://api.stepfun.com/v1/accounts";
+/// novita：余额明细（单位 1/10000 USD）。
+const NOVITA_BALANCE_URL: &str = "https://api.novita.ai/openapi/v1/billing/balance/detail";
+/// deepinfra：checklist（`stripe_balance` 负值 = 可用余额）。
+const DEEPINFRA_CHECKLIST_URL: &str = "https://api.deepinfra.com/payment/checklist?compute_owed=true";
+/// aimlapi：账户余额（`/v2/billing`）。
+const AIMLAPI_BILLING_URL: &str = "https://api.aimlapi.com/v2/billing";
+/// aiand：组织余额（字符串 + currency）。
+const AIAND_BALANCE_URL: &str = "https://api.aiand.com/billing/balance";
+/// nanogpt：余额查询（语义只读；认证头是 `x-api-key`）。
+const NANOGPT_BALANCE_URL: &str = "https://api.nano-gpt.com/api/check-balance";
+/// kilo：网关账户余额（官方开源客户端同款端点）。
+const KILO_BALANCE_URL: &str = "https://api.kilo.ai/api/profile/balance";
+/// venice：billing balance（**需要 ADMIN 权限的 key**，推理 key 会 401）。
+const VENICE_BALANCE_URL: &str = "https://api.venice.ai/api/v1/billing/balance";
+/// zenmux：PAYG 余额（**需要单独的 Management Key**，标准 API key 不可用）。
+const ZENMUX_BALANCE_URL: &str = "https://zenmux.ai/api/v1/management/payg/balance";
+/// minimax-code-cn：Token Plan 剩余额度（与上游 `minimax-code` 探针同款接口，国内域）。
+const MINIMAX_CN_REMAINS_URL: &str = "https://api.minimaxi.com/v1/token_plan/remains";
 
 /// 单次 HTTP 查询超时。实测 commandcode 约 2s、deepseek 约 1s；15s 给慢网络留余量。
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
@@ -100,6 +167,72 @@ fn short_error(body: &str) -> String {
 
 fn num(v: Option<&serde_json::Value>) -> Option<f64> {
     v.and_then(|x| x.as_f64().or_else(|| x.as_i64().map(|i| i as f64)))
+}
+
+/// 字符串字段：转成 `&str` 并 trim（空串按 None）。
+fn text_of(v: Option<&serde_json::Value>) -> Option<&str> {
+    v.and_then(|x| x.as_str()).map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// 数字或数字字符串（余额接口大量用字符串传金额，如 "0.88" / "129.46956147"）。
+fn num_str(v: Option<&serde_json::Value>) -> Option<f64> {
+    num(v).or_else(|| text_of(v).and_then(|s| s.parse::<f64>().ok()))
+}
+
+/// 从 `fetch_json` 的错误串里取 HTTP 状态码（错误形如 `HTTP 401：…`）。
+fn err_status(err: &str) -> Option<u16> {
+    err.strip_prefix("HTTP ")?.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok()
+}
+
+/// 401 / 403 → 换成「凭据类型不对」的明确引导（如 venice 需要 ADMIN key、zenmux 需要
+/// Management Key）；其余错误原样透传。
+fn explain_auth(err: String, hint: &str) -> String {
+    if matches!(err_status(&err), Some(401) | Some(403)) {
+        format!("{hint}（{err}）")
+    } else {
+        err
+    }
+}
+
+/// 余额型行：`remaining` 是主值、没有上限 → 界面不画进度条，显示「N 剩余」。
+fn balance_row(
+    id: &str,
+    label: &str,
+    remaining: f64,
+    unit: &str,
+    status: &str,
+    notes: Vec<String>,
+) -> UsageLimit {
+    UsageLimit {
+        id: id.to_string(),
+        label: label.to_string(),
+        window_id: "balance".to_string(),
+        window_label: label.to_string(),
+        used_fraction: 0.0,
+        percent: 0.0,
+        status: status.to_string(),
+        resets_at: None,
+        duration_ms: None,
+        notes,
+        used: None,
+        limit: None,
+        remaining: Some(remaining),
+        unit: unit.to_string(),
+    }
+}
+
+/// 余额行的状态：>0 为 ok，否则 exhausted（与 deepseek 的 `is_available` 同口径）。
+fn balance_status(remaining: f64) -> &'static str {
+    if remaining > 0.0 {
+        "ok"
+    } else {
+        "exhausted"
+    }
+}
+
+/// 金额展示（备注行用；两位小数，去尾零太复杂的场景不值得）。
+fn money(v: f64) -> String {
+    format!("{v:.2}")
 }
 
 /// commandcode 官方套餐表（Usage Limits 文档的表格）：(5 小时 cap, 每周 cap) → 月度 credits 总额。
@@ -280,6 +413,357 @@ pub fn parse_deepseek_balance(v: &serde_json::Value) -> Result<Vec<UsageLimit>, 
     Ok(limits)
 }
 
+// ---------- 余额型解析（2026-09-30 调研；响应形状出处见每条注释） ----------
+
+/// openrouter：`GET /api/v1/key`（普通 key 可用）与 `GET /api/v1/credits`（**仅管理密钥**，
+/// 普通 key 403）的合成解析。文档：
+/// openrouter.ai/docs/api/api-reference/api-keys/get-current-key、…/credits/get-credits。
+///
+/// `key`：`{data:{limit, limit_remaining, limit_reset, usage, usage_monthly, is_free_tier,…}}`
+/// （`limit`/`limit_remaining` 可为 null = 没设 per-key 上限）；`credits`：
+/// `{data:{total_credits, total_usage}}`。优先账户级余额（credits 差），其次 per-key 剩余，
+/// 再其次只给累计消费（行名「已消费」）。
+pub fn parse_openrouter(
+    key_res: Result<serde_json::Value, String>,
+    credits_res: Result<serde_json::Value, String>,
+) -> Result<Vec<UsageLimit>, String> {
+    if let Ok(v) = credits_res {
+        if let (Some(total), Some(used)) = (
+            num(v.pointer("/data/total_credits")),
+            num(v.pointer("/data/total_usage")),
+        ) {
+            let remaining = (total - used).max(0.0);
+            return Ok(vec![balance_row(
+                "balance",
+                "Balance",
+                remaining,
+                "usd",
+                balance_status(remaining),
+                vec![format!("credits {} · used {}", money(total), money(used))],
+            )]);
+        }
+    }
+    let v = key_res?;
+    let data = v.get("data").ok_or_else(|| "响应里没有 data".to_string())?;
+    let usage = num_str(data.get("usage"));
+    let mut notes = vec![];
+    if let Some(u) = usage {
+        notes.push(format!("usage {}", money(u)));
+    }
+    match num_str(data.get("limit_remaining")) {
+        Some(remaining) => {
+            if let Some(limit) = num_str(data.get("limit")) {
+                let reset = text_of(data.get("limit_reset")).unwrap_or("—");
+                notes.push(format!("limit {} ({reset})", money(limit)));
+            }
+            Ok(vec![balance_row("balance", "Balance", remaining, "usd", balance_status(remaining), notes)])
+        }
+        None => {
+            // 没设 per-key 上限：账户余额需要管理密钥（上面已试），这里退化为展示累计消费
+            let spent = usage.ok_or_else(|| "响应里没有可用的额度或消费数据".to_string())?;
+            notes.push("no per-key limit set".into());
+            let mut row = balance_row("spent", "Spent", spent, "usd", "ok", notes);
+            row.window_id = "spent".to_string();
+            row.remaining = None;
+            row.used = Some(spent);
+            Ok(vec![row])
+        }
+    }
+}
+
+/// vercel-ai-gateway：`GET /v1/credits`（文档 vercel.com/docs/ai-gateway/sdks-and-apis/rest-api#check-credit-balance）
+/// → `{balance:"95.50", total_used:"4.50"}`（字符串，USD）。
+pub fn parse_vercel_credits(v: &serde_json::Value) -> Result<Vec<UsageLimit>, String> {
+    let balance = num_str(v.get("balance")).ok_or_else(|| "响应里没有 balance".to_string())?;
+    let mut notes = vec![];
+    if let Some(used) = num_str(v.get("total_used")) {
+        notes.push(format!("total spend {}", money(used)));
+    }
+    Ok(vec![balance_row("balance", "Balance", balance, "usd", balance_status(balance), notes)])
+}
+
+/// moonshot（Kimi 开放平台）：`GET /v1/users/me/balance`（文档 platform.kimi.com/docs/api/balance）
+/// → `{code:0, status:true, data:{available_balance, voucher_balance, cash_balance}}`。
+/// `.ai`（国际，USD）与 `.cn`（国内，CNY）两个站点**账号体系独立、key 不通用**。
+pub fn parse_moonshot_balance(v: &serde_json::Value, unit: &str) -> Result<Vec<UsageLimit>, String> {
+    let code = v.get("code").and_then(|x| x.as_i64()).unwrap_or(0);
+    if code != 0 {
+        return Err(format!("平台返回错误码 {code}"));
+    }
+    let data = v.get("data").ok_or_else(|| "响应里没有 data".to_string())?;
+    let available = num_str(data.get("available_balance")).ok_or_else(|| "响应里没有可用余额".to_string())?;
+    let mut notes = vec![];
+    if let Some(cash) = num_str(data.get("cash_balance")) {
+        notes.push(format!("cash {}", money(cash)));
+    }
+    if let Some(voucher) = num_str(data.get("voucher_balance")) {
+        notes.push(format!("voucher {}", money(voucher)));
+    }
+    Ok(vec![balance_row("balance", "Balance", available, unit, balance_status(available), notes)])
+}
+
+/// siliconflow（**国际站**）：`GET /v1/user/info`（文档
+/// docs.siliconflow.com/en/api-reference/userinfo/get-user-info）→
+/// `{code:20000, status:true, data:{balance:"0.88", chargeBalance:"88.00", totalBalance:"88.88"}}`
+/// （全字符串；国际站计价为美元）。**国内站同名接口官方 2026-08 已下线**（410），不注册。
+pub fn parse_siliconflow_user(v: &serde_json::Value) -> Result<Vec<UsageLimit>, String> {
+    let code = v.get("code").and_then(|x| x.as_i64()).unwrap_or(0);
+    if code != 20000 && code != 0 {
+        return Err(format!("平台返回错误码 {code}"));
+    }
+    let data = v.get("data").ok_or_else(|| "响应里没有 data".to_string())?;
+    let total = num_str(data.get("totalBalance")).ok_or_else(|| "响应里没有余额".to_string())?;
+    let mut notes = vec![];
+    if let Some(charge) = num_str(data.get("chargeBalance")) {
+        notes.push(format!("recharged {}", money(charge)));
+    }
+    if let Some(gift) = num_str(data.get("balance")) {
+        notes.push(format!("gift {}", money(gift)));
+    }
+    Ok(vec![balance_row("balance", "Balance", total, "usd", balance_status(total), notes)])
+}
+
+/// stepfun：`GET /v1/accounts`（文档 platform.stepfun.com/docs/zh/api-reference/accounts/get）
+/// → `{object:"account", type:"prepaid"|"postpaid", balance, total_cash_balance,
+/// total_voucher_balance}`（人民币）。
+pub fn parse_stepfun_account(v: &serde_json::Value) -> Result<Vec<UsageLimit>, String> {
+    let balance = num_str(v.get("balance")).ok_or_else(|| "响应里没有 balance".to_string())?;
+    let mut notes = vec![];
+    if let Some(kind) = text_of(v.get("type")) {
+        notes.push(format!("account {kind}"));
+    }
+    if let Some(cash) = num_str(v.get("total_cash_balance")) {
+        notes.push(format!("cash {}", money(cash)));
+    }
+    if let Some(voucher) = num_str(v.get("total_voucher_balance")) {
+        notes.push(format!("voucher {}", money(voucher)));
+    }
+    Ok(vec![balance_row("balance", "Balance", balance, "cny", balance_status(balance), notes)])
+}
+
+/// novita：`GET /openapi/v1/billing/balance/detail`（文档 novita.ai/docs/api-reference/basic-get-user-balance）
+/// → `{availableBalance, cashBalance, creditLimit, pendingCharges, outstandingInvoices}`，
+/// 全是**字符串**且单位为 1/10000 USD（`10000` = $1）。
+pub fn parse_novita_balance(v: &serde_json::Value) -> Result<Vec<UsageLimit>, String> {
+    let raw = num_str(v.get("availableBalance")).ok_or_else(|| "响应里没有 availableBalance".to_string())?;
+    let available = raw / 10_000.0;
+    let mut notes = vec![];
+    if let Some(cash) = num_str(v.get("cashBalance")) {
+        notes.push(format!("cash {}", money(cash / 10_000.0)));
+    }
+    if let Some(limit) = num_str(v.get("creditLimit")).filter(|l| *l > 0.0) {
+        notes.push(format!("credit limit {}", money(limit / 10_000.0)));
+    }
+    if let Some(pending) = num_str(v.get("pendingCharges")).filter(|p| *p > 0.0) {
+        notes.push(format!("pending {}", money(pending / 10_000.0)));
+    }
+    Ok(vec![balance_row("balance", "Balance", available, "usd", balance_status(available), notes)])
+}
+
+/// deepinfra：`GET /payment/checklist?compute_owed=true`（文档
+/// docs.deepinfra.com/api-reference/billing/get-checklist）→ `{stripe_balance, limit, recent,
+/// suspended, suspend_reason, …}`；`stripe_balance` **负值 = 可用余额**（正值 = 欠款）。
+pub fn parse_deepinfra_checklist(v: &serde_json::Value) -> Result<Vec<UsageLimit>, String> {
+    let stripe = num_str(v.get("stripe_balance")).ok_or_else(|| "响应里没有 stripe_balance".to_string())?;
+    let available = (-stripe).max(0.0);
+    let mut notes = vec![];
+    if stripe > 0.0 {
+        notes.push(format!("owed {}", money(stripe)));
+    }
+    if let Some(recent) = num_str(v.get("recent")) {
+        notes.push(format!("recent {}", money(recent)));
+    }
+    let suspended = v.get("suspended").and_then(|x| x.as_bool()).unwrap_or(false);
+    if suspended {
+        let reason = text_of(v.get("suspend_reason")).unwrap_or("suspended");
+        notes.push(format!("suspended: {reason}"));
+    }
+    let status = if suspended { "exhausted" } else { balance_status(available) };
+    Ok(vec![balance_row("balance", "Balance", available, "usd", status, notes)])
+}
+
+/// aimlapi：`GET /v2/billing`（文档 docs.aimlapi.com/api-references/service-endpoints/account-balance）
+/// → `{current_balance, currency}`。
+pub fn parse_aimlapi_billing(v: &serde_json::Value) -> Result<Vec<UsageLimit>, String> {
+    let balance = num_str(v.get("current_balance")).ok_or_else(|| "响应里没有 current_balance".to_string())?;
+    let unit = text_of(v.get("currency")).unwrap_or("USD").to_lowercase();
+    Ok(vec![balance_row("balance", "Balance", balance, &unit, balance_status(balance), vec![])])
+}
+
+/// aiand：`GET /billing/balance`（文档 docs.aiand.com/billing/balance）
+/// → `{balance:"12.34", currency:"usd"}`。
+pub fn parse_aiand_balance(v: &serde_json::Value) -> Result<Vec<UsageLimit>, String> {
+    let balance = num_str(v.get("balance")).ok_or_else(|| "响应里没有 balance".to_string())?;
+    let unit = text_of(v.get("currency")).unwrap_or("usd").to_lowercase();
+    Ok(vec![balance_row("balance", "Balance", balance, &unit, balance_status(balance), vec![])])
+}
+
+/// nanogpt：`POST /api/check-balance`（文档 docs.nano-gpt.com/api-reference/endpoint/check-balance，
+/// 认证头 `x-api-key`；语义只读）→ `{usd_balance:"129.46", nano_balance:"26.71", …}`（字符串）。
+pub fn parse_nanogpt_balance(v: &serde_json::Value) -> Result<Vec<UsageLimit>, String> {
+    let usd = num_str(v.get("usd_balance")).ok_or_else(|| "响应里没有 usd_balance".to_string())?;
+    let mut notes = vec![];
+    if let Some(nano) = num_str(v.get("nano_balance")) {
+        notes.push(format!("nano {}", money(nano)));
+    }
+    Ok(vec![balance_row("balance", "Balance", usd, "usd", balance_status(usd), notes)])
+}
+
+/// kilo：`GET /api/profile/balance`（官方开源客户端同款端点：Kilo-Org/kilocode 的
+/// `packages/kilo-gateway/src/api/profile.ts`；公开文档只写控制台余额）→ `{balance:<number>}`（USD）。
+pub fn parse_kilo_balance(v: &serde_json::Value) -> Result<Vec<UsageLimit>, String> {
+    let balance = num_str(v.get("balance")).ok_or_else(|| "响应里没有 balance".to_string())?;
+    Ok(vec![balance_row("balance", "Balance", balance, "usd", balance_status(balance), vec![])])
+}
+
+/// venice：`GET /api/v1/billing/balance`（文档 docs.venice.ai/api-reference/endpoint/billing/balance；
+/// **需要 ADMIN 权限的 key**，推理 key 401）→ `{canConsume, consumptionCurrency,
+/// balances:{diem,usd}, diemEpochAllocation}`。
+pub fn parse_venice_balance(v: &serde_json::Value) -> Result<Vec<UsageLimit>, String> {
+    let usd = num_str(v.pointer("/balances/usd"));
+    let diem = num_str(v.pointer("/balances/diem"));
+    let (remaining, unit) = match (usd, diem) {
+        (Some(u), _) => (u, "usd"),
+        (None, Some(d)) => (d, "diem"),
+        _ => return Err("响应里没有余额字段".to_string()),
+    };
+    let mut notes = vec![];
+    if unit == "usd" {
+        if let Some(d) = diem {
+            notes.push(format!("diem {}", money(d)));
+        }
+    }
+    if let Some(alloc) = num_str(v.get("diemEpochAllocation")) {
+        notes.push(format!("daily allocation {}", money(alloc)));
+    }
+    let can_consume = v.get("canConsume").and_then(|x| x.as_bool()).unwrap_or(true);
+    let status = if can_consume { balance_status(remaining) } else { "exhausted" };
+    Ok(vec![balance_row("balance", "Balance", remaining, unit, status, notes)])
+}
+
+/// zenmux：`GET /api/v1/management/payg/balance`（文档 zenmux.ai/docs/api/platform/payg-balance.html；
+/// **需要单独的 Management Key**）→ `{success, data:{currency, total_credits, top_up_credits,
+/// bonus_credits}}`（total = top-up + bonus）。
+pub fn parse_zenmux_balance(v: &serde_json::Value) -> Result<Vec<UsageLimit>, String> {
+    if v.get("success").and_then(|x| x.as_bool()) == Some(false) {
+        return Err("平台返回 success=false".to_string());
+    }
+    let data = v.get("data").ok_or_else(|| "响应里没有 data".to_string())?;
+    let total = num_str(data.get("total_credits")).ok_or_else(|| "响应里没有 total_credits".to_string())?;
+    let unit = text_of(data.get("currency")).unwrap_or("usd").to_lowercase();
+    let mut notes = vec![];
+    if let Some(top) = num_str(data.get("top_up_credits")) {
+        notes.push(format!("top-up {}", money(top)));
+    }
+    if let Some(bonus) = num_str(data.get("bonus_credits")) {
+        notes.push(format!("bonus {}", money(bonus)));
+    }
+    Ok(vec![balance_row("balance", "Balance", total, &unit, balance_status(total), notes)])
+}
+
+/// minimax-code-cn：`GET /v1/token_plan/remains`（**plan 型**；与上游 `minimax-code` 探针
+/// 同款接口与形状，国内域 `api.minimaxi.com`）→ `{base_resp:{status_code,status_msg},
+/// model_remains:[{model_name, start_time, end_time, current_interval_remaining_percent,
+/// current_interval_total_count, current_interval_usage_count, weekly_*…}]}`（形状取自 omp
+/// 二进制里的同一实现）。间隔窗 id 按时长命名（5 小时 → `5h`）、每周 → `7d`；
+/// 两个计数都为 0 的模型视为无配额、跳过。
+pub fn parse_minimax_token_plan(v: &serde_json::Value) -> Result<Vec<UsageLimit>, String> {
+    let code = v.pointer("/base_resp/status_code").and_then(|x| x.as_i64()).unwrap_or(0);
+    if code != 0 {
+        let msg = text_of(v.pointer("/base_resp/status_msg")).unwrap_or("Token Plan 不可用");
+        return Err(format!("平台返回错误码 {code}：{msg}"));
+    }
+    let items = v
+        .get("model_remains")
+        .and_then(|x| x.as_array())
+        .ok_or_else(|| "响应里没有 model_remains".to_string())?;
+    let mut limits = vec![];
+    for item in items {
+        let model = text_of(item.get("model_name")).unwrap_or("MiniMax").to_string();
+        let model_label = {
+            let mut it = model.chars();
+            match it.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + it.as_str(),
+                None => model.clone(),
+            }
+        };
+        let interval_total = num(item.get("current_interval_total_count"));
+        let weekly_total = num(item.get("current_weekly_total_count"));
+        if interval_total.unwrap_or(0.0) <= 0.0 && weekly_total.unwrap_or(0.0) <= 0.0 {
+            continue;
+        }
+        let start = num(item.get("start_time"));
+        let end = num(item.get("end_time"));
+        let interval_ms = match (start, end) {
+            (Some(s), Some(e)) => Some(e - s),
+            _ => None,
+        };
+        let (interval_id, interval_label) = match interval_ms {
+            Some(ms) if ms > 0.0 && (ms as i64) % 3_600_000 == 0 => {
+                let hours = (ms as i64) / 3_600_000;
+                (format!("{hours}h"), format!("{hours} Hour"))
+            }
+            _ => ("interval".to_string(), "Interval".to_string()),
+        };
+        let windows = [
+            (
+                interval_id.as_str(),
+                interval_label.as_str(),
+                num(item.get("current_interval_remaining_percent")),
+                end.map(|e| e as i64),
+                num(item.get("current_interval_usage_count")),
+                interval_total,
+            ),
+            (
+                "7d",
+                "7 Day",
+                num(item.get("current_weekly_remaining_percent")),
+                item.get("weekly_end_time").and_then(|x| x.as_i64()),
+                num(item.get("current_weekly_usage_count")),
+                weekly_total,
+            ),
+        ];
+        for (window_id, window_label, remaining_pct, resets_at, used, total) in windows {
+            let Some(pct) = remaining_pct else { continue };
+            if total.unwrap_or(0.0) <= 0.0 {
+                continue;
+            }
+            let fraction = ((100.0 - pct) / 100.0).clamp(0.0, 1.0);
+            let status = if fraction >= 1.0 {
+                "exhausted"
+            } else if fraction >= 0.8 {
+                "warning"
+            } else {
+                "ok"
+            };
+            let mut notes = vec![];
+            if let (Some(u), Some(t)) = (used, total) {
+                notes.push(format!("Requests: {}/{}", u as i64, t as i64));
+            }
+            limits.push(UsageLimit {
+                id: format!("{model}:{window_id}"),
+                label: format!("{model_label} {window_label}"),
+                window_id: window_id.to_string(),
+                window_label: window_label.to_string(),
+                used_fraction: fraction,
+                percent: fraction * 100.0,
+                status: status.to_string(),
+                resets_at,
+                duration_ms: None,
+                notes,
+                used: None,
+                limit: None,
+                remaining: None,
+                unit: "percent".into(),
+            });
+        }
+    }
+    if limits.is_empty() {
+        return Err("响应里没有可用的配额窗口".into());
+    }
+    Ok(limits)
+}
+
 // ---------- 网络与编排 ----------
 
 /// GET 一个 JSON 接口（Bearer 认证）。错误消息不含凭据。
@@ -287,6 +771,23 @@ async fn fetch_json(url: &str, key: &str) -> Result<serde_json::Value, String> {
     let resp = HTTP
         .get(url)
         .bearer_auth(key)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("网络请求失败：{e}"))?;
+    let status = resp.status();
+    let body = resp.text().await.map_err(|e| format!("读取响应失败：{e}"))?;
+    if !status.is_success() {
+        return Err(format!("HTTP {}：{}", status.as_u16(), short_error(&body)));
+    }
+    serde_json::from_str(&body).map_err(|e| format!("响应不是合法 JSON：{e}"))
+}
+
+/// POST 一个 JSON 接口（`x-api-key` 认证；nanogpt 的余额查询是语义只读的 POST）。
+async fn fetch_json_x_api_key(url: &str, key: &str) -> Result<serde_json::Value, String> {
+    let resp = HTTP
+        .post(url)
+        .header("x-api-key", key)
         .header("Accept", "application/json")
         .send()
         .await
@@ -308,12 +809,18 @@ async fn fetch_key(bin: &str, provider: &str) -> Result<String, String> {
 /// 跑一个补充探针（key → 请求 → 解析）。
 pub async fn probe(bin: &str, provider: &str) -> Result<Vec<UsageLimit>, String> {
     let key = fetch_key(bin, provider).await?;
+    probe_with_key(provider, &key).await
+}
+
+/// 探针主体（凭据已取得）：按 provider 分派到各端点。独立函数便于「真实端点路由」慢测试
+/// 用无效 key 全量跑一遍（验证路由存在性 / 401 映射，不做任何写操作）。
+pub async fn probe_with_key(provider: &str, key: &str) -> Result<Vec<UsageLimit>, String> {
     match provider {
         "commandcode" => {
             // 两个端点并行：credits（必需）与 subscriptions（尽力——拿「月度重置时刻」，
             // 免费层 / 失败时为 None，不影响额度本身）
-            let credits_fut = fetch_json("https://api.commandcode.ai/alpha/billing/credits", &key);
-            let subs_fut = fetch_json("https://api.commandcode.ai/alpha/billing/subscriptions", &key);
+            let credits_fut = fetch_json("https://api.commandcode.ai/alpha/billing/credits", key);
+            let subs_fut = fetch_json("https://api.commandcode.ai/alpha/billing/subscriptions", key);
             let (credits, subs) = tokio::join!(credits_fut, subs_fut);
             let period_end = subs.ok().and_then(|s| {
                 s.get("data")
@@ -324,8 +831,86 @@ pub async fn probe(bin: &str, provider: &str) -> Result<Vec<UsageLimit>, String>
             parse_commandcode_credits(&credits?, period_end)
         }
         "deepseek" => {
-            let v = fetch_json("https://api.deepseek.com/user/balance", &key).await?;
+            let v = fetch_json("https://api.deepseek.com/user/balance", key).await?;
             parse_deepseek_balance(&v)
+        }
+        "openrouter" => {
+            let (k, c) = tokio::join!(
+                fetch_json(OPENROUTER_KEY_URL, key),
+                fetch_json(OPENROUTER_CREDITS_URL, key),
+            );
+            parse_openrouter(k, c)
+        }
+        "vercel-ai-gateway" => {
+            let v = fetch_json(VERCEL_CREDITS_URL, key).await?;
+            parse_vercel_credits(&v)
+        }
+        "moonshot" => {
+            // 两个站点账号体系独立（key 不通用）：谁成功用谁（omp 默认域是 .ai，USD；
+            // .cn 是人民币）
+            let (us, cn) = tokio::join!(
+                fetch_json(MOONSHOT_BALANCE_URL_US, key),
+                fetch_json(MOONSHOT_BALANCE_URL_CN, key),
+            );
+            let mut first_err: Option<String> = None;
+            for (res, unit) in [(us, "usd"), (cn, "cny")] {
+                match res {
+                    Ok(v) => match parse_moonshot_balance(&v, unit) {
+                        Ok(rows) => return Ok(rows),
+                        Err(e) => first_err = first_err.or(Some(e)),
+                    },
+                    Err(e) => first_err = first_err.or(Some(e)),
+                }
+            }
+            Err(first_err.unwrap_or_else(|| "moonshot 余额查询失败".to_string()))
+        }
+        "siliconflow" => {
+            let v = fetch_json(SILICONFLOW_USER_URL, key).await?;
+            parse_siliconflow_user(&v)
+        }
+        "stepfun" => {
+            let v = fetch_json(STEPFUN_ACCOUNTS_URL, key).await?;
+            parse_stepfun_account(&v)
+        }
+        "novita" => {
+            let v = fetch_json(NOVITA_BALANCE_URL, key).await?;
+            parse_novita_balance(&v)
+        }
+        "deepinfra" => {
+            let v = fetch_json(DEEPINFRA_CHECKLIST_URL, key).await?;
+            parse_deepinfra_checklist(&v)
+        }
+        "aimlapi" => {
+            let v = fetch_json(AIMLAPI_BILLING_URL, key).await?;
+            parse_aimlapi_billing(&v)
+        }
+        "aiand" => {
+            let v = fetch_json(AIAND_BALANCE_URL, key).await?;
+            parse_aiand_balance(&v)
+        }
+        "nanogpt" => {
+            let v = fetch_json_x_api_key(NANOGPT_BALANCE_URL, key).await?;
+            parse_nanogpt_balance(&v)
+        }
+        "kilo" => {
+            let v = fetch_json(KILO_BALANCE_URL, key).await?;
+            parse_kilo_balance(&v)
+        }
+        "venice" => {
+            let v = fetch_json(VENICE_BALANCE_URL, key)
+                .await
+                .map_err(|e| explain_auth(e, "该接口需要 ADMIN 权限的 key（推理 key 查不了用量）"))?;
+            parse_venice_balance(&v)
+        }
+        "zenmux" => {
+            let v = fetch_json(ZENMUX_BALANCE_URL, key)
+                .await
+                .map_err(|e| explain_auth(e, "该接口需要 Management Key（在 zenmux.ai 平台单独创建，与标准 API key 不同）"))?;
+            parse_zenmux_balance(&v)
+        }
+        "minimax-code-cn" => {
+            let v = fetch_json(MINIMAX_CN_REMAINS_URL, key).await?;
+            parse_minimax_token_plan(&v)
         }
         other => Err(format!("没有为 {other} 注册补充探针")),
     }
@@ -519,5 +1104,219 @@ mod tests {
             }
             Err(e) => eprintln!("跳过：commandcode 探针不可用（{e}）"),
         }
+    }
+
+    // ---------- 2026-09-30 新增探针的解析单测（fixture 形状取自各官方文档） ----------
+
+    #[test]
+    fn openrouter_prefers_account_credits_then_key_limit_then_spend() {
+        // 管理密钥：账户级 credits 差
+        let credits = Ok(serde_json::json!({"data":{"total_credits":100.5,"total_usage":25.75}}));
+        let key = Ok(serde_json::json!({"data":{"limit":null,"limit_remaining":null,"usage":25.75}}));
+        let rows = parse_openrouter(key, credits).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].remaining, Some(74.75));
+        assert_eq!(rows[0].unit, "usd");
+        assert_eq!(rows[0].status, "ok");
+
+        // 普通 key（/credits 403）：per-key 剩余额度
+        let credits = Err("HTTP 403：Only management keys can perform this operation".into());
+        let key = Ok(serde_json::json!({"data":{"limit":100,"limit_remaining":74.5,"limit_reset":"monthly","usage":25.5}}));
+        let rows = parse_openrouter(key, credits).unwrap();
+        assert_eq!(rows[0].remaining, Some(74.5));
+        assert!(rows[0].notes.iter().any(|n| n.contains("monthly")));
+
+        // 没设 per-key 上限、也拿不到 credits：退化为「已消费」
+        let credits = Err("HTTP 403".into());
+        let key = Ok(serde_json::json!({"data":{"limit":null,"limit_remaining":null,"usage":25.5}}));
+        let rows = parse_openrouter(key, credits).unwrap();
+        assert_eq!(rows[0].window_id, "spent");
+        assert_eq!(rows[0].remaining, None);
+        assert_eq!(rows[0].used, Some(25.5));
+
+        // 两个都失败 → 错误（保留 key 侧的原始错误）
+        assert!(parse_openrouter(Err("HTTP 500：boom".into()), Err("HTTP 403".into())).is_err());
+    }
+
+    #[test]
+    fn vercel_credits_parses_string_amounts() {
+        let v = serde_json::json!({"balance":"95.50","total_used":"4.50"});
+        let rows = parse_vercel_credits(&v).unwrap();
+        assert_eq!(rows[0].remaining, Some(95.5));
+        assert_eq!(rows[0].unit, "usd");
+        assert!(rows[0].notes[0].contains("4.50"));
+        assert!(parse_vercel_credits(&serde_json::json!({})).is_err());
+    }
+
+    #[test]
+    fn moonshot_balance_maps_currency_by_site() {
+        let v = serde_json::json!({"code":0,"status":true,"data":{"available_balance":110.5,"voucher_balance":10.0,"cash_balance":100.5}});
+        let rows = parse_moonshot_balance(&v, "usd").unwrap();
+        assert_eq!(rows[0].remaining, Some(110.5));
+        assert_eq!(rows[0].unit, "usd");
+        assert!(rows[0].notes.iter().any(|n| n.contains("voucher 10.00")));
+
+        let rows = parse_moonshot_balance(&v, "cny").unwrap();
+        assert_eq!(rows[0].unit, "cny");
+
+        let err = parse_moonshot_balance(&serde_json::json!({"code":401,"message":"x"}), "usd").unwrap_err();
+        assert!(err.contains("401"), "{err}");
+    }
+
+    #[test]
+    fn siliconflow_user_info_maps_total_balance() {
+        let v = serde_json::json!({"code":20000,"message":"OK","status":true,"data":{"balance":"0.88","chargeBalance":"88.00","totalBalance":"88.88"}});
+        let rows = parse_siliconflow_user(&v).unwrap();
+        assert_eq!(rows[0].remaining, Some(88.88));
+        assert!(rows[0].notes.iter().any(|n| n.contains("recharged 88.00")));
+        let err = parse_siliconflow_user(&serde_json::json!({"code":30014,"data":null,"message":"Token is invalid."})).unwrap_err();
+        assert!(err.contains("30014"), "{err}");
+    }
+
+    #[test]
+    fn stepfun_account_maps_balance_and_breakdown() {
+        let v = serde_json::json!({"object":"account","type":"prepaid","balance":0.0,"total_cash_balance":0.0,"total_voucher_balance":26.0});
+        let rows = parse_stepfun_account(&v).unwrap();
+        assert_eq!(rows[0].remaining, Some(0.0));
+        assert_eq!(rows[0].status, "exhausted");
+        assert_eq!(rows[0].unit, "cny");
+        assert!(rows[0].notes.iter().any(|n| n.contains("voucher 26.00")));
+    }
+
+    #[test]
+    fn novita_balance_scales_ten_thousandths() {
+        let v = serde_json::json!({"availableBalance":"1000000","cashBalance":"800000","creditLimit":"200000","pendingCharges":"0","outstandingInvoices":"0"});
+        let rows = parse_novita_balance(&v).unwrap();
+        assert_eq!(rows[0].remaining, Some(100.0));
+        assert!(rows[0].notes.iter().any(|n| n.contains("cash 80.00")));
+        assert!(rows[0].notes.iter().any(|n| n.contains("credit limit 20.00")));
+        assert!(!rows[0].notes.iter().any(|n| n.contains("pending")), "0 值 pending 不进 notes");
+    }
+
+    #[test]
+    fn deepinfra_negative_stripe_balance_is_available() {
+        let v = serde_json::json!({"stripe_balance":-12.5,"recent":3.25,"suspended":false});
+        let rows = parse_deepinfra_checklist(&v).unwrap();
+        assert_eq!(rows[0].remaining, Some(12.5));
+        assert_eq!(rows[0].status, "ok");
+
+        let owed = serde_json::json!({"stripe_balance":7.0,"suspended":true,"suspend_reason":"payment-method"});
+        let rows = parse_deepinfra_checklist(&owed).unwrap();
+        assert_eq!(rows[0].remaining, Some(0.0));
+        assert_eq!(rows[0].status, "exhausted");
+        assert!(rows[0].notes.iter().any(|n| n.contains("owed 7.00")));
+        assert!(rows[0].notes.iter().any(|n| n.contains("payment-method")));
+    }
+
+    #[test]
+    fn aimlapi_and_aiand_use_their_currency_field() {
+        let rows = parse_aimlapi_billing(&serde_json::json!({"current_balance":42.5,"currency":"USD"})).unwrap();
+        assert_eq!((rows[0].remaining, rows[0].unit.as_str()), (Some(42.5), "usd"));
+        let rows = parse_aiand_balance(&serde_json::json!({"balance":"1234.5","currency":"jpy"})).unwrap();
+        assert_eq!((rows[0].remaining, rows[0].unit.as_str()), (Some(1234.5), "jpy"));
+    }
+
+    #[test]
+    fn nanogpt_and_kilo_balances() {
+        let rows = parse_nanogpt_balance(
+            &serde_json::json!({"usd_balance":"129.46956147","nano_balance":"26.71801147","nanoDepositAddress":"nano_x"}),
+        )
+        .unwrap();
+        assert!((rows[0].remaining.unwrap() - 129.46956147).abs() < 1e-9);
+        assert!(rows[0].notes.iter().any(|n| n.contains("nano 26.72")));
+
+        let rows = parse_kilo_balance(&serde_json::json!({"balance":12.75})).unwrap();
+        assert_eq!(rows[0].remaining, Some(12.75));
+        assert_eq!(rows[0].unit, "usd");
+    }
+
+    #[test]
+    fn venice_prefers_usd_and_honors_can_consume() {
+        let v = serde_json::json!({"canConsume":true,"consumptionCurrency":"USD","balances":{"diem":5.0,"usd":12.5},"diemEpochAllocation":5.0});
+        let rows = parse_venice_balance(&v).unwrap();
+        assert_eq!(rows[0].remaining, Some(12.5));
+        assert_eq!(rows[0].unit, "usd");
+        assert!(rows[0].notes.iter().any(|n| n.contains("diem 5.00")));
+
+        let blocked = serde_json::json!({"canConsume":false,"balances":{"usd":0.0}});
+        let rows = parse_venice_balance(&blocked).unwrap();
+        assert_eq!(rows[0].status, "exhausted");
+
+        let diem_only = serde_json::json!({"canConsume":true,"balances":{"diem":3.0,"usd":null}});
+        let rows = parse_venice_balance(&diem_only).unwrap();
+        assert_eq!((rows[0].remaining, rows[0].unit.as_str()), (Some(3.0), "diem"));
+    }
+
+    #[test]
+    fn zenmux_balance_and_success_flag() {
+        let v = serde_json::json!({"success":true,"data":{"currency":"usd","total_credits":120.0,"top_up_credits":100.0,"bonus_credits":20.0}});
+        let rows = parse_zenmux_balance(&v).unwrap();
+        assert_eq!(rows[0].remaining, Some(120.0));
+        assert!(rows[0].notes.iter().any(|n| n.contains("bonus 20.00")));
+        assert!(parse_zenmux_balance(&serde_json::json!({"success":false})).is_err());
+    }
+
+    #[test]
+    fn minimax_cn_token_plan_windows() {
+        let v = serde_json::json!({
+            "base_resp": {"status_code": 0},
+            "model_remains": [
+                {
+                    "model_name": "general",
+                    "start_time": 1790000000000i64, "end_time": 1790018000000i64,
+                    "current_interval_remaining_percent": 72.5,
+                    "current_interval_total_count": 40, "current_interval_usage_count": 11,
+                    "current_interval_status": 1,
+                    "weekly_start_time": 1790000000000i64, "weekly_end_time": 1790604800000i64,
+                    "current_weekly_remaining_percent": 10.0,
+                    "current_weekly_total_count": 200, "current_weekly_usage_count": 180,
+                    "current_weekly_status": 1
+                },
+                { "model_name": "no-quota", "current_interval_total_count": 0, "current_weekly_total_count": 0 }
+            ]
+        });
+        let rows = parse_minimax_token_plan(&v).unwrap();
+        assert_eq!(rows.len(), 2, "无配额的模型跳过");
+        assert_eq!(rows[0].window_id, "5h");
+        assert!((rows[0].percent - 27.5).abs() < 1e-9);
+        assert_eq!(rows[0].status, "ok");
+        assert_eq!(rows[0].resets_at, Some(1790018000000));
+        assert_eq!(rows[0].notes, vec!["Requests: 11/40".to_string()]);
+        assert_eq!(rows[0].label, "General 5 Hour");
+        assert_eq!(rows[1].window_id, "7d");
+        assert!((rows[1].percent - 90.0).abs() < 1e-9);
+        assert_eq!(rows[1].status, "warning");
+
+        let err = parse_minimax_token_plan(&serde_json::json!({"base_resp":{"status_code":1004,"status_msg":"login fail"}})).unwrap_err();
+        assert!(err.contains("1004"), "{err}");
+    }
+
+    #[test]
+    fn err_status_and_explain_auth() {
+        assert_eq!(err_status("HTTP 401：invalid key"), Some(401));
+        assert_eq!(err_status("网络请求失败：timeout"), None);
+        assert_eq!(explain_auth("HTTP 403：nope".into(), "需要 Management Key"), "需要 Management Key（HTTP 403：nope）");
+        assert_eq!(explain_auth("网络请求失败：x".into(), "hint"), "网络请求失败：x");
+    }
+
+    /// 真实端点路由核对（默认跳过；`cargo test -- --ignored` 手动跑）：用**无效 key** 对
+    /// 全部补充探针各打一次真实端点——验证：路由存在（不是 404 / DNS 失败）、401 / 业务码
+    /// 被正确归一成可读消息、解析层不 panic。**只发查询请求（GET / 语义只读的 POST），
+    /// 不发任何写操作**。
+    #[test]
+    #[ignore]
+    fn real_extra_probe_routes() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        let mut unexpected = vec![];
+        for provider in EXTRA_PROBES {
+            match rt.block_on(probe_with_key(provider, "omp-mini-invalid-probe-key")) {
+                Ok(rows) => unexpected.push(format!("{provider}: 无效 key 却返回了 {} 行", rows.len())),
+                Err(e) => println!("  {provider}: {e}"),
+            }
+        }
+        assert!(unexpected.is_empty(), "以下探针行为异常：{unexpected:?}");
     }
 }

@@ -20,8 +20,8 @@ import { Switch } from "./Switch";
  * 表单只改本地态，保存时交给 `lib/customModels.ts` 的保真编辑（注释与界面之外的字段原样保留），
  * 再由后端预校验 / 备份 / 原子写。
  *
- * 口径：**名称可改**（`form.originalId` 记录原键名，保存时就地改名）；**接口类型两档**
- * （openai-completions / anthropic-messages，既有文件里的其它值原样列出）；**认证只有 API Key**
+ * 口径：**名称可改**（`form.originalId` 记录原键名，保存时就地改名）；**接口类型三档**
+ * （openai-completions / openai-responses / anthropic-messages，既有文件里的其它值原样列出）；**认证只有 API Key**
  * 一种（Key 常驻输入框；留空 = 该端点无需鉴权，落盘为 `auth: none`）。
  */
 export function CustomProviderEditForm({

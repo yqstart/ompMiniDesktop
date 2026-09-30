@@ -10,7 +10,7 @@
 | 问题 | 结论 |
 |---|---|
 | 能否**通过读取 omp** 直接拿到滚动用量？ | **能**。`omp usage --json` 是 omp 自带的一等命令（"Show provider usage limits for every authenticated account"），直接给出每个已登录账户、每个供应商的滚动窗口（5 小时 / 每周 / 每月…）：已用比例、重置时刻、套餐名、状态。本版就照它实现——壳侧不直连任何供应商接口、不读凭证库。 |
-| 如果不能，是否支持**自定义配置**去获取用量？ | **已升级为「壳侧补充探针」**（2026-09-18 第二轮，见 §6）：对 omp 没有探针、但上游提供「API key 可用」查询接口的供应商，壳侧直接补查——`commandcode` 走 `api.commandcode.ai/alpha/billing/credits`（实测 API key 可用：返 5 小时 / 每周额度与重置时刻 + 月度剩余 credits），`deepseek` 走官方 `GET /user/balance` 余额接口（文档化）；凭据只经 `omp token` 在内存中传递、不落盘、不回传前端。仍无查询路径的供应商显式列「无用量数据」并写明原因；查询失败的单独列「查询失败」。 |
+| 如果不能，是否支持**自定义配置**去获取用量？ | **已升级为「壳侧补充探针」**（2026-09-18 第二轮，见 §6；2026-09-30 第四轮全量适配，见 §8）：对 omp 没有探针、但上游提供「API key 可用」查询接口的供应商，壳侧直接补查——**16 个 provider**（plan 型：commandcode / minimax-code-cn；余额型：deepseek / openrouter / vercel-ai-gateway / moonshot / siliconflow / stepfun / novita / deepinfra / aimlapi / aiand / nanogpt / kilo / venice / zenmux）；凭据只经 `omp token` 在内存中传递、不落盘、不回传前端。**API key 查不到用量的（如 xiaomi）直接提示**「未提供 API 用量 / 余额查询接口」——不做 Cookie 粘贴之类的代偿（xiaomi 的 API key 通道已复核确认不存在，见 §8.2）。仍无查询路径的供应商显式列「无用量数据」；查询失败的单独列「查询失败」。 |
 
 ## 1. 上游事实（omp 18.2.5 本机实测，2026-09-18；V6 的 18.2.1 结论继续有效）
 
@@ -190,3 +190,82 @@ ProviderUsageDialog（弹窗；V15 交付时是设置页页签 ProviderUsagePane
   - 通用供应商不受影响：opencode-go / commandcode 仍是「5 小时 / 每周 / 每月」（英文 `5 hours / Weekly / Monthly`）、deepseek 余额行不变（`¥110.00 剩余`）；
   - 名字列加宽后进度条起点对齐，卡片布局无溢出（截图核对）。
 - Cursor 无 5h / 周窗口为**上游事实**（见 §7.1 两个端口的原始返回），壳侧不代偿、不造窗口。
+
+## 8. 第四轮：全量厂商适配——plan / 余额两种模式（2026-09-30）
+
+> 用户口径：「现在用量查询要支持两种模型，第一种是 plan 模式查询用量（例如 opencode go 和 cursor），
+> 第二种是 API 调用查询余额（例如 deepseek）；先不管自定义供应商，现在要把 omp 支持的厂商都适配一下。
+> 还有类似小米那种通过 apikey 查询不到的直接提示即可，不需要通过粘贴 cookie 的形式去查询
+> （此处小米可不可以通过 apikey 去查询用量还需要你去调研一下）」。
+
+### 8.1 覆盖矩阵（omp 18.4.4；全量 78 个内置 provider）
+
+**两种查询模式**：**plan 型** = 订阅 / 滚动窗口额度（百分比 + 重置时刻，如 opencode-go、cursor）；
+**余额型** = 按量计费余额（金额 / 货币，如 deepseek）。
+
+| 类 | 数量 | 处理 |
+|---|---|---|
+| ① 上游探针覆盖（omp `packages/ai/src/usage/`） | 21 个 provider | 壳侧零改动、`omp usage --json` 直接展示：`anthropic`、`openai-codex`、`cursor`、`github-copilot`、`google-gemini-cli`、`google-antigravity`、`kimi-code`、`minimax-code`、`muse-code`、`ollama`、`ollama-cloud`、`opencode-go`、`commandcode`、`cline-pass`、`charm-hyper`、`devin`、`synthetic`、`umans`、`xai-oauth`、`zai`、`alibaba-token-plan`（覆盖范围从二进制 usage 注册表逐项核对） |
+| ② 壳侧补充探针 | **16 个 provider**（本轮新增 14 + 既有 2） | plan 型 2：`commandcode`（既有）、`minimax-code-cn`（新增，上游只覆盖国际域 `minimax-code`）；余额型 14：`deepseek`（既有）、`openrouter`、`vercel-ai-gateway`、`moonshot`、`siliconflow`、`stepfun`、`novita`、`deepinfra`、`aimlapi`、`aiand`、`nanogpt`、`kilo`、`venice`、`zenmux`。端点 / 形状 / 出处见 §8.3 |
+| ③ 无 API key 查询路径 | 其余（含若干非凭据伪 provider，如 `web` / `typesafe`） | 界面「无用量数据」**直接提示**（`pusageNoDataHint`：「未提供 API 用量 / 余额查询接口（可在其控制台查看）；模型可正常使用。」）；清单与理由见 §8.4 |
+
+### 8.2 xiaomi（MiMo）：API key 查不了用量——直接提示，不代偿
+
+用户指名复核「小米能不能用 API key 查用量」。**结论：不能**（2026-09-30 实测，omp 18.4.4）：
+
+| 通道 | 实测结论 |
+|---|---|
+| API 网关（`api.xiaomimimo.com`） | 候选路径（`/v1/balance`、`/v1/usage`、`/v1/user/balance`、`/v1/credits`、`/v1/dashboard/billing/*` 等 20+ 条，`Bearer` 与 `api-key:` 两种头）**一律 404**（对照：`/v1/models` 200 且**无任何配额响应头**）。 |
+| Token Plan 三区网关（`token-plan-{cn,sgp,ams}.xiaomimimo.com`） | 候选用量路径全 404；对照 `/v1/models` 对错误 key 返回 401（路由存在性判别法：401=存在、404=不存在）。 |
+| 平台控制台接口 | `platform.xiaomimimo.com/api/v1/balance`、`/api/v1/tokenPlan/usage` **存在但只认小米账号 Cookie**——无 Cookie / API key / 无效 Cookie 一律 401 + `loginUrl`。 |
+| 官方文档 / 社区 | 官方只提供控制台「用量信息」页（可导出），无 API；cc-switch #3230 社区同结论「mimo 没开」。 |
+
+处理：**不注册探针、不做 Cookie 代偿**，落「无用量数据」直接提示。
+（过程说明：本轮曾按上游 alibaba-token-plan 的「可选 Cookie 上报」先例实现过一版 Cookie 粘贴通道
+——用户随后明确「不需要通过粘贴 cookie 的形式去查询」，该通道已整体移除：`usage_cookie.rs`、
+两个 IPC 命令、弹窗配置块、字典键全部删除，不留半截代码。）
+
+### 8.3 新增补充探针（14 个；端点与形状出处）
+
+| provider | 模式 | 端点（GET，除注明外） | 形状 / 映射 | 出处 |
+|---|---|---|---|---|
+| `openrouter` | 余额 | `https://openrouter.ai/api/v1/key` + `…/credits`（best-effort） | 优先账户 credits 差（管理密钥）；普通 key 用 `limit_remaining` / `limit_reset`；没设上限时退化为「已消费」行（`windowId: spent`） | openrouter.ai/docs（get-current-key / get-credits） |
+| `vercel-ai-gateway` | 余额 | `https://ai-gateway.vercel.sh/v1/credits` | `{balance,total_used}`（字符串 USD） | vercel.com/docs/ai-gateway/…/rest-api |
+| `moonshot` | 余额 | `https://api.moonshot.ai/v1/users/me/balance` ＋ `.cn` 兜底 | `data.available_balance/voucher_balance/cash_balance`；`.ai`=USD、`.cn`=CNY；两站 key 不通用、谁成功用谁 | platform.kimi.com/docs/api/balance |
+| `siliconflow` | 余额 | `https://api.siliconflow.com/v1/user/info` | `data.totalBalance`（字符串，USD）+ 充值 / 赠送备注 | docs.siliconflow.com（国际站文档；国内站接口已下线，见 §8.4） |
+| `stepfun` | 余额 | `https://api.stepfun.com/v1/accounts` | `{balance,total_cash_balance,total_voucher_balance}`（CNY） | platform.stepfun.com/docs（获取账户信息） |
+| `novita` | 余额 | `https://api.novita.ai/openapi/v1/billing/balance/detail` | `availableBalance` 等（字符串，单位 1/10000 USD） | novita.ai/docs（get-user-balance） |
+| `deepinfra` | 余额 | `https://api.deepinfra.com/payment/checklist?compute_owed=true` | `stripe_balance` 负值=可用（正值=欠款）；`suspended` → exhausted | docs.deepinfra.com（billing/get-checklist） |
+| `aimlapi` | 余额 | `https://api.aimlapi.com/v2/billing` | `{current_balance,currency}` | docs.aimlapi.com（account-balance） |
+| `aiand` | 余额 | `https://api.aiand.com/billing/balance` | `{balance:"…",currency}` | docs.aiand.com/billing/balance |
+| `nanogpt` | 余额 | **POST** `https://api.nano-gpt.com/api/check-balance`（`x-api-key` 头） | `{usd_balance,nano_balance}`（字符串） | docs.nano-gpt.com（check-balance） |
+| `kilo` | 余额 | `https://api.kilo.ai/api/profile/balance` | `{balance}`（USD） | 官方开源客户端同款端点（Kilo-Org/kilocode） |
+| `venice` | 余额 | `https://api.venice.ai/api/v1/billing/balance` | `balances.{usd,diem}` + `canConsume`；**需 ADMIN key**（401 时提示换个 key） | docs.venice.ai（billing/balance） |
+| `zenmux` | 余额 | `https://zenmux.ai/api/v1/management/payg/balance` | `data.{total_credits,top_up_credits,bonus_credits,currency}`；**需 Management Key**（403 时提示单独创建） | zenmux.ai/docs（payg-balance） |
+| `minimax-code-cn` | **plan** | `https://api.minimaxi.com/v1/token_plan/remains` | `model_remains[]`：间隔窗（按时长命名，5 小时 → `5h`）+ 每周 `7d`；`remaining_percent` 0–100 → 已用百分比；与上游 `minimax-code` 探针同形状（从 omp 二进制同款实现核对）；两计数全 0 的模型跳过 | omp 二进制同款实现 + 实测路由 |
+
+### 8.4 不做探针、直接提示的供应商（调研结论 2026-09-30）
+
+| 供应商 | 结论与证据 |
+|---|---|
+| `xiaomi` / `xiaomi-token-plan-*` | 见 §8.2：无任何 API key 路径 |
+| `siliconflow-cn` | 同款 `/v1/user/info` 官方 2026-08-14 下线（有效 key 返回 410），替代接口未公布 |
+| `zhipu-coding-plan`（含 BigModel 余额） | 只有未文档化的控制台内部路由（`/api/monitor/usage/quota/limit`、`/api/biz/account/query-customer-account-report`）；社区实证有，但属于把 API token 发往非文档控制台端点的凭据边界扩张（CodexBar PR #3109 因此被要求改为 opt-in）——**不采用** |
+| `xai` / `minimax` / `minimax-cn` | 推理 key 无余额接口（xAI 余额在独立 Management API 且需 team/management key；MiniMax 余额仅控制台） |
+| `opencode-zen` | 官方 issue #10448 确认无公开余额接口（`/zen/v1/usage`、`/zen/v1/balance` 均 404；余额只有浏览器 cookie 可得）；`opencode-go` 已有上游探针 |
+| `alibaba-coding-plan` | 用量只经官方 CLI 的**控制台会话**（`auth: 'console'`） |
+| `qwen-portal` / `gitlab-duo(-agent)` | OAuth 型，端点不返回配额（qwen-code #331 官方回复） |
+| `mistral` / `groq` / `cerebras` / `together` / `fireworks` / `baseten` / `coreweave` / `huggingface` / `nvidia` | 无公开余额接口（mistral 仅 Admin key 的用量；fireworks / baseten / coreweave 只有用量导出，无余额；nvidia credits 制度已取消） |
+| `gmi-cloud` / `firepass` / `sakana` / `qianfan` / `meta` / `wafer-serverless` / `yolo-auto` / `singularityapi-*` / `abliteration` / `litellm` / `lm-studio` / `llama.cpp` / `vllm` / `local` 等 | 无文档化可用接口 / 非托管余额语义（本地引擎）/ 信息不足（wafer 的 usage 页已下架且探测不构成路由存在证据；abliteration 只有推理文档）；`cloudflare-ai-gateway` 的 credits API 需要 Cloudflare **账户级 API token**（不是网关 API key），不可用同一凭据查询；`litellm` 是自托管代理、余额语义在下游 key 上 |
+| `google` / `openai` / `azure` / `amazon-bedrock` / `bedrock-mantle` / `google-vertex` | 无 API key 可查的余额 / 用量接口（账单类接口另有管理面与权限要求） |
+
+### 8.5 实现与验证
+
+| 层 | 变更 |
+|---|---|
+| 后端 | `extra_usage.rs`：`EXTRA_PROBES` 扩到 16 个；新增 14 个解析函数（含共享 `balance_row` / `num_str` / `err_status` / `explain_auth` 助手）、`fetch_json_x_api_key`（nanogpt 的 POST）、拆出 `probe_with_key` 供「无效 key 全量路由核对」慢测试复用；**移除**上一版的 `usage_cookie.rs` 与 Cookie 通道（模块 / 命令 / 编排一起删净） |
+| 前端 | 删除 Cookie 配置块与相关 IPC / 类型 / 字典键；`windowNames` 增加 `spent`（「已消费 / Spent」）映射；「无用量数据」提示文案改为「未提供 API 用量 / 余额查询接口（可在其控制台查看）；模型可正常使用。」；`e2e:ipc` 回到 71 命令 |
+| 验证（解析层） | `cargo test` 新增 13 项单测（每个新端点一条，fixture 取自各官方文档；含 openrouter 三种回退、moonshot 双站币种、deepinfra 负值语义、novita 1/10000 缩放、minimax plan 窗口等边界） |
+| 验证（真实端点） | `real_extra_probe_routes`（`--ignored`）：用无效 key 对 **16 个探针全量打真实端点**——15 个新 / 旧端点全部返回可读错误（401 归一 / 业务码归一），**无 404、无 DNS 失败、无 panic**；venice / zenmux 的「需要 ADMIN / Management Key」提示与 minimax-cn 的 `login fail` 业务码均在真实响应上核对 |
+| 验证（界面） | 构建产物 + `__TAURI_INTERNALS__` mock 的真实 Chromium：新余额行（`$… 剩余` + notes）、`spent` 行（「已消费」）、minimax plan 行（5 小时 / 每周 + Requests 备注）、「无用量数据」新提示文案与「查询失败」块逐项截图核对（详见交付记录） |
+| 未覆盖 | 各新端点的**真实成功响应**（本机只有 deepseek / commandcode / xiaomi / opencode-go / cursor 的凭据；其余按官方文档形状解析 + 全容错，字段漂移只报「查询失败」）；真机 WebView（同既有权限限制） |

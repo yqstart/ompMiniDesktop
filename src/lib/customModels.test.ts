@@ -373,13 +373,22 @@ describe("表单校验", () => {
 });
 
 describe("接口类型候选（apiOptionsFor）", () => {
-  it("界面只提供两档；既有文件里写的其它值原样追加（不改动也能保存）", () => {
-    expect(API_OPTIONS).toEqual(["openai-completions", "anthropic-messages"]);
+  it("界面只提供三档；既有文件里写的其它值原样追加（不改动也能保存）", () => {
+    expect(API_OPTIONS).toEqual(["openai-completions", "openai-responses", "anthropic-messages"]);
     for (const cur of ["", " openai-completions "]) {
-      expect(apiOptionsFor(cur)).toEqual(["openai-completions", "anthropic-messages"]);
+      expect(apiOptionsFor(cur)).toEqual(["openai-completions", "openai-responses", "anthropic-messages"]);
     }
-    expect(apiOptionsFor("anthropic-messages")).toEqual(["openai-completions", "anthropic-messages"]);
-    expect(apiOptionsFor("google-vertex")).toEqual(["openai-completions", "anthropic-messages", "google-vertex"]);
+    expect(apiOptionsFor("openai-responses")).toEqual(["openai-completions", "openai-responses", "anthropic-messages"]);
+    expect(apiOptionsFor("anthropic-messages")).toEqual(["openai-completions", "openai-responses", "anthropic-messages"]);
+    expect(apiOptionsFor("google-vertex")).toEqual(["openai-completions", "openai-responses", "anthropic-messages", "google-vertex"]);
+  });
+
+  it("选 openai-responses：原样写进 YAML 并能读回", () => {
+    const created = upsertProvider("", form({ api: "openai-responses" }));
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    expect(created.text).toContain("api: openai-responses");
+    expect(providerFormOf(created.text, "new-gw")?.api).toBe("openai-responses");
   });
 });
 

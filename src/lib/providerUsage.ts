@@ -172,6 +172,7 @@ export function windowNames(t: Text, limits: UsageLimit[]): string[] {
   if (l.windowId === "7d") return t.pusageWindow7d;
   if (l.windowId === "monthly") return t.pusageWindowMonthly;
   if (l.windowId === "balance") return t.pusageWindowBalance;
+  if (l.windowId === "spent") return t.pusageWindowSpent;
   return l.windowLabel || l.label;
  });
 }
