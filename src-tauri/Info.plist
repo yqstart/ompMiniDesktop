@@ -4,7 +4,7 @@
 <dict>
   <!-- 项目目录可能在桌面/文稿/下载里：首次触碰时系统弹授权，这段文案会显示在授权框里。
        Tauri 打包时自动把本文件与生成的 Info.plist 合并（见 Tauri 官方 macOS Application Bundle 文档）。
-       注意：它只改提示文案，不解决“adhoc 签名导致授权不持久”——反复弹的根因见 README 排障。 -->
+       注意：它只改提示文案。授权的"记得住/记不住"由签名身份决定——见 README「本机发布构建」的签名说明。 -->
   <key>NSDesktopFolderUsageDescription</key>
   <string>需要读取你选择的项目目录。当项目放在桌面时，系统要求说明用途后才会放行；仅访问项目本身，不扫描桌面其他文件。</string>
   <key>NSDocumentsFolderUsageDescription</key>

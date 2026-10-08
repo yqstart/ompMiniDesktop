@@ -286,7 +286,7 @@ export function WorkspaceSidebar() {
     >
      <Search size={14} aria-hidden className="shrink-0 text-muted" />
      <span className="min-w-0 flex-1 truncate text-left">{t.quickSwitcher}</span>
-     <kbd className="shrink-0 font-mono text-[11px] text-faint">{isMacKeyboard() ? "⇧⌘K" : "Ctrl+Shift+K"}</kbd>
+     <kbd className="shrink-0 text-[11px] text-faint">{isMacKeyboard() ? "⇧⌘K" : "Ctrl+Shift+K"}</kbd>
     </button>
    </div>
    {

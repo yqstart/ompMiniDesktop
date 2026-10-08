@@ -109,7 +109,7 @@ function EmptyTerminal() {
       className="mt-7 flex cursor-pointer items-center gap-4 rounded-md border border-accent/25 bg-accent/10 px-4 py-2.5 text-[13px] font-medium text-accent transition-colors duration-100 hover:bg-hover"
      >
       {t.termNew}
-      <kbd className="font-mono text-[11px] opacity-75">{shortcut}</kbd>
+      <kbd className="text-[11px] opacity-75">{shortcut}</kbd>
      </button>
     ) : (
      <>
@@ -123,8 +123,8 @@ function EmptyTerminal() {
      </>
     )}
     <div className="mt-12 flex flex-wrap justify-center gap-x-6 gap-y-3 border-t border-border-soft pt-5 text-[11px] text-faint">
-     <span className="flex items-center gap-2"><kbd className="rounded-sm border border-border bg-surface px-1.5 py-0.5 font-mono">{shortcut}</kbd>{t.termNew}</span>
-     <span className="flex items-center gap-2"><kbd className="rounded-sm border border-border bg-surface px-1.5 py-0.5 font-mono">⌘ 1–9</kbd>{t.termSwitch}</span>
+     <span className="flex items-center gap-2"><kbd className="rounded-sm border border-border bg-surface px-1.5 py-0.5">{shortcut}</kbd>{t.termNew}</span>
+     <span className="flex items-center gap-2"><kbd className="rounded-sm border border-border bg-surface px-1.5 py-0.5">⌘ 1–9</kbd>{t.termSwitch}</span>
     </div>
    </div>
   </div>

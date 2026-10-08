@@ -44,6 +44,19 @@ jobs:
             exit 1
           fi
 
+      # macOS 产物的签名身份必须固定，否则 TCC 授权（桌面/文稿/下载文件夹）每次更新都重弹。
+      # 自签名证书由 bash scripts/make-signing-cert.sh 生成，两个 secrets 从脚本产物设置。
+      - name: macOS 签名证书 secrets 必须已配置
+        env:
+          CERT: ${{ secrets.APPLE_CERTIFICATE }}
+          CERT_PASS: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$CERT" ] || [ -z "$CERT_PASS" ]; then
+            echo "::error::缺少 APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD。本机执行 bash scripts/make-signing-cert.sh 生成自签名证书，再按脚本末尾提示设置两个 secrets（见 README「本机发布构建」）。"
+            exit 1
+          fi
+
+
       - name: tag 与 package.json 版本一致
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -133,6 +146,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS 签名：证书 base64 + 密码交给 tauri CLI，它自己导入临时钥匙串后签名；
+          # APPLE_SIGNING_IDENTITY 指定用哪个身份签（CN 与 p12 里的证书一致；
+          # 覆盖 tauri.conf.json 的 "-" 基线）。其它平台的构建忽略这三个 env。
+          APPLE_SIGNING_IDENTITY: ompMiniDesktop Signing
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         with:
           tagName: v__VERSION__
           releaseName: ompMiniDesktop v__VERSION__

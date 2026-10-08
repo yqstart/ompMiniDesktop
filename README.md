@@ -76,8 +76,23 @@ cargo test --manifest-path src-tauri/Cargo.toml -- --ignored    # 慢测试：�
 pnpm tauri:build    # 产物见 src-tauri/target/release/bundle/
 ```
 
-未签名（`signingIdentity: "-"`）：首次打开若被 Gatekeeper 拦截，右键 → 打开，
+产物用**固定身份的签名证书**签名（CN `ompMiniDesktop Signing`，自签名、10 年有效）。
+一次性设置（macOS）：
+
+```bash
+bash scripts/make-signing-cert.sh   # 生成证书 → 装入登录钥匙串 → 导出 CI 用的 p12（系统会弹密码框，按提示操作）
+```
+
+之后 `pnpm tauri:build` 自动用它签名（`scripts/tauri-build.mjs` 检测到证书就注入签名身份；没装证书的机器照常按 ad-hoc 构建，不受影响）。
+这样做的原因：macOS 的 TCC 授权（桌面 / 文稿 / 下载文件夹）按签名身份记——ad-hoc 签名
+每次构建身份都变，系统会当成新 app 反复弹授权；固定证书后授权跨构建与应用内更新保留。
+
+未公证：首次打开若被 Gatekeeper 拦截，右键 → 打开，
 或 `xattr -dr com.apple.quarantine <App>.app`。
+
+> 说明：本地构建末尾可能出现「A public key has been found, but no private key」之类报错——那是
+> **updater 产物（`*.tar.gz.sig`）的签名**在找发版私钥（`~/.tauri/omp-mini.key`，带密码，密码在
+> CI secrets 里）；`.app` 与 `.dmg` 此时**已生成并签名完毕**，本地不需要那一步（发版由 CI 完成）。
 
 ## 应用内更新
 
@@ -95,8 +110,13 @@ pnpm tauri:build    # 产物见 src-tauri/target/release/bundle/
 > 私钥全文写入仓库 Settings → Secrets → `TAURI_SIGNING_PRIVATE_KEY`
 >（生成时没设密码则 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 置空）。
 >
+> **macOS 签名证书（TCC 授权持久化）**：本机跑一次 `bash scripts/make-signing-cert.sh`，
+> 按脚本末尾提示把 `signing.p12.b64` 与 `p12.pass` 设为 Secrets
+> `APPLE_CERTIFICATE` / `APPLE_CERTIFICATE_PASSWORD`——macOS 矩阵用它签名
+>（tauri CLI 自动导入临时钥匙串 + `APPLE_SIGNING_IDENTITY` 指定身份），其它平台忽略。
+>
 > Release 工作流带守卫 job：仓库不是 public、`pubkey` 里还留着 `TODO` 占位、
-> 或 tag 与 `package.json` 版本号不一致时，发版会直接失败
+> tag 与 `package.json` 版本号不一致、或 `APPLE_CERTIFICATE` 缺失时，发版会直接失败
 >（见 `.github/workflows/release.yml`）。
 
 ---
@@ -137,7 +157,7 @@ pnpm tauri:build    # 产物见 src-tauri/target/release/bundle/
 | 项目「目录缺失」 | 重定位到新路径，或移除项目（会话归档保留） |
 | 会话「已损坏」 | jsonl 头部解析失败，不阻塞列表，可在弹窗或归档页删除 |
 | 打开的终端没有响应 | 终端进程退出后浮层会给「重启」；或点 `×` 关闭后重开（运行中关闭会先确认） |
-| 反复弹「“ompMiniDesktop”想访问“桌面”（/文稿/下载）文件夹」，明明已授过权 | macOS 按「签名身份」记授权，本应用目前是 adhoc 签名（`signingIdentity: "-"`），且 `tauri:dev` 每次编译都是新二进制 → 系统认作新应用，旧授权即失效，只能重弹（发版包同理：每次更新弹一次）。已加 `src-tauri/Info.plist` 用量说明，打包后授权框会显示中文用途（只改文案，不解决 adhoc 不持久）。根治需 Apple Developer ID 签名+公证；眼前绕行：把项目移出桌面/文稿/下载（如 `~/Projects`，不在保护目录内），或固定用同一份打包产物少重编。授权状态错乱时可 `tccutil reset SystemPolicyDesktopFolder com.omnidesktop.mini` 后重授（仅对打包产物有效，dev 二进制每次重编身份都变） |
+| 反复弹「“ompMiniDesktop”想访问“桌面”（/文稿/下载）文件夹」，明明已授过权 | macOS 按「签名身份」记授权。**已修**：产物改用固定身份的自签名证书（CN `ompMiniDesktop Signing`，`bash scripts/make-signing-cert.sh` 一次性生成并装入登录钥匙串——ad-hoc 签名的身份是每次构建都变的 cdhash，才会反复弹）。从 ad-hoc 切过来后**第一次**仍会弹一次（旧记录匹配不上），之后跨更新不再弹。`tauri:dev` 的开发二进制仍是每次重编的临时身份——嫌弹就把项目放 `~/Projects` 等非保护目录，或固定用打包产物。授权状态错乱时可 `tccutil reset SystemPolicyDesktopFolder com.omnidesktop.mini` 后重授 |
 
 ---
 

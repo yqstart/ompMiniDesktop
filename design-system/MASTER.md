@@ -54,6 +54,7 @@
 
 - 界面：系统栈 `-apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", Inter, sans-serif`。中文优先苹方 / 微软雅黑。
 - 等宽（工具参数、路径、session id 前缀）：`"JetBrains Mono", "SF Mono", Menlo, monospace`，12–13px；等宽文本自动带 `tabular-nums`（时间、token 数、行号对齐不跳动）。**末尾挂一枚内嵌的图标字体 "OMP Nerd Icons"**（`--font-mono` 里排在系统字体之后，只补图标码点）：终端里 omp 的 `symbolPreset: nerd` 图标由它渲染，单宽（1 字符 = 1 cell，与 Menlo/JetBrains Mono/SF Mono 的 advance 对齐），源见 `scripts/build-nerd-icons-font.py` 与 `THIRD-PARTY-NOTICES.md`「字体资源」。
+- **快捷键键帽（`kbd`）一律走系统 UI 字体，不挂等宽栈**（`index.css` 的 `kbd` 元素规则；组件不要给 kbd 挂 `font-mono`——class 会盖掉它）：mac 的修饰键符号（⌘⇧⌥⌃）在 Menlo 里是另画的一套「小图标」——墨迹只有大写字高的 47%–76%，⌘⌥⌃ 还整体浮在基线上方，与字母的大小、基线都对不齐；系统字体（SF Pro）里这组符号与字母同源设计，macOS 菜单的快捷键即此观感。
 - 字阶：正文 14px；控件 13px（标签栏 12px）；元信息 11px；设置标题 17px；终端空态标题 24px / 宽窗 28px。空态展示标题是唯一大字使用场景。终端仍是 13px 等宽、1.25 行高。
 - 设置页 `max-w-6xl` 居中；依据实际内容宽度做容器查询，导航在设置容器 <640px 时缩成 44px 图标栏，否则 176px；面板是唯一滚动区。
 

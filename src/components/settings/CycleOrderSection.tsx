@@ -64,7 +64,7 @@ export function CycleOrderSection({
    <div className="flex flex-wrap items-center gap-2">
     <Repeat size={16} aria-hidden className="text-muted" />
     <h2 className="text-sm font-semibold">{t.cycleSection}</h2>
-    <kbd className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted">Ctrl+P</kbd>
+    <kbd className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted">Ctrl+P</kbd>
     <button
      onClick={onRefresh}
      disabled={busy || saving}
