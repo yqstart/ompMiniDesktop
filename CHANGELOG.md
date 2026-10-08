@@ -4,6 +4,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **签名脚本生成的 p12 改用旧式算法（`-legacy`），CI 不再报 `MAC verification failed`**：OpenSSL 3 默认的 PBES2/AES-256 打包会被 macOS 的 `security import` 拒绝——Release 工作流里 tauri CLI 正是走它导入证书；脚本现在在支持时加 `-legacy`（RC2/3DES + SHA1 经典格式），LibreSSL / OpenSSL 1.x 无该选项、默认即旧式。
+
 ## [0.10.0] - 2026-10-08
 
 ### Changed

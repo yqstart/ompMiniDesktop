@@ -79,10 +79,18 @@ EOF
     -keyout "$DIR/key.pem" -out "$DIR/cert.pem" -config "$CONF" 2>/dev/null
 
   P12_PASS="$(openssl rand -base64 24)"
-  # 注意：p12 是现代算法（AES-256）打包，给 CI 的 tauri 用（它自己解析）；
-  # 本机导入不走 p12——macOS 的 security 认不了现代算法，直接导 PEM。
-  openssl pkcs12 -export -inkey "$DIR/key.pem" -in "$DIR/cert.pem" \
-    -name "$CN" -out "$DIR/signing.p12" -passout "pass:$P12_PASS"
+  # p12 必须用「旧式」算法（RC2/3DES + SHA1）打包：CI 里 tauri CLI 用 macOS 的
+  # `security import` 导入它，而 security 认不了 OpenSSL 3 默认的 PBES2/AES-256
+  #（报 "MAC verification failed during PKCS12 import"，Release 构建会在此失败）。
+  # OpenSSL 3.x 加 -legacy 回到经典格式；LibreSSL / OpenSSL 1.x 没有该选项、默认即旧式。
+  # 本机导入不走 p12（直接导 PEM）——这份 p12 只为 CI 的 secrets。
+  if openssl pkcs12 -help 2>&1 | grep -q -- "-legacy"; then
+    openssl pkcs12 -export -legacy -inkey "$DIR/key.pem" -in "$DIR/cert.pem" \
+      -name "$CN" -out "$DIR/signing.p12" -passout "pass:$P12_PASS"
+  else
+    openssl pkcs12 -export -inkey "$DIR/key.pem" -in "$DIR/cert.pem" \
+      -name "$CN" -out "$DIR/signing.p12" -passout "pass:$P12_PASS"
+  fi
   printf '%s' "$P12_PASS" > "$DIR/p12.pass"
   base64 -i "$DIR/signing.p12" | tr -d '\n' > "$DIR/signing.p12.b64"
   echo "✔ 证书文件已生成：$DIR"
