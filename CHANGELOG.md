@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-08
+
 ### Changed
 - **macOS 产物改用固定身份的签名证书：TCC 授权（桌面 / 文稿 / 下载文件夹）不再每次更新重弹**：ad-hoc 签名（`signingIdentity: "-"`）的签名身份是二进制的 cdhash——每次构建都变，系统把每个新版本当成新 app，反复弹「想访问"桌面"文件夹」（排障里的老问题）。现在产物的签名身份是**一张固定的自签名证书**（CN `ompMiniDesktop Signing`，10 年有效）：本机跑一次 `bash scripts/make-signing-cert.sh` 生成并装入登录钥匙串（系统弹框输登录密码 + 一次「始终允许」，皆一次性），`pnpm tauri:build` 经 `scripts/tauri-build.mjs` 检测到身份就注入 `APPLE_SIGNING_IDENTITY` 签名——**没装证书的机器照常 ad-hoc 构建**（他人 clone / 新机器不受影响）；Release 工作流的两个 macOS 矩阵用 `APPLE_CERTIFICATE` / `APPLE_CERTIFICATE_PASSWORD` secrets（tauri CLI 自动导入临时钥匙串，guard job 缺这两个 secrets 直接挡发版）。从 ad-hoc 切到签名后**第一次**运行仍会弹一次授权（旧记录匹配不上），之后跨构建 / 跨应用内更新不再弹。自签名无法公证：首次安装的 Gatekeeper 拦截与现状相同（右键打开 / 去 quarantine）。
 - **omp 的运行环境诊断搬进 omp 更新弹窗，设置 ›「关于」页签退场（V31）**：omp 路径 / agentDir / 重新检测 / 指定路径此前是「关于」页唯一的区块（应用更新 V30 已搬去字标行的 chip），现在整块搬进**字标行 omp 版本 chip 点开的弹窗**——事实表（当前版本 / 最新版本 / 更新渠道 / 上次检查）下面多一块「omp 诊断」：状态徽章（正常 / 不可用）+「重新检测」（重跑健康检查 `get_health`——与弹窗底部查新版本的「重新检查」是两件事，都在）+「指定路径」（系统文件选择器，与顶部横幅同一入口）+ omp 路径与 agentDir 两行（各带复制键，值缺失时不渲染复制键）+ 健康错误与一行说明。搬完之后「关于」页没有别的内容，**整个页签退场**（设置页八 → 七个页签：常用设置 / 模型 / 插件 / 技能 / 记忆 + 使用统计 / 已归档对话），omp 找不到时（chip 不渲染、弹窗开不出来）仍由顶部 `HealthBanner` 兜底；「常用设置」页在 omp 未找到时的提示文案同步改指新位置。实测（构建产物 + `__TAURI_INTERNALS__` mock 的真实 Chromium）：点 chip 开弹窗 → 诊断块渲染路径 / agentDir / 两枚按钮 / 说明；点「重新检测」后端 `get_health` 重跑一次（mock 计数 1 → 2）；设置页 `role="tab"` 只剩七项、`#settings-tab-about` 不存在。见 `docs/v31-schedule.md`。
