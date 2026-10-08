@@ -97,7 +97,7 @@ $ echo $?                              # 0
 
 | 链路 | 管什么 | 状态 | 入口 |
 |---|---|---|---|
-| `UpdateState`（既有） | **本应用**（Tauri updater → GitHub Release `latest.json`） | `store.update` | 左栏「设置」入口小点 + 设置 ›「关于」+ 启动静默 |
+| `UpdateState`（既有） | **本应用**（Tauri updater → GitHub Release `latest.json`） | `store.update` | 左栏「设置」入口小点 + 设置 ›「关于」+ 启动静默（**已由 V30 迁移**：入口 = 字标行的应用版本 chip → `UpdateDialog`，设置小点退场；见 `docs/v30-schedule.md`） |
 | `OmpUpdate` / `OmpUpdateRun`（本期） | **omp 运行时**（`omp update --check` / `omp update`） | `store.ompUpdate` / `store.ompUpdateRun` | 左栏字标行版本 chip + 弹窗 |
 | 插件 / 技能 | omp 的扩展 | 各自面板 | 设置页 |
 
@@ -236,7 +236,7 @@ $ echo $?                              # 0
 - **`Already up to date` 是英文硬编码匹配**：上游改文案会让解析落到「输出无法解析」分支
   （报检查失败而不是谎报已是最新）。`--ignored` 的真实检查测试会在上游改口径时先炸出来。
 - **版本号是字符串比较**：壳侧不比较版本，只转述上游结论（谁新谁旧由 `omp` 判断，壳侧不猜）。
-- **手动指定路径钉的是那一份二进制**：设置 ›「关于」里指定过的 omp 路径优先于登录 shell 的 PATH；
+- **手动指定路径钉的是那一份二进制**：omp 更新弹窗的「omp 诊断」里指定过的 omp 路径优先于登录 shell 的 PATH（V31 前这个入口在设置 ›「关于」）；
   若指到 `Cellar/omp/<版本>/bin/omp` 这种带版本号的路径，Homebrew 升级后旧 Cellar 目录通常还在
   （`brew cleanup` 之前），chip 会继续显示旧版本——这是「用户指定了哪一份」的语义，不是 bug。
 - **chip 宽度**：`max-w-[86px]` + 截断，canary 长版本号（如 `18.4.2-canary.1`）也放得下；

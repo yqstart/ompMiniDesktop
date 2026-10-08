@@ -5,9 +5,11 @@ import type { UpdateState } from "@shared/types";
 
 /**
  * 应用内更新：直接面向 GitHub Release `latest.json`（Tauri updater 标准链路）。
- * - auto（启动静默检查）：有更新只点亮入口 + toast 提示，不打断用户。
- * - manual（设置页按钮）：有更新弹「立即更新 / 稍后」；无更新给明确反馈。
- * - 稍后：关闭弹窗但保留顶栏入口 + 状态，下次启动重新检查。
+ * 入口 = 左栏字标行的版本 chip（V30，`components/sidebar/AppUpdateChip.tsx`）→ `UpdateDialog`；
+ * 检查更新的按钮也在弹窗里（设置 ›「关于」的更新区块已随 V30 迁走）。
+ * - auto（启动静默检查）：有更新弹窗提醒（本轮已「稍后」过则只留 chip 上的状态），不打断用户。
+ * - manual（chip / 弹窗里点检查）：有更新弹窗；无更新 / 失败在弹窗里给明确反馈。
+ * - 稍后：关闭弹窗但保留 chip 上的状态，下次启动重新检查。
  * - 安装完成：询问「立即重启 / 稍后」（稍后则下次启动生效）。
  */
 
@@ -23,14 +25,20 @@ function setUpdate(p: { update?: UpdateState; updateDismissedVersion?: string | 
  useApp.setState(p as never);
 }
 
-export async function getAppVersion(): Promise<string> {
- if (!isTauri()) return "dev";
- try {
-  const { getVersion } = await import("@tauri-apps/api/app");
-  return await getVersion();
- } catch {
-  return "dev";
- }
+let versionPromise: Promise<string> | null = null;
+
+/** 本应用版本（非 Tauri 环境或取不到时给 "dev"）。单飞缓存——一次运行里版本不变。 */
+export function getAppVersion(): Promise<string> {
+ versionPromise ??= (async () => {
+  if (!isTauri()) return "dev";
+  try {
+   const { getVersion } = await import("@tauri-apps/api/app");
+   return await getVersion();
+  } catch {
+   return "dev";
+  }
+ })();
+ return versionPromise;
 }
 
 /** 启动时调用一次：静默检查，有更新只点亮入口。 */
@@ -72,7 +80,7 @@ export async function checkForUpdate(
     current: update.currentVersion,
     body: update.body ?? null,
    },
-   // auto 且本轮已稍后：只点亮入口不弹窗；否则弹窗
+   // auto 且本轮已稍后：只留 chip 上的状态不弹窗；否则弹窗
    updateDialogOpen: mode === "manual" ? true : st.updateDismissedVersion !== update.version,
   });
   return "available";
@@ -86,7 +94,7 @@ export async function checkForUpdate(
  }
 }
 
-/** 稍后：关闭弹窗，保留顶栏入口；本轮 auto 不再弹窗打扰。 */
+/** 稍后：关闭弹窗，chip 上的状态保留；本轮 auto 不再弹窗打扰。 */
 export function deferUpdate(): void {
  const st = useApp.getState();
  if (st.update.status === "available") {

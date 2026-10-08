@@ -6,7 +6,8 @@ import { useText } from "../../lib/useText";
 
 /**
  * omp 运行时版本 chip（左栏字标行右端，V24）：显示当前 omp 版本 + 上次检查的结论，
- * 点击打开 `OmpUpdateDialog`。
+ * 点击打开 `OmpUpdateDialog`。右端与 `AppUpdateChip`（本应用版本）并排，对齐由字标行的
+ * 右端容器负责（这里不再自带 `ml-auto`）。
  *
  * - 状态色与终端 π 同一套语义：有新版本 `accent`、已是最新 `ok`、检查失败 `warn`、
  *   还没查过 `faint`——**颜色不是唯一信号**，完整结论（版本 / 渠道 / 失败原因）在
@@ -53,14 +54,14 @@ export function OmpUpdateChip() {
    onClick={openOmpUpdateDialog}
    aria-label={label}
    title={label}
-   className="ml-auto flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-md border border-border bg-surface px-1.5 font-mono text-[11px] leading-none text-muted transition-colors duration-100 hover:border-accent/30 hover:bg-hover hover:text-foreground"
+   className="flex h-6 min-w-0 cursor-pointer items-center gap-1 rounded-md border border-border bg-surface px-1.5 font-mono text-[11px] leading-none text-muted transition-colors duration-100 hover:border-accent/30 hover:bg-hover hover:text-foreground"
   >
    {updating || checking ? (
     <Loader size={12} aria-hidden className="shrink-0 animate-spin" />
    ) : (
     <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${tone}`} />
    )}
-   <span className="max-w-[86px] truncate">{available && ompUpdate.latest ? ompUpdate.latest : version}</span>
+   <span className="min-w-0 max-w-[86px] truncate">{available && ompUpdate.latest ? ompUpdate.latest : version}</span>
   </button>
  );
 }

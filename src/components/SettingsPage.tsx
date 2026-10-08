@@ -1,8 +1,4 @@
-import { Archive, ChartBar, Check, Copy, FolderError, InfoCircle, Key, Loader, Notebook, Plug, Puzzle, Refresh, Sliders } from "reicon-react";
-import { useApp } from "../stores/app";
-import { checkForUpdate, getAppVersion, openUpdateDialog } from "../lib/appUpdate";
-import { pickOmpExecutable, refreshOmpHealth } from "../lib/ompDiag";
-import { fmt } from "../lib/locale";
+import { Archive, ChartBar, Key, Notebook, Plug, Puzzle, Sliders } from "reicon-react";
 import { useText } from "../lib/useText";
 import { useEffect, useRef, useState } from "react";
 import { ArchivedSessions } from "./ArchivedSessions";
@@ -14,33 +10,28 @@ import { ModelsPanel } from "./settings/ModelsPanel";
 import { UsagePanel } from "./settings/UsagePanel";
 
 /** 设置页分页签；顺序即界面顺序。 */
-type SettingsTab = "general" | "models" | "plugins" | "skills" | "memories" | "about" | "usage" | "archived";
+type SettingsTab = "general" | "models" | "plugins" | "skills" | "memories" | "usage" | "archived";
 const TAB_ICONS = {
  general: Sliders,
  models: Key,
  plugins: Plug,
  skills: Puzzle,
  memories: Notebook,
- about: InfoCircle,
  usage: ChartBar,
  archived: Archive,
 };
 /**
  * 左栏两组（组标题 + 组间分隔线）：上组读写的是 **omp** 的配置与数据，
- * 下组是本应用自己的信息与设置（更新 / 诊断、会话统计、归档管理）。
+ * 下组是本应用自己的信息与设置（会话统计、归档管理）。
  * 页内的快捷定位 chips 已删——区块不多，左栏切页就是唯一导航。
  */
 const TAB_GROUPS: { label: "settingsGroupOmp" | "settingsGroupApp"; tabs: SettingsTab[] }[] = [
  { label: "settingsGroupOmp", tabs: ["general", "models", "plugins", "skills", "memories"] },
- { label: "settingsGroupApp", tabs: ["about", "usage", "archived"] },
+ { label: "settingsGroupApp", tabs: ["usage", "archived"] },
 ];
 
 export function SettingsPage({ visible = true }: { visible?: boolean }) {
- const { health, update } = useApp();
  const t = useText();
- const [version, setVersion] = useState("…");
- const [diagError, setDiagError] = useState<string | null>(null);
- const [copied, setCopied] = useState(false);
  const [tab, setTab] = useState<SettingsTab>("general");
  const pageRef = useRef<HTMLDivElement>(null);
  const panelRef = useRef<HTMLDivElement>(null);
@@ -67,41 +58,6 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
   target?.focus({ preventScroll: true });
  }, [visible]);
 
- useEffect(() => {
-  void getAppVersion().then(setVersion);
- }, []);
-
- const runDiag = async (fn: () => Promise<{ ok: boolean; message?: string } | null>) => {
-  const res = await fn();
-  setDiagError(res && !res.ok ? (res.message ?? t.opFailed) : null);
- };
-
- const copyAgentDir = async () => {
-  const p = health?.omp.agentDir;
-  if (!p) return;
-  try {
-   await navigator.clipboard.writeText(p);
-   setCopied(true);
-   window.setTimeout(() => setCopied(false), 1500);
-  } catch {
-   setDiagError(t.copyFailed);
-  }
- };
-
- const checking = update.status === "checking";
- const updateHint =
-  update.status === "latest"
-   ? fmt(t.updateLatest, update.current)
-   : update.status === "available"
-    ? fmt(t.updateAvailable, update.version)
-    : update.status === "downloading"
-     ? t.updateDownloading
-     : update.status === "ready"
-      ? fmt(t.updateReady, update.version)
-      : update.status === "error"
-       ? fmt(t.updateError, update.message)
-       : null;
-
  // 设置标签面板：切到终端标签只隐藏（页签选择、滚动位置都保留），关闭标签才卸载
  return (
   <div
@@ -125,9 +81,10 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
           供应商 / 我的模型 / 模型角色 / 快速切换环 / 失败转移）、插件（V23：`omp plugin` 的
           清单 / 启停 / 特性 / 安装 / 卸载 / 体检）、技能（V23：`omp skill list` 的发现结果 +
           逐项启停 + SKILL.md 预览）、记忆（omp 项目记忆的查看 / 删除）。
-          本应用组：关于（本应用更新与 omp 运行环境诊断；
-          界面语言与皮肤是纯展示层偏好，入口在左栏底部「设置」行，这里不重复放）、
-          使用统计（会话 jsonl 的用量聚合，只读）、已归档对话（归档管理面，归档会话不在左栏出现）。 */}
+          本应用组：使用统计（会话 jsonl 的用量聚合，只读）、已归档对话（归档管理面，归档会话不在左栏出现）。
+          本应用的更新在左栏字标行的应用版本 chip；omp 的运行环境诊断（路径 / agentDir /
+          重新检测 / 指定路径）在字标行 omp 版本 chip 的弹窗里（V31）；界面语言与皮肤是纯展示层
+          偏好，入口在左栏底部「设置」行，这里不重复放。 */}
    <nav aria-label={t.title} className="flex w-11 shrink-0 flex-col border-r border-border-soft pr-2 @min-[640px]/settings:w-40 @min-[640px]/settings:pr-3">
     <div
      role="tablist"
@@ -169,11 +126,9 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
              ? t.tabSkills
              : k === "memories"
               ? t.tabMemories
-              : k === "about"
-               ? t.tabAbout
-               : k === "usage"
-                ? t.tabUsage
-                : t.tabArchived;
+              : k === "usage"
+               ? t.tabUsage
+               : t.tabArchived;
         return (
          <button
           key={k}
@@ -219,117 +174,13 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
      <MemoryPanel />
     ) : tab === "usage" ? (
      <UsagePanel />
-    ) : tab === "general" ? (
+    ) : (
      <>
       <div className="shrink-0">
        <h2 className="text-[20px] font-semibold tracking-tight">{t.tabGeneral}</h2>
        <p className="mt-1 text-[13px] text-muted">{t.tabGeneralHint}</p>
       </div>
       <GeneralSettingsPanel />
-     </>
-    ) : (
-     <>
-      <div className="shrink-0">
-       <h2 className="text-[20px] font-semibold tracking-tight">{t.tabAbout}</h2>
-       <p className="mt-1 text-[13px] text-muted">{t.tabAboutHint}</p>
-      </div>
-
-      <section aria-label={t.updateSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
-       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-sm font-semibold">{t.updateSection}</h2>
-        <span className="font-mono text-xs text-muted">
-         {t.current} v{version}
-        </span>
-        <button
-         onClick={() =>
-          void checkForUpdate("manual").then((r) => {
-           if (r === "available") openUpdateDialog();
-          })
-         }
-         disabled={checking}
-         className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
-         aria-label={t.checkUpdate}
-        >
-         {checking ? <Loader size={14} className="animate-spin" aria-hidden /> : <Refresh size={14} aria-hidden />}
-         {t.checkUpdate}
-        </button>
-       </div>
-       {updateHint && (
-        <div className="mt-2 text-sm text-muted">
-         {updateHint}
-         {(update.status === "available" || update.status === "ready") && (
-          <button onClick={openUpdateDialog} className="ml-2 cursor-pointer text-accent">
-           {t.viewDetail}
-          </button>
-         )}
-        </div>
-       )}
-       <p className="mt-3 text-[13px] leading-relaxed text-muted">{t.updateFoot}</p>
-      </section>
-
-      <section aria-label={t.diagSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
-       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-sm font-semibold">{t.diagSection}</h2>
-        <span className={`rounded-sm px-2 py-0.5 font-mono text-[11px] ${health?.ok ? "bg-ok/10 text-ok" : "bg-warn/10 text-warn"}`}>
-         {health?.ok ? t.diagOk : t.diagBad}
-        </span>
-        <button
-         onClick={() => void runDiag(refreshOmpHealth)}
-         className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover"
-         aria-label={t.recheck}
-        >
-         <Refresh size={12} aria-hidden />
-         {t.recheck}
-        </button>
-        <button
-         onClick={() => void runDiag(pickOmpExecutable)}
-         className="flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover"
-         aria-label={t.pickPath}
-         title={t.pickPathTitle}
-        >
-         <FolderError size={12} aria-hidden />
-         {t.pickPath}
-        </button>
-       </div>
-       <dl className="mt-4 space-y-3 rounded-md bg-background p-3 text-[13px]">
-        <div className="flex gap-2">
-         <dt className="w-20 shrink-0 text-muted">{t.ompPath}</dt>
-         <dd className="min-w-0 flex-1 font-mono break-all">{health?.omp.ompPath ?? t.notFound}</dd>
-        </div>
-        <div className="flex gap-2">
-         <dt className="w-20 shrink-0 text-muted">{t.version}</dt>
-         <dd className="min-w-0 flex-1 font-mono break-all">{health?.omp.ompVersion ?? t.unknown}</dd>
-        </div>
-        <div className="flex gap-2">
-         <dt className="w-20 shrink-0 text-muted">agentDir</dt>
-         <dd className="flex min-w-0 flex-1 items-start gap-1.5">
-          <span className="min-w-0 flex-1 font-mono break-all">{health?.omp.agentDir ?? t.unknown}</span>
-          <button
-           onClick={() => void copyAgentDir()}
-           className="shrink-0 cursor-pointer rounded-md border border-border p-1 text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
-           aria-label={t.copyAgentDir}
-           title={t.copyPath}
-          >
-           {copied ? <Check size={11} aria-hidden /> : <Copy size={11} aria-hidden />}
-          </button>
-         </dd>
-        </div>
-       </dl>
-       {(health?.omp.errors.length ?? 0) > 0 && (
-        <ul className="mt-2 space-y-0.5 text-[13px] text-warn">
-         {health?.omp.errors.map((e) => (
-          <li key={e}>{e}</li>
-         ))}
-        </ul>
-       )}
-       {health?.modelsError && <p className="mt-1 text-[13px] text-warn">{health.modelsError}</p>}
-       {diagError && (
-        <p role="alert" className="mt-1 text-[13px] text-danger">
-         {diagError}
-        </p>
-       )}
-       <p className="mt-3 text-[13px] leading-relaxed text-faint">{t.diagFoot}</p>
-      </section>
      </>
     )}
    </div>

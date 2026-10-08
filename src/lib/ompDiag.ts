@@ -5,7 +5,7 @@ import { autoCheckOmpUpdate } from "./ompUpdate";
 import { TEXT } from "./locale";
 
 /**
- * omp 自检与手动指定路径（设置页诊断区 + 顶部引导横幅共用一份实现）。
+ * omp 自检与手动指定路径（omp 更新弹窗的「omp 诊断」块 + 顶部引导横幅共用一份实现）。
  *
  * 为什么需要：GUI 启动的进程 PATH 只有 launchd 默认值，homebrew / ~/.local/bin
  * 常常不在其中——用户装了 omp 也会被判"未找到"。所以引导横幅不能只报错，

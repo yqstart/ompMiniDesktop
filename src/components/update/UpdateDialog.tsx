@@ -1,15 +1,18 @@
-import { Download, Loader, X } from "reicon-react";
+import { useEffect, useState } from "react";
+import { CheckCircle, Download, Loader, Refresh, TriangleWarning, X } from "reicon-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useApp } from "../../stores/app";
-import { checkForUpdate, deferUpdate, installUpdate, relaunchToApply } from "../../lib/appUpdate";
+import { checkForUpdate, deferUpdate, getAppVersion, installUpdate, relaunchToApply } from "../../lib/appUpdate";
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
 import { MarkdownLink } from "../MarkdownLink";
 
 /**
- * 应用更新弹窗（V11：顶栏 UpdateBell 退场后，由 App 常驻挂载、`updateDialogOpen` 控制显隐；
- * 有更新的常驻提醒改由左栏「设置」入口上的小点承担）。
+ * 应用更新弹窗（App 常驻挂载、`updateDialogOpen` 控制显隐）：入口 = 左栏字标行的版本 chip
+ * （V30；「应用更新」区块已从设置 ›「关于」迁到这里，检查更新按钮也在弹窗里）。
+ * **所有状态都渲染**（idle / checking / latest 也开得出东西）——chip 点开永远有内容，
+ * 图标与颜色只是补充，完整结论在文案里。
  */
 function Progress({ downloaded, total }: { downloaded: number; total: number | null }) {
  const t = useText();
@@ -28,25 +31,71 @@ function Progress({ downloaded, total }: { downloaded: number; total: number | n
 export function UpdateDialog() {
  const { update, set } = useApp();
  const t = useText();
- if (update.status !== "available" && update.status !== "downloading" && update.status !== "ready" && update.status !== "error") {
-  return null;
- }
+ const [version, setVersion] = useState<string | null>(null);
+
+ useEffect(() => {
+  void getAppVersion().then(setVersion);
+ }, []);
+
  const close = () => set({ updateDialogOpen: false });
+ const checking = update.status === "checking";
+ const available = update.status === "available";
+ const latest = update.status === "latest";
+ // 检查结果里有当前版本就用它（权威），否则用 app 版本（idle / checking 还没有结果）
+ const current = available || latest ? update.current : version ?? t.unknown;
+ // idle / checking / latest 是「没事可做」的三种状态：同一个版式，区别只在状态行
+ const idleLayout = update.status === "idle" || checking || latest;
+ const status =
+  checking
+   ? { icon: <Loader size={16} aria-hidden className="shrink-0 animate-spin text-muted" />, title: t.updateChecking }
+   : latest
+    ? { icon: <CheckCircle size={16} aria-hidden className="shrink-0 text-ok" />, title: fmt(t.updateLatest, update.current) }
+    : available
+     ? { icon: <Download size={16} aria-hidden className="shrink-0 text-accent" />, title: fmt(t.updateAvailable, update.version) }
+     : update.status === "downloading"
+      ? { icon: <Loader size={16} aria-hidden className="shrink-0 animate-spin text-muted" />, title: t.updateDownloading }
+      : update.status === "ready"
+       ? { icon: <CheckCircle size={16} aria-hidden className="shrink-0 text-ok" />, title: t.updateReadyTitle }
+       : update.status === "error"
+        ? { icon: <TriangleWarning size={16} aria-hidden className="shrink-0 text-warn" />, title: t.updateFailedTitle }
+        : { icon: <Download size={16} aria-hidden className="shrink-0 text-muted" />, title: t.updateSection };
 
  return (
   <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={t.updateDialogAria}>
    <div className="w-[420px] max-w-full rounded-xl border border-border bg-elevated p-6 shadow-dialog">
     <div className="flex items-center gap-2">
-     <Download size={16} className="text-accent" aria-hidden />
-     <h2 className="text-[15px] font-semibold">
-      {update.status === "ready" ? t.updateReadyTitle : update.status === "downloading" ? t.updateDownloading : update.status === "error" ? t.updateFailedTitle : fmt(t.updateAvailable, update.status === "available" ? update.version : "")}
-     </h2>
-     <button onClick={update.status === "available" ? deferUpdate : close} className="ml-auto cursor-pointer rounded p-1.5 transition-colors duration-100 hover:bg-hover" aria-label={t.updateDeferAria}>
+     {status.icon}
+     <h2 className="text-[15px] font-semibold">{status.title}</h2>
+     <button onClick={available ? deferUpdate : close} className="ml-auto cursor-pointer rounded p-1.5 transition-colors duration-100 hover:bg-hover" aria-label={available ? t.updateDeferAria : t.close}>
       <X size={14} aria-hidden />
      </button>
     </div>
 
-    {update.status === "available" && (
+    {idleLayout && (
+     <>
+      {update.status === "idle" && (
+       <p className="mt-2 text-sm text-muted">
+        {t.current} <span className="font-mono">v{current}</span>
+       </p>
+      )}
+      <p className="mt-3 text-[13px] leading-relaxed text-faint">{t.updateFoot}</p>
+      {!checking && (
+       <div className="mt-3 flex justify-end gap-2">
+        <button onClick={close} className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover">
+         {t.close}
+        </button>
+        <button
+         onClick={() => void checkForUpdate("manual")}
+         className="flex cursor-pointer items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-[13px] text-accent-foreground transition-opacity duration-100 hover:opacity-90"
+        >
+         <Refresh size={14} aria-hidden /> {t.checkUpdate}
+        </button>
+       </div>
+      )}
+     </>
+    )}
+
+    {available && (
      <>
       <p className="mt-2 text-sm text-muted">{fmt(t.updateCurrentTo, update.current, update.version)}</p>
       {update.body && (

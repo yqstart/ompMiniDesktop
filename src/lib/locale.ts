@@ -149,10 +149,11 @@ const ZH = {
  updateDownloadedKb: "已下载 {0} KB…",
  updateProgressAria: "下载进度",
  updateDialogAria: "应用更新",
+ updateChecking: "正在检查更新…",
  updateReadyTitle: "更新已就绪",
  updateFailedTitle: "更新失败",
  updateDeferAria: "稍后更新",
- updateCurrentTo: "当前 {0} → 新版 {1}。稍后可在设置 › 关于里重新打开。",
+ updateCurrentTo: "当前 {0} → 新版 {1}。稍后点左栏字标行的版本 chip 可重新打开。",
  updateNotes: "本次更新",
  updateLater: "稍后更新",
  updateNow: "立即更新",
@@ -160,6 +161,14 @@ const ZH = {
  updateRestartAsk: "新版本已下载完成，重启后生效。现在重启吗？",
  updateRestartLater: "稍后重启",
  updateRestartNow: "立即重启",
+
+ // 应用版本 chip（V30：左栏字标行右端，与 omp 版本 chip 并排）
+ updateChipIdle: "本应用 v{0} · 点击检查更新",
+ updateChipLatest: "本应用已是最新（{0}）· 点击查看",
+ updateChipAvailable: "本应用有新版本：{0} → {1} · 点击查看",
+ updateChipDownloading: "正在下载应用更新…",
+ updateChipReady: "应用更新已下载（{0}），重启后生效 · 点击查看",
+ updateChipError: "检查应用更新失败 · 点击查看",
 
  // omp 运行时更新（V24：左栏字标行的版本 chip + 详情弹窗）
  ompUpdateEntryAria: "检查 omp 更新",
@@ -235,7 +244,6 @@ const ZH = {
  pickPath: "指定路径",
  pickPathTitle: "指定 omp 可执行文件（GUI 启动的 PATH 常不含 homebrew 目录）",
  ompPath: "omp 路径",
- version: "版本",
  notFound: "未找到",
  unknown: "未知",
  copyAgentDir: "复制 agentDir",
@@ -246,12 +254,10 @@ const ZH = {
  updateSection: "应用更新",
  current: "当前",
  checkUpdate: "检查更新",
- viewDetail: "查看详情",
  updateFoot: "更新包来自 GitHub Release；下载完成后可选择立即重启或稍后重启（下次启动生效）。",
  updateLatest: "已是最新（{0}）",
  updateAvailable: "发现新版本 {0}",
  updateDownloading: "正在下载更新…",
- updateReady: "新版本 {0} 已就绪，重启生效",
  updateError: "检查失败：{0}",
  // 左栏两组：omp（改 omp 的配置与数据）/ 本应用自己的设置与信息
  settingsGroupOmp: "omp",
@@ -260,8 +266,6 @@ const ZH = {
  tabGeneralHint: "omp 的常用设置一览，按上游分组",
  tabModels: "模型",
  tabModelsHint: "连接供应商，安排模型角色与切换顺序",
- tabAbout: "关于",
- tabAboutHint: "本应用的更新，与 omp 运行环境诊断",
  tabArchived: "已归档对话",
  tabArchivedHint: "恢复或删除已归档的对话",
  ompSettingsNoMatch: "没有匹配的设置",
@@ -567,7 +571,7 @@ const ZH = {
  ompSettingsReset: "恢复 omp 默认值",
  ompSettingsTuiOnly: "仅 TUI 生效",
  ompSettingsDefault: "默认",
- ompSettingsMissing: "未找到 omp——先在「关于」页的诊断区指定 omp 路径。",
+ ompSettingsMissing: "未找到 omp——先用顶部横幅的「重新检测 / 指定路径」指定；omp 就绪后，安装信息与诊断在左栏字标行 omp 版本 chip 的弹窗里。",
  // 设置面板（设置 ›「常用设置」）的文案；展示哪些键由 `lib/settingsList.ts` 的清单过滤，
  // 分组 / 枚举取值来自上游人读清单，值与说明来自 --json
  allSettingsHint:
@@ -987,10 +991,11 @@ const EN: Record<TextKey, string> = {
  updateDownloadedKb: "{0} KB downloaded…",
  updateProgressAria: "Download progress",
  updateDialogAria: "App update",
+ updateChecking: "Checking for updates…",
  updateReadyTitle: "Update ready",
  updateFailedTitle: "Update failed",
  updateDeferAria: "Update later",
- updateCurrentTo: "Current {0} → {1}. You can reopen this later in Settings › About.",
+ updateCurrentTo: "Current {0} → {1}. You can reopen this from the version chip in the sidebar.",
  updateNotes: "What's new",
  updateLater: "Later",
  updateNow: "Update now",
@@ -998,6 +1003,14 @@ const EN: Record<TextKey, string> = {
  updateRestartAsk: "The new version is downloaded and applies after a restart. Restart now?",
  updateRestartLater: "Restart later",
  updateRestartNow: "Restart now",
+
+ // App version chip (V30: right end of the sidebar wordmark row, next to the omp chip)
+ updateChipIdle: "This app v{0} · Click to check for updates",
+ updateChipLatest: "This app is up to date ({0}) · Click for details",
+ updateChipAvailable: "This app has an update: {0} → {1} · Click for details",
+ updateChipDownloading: "Downloading app update…",
+ updateChipReady: "App update downloaded ({0}), restart to apply · Click for details",
+ updateChipError: "App update check failed · Click for details",
 
  // omp runtime updates (V24: version chip in the sidebar wordmark row + its dialog)
  ompUpdateEntryAria: "Check for omp updates",
@@ -1068,7 +1081,6 @@ const EN: Record<TextKey, string> = {
  pickPath: "Set path",
  pickPathTitle: "Point to the omp executable (GUI PATH often misses the homebrew dir)",
  ompPath: "omp path",
- version: "Version",
  notFound: "Not found",
  unknown: "Unknown",
  copyAgentDir: "Copy agentDir",
@@ -1079,12 +1091,10 @@ const EN: Record<TextKey, string> = {
  updateSection: "App updates",
  current: "Current",
  checkUpdate: "Check for updates",
- viewDetail: "Details",
  updateFoot: "Updates come from GitHub Releases; after download, restart now or later (takes effect on next launch).",
  updateLatest: "Already latest ({0})",
  updateAvailable: "New version {0} available",
  updateDownloading: "Downloading update…",
- updateReady: "New version {0} ready, restart to apply",
  updateError: "Check failed: {0}",
  // Left nav has two groups: omp (its config & data) / this app's own settings
  settingsGroupOmp: "omp",
@@ -1093,8 +1103,6 @@ const EN: Record<TextKey, string> = {
  tabGeneralHint: "The omp settings at a glance, grouped as upstream",
  tabModels: "Models",
  tabModelsHint: "Connect providers and arrange roles and switch order",
- tabAbout: "About",
- tabAboutHint: "This app's updates and the omp runtime diagnostics",
  tabArchived: "Archived chats",
  tabArchivedHint: "Restore or delete archived chats",
  ompSettingsNoMatch: "No matching settings",
@@ -1393,7 +1401,7 @@ const EN: Record<TextKey, string> = {
  ompSettingsReset: "Reset to omp's default",
  ompSettingsTuiOnly: "TUI only",
  ompSettingsDefault: "Default",
- ompSettingsMissing: "omp not found — set its path in the diagnostics section under About.",
+ ompSettingsMissing: "omp not found — use “Re-check / Set path” in the banner at the top first; once omp is ready, its install info and diagnostics live in the dialog behind the omp version chip on the sidebar wordmark row.",
  allSettingsHint:
   "A curated local list of omp's commonly used settings (themes, model, context, tools and more), grouped as upstream does. Writes go to omp's global config (~/.omp/agent/config.yml) and new sessions always pick them up; for the full key list run omp config list in a terminal; hover a row for omp's own description (upstream English, not translated).",
  allSettingsSearch: "Search keys, names, or descriptions…",

@@ -12,6 +12,7 @@ import { TEXT } from "../../lib/locale";
 import { useText } from "../../lib/useText";
 import { LanguageToggle } from "../LanguageToggle";
 import { ThemeToggle } from "../ThemeToggle";
+import { AppUpdateChip } from "./AppUpdateChip";
 import { DropLine } from "./DropLine";
 import { OmpUpdateChip } from "./OmpUpdateChip";
 import { ProjectGroup } from "./ProjectGroup";
@@ -50,7 +51,6 @@ export function WorkspaceSidebar() {
  const projects = useApp((s) => s.projects);
  const workspaceGroups = useApp((s) => s.workspaceGroups);
  const checkouts = useApp((s) => s.checkouts);
- const updateReady = useApp((s) => s.update.status === "available" || s.update.status === "ready");
  const t = useText();
  const [error, setError] = useState<string | null>(null);
  const [sessionsFor, setSessionsFor] = useState<ProjectView | null>(null);
@@ -272,8 +272,11 @@ export function WorkspaceSidebar() {
      <span className="pointer-events-none text-[14px] font-semibold tracking-tight text-foreground">
       <span className="font-mono text-accent">omp</span>MiniDesktop
      </span>
-     {/* omp 运行时版本 chip（V24）：当前版本 + 上次检查结论；点击开详情弹窗 */}
-     <OmpUpdateChip />
+     {/* 字标行右端 = 两个更新入口（V30）：本应用版本 chip + omp 运行时版本 chip */}
+     <div className="ml-auto flex min-w-0 items-center gap-1.5">
+      <AppUpdateChip />
+      <OmpUpdateChip />
+     </div>
     </div>
     <button
      onClick={() => useApp.getState().set({ quickSwitcherOpen: true })}
@@ -401,19 +404,12 @@ export function WorkspaceSidebar() {
       useApp.getState().openSettingsTab();
       useApp.getState().set({ sidebarOpen: false });
      }}
-     className="relative flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+     className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
      aria-label={t.settingsOpenAria}
      title={t.settingsOpenAria}
     >
      <Settings size={15} aria-hidden className="shrink-0" />
      <span className="whitespace-nowrap">{t.settingsOpenAria}</span>
-     {/* 有可用更新：设置入口点亮小点（顶栏 UpdateBell 退场后的常驻提醒） */}
-     {updateReady && (
-      <span
-       aria-hidden
-       className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-accent"
-      />
-     )}
     </button>
     <LanguageToggle />
     <ThemeToggle />

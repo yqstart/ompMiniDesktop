@@ -28,7 +28,7 @@ type AppState = {
  sidebarOpen: boolean;
  update: UpdateState;
  updateDismissedVersion: string | null;
- /** 更新弹窗显隐（available 常驻入口，弹窗可单独关闭=稍后）。 */
+ /** 更新弹窗显隐（入口 = 左栏字标行的应用版本 chip；弹窗可单独关闭=稍后）。 */
  updateDialogOpen: boolean;
  /**
   * omp 运行时更新检查状态（`lib/ompUpdate.ts`；左栏字标行的版本 chip 与详情弹窗用）。
