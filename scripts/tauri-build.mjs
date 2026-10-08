@@ -7,7 +7,7 @@
  * 系统会当成新 app 反复弹授权；固定证书后授权跨构建与应用内更新保留。
  * 但没装证书的机器（他人 clone、新机器）必须还能正常构建，所以：
  *
- * - 找得到身份（登录钥匙串里有 CN = ompMiniDesktop Signing 的完整身份）
+ * - 找得到身份（登录钥匙串里有 CN = Apple Development: ompMiniDesktop Signing 的完整身份）
  *   → 注入 APPLE_SIGNING_IDENTITY 再构建（tauri 用它签名）；
  * - 找不到 / 非 macOS → 原样构建（tauri.conf.json 的 signingIdentity 是 "-"，
  *   即 ad-hoc 签名，行为与以往一致）。
@@ -19,7 +19,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
-const IDENTITY = "ompMiniDesktop Signing";
+const IDENTITY = "Apple Development: ompMiniDesktop Signing";
 
 const env = { ...process.env };
 let found = false;

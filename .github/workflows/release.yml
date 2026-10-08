@@ -149,7 +149,7 @@ jobs:
           # macOS 签名：证书 base64 + 密码交给 tauri CLI，它自己导入临时钥匙串后签名；
           # APPLE_SIGNING_IDENTITY 指定用哪个身份签（CN 与 p12 里的证书一致；
           # 覆盖 tauri.conf.json 的 "-" 基线）。其它平台的构建忽略这三个 env。
-          APPLE_SIGNING_IDENTITY: ompMiniDesktop Signing
+          APPLE_SIGNING_IDENTITY: "Apple Development: ompMiniDesktop Signing"
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         with:

@@ -76,7 +76,7 @@ cargo test --manifest-path src-tauri/Cargo.toml -- --ignored    # 慢测试：�
 pnpm tauri:build    # 产物见 src-tauri/target/release/bundle/
 ```
 
-产物用**固定身份的签名证书**签名（CN `ompMiniDesktop Signing`，自签名、10 年有效）。
+产物用**固定身份的签名证书**签名（CN `Apple Development: ompMiniDesktop Signing`，自签名、10 年有效）。
 一次性设置（macOS）：
 
 ```bash
@@ -157,7 +157,7 @@ bash scripts/make-signing-cert.sh   # 生成证书 → 装入登录钥匙串 →
 | 项目「目录缺失」 | 重定位到新路径，或移除项目（会话归档保留） |
 | 会话「已损坏」 | jsonl 头部解析失败，不阻塞列表，可在弹窗或归档页删除 |
 | 打开的终端没有响应 | 终端进程退出后浮层会给「重启」；或点 `×` 关闭后重开（运行中关闭会先确认） |
-| 反复弹「“ompMiniDesktop”想访问“桌面”（/文稿/下载）文件夹」，明明已授过权 | macOS 按「签名身份」记授权。**已修**：产物改用固定身份的自签名证书（CN `ompMiniDesktop Signing`，`bash scripts/make-signing-cert.sh` 一次性生成并装入登录钥匙串——ad-hoc 签名的身份是每次构建都变的 cdhash，才会反复弹）。从 ad-hoc 切过来后**第一次**仍会弹一次（旧记录匹配不上），之后跨更新不再弹。`tauri:dev` 的开发二进制仍是每次重编的临时身份——嫌弹就把项目放 `~/Projects` 等非保护目录，或固定用打包产物。授权状态错乱时可 `tccutil reset SystemPolicyDesktopFolder com.omnidesktop.mini` 后重授 |
+| 反复弹「“ompMiniDesktop”想访问“桌面”（/文稿/下载）文件夹」，明明已授过权 | macOS 按「签名身份」记授权。**已修**：产物改用固定身份的自签名证书（CN `Apple Development: ompMiniDesktop Signing`，`bash scripts/make-signing-cert.sh` 一次性生成并装入登录钥匙串——ad-hoc 签名的身份是每次构建都变的 cdhash，才会反复弹）。从 ad-hoc 切过来后**第一次**仍会弹一次（旧记录匹配不上），之后跨更新不再弹。`tauri:dev` 的开发二进制仍是每次重编的临时身份——嫌弹就把项目放 `~/Projects` 等非保护目录，或固定用打包产物。授权状态错乱时可 `tccutil reset SystemPolicyDesktopFolder com.omnidesktop.mini` 后重授 |
 
 ---
 

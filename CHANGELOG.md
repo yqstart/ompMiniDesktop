@@ -5,7 +5,7 @@
 ## [Unreleased]
 
 ### Fixed
-- **签名脚本生成的 p12 改用旧式算法（`-legacy`），CI 不再报 `MAC verification failed`**：OpenSSL 3 默认的 PBES2/AES-256 打包会被 macOS 的 `security import` 拒绝——Release 工作流里 tauri CLI 正是走它导入证书；脚本现在在支持时加 `-legacy`（RC2/3DES + SHA1 经典格式），LibreSSL / OpenSSL 1.x 无该选项、默认即旧式。
+- **CI 的 macOS 签名链路修好：p12 换旧式算法、证书 CN 补 Apple 前缀、DN 补 OU**：首个 0.10.0 构建在 macOS 矩阵连挂两处——①`security import` 拒收 OpenSSL 3 默认的 PBES2/AES-256 打包（`MAC verification failed during PKCS12 import`），脚本改为支持时用 `-legacy`（RC2/3DES + SHA1 经典格式）；②tauri 的签名身份解析（tauri-macos-sign）**只按 7 个 Apple 前缀在钥匙串里找证书、且要求证书带 `organizationalUnit`**，自签名证书据此补成 `CN = Apple Development: ompMiniDesktop Signing` + `OU`；`tauri-build.mjs` 与 Release 工作流的 `APPLE_SIGNING_IDENTITY` 同步为完整 CN。
 
 ## [0.10.0] - 2026-10-08
 

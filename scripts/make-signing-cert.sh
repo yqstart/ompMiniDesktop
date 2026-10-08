@@ -11,24 +11,29 @@
 #   ~/.omp-mini-signing/signing.p12      CI 打包证书（含私钥）
 #   ~/.omp-mini-signing/p12.pass         p12 密码
 #   ~/.omp-mini-signing/signing.p12.b64  p12 的 base64（GitHub secrets 用）
-# 证书 CN：ompMiniDesktop Signing，安装到「登录」钥匙串（登录钥匙串平时已解锁，签名不弹框）。
+# 证书 CN：Apple Development: ompMiniDesktop Signing（前缀是 tauri 认身份的硬要求），
+# 安装到「登录」钥匙串（登录钥匙串平时已解锁，签名不弹框）。
 #
 # 运行本脚本时会出现的系统对话框（各一次，之后不再出现）：
 #   1) 「security 想导入密钥到"登录"钥匙串」→ 输入你的登录密码；
 #   2) 「security 想修改信任设置」→ 输入你的登录密码 / 点允许（让系统信任这张证书，仅代码签名用途）；
-#   3) 「codesign 想使用密钥"ompMiniDesktop Signing"」→ 点「始终允许」（末尾的签名冒烟会触发）。
+#   3) 「codesign 想使用密钥"Apple Development: ompMiniDesktop Signing"」→ 点「始终允许」（末尾的签名冒烟会触发）。
 #
 # 用法：
 #   bash scripts/make-signing-cert.sh           # 生成 + 安装（已装过则打印现状）
-#   bash scripts/make-signing-cert.sh --force   # 重新生成证书（轮换；建议先在「钥匙串访问」里删掉旧的 ompMiniDesktop Signing 项）
+#   bash scripts/make-signing-cert.sh --force   # 重新生成证书（轮换；会先删登录钥匙串里的旧证书）
 #
-# 卸载（如需）：打开「钥匙串访问」，搜索 ompMiniDesktop Signing，右键删除该证书（连同私钥），
+# 卸载（如需）：打开「钥匙串访问」，搜索 Apple Development: ompMiniDesktop Signing，右键删除该证书（连同私钥），
 # 再删掉本目录（~/.omp-mini-signing）与仓库 Secrets（APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD）。
 
 set -euo pipefail
 umask 077
 
-CN="ompMiniDesktop Signing"
+# CN 必须带 Apple 证书前缀：tauri 的签名身份解析（tauri-macos-sign）只按 7 个前缀
+# （Apple Development: / Developer ID Application: / Mac Development: 等）在钥匙串里
+# 找证书，不带前缀的自签名证书会被当成「找不到签名身份」——Release 构建报
+# "failed to resolve signing identity"。OU 也不可缺：解析证书要求 organizationalUnit。
+CN="Apple Development: ompMiniDesktop Signing"
 DIR="$HOME/.omp-mini-signing"
 LOGIN_KC="$HOME/Library/Keychains/login.keychain-db"
 FORCE=0
@@ -51,6 +56,8 @@ if [[ $HAVE_CERT_FILES -eq 0 || $FORCE -eq 1 ]]; then
   if [[ $FORCE -eq 1 && $HAVE_CERT_FILES -eq 1 ]]; then
     echo "→ --force：删除登录钥匙串里的旧证书（如有）"
     security delete-certificate -c "$CN" "$LOGIN_KC" 2>/dev/null || true
+    # 0.10.0 之前生成的证书 CN 不带 Apple 前缀（历史遗留），一并清理
+    security delete-certificate -c "ompMiniDesktop Signing" "$LOGIN_KC" 2>/dev/null || true
   fi
   if [[ $FORCE -eq 1 ]]; then
     rm -f "$DIR/cert.pem" "$DIR/key.pem" "$DIR/signing.p12" "$DIR/p12.pass" "$DIR/signing.p12.b64"
@@ -67,6 +74,7 @@ prompt = no
 [dn]
 CN = $CN
 O = ompMiniDesktop
+OU = ompMiniDesktop
 
 [ext]
 basicConstraints = critical,CA:false
