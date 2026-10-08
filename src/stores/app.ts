@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CheckoutView, CommitOutcome, CommitTaskView, HealthInfo, ModelCatalog, OmpUpdate, OmpUpdateRun, ProjectView, SidebarSelection, TerminalStatus, TerminalView, UpdateState, WorkspaceGitState, WorkspaceView } from "@shared/types";
+import type { CheckoutView, CommitOutcome, CommitTaskView, HealthInfo, ImageAttachment, ModelCatalog, OmpUpdate, OmpUpdateRun, ProjectView, SessionRuntime, SessionStatus, SessionView, SidebarSelection, TerminalStatus, TerminalView, TodoPhase, UpdateState, ViewMsg, WorkspaceGitState, WorkspaceView } from "@shared/types";
 import type { Locale, LocaleMode } from "../lib/locale";
 import { loadLocaleMode, resolveLocale, saveLocaleMode, systemLang } from "../lib/locale";
 import { applyTheme, loadTheme, saveTheme, type ThemeMode } from "../lib/theme";
@@ -55,6 +55,65 @@ type AppState = {
  /** 左侧栏宽度（292–480，默认 292，持久化 localStorage）。 */
  sidebarWidth: number;
  setSidebarWidth: (w: number) => void;
+
+ /**
+  * 形态（V32）：`terminal` = 终端工作区（V11 起），`chat` = 聊天界面（V1–V10 形态的恢复）。
+  * 全局单值、持久化 localStorage（`omp.appMode.v1`）；切换只换主区与交互口径，
+  * 两侧的运行中进程都不停（终端面板与聊天会话都常驻，切回来还在）。
+  */
+ appMode: AppMode;
+ setAppMode: (m: AppMode) => void;
+ /**
+  * 聊天形态**是否已被使用过**（V32）：首次切到 `chat` 时置位、本次运行内不回退。
+  * `App` 用它做懒挂载——纯终端用户不付聊天侧的启动调用（挂载即触发 `get_global_approval` /
+  * `omp usage` 这类读取）；挂载后只切显隐（卸载会断事件订阅，切走期间的帧就丢了）。
+  */
+ chatFormUsed: boolean;
+
+ // ---------- V32 聊天形态（恢复自 V1–V10） ----------
+
+ /**
+  * 已知的聊天会话视图（新建 / 打开 / 从会话弹窗进入时补进；顶栏标题与上下文条从这里取）。
+  * 不是「全部会话」的镜像——会话列表仍在 `list_sessions`（弹窗按需拉）。
+  */
+ sessions: SessionView[];
+ /** 当前在聊天视图里打开的会话 id（终端形态不看它）。 */
+ activeSessionId: string | null;
+ /** 会话消息流（ViewMsg 归一；高频流式增量只改这里，不进终端）。 */
+ eventsBySession: Record<string, ViewMsg[]>;
+ /** 会话运行状态（`omp-status://<id>` 事件的落点；状态胶囊 / 通知用）。 */
+ statusBySession: Record<string, SessionStatus>;
+ /** 输入草稿（按会话隔离，内存态）。 */
+ drafts: Record<string, string>;
+ /** 待发送图片附件（按会话隔离，只存在内存里，发送成功即清空）。 */
+ attachmentsBySession: Record<string, ImageAttachment[]>;
+ /** 当前会话的模型 selector（`provider/id`；工具行选择器显示与用量入口用）。 */
+ currentModel: string | null;
+ /** 当前思考档（omp 真值回填；null = 未知）。 */
+ currentThinking: string | null;
+ /** 当前模型可用思考档（omp 真值；null = 不支持思考）。驱动思考档下拉只列支持项。 */
+ currentEfforts: string[] | null;
+ /** 当前会话的运行时真值快照（上下文占用 / 本轮用量 / 耗时）：状态条纯透传的数据源。 */
+ currentRuntime: SessionRuntime | null;
+ /** 任务计划（`todoPhases` 真值 + `todo_reminder` 事件合并，按会话隔离；只读展示）。 */
+ plansBySession: Record<string, TodoPhase[]>;
+ /** 会话级权限覆盖（覆盖层 `sessionApproval` 的水合；徽标显示用）。 */
+ sessionApprovals: Record<string, string>;
+ /** 输入框工具行与上方上下文条的下拉互斥：同一时刻只开一个（model/thinking/permission/project/branch/context/usage）。 */
+ composerMenu: "model" | "thinking" | "permission" | "project" | "branch" | "context" | "usage" | null;
+ /** 消息流「首屏增量」窗口：当前会话已渲染的消息条数（首屏 200 条）。 */
+ threadLimitSid: string | null;
+ threadLimit: number;
+ draftOf: (sid: string | null) => string;
+ setDraft: (sid: string | null, text: string) => void;
+ attachmentsOf: (sid: string | null) => ImageAttachment[];
+ addAttachments: (sid: string | null, items: ImageAttachment[]) => void;
+ removeAttachment: (sid: string | null, index: number) => void;
+ clearAttachments: (sid: string | null) => void;
+ appendEvents: (sid: string, msgs: ViewMsg[]) => void;
+ /** 展开更早的消息（按页递增）；打开新会话时由 openSessionWithHistory 重置。 */
+ growThreadLimit: (by: number) => void;
+ resetThreadLimit: (sid: string) => void;
 
  // ---------- V11 终端工作区 ----------
 
@@ -166,6 +225,29 @@ const COMMIT_MSG_MAX = 8000;
 
 /** 启动时的语言偏好（模块加载时读一次，供 store 初始化解析出实际语言）。 */
 const INITIAL_LOCALE_MODE = loadLocaleMode();
+/** 消息流单页条数：首屏只渲染最后 200 条，其余按需向上加载（MASTER §7）。 */
+export const THREAD_PAGE = 200;
+
+/** 应用形态（V32）：终端工作区 / 聊天界面。 */
+export type AppMode = "terminal" | "chat";
+const APP_MODE_KEY = "omp.appMode.v1";
+/** 形态偏好（默认终端形态——V11 起的现行形态不动摇；显式切到聊天才落盘）。 */
+function loadAppMode(): AppMode {
+ try {
+  if (typeof localStorage === "undefined") return "terminal";
+  return localStorage.getItem(APP_MODE_KEY) === "chat" ? "chat" : "terminal";
+ } catch {
+  // 无痕模式等取不到持久化时用默认形态
+  return "terminal";
+ }
+}
+function saveAppMode(mode: AppMode): void {
+ try {
+  localStorage.setItem(APP_MODE_KEY, mode);
+ } catch {
+  // 持久化失败不阻断本次切换
+ }
+}
 
 function loadSidebarWidth(): number {
  try {
@@ -229,6 +311,52 @@ export const useApp = create<AppState>((set, get) => ({
   }
   set({ sidebarWidth: v });
  },
+
+ // ---------- V32 形态切换 + 聊天状态 ----------
+
+ appMode: loadAppMode(),
+ chatFormUsed: loadAppMode() === "chat",
+ setAppMode: (m) => {
+  saveAppMode(m);
+  set(m === "chat" ? { appMode: m, chatFormUsed: true } : { appMode: m });
+ },
+ sessions: [],
+ activeSessionId: null,
+ eventsBySession: {},
+ statusBySession: {},
+ drafts: {},
+ attachmentsBySession: {},
+ currentModel: null,
+ currentThinking: null,
+ currentEfforts: null,
+ currentRuntime: null,
+ plansBySession: {},
+ sessionApprovals: {},
+ composerMenu: null,
+ threadLimitSid: null,
+ threadLimit: THREAD_PAGE,
+ draftOf: (sid) => (sid ? get().drafts[sid] ?? "" : ""),
+ setDraft: (sid, text) =>
+  set((s) => (sid ? { drafts: { ...s.drafts, [sid]: text } } : {})),
+ attachmentsOf: (sid) => (sid ? get().attachmentsBySession[sid] ?? [] : []),
+ addAttachments: (sid, items) =>
+  set((s) =>
+   sid && items.length > 0
+    ? { attachmentsBySession: { ...s.attachmentsBySession, [sid]: [...(s.attachmentsBySession[sid] ?? []), ...items] } }
+    : {},
+  ),
+ removeAttachment: (sid, index) =>
+  set((s) => {
+   if (!sid) return {};
+   const cur = s.attachmentsBySession[sid] ?? [];
+   return { attachmentsBySession: { ...s.attachmentsBySession, [sid]: cur.filter((_, i) => i !== index) } };
+  }),
+ clearAttachments: (sid) =>
+  set((s) => (sid ? { attachmentsBySession: { ...s.attachmentsBySession, [sid]: [] } } : {})),
+ appendEvents: (sid, msgs) =>
+  set((s) => ({ eventsBySession: { ...s.eventsBySession, [sid]: [...(s.eventsBySession[sid] ?? []), ...msgs] } })),
+ growThreadLimit: (by) => set((s) => ({ threadLimit: s.threadLimit + by })),
+ resetThreadLimit: (sid) => set({ threadLimitSid: sid, threadLimit: THREAD_PAGE }),
 
  // ---------- V11 终端工作区 ----------
 

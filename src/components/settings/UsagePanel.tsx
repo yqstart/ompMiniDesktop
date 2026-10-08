@@ -190,6 +190,8 @@ function Heatmap({ cells, numLocale }: { cells: UsageHeatRow[]; numLocale: strin
  *
  * 口径（与 ZCode 的「使用统计」对齐，数据源换成 omp）：
  * - 总览三项指标：tokens 用量 / Cache 命中率 / 活跃天数（**默认看「今日」**）；
+ * - 范围只作用于 tokens 用量与 Cache 命中率：**活跃天数与连续天数恒为全量历史**，不随范围缩水
+ *   （「今日」档下它们与「全部」档相同）；
  * - 「Token 活动」热力图：最近 53 周的逐日日历，**不随范围切换**，右上三档换取值口径；
  * - 数据来自会话 jsonl 里每条 assistant 消息的 `usage`，含已归档会话；
  * - 全部数字（含命中率 / 连续天数）由后端算好，前端只做格式化；

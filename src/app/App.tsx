@@ -15,10 +15,11 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CommitTaskPanel } from "../components/git/CommitTaskPanel";
 import { HealthBanner } from "../components/HealthBanner";
 import { SettingsPage } from "../components/SettingsPage";
+import { ChatView } from "../components/thread/ChatView";
 import { UpdateDialog } from "../components/update/UpdateDialog";
 import { OmpUpdateDialog } from "../components/update/OmpUpdateDialog";
 import { ProviderUsageDialog } from "../components/usage/ProviderUsageDialog";
-import { newTerminalInSelection } from "../lib/checkouts";
+import { newTerminalInSelection, newChatInSelection } from "../lib/checkouts";
 import { terminalsInScope } from "../lib/terminalScope";
 import { selectionScopePaths } from "../lib/workspaceGroups";
 import { refreshWorkspaceGitState, scheduleWorkspaceGitRefresh, startWorkspaceGitPolling } from "../lib/commitTasks";
@@ -134,6 +135,12 @@ function useTerminalHotkeys() {
    e.stopPropagation();
    if (e.repeat || hasOpenDialog() || typing) return;
    const s = useApp.getState();
+   // 聊天形态：只有「⌘W 关设置」有意义；⌘T 换成新建聊天，其余终端快捷键不参与
+   if (s.appMode === "chat") {
+    if (key === "w" && s.settingsTabActive) s.closeSettingsTab();
+    else if (key === "t") newChatInSelection();
+    return;
+   }
    if (key === "t") {
     newTerminalInSelection();
    } else if (key === "k") {
@@ -274,7 +281,7 @@ function SidebarShell({
  );
 }
 export function App() {
- const { settingsTabOpen, settingsTabActive, closingTerminalId, set, sidebarWidth, setSidebarWidth, updateDialogOpen, ompUpdateDialogOpen, sidebarOpen, quickSwitcherOpen, providerUsageOpen, refPickerTerminalId } = useApp();
+ const { settingsTabOpen, settingsTabActive, closingTerminalId, set, sidebarWidth, setSidebarWidth, updateDialogOpen, ompUpdateDialogOpen, sidebarOpen, quickSwitcherOpen, providerUsageOpen, refPickerTerminalId, appMode, chatFormUsed } = useApp();
  const t = useText();
  useTheme();
  useLocale();
@@ -344,12 +351,20 @@ export function App() {
    </SidebarShell>
    <main inert={sidebarOpen ? true : undefined} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background md:my-2 md:mr-2 md:rounded-xl md:border md:border-border">
     <HealthBanner />
-    {/* 标签栏常驻（主区顶部）：终端标签 + 设置标签（单例）——设置打开时也看得见标签栏、
-       点得回终端。终端区与设置页都**常驻挂载、只切显隐**（卸载 `TerminalPane` 的
-       清理 effect 会 `pty_kill`，那是「关闭标签」才该发生的事）。 */}
-    <TerminalTabs />
-    <TerminalView visible={!settingsTabActive} />
-    {settingsTabOpen && <SettingsPage visible={settingsTabActive} />}
+    {/* 两种形态都**常驻挂载、只切显隐**（V32）：
+        - 终端面板卸载会连带 kill 全部 PTY（`TerminalPane` 的清理 effect）——那是「关标签」才该发生的；
+        - 聊天侧同理要保住订阅与滚动位置；
+        所以形态切换一律走 CSS，运行中的进程两侧都不中断，切回来原样还在。
+        终端形态内：标签栏常驻（设置标签是单例），终端区与设置页也按老规矩切显隐。 */}
+    <div className={appMode === "terminal" ? "flex min-h-0 min-w-0 flex-1 flex-col" : "hidden"}>
+     <TerminalTabs />
+     <TerminalView visible={appMode === "terminal" && !settingsTabActive} />
+    </div>
+    {/* 聊天形态**首次用到才挂载、之后常驻**（`chatFormUsed`）：纯终端用户不付聊天侧的启动调用
+        （挂载即触发 `get_global_approval` / `omp usage` 这类读取）；挂载后只切显隐——
+        卸载会断事件订阅，切走期间到达的帧就丢了。 */}
+    {chatFormUsed && <ChatView visible={appMode === "chat" && !settingsTabActive} />}
+    {settingsTabOpen && <SettingsPage visible={settingsTabActive} showClose={appMode === "chat"} />}
     {/* 关闭确认常驻这层：设置标签激活时点终端标签的 × 也要弹得出来 */}
     <ConfirmDialog
      open={closingTerminalId !== null}

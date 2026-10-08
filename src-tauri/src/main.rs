@@ -1,5 +1,6 @@
 mod commands;
 mod commit_msg;
+mod context;
 mod extra_usage;
 mod git_commit;
 mod git_info;
@@ -13,6 +14,7 @@ mod project_files;
 mod provider_usage;
 mod providers;
 mod pty;
+mod runtime;
 mod session_scan;
 mod settings;
 mod skills;
@@ -28,6 +30,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let state = load_state(app.handle());
@@ -56,6 +59,31 @@ fn main() {
             archive_sessions,
             unarchive_sessions,
             delete_sessions,
+            // 聊天形态（V32 恢复自 V1–V10）：RPC 会话命令面
+            context::get_context_breakdown,
+            create_session,
+            open_session,
+            rename_session_note,
+            get_history,
+            send_message,
+            steer_message,
+            follow_up_message,
+            run_slash,
+            compact_session,
+            branch_session,
+            read_image_file,
+            check_paths,
+            complete_path,
+            stop_session,
+            approve,
+            respond_ui,
+            set_model,
+            set_thinking,
+            get_session_runtime,
+            get_global_approval,
+            set_global_approval,
+            set_session_approval,
+            get_git_info,
             git_commit::get_workspace_git_state,
             git_commit::generate_commit_message,
             git_commit::commit_selected,
@@ -114,6 +142,7 @@ fn main() {
             if let tauri::RunEvent::Exit = event {
                 let state = app.state::<AppState>();
                 pty::kill_all(&state.pty);
+                runtime::kill_all(&state.runtime);
                 git_commit::kill_all(&state.commit_tasks);
                 omp_update::kill_update(&state.omp_update_task);
             }

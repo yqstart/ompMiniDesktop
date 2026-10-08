@@ -93,6 +93,31 @@ export const IPC = {
  checkOmpUpdate: "check_omp_update",
  startOmpUpdate: "start_omp_update",
  cancelOmpUpdate: "cancel_omp_update",
+ // 聊天形态（V32 恢复自 V1–V10）：RPC 会话命令面（per-会话长驻 `omp --mode rpc-ui`）
+ createSession: "create_session",
+ openSession: "open_session",
+ renameSessionNote: "rename_session_note",
+ getHistory: "get_history",
+ sendMessage: "send_message",
+ steerMessage: "steer_message",
+ followUpMessage: "follow_up_message",
+ runSlash: "run_slash",
+ compactSession: "compact_session",
+ branchSession: "branch_session",
+ readImageFile: "read_image_file",
+ checkPaths: "check_paths",
+ completePath: "complete_path",
+ stopSession: "stop_session",
+ approve: "approve",
+ respondUi: "respond_ui",
+ setModel: "set_model",
+ setThinking: "set_thinking",
+ getSessionRuntime: "get_session_runtime",
+ getGlobalApproval: "get_global_approval",
+ setGlobalApproval: "set_global_approval",
+ setSessionApproval: "set_session_approval",
+ getGitInfo: "get_git_info",
+ getContextBreakdown: "get_context_breakdown",
  // events
  /** 供应商登录进度（payload = 全量 ProviderLoginStatus 快照）。 */
  providerLogin: "omp-provider://login",
@@ -102,4 +127,10 @@ export const IPC = {
   * 新快照完成后广播——已挂载的设置页（模型 / 供应商）据此原地更新，不必自己重拉。
   */
  modelsRefreshed: "omp-models://catalog",
+ /** 聊天会话事件流（payload = 单帧 omp RPC 事件；`useSessionEvents` 归一成 ViewMsg）。 */
+ chatEvent: (id: string) => `omp-event://${id}`,
+ /** 聊天会话状态（payload = `{state}`；running / idle / awaiting-approval / error / exited）。 */
+ chatStatus: (id: string) => `omp-status://${id}`,
+ /** 聊天会话运行时真值（payload = 全量 SessionRuntime 快照）。 */
+ chatRuntime: (id: string) => `omp-state://${id}`,
 } as const;

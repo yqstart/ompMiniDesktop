@@ -41,9 +41,9 @@
 ### Markdown 渲染（react-markdown、remark-gfm、rehype-highlight）
 - 仓库：https://github.com/remarkjs/react-markdown · https://github.com/remarkjs/remark-gfm · https://github.com/rehypejs/rehype-highlight
 - 许可证：MIT
-- 说明：设置 ›「记忆」页里记忆文件的 Markdown 预览（底层 highlight.js/lowlight）。`react-markdown` 默认不渲染原始 HTML，正文内容不做 `dangerouslySetInnerHTML` 注入。
+- 说明：设置 ›「记忆」页的记忆文件预览与聊天形态（V32）的消息正文 / 更新说明渲染（底层 highlight.js/lowlight）。`react-markdown` 默认不渲染原始 HTML，正文内容不做 `dangerouslySetInnerHTML` 注入。
 
-### Tauri 前端插件（@tauri-apps/api、plugin-dialog/opener/process/updater）
+### Tauri 前端插件（@tauri-apps/api、plugin-dialog/opener/process/updater/notification）
 - 仓库：https://github.com/tauri-apps/tauri
 - 许可证：Apache-2.0 / MIT（双许可）
 
@@ -58,7 +58,7 @@
 
 ## Rust 依赖
 
-### Tauri（tauri、tauri-build、tauri-plugin-dialog/opener/process/updater）
+### Tauri（tauri、tauri-build、tauri-plugin-dialog/opener/process/updater/notification）
 - 仓库：https://github.com/tauri-apps/tauri
 - 许可证：Apache-2.0 / MIT（双许可）
 

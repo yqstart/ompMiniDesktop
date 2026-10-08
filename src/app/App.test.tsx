@@ -48,6 +48,13 @@ vi.mock("../components/sidebar/WorkspaceSidebar", () => ({
 vi.mock("../components/terminal/TerminalView", () => ({
  TerminalView: () => <div data-testid="terminals">terminals</div>,
 }));
+vi.mock("../components/thread/ChatView", () => ({
+ ChatView: ({ visible }: { visible?: boolean }) => (
+  <div data-testid="chat" data-visible={String(visible ?? true)}>
+   chat
+  </div>
+ ),
+}));
 vi.mock("../components/git/CommitTaskPanel", () => ({
  CommitTaskPanel: () => null,
 }));
@@ -96,6 +103,7 @@ beforeEach(() => {
   terminalFocusSeq: 0,
   localeMode: "system",
   locale: "zh-CN",
+  appMode: "terminal",
  });
  container = document.createElement("div");
  document.body.append(container);

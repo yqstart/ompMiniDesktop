@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
-import type { ChangeSet, CheckoutView, CommitEvent, FallbackChainsInfo, HealthInfo, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionView, SkillFileContent, SkillsView, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
+import type { ChangeSet, CheckoutView, CommitEvent, ContextBreakdown, FallbackChainsInfo, GitInfo, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionRuntime, SessionView, SkillFileContent, SkillsView, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -126,6 +126,71 @@ export const api = {
   call<void>(IPC.ptyResize, { id, cols, rows }),
  /** 关闭终端：kill 子进程（SIGHUP），读线程 EOF 后自行收尾。 */
  ptyKill: (id: string) => call<void>(IPC.ptyKill, { id }),
+
+ // ---------- 聊天形态（V32 恢复自 V1–V10）：RPC 会话命令面 ----------
+
+ /** 新建聊天会话（按目录开：左栏目录行 / 会话弹窗的「新建」传 checkout 路径）。 */
+ createSession: (cwd: string) => call<SessionView>(IPC.createSession, { cwd }),
+ /** 打开（或聚焦）聊天会话：已有长驻进程直接返回；否则 `omp --resume` 拉起。 */
+ openSession: (id: string) => call<SessionView>(IPC.openSession, { id }),
+ /** 会话备注名（覆盖层 notes；显示优先于 omp 原标题）。空串 = 清除备注。 */
+ renameSessionNote: (id: string, note: string) => call<void>(IPC.renameSessionNote, { id, note }),
+ /**
+  * 历史回放（后端上限：5000 行 / 2000 条）。`lines` 是 **jsonl 原始行**
+  * （由 `viewMsgsFromJsonlLines` 归一）。`truncated` 为真时前端在流尾注明——
+  * 超限绝不静默丢内容。
+  */
+ getHistory: (id: string) => call<{ lines: unknown[]; truncated: boolean }>(IPC.getHistory, { id }),
+ sendMessage: (id: string, message: string, images?: ImageAttachment[]) =>
+  call<void>(IPC.sendMessage, { id, message, images }),
+ /** 流式中转向（`steer`）：在下一个工具调用边界生效，不砍掉进行中的工作。 */
+ steerMessage: (id: string, message: string, images?: ImageAttachment[]) =>
+  call<void>(IPC.steerMessage, { id, message, images }),
+ /** 流式中排队（`follow_up`）：本轮结束后按序执行。 */
+ followUpMessage: (id: string, message: string, images?: ImageAttachment[]) =>
+  call<void>(IPC.followUpMessage, { id, message, images }),
+ /** `/` 命令：经 prompt 直发（本地命令走 command_output 回来，无 agent turn）。 */
+ runSlash: (id: string, command: string) => call<void>(IPC.runSlash, { id, command }),
+ /** 上下文压缩：把历史压缩成摘要后继续本会话（满上下文时的接续手段）。 */
+ compactSession: (id: string, customInstructions?: string) =>
+  call<void>(IPC.compactSession, { id, customInstructions }),
+ /** 从某条消息另起分支（探索走偏时的回退手段，不删原分支）。 */
+ branchSession: (id: string, entryId: string) => call<SessionView>(IPC.branchSession, { id, entryId }),
+ /** 图片附件走「系统文件选择器 → 后端读文件」：WebView 拿不到任意本地路径的内容。 */
+ readImageFile: (path: string) => call<ImageAttachment>(IPC.readImageFile, { path }),
+ /** 输入框 @提及 的存在性提示（后端只 stat，不读内容、不写任何东西）。 */
+ checkPaths: (base: string, paths: string[]) => call<PathCheck[]>(IPC.checkPaths, { base, paths }),
+ /** `@` 路径补全（只读目录列举，不读文件内容）。 */
+ completePath: (base: string, prefix: string) =>
+  call<{ path: string; isDir: boolean }[]>(IPC.completePath, { base, prefix }),
+ stop: (id: string) => call<void>(IPC.stopSession, { id }),
+ approve: (id: string, uiId: string, decision: "once" | "always" | "deny") =>
+  call<void>(IPC.approve, { id, uiId, decision }),
+ /**
+  * 通用 UI 请求回包（非审批）：`confirm` → `{confirmed}`，`value` → `{value}`，`cancel` → `{cancelled}`。
+  * 与 `approve` 分开：审批的「总是允许」还要写会话级 yolo 意向，语义不同。
+  */
+ respondUi: (
+  id: string,
+  uiId: string,
+  kind: "value" | "confirm" | "cancel",
+  opts?: { value?: string; confirmed?: boolean },
+ ) => call<void>(IPC.respondUi, { id, uiId, kind, value: opts?.value, confirmed: opts?.confirmed }),
+ setModel: (id: string, provider: string, modelId: string) =>
+  call<void>(IPC.setModel, { id, provider, modelId }),
+ setThinking: (id: string, level: string) => call<void>(IPC.setThinking, { id, level }),
+ getSessionRuntime: (id: string) => call<SessionRuntime | null>(IPC.getSessionRuntime, { id }),
+ /**
+  * 上下文分项（输入框工具行的「上下文容量」面板）：已用 / 窗口 / 非消息是 omp 真值，
+  * 非消息各档按字符量估算后缩放到真值。**只读**——不启动进程、不写任何东西。
+  */
+ getContextBreakdown: (id: string) => call<ContextBreakdown>(IPC.getContextBreakdown, { id }),
+ getGitInfo: (path: string) => call<GitInfo>(IPC.getGitInfo, { path }),
+ getGlobalApproval: () => call<string>(IPC.getGlobalApproval),
+ setGlobalApproval: (mode: string) => call<void>(IPC.setGlobalApproval, { mode }),
+ setSessionApproval: (id: string, mode: string | null) =>
+  call<void>(IPC.setSessionApproval, { id, mode }),
+
  /**
   * 供应商（设置 › 供应商）：omp 的 login / logout / modelRoles 映射。
   * 登录走 `omp auth-broker login` 子进程（不经 RPC），进度经 `omp-provider://login` 全量推送。

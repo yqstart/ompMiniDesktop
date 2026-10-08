@@ -27,8 +27,14 @@ libc = "0.2"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "io-util", "sync", "time"] }
 walkdir = "2"
 chrono = { version = "0.4", features = ["serde"] }
+tauri-plugin-notification = "2.5.1"
 
 [profile.release]
 opt-level = 3
 lto = "thin"
 codegen-units = 1
+
+[dev-dependencies]
+# 真机 RPC 冒烟测试（runtime.rs 的 `real_rpc_*`，默认 `--ignored`）：mock app 提供
+# AppHandle，不需要真实窗口；见 modules 测试模块的说明。
+tauri = { version = "2", features = ["test"] }

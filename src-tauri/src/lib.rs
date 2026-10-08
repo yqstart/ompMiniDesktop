@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod commit_msg;
+pub mod context;
 pub mod git_commit;
 pub mod git_info;
 pub mod git_ops;
@@ -10,6 +11,7 @@ pub mod plugins;
 pub mod project_files;
 pub mod providers;
 pub mod pty;
+pub mod runtime;
 pub mod session_scan;
 pub mod settings;
 pub mod skills;

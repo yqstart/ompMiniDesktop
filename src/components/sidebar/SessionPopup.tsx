@@ -3,7 +3,7 @@ import { Clock, X } from "reicon-react";
 import { api } from "@shared/api";
 import type { ProjectView, SessionPage, SessionView } from "@shared/types";
 import { useApp } from "../../stores/app";
-import { resumeSessionInTerminal } from "../../lib/checkouts";
+import { resumeSessionInApp } from "../../lib/checkouts";
 import { runSessionBatch } from "../../lib/sessionBatch";
 import { useText } from "../../lib/useText";
 import { TEXT, fmt } from "../../lib/locale";
@@ -230,7 +230,7 @@ export function SessionPopup({
         >
          <button
           onClick={() => {
-           resumeSessionInTerminal({ id: s.id, cwd: s.cwd, title: s.title, projectId: s.projectId });
+           resumeSessionInApp({ id: s.id, cwd: s.cwd, title: s.title, projectId: s.projectId });
            onClose();
           }}
           disabled={s.corrupt || busy}

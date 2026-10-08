@@ -1,5 +1,6 @@
-import { Archive, ChartBar, Key, Notebook, Plug, Puzzle, Sliders } from "reicon-react";
+import { Archive, ArrowLeft, ChartBar, Key, Notebook, Plug, Puzzle, Sliders } from "reicon-react";
 import { useText } from "../lib/useText";
+import { useApp } from "../stores/app";
 import { useEffect, useRef, useState } from "react";
 import { ArchivedSessions } from "./ArchivedSessions";
 import { GeneralSettingsPanel } from "./settings/GeneralSettingsPanel";
@@ -30,7 +31,7 @@ const TAB_GROUPS: { label: "settingsGroupOmp" | "settingsGroupApp"; tabs: Settin
  { label: "settingsGroupApp", tabs: ["usage", "archived"] },
 ];
 
-export function SettingsPage({ visible = true }: { visible?: boolean }) {
+export function SettingsPage({ visible = true, showClose = false }: { visible?: boolean; showClose?: boolean }) {
  const t = useText();
  const [tab, setTab] = useState<SettingsTab>("general");
  const pageRef = useRef<HTMLDivElement>(null);
@@ -86,6 +87,18 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
           重新检测 / 指定路径）在字标行 omp 版本 chip 的弹窗里（V31）；界面语言与皮肤是纯展示层
           偏好，入口在左栏底部「设置」行，这里不重复放。 */}
    <nav aria-label={t.title} className="flex w-11 shrink-0 flex-col border-r border-border-soft pr-2 @min-[640px]/settings:w-40 @min-[640px]/settings:pr-3">
+    {/* 聊天形态没有标签栏（设置不是标签），页内给一个返回入口；终端形态关闭走标签栏的 × / ⌘W */}
+    {showClose && (
+     <button
+      onClick={() => useApp.getState().closeSettingsTab()}
+      aria-label={t.backToChat}
+      title={t.backToChat}
+      className="mb-2 flex min-h-9 cursor-pointer items-center justify-center gap-2.5 rounded-md text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground @min-[640px]/settings:justify-start @min-[640px]/settings:px-3"
+     >
+      <ArrowLeft size={16} aria-hidden className="shrink-0" />
+      <span className="sr-only @min-[640px]/settings:not-sr-only">{t.backToChat}</span>
+     </button>
+    )}
     <div
      role="tablist"
      aria-orientation="vertical"

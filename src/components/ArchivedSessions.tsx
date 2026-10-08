@@ -4,7 +4,7 @@ import { api } from "@shared/api";
 import { useApp } from "../stores/app";
 import { groupSessionsByProject } from "../lib/sessions";
 import { runSessionBatch } from "../lib/sessionBatch";
-import { resumeSessionInTerminal } from "../lib/checkouts";
+import { resumeSessionInApp } from "../lib/checkouts";
 import { fmt } from "../lib/locale";
 import { useText } from "../lib/useText";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -89,7 +89,7 @@ export function ArchivedSessions() {
     setError(fmt(t.archivedPartialRestore, res.failed.map((f) => f.message || f.id).join("；")));
     return;
    }
-   resumeSessionInTerminal({ id: s.id, cwd: s.cwd, title: s.title, projectId: s.projectId });
+   resumeSessionInApp({ id: s.id, cwd: s.cwd, title: s.title, projectId: s.projectId });
    setReloadKey((k) => k + 1);
   } catch (e) {
    setError(e instanceof Error ? e.message : t.archivedRestore);

@@ -12,6 +12,7 @@ import { TEXT } from "../../lib/locale";
 import { useText } from "../../lib/useText";
 import { LanguageToggle } from "../LanguageToggle";
 import { ThemeToggle } from "../ThemeToggle";
+import { AppModeToggle } from "../AppModeToggle";
 import { AppUpdateChip } from "./AppUpdateChip";
 import { DropLine } from "./DropLine";
 import { OmpUpdateChip } from "./OmpUpdateChip";
@@ -398,21 +399,32 @@ export function WorkspaceSidebar() {
      )}
     </div>
    </div>
-   <div className="flex shrink-0 items-center gap-1.5 border-t border-border px-3 py-3">
-    <button
-     onClick={() => {
-      useApp.getState().openSettingsTab();
-      useApp.getState().set({ sidebarOpen: false });
-     }}
-     className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
-     aria-label={t.settingsOpenAria}
-     title={t.settingsOpenAria}
-    >
-     <Settings size={15} aria-hidden className="shrink-0" />
-     <span className="whitespace-nowrap">{t.settingsOpenAria}</span>
-    </button>
-    <LanguageToggle />
-    <ThemeToggle />
+   <div className="shrink-0 border-t border-border px-3 py-3">
+    {/* 形态切换单独一行（V32）：与「设置/语言/皮肤」同属底部区，但不挤那一行——
+        底部行的最小宽度（288px 临界）是按设置 + 语言 + 皮肤算的，见 stores/app.ts 的 SIDEBAR_MIN。 */}
+    <div className="mb-2 flex items-center gap-2">
+     <AppModeToggle />
+     <span className="min-w-0 truncate text-[11px] text-faint">{t.modeSection}</span>
+    </div>
+    <div className="flex items-center gap-1.5">
+     <button
+      onClick={() => {
+       const st = useApp.getState();
+       // 聊天形态：设置不是标签，再点一次「设置」= 返回聊天（终端形态保持「聚焦设置」不变）
+       if (st.appMode === "chat" && st.settingsTabActive) st.closeSettingsTab();
+       else st.openSettingsTab();
+       useApp.getState().set({ sidebarOpen: false });
+      }}
+      className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+      aria-label={t.settingsOpenAria}
+      title={t.settingsOpenAria}
+     >
+      <Settings size={15} aria-hidden className="shrink-0" />
+      <span className="whitespace-nowrap">{t.settingsOpenAria}</span>
+     </button>
+     <LanguageToggle />
+     <ThemeToggle />
+    </div>
    </div>
    {groupDialog && (
     <WorkspaceGroupDialog

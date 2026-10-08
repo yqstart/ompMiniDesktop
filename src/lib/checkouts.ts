@@ -2,6 +2,7 @@ import { api } from "@shared/api";
 import type { CheckoutView, ProjectView, SidebarSelection } from "@shared/types";
 import { useApp } from "../stores/app";
 import { TEXT } from "./locale";
+import { createChatIn, openSessionWithHistory } from "./sessionOpen";
 import { selectionScopePaths } from "./workspaceGroups";
 
 /**
@@ -47,9 +48,16 @@ export async function loadCheckouts(): Promise<CheckoutView[]> {
  return list;
 }
 
-/** 打开或聚焦某目录行的终端：已有该目录的终端 → 聚焦最近一个；否则新建。 */
+/** 打开或聚焦某目录行的终端：已有该目录的终端 → 聚焦最近一个；否则新建。
+ *
+ * 聊天形态下同一次点击的语义换成「打开聊天」：该目录已有运行中的聊天会话 → 聚焦它；
+ * 否则在该目录新建一个聊天会话（与终端形态的「点目录 = 开一个会话」完全平行）。 */
 export function openOrFocusCheckout(ws: CheckoutView): void {
  if (ws.missing) return;
+ if (useApp.getState().appMode === "chat") {
+  openChatForCheckout(ws);
+  return;
+ }
  const s = useApp.getState();
  const existing = s.terminals.filter((t) => t.cwd === ws.path);
  if (existing.length > 0) {
@@ -57,6 +65,31 @@ export function openOrFocusCheckout(ws: CheckoutView): void {
   return;
  }
  s.openTerminal({ projectId: ws.projectId, cwd: ws.path, label: checkoutLabel(ws) });
+}
+
+/** 聊天形态的目录行点击：运行中的聊天会话优先聚焦，没有就新建一个（懒写盘，空转无副作用）。 */
+export function openChatForCheckout(ws: CheckoutView): void {
+ const s = useApp.getState();
+ const running = s.sessions.filter((x) => x.cwd === ws.path && x.running && !x.archived).pop();
+ if (running) {
+  void openSessionWithHistory(running.id);
+  return;
+ }
+ if (s.activeSessionId) {
+  // 该目录已有当前打开的聊天（可能已不是 running——刚建好还没跑过）→ 直接留着
+  const cur = s.sessions.find((x) => x.id === s.activeSessionId);
+  if (cur && cur.cwd === ws.path) return;
+ }
+ void createChatIn(ws.path, { projectName: ws.projectName });
+}
+
+/** `⌘T`（聊天形态）：按当前选中项新建聊天（与 `newTerminalInSelection` 同一套目标选择）。 */
+export function newChatInSelection(): CheckoutView | null {
+ const s = useApp.getState();
+ const ws = resolveNewTerminalCheckout(s.checkouts, s.selection, s.projects);
+ if (!ws) return null;
+ openChatForCheckout(ws);
+ return ws;
 }
 
 /** `＋` / ⌘T：按当前选中项**新建**终端；没选中时退回第一个可用主目录。 */
@@ -117,4 +150,19 @@ export function resumeSessionInTerminal(session: {
   label: session.title,
   resume: session.id,
  });
+}
+
+/** 会话弹窗 / 归档恢复的「打开」：**按当前形态分流**——终端形态开终端 resume，
+ *  聊天形态进聊天视图（`open_session` 起 / 聚焦长驻 RPC 并拉历史）。 */
+export function resumeSessionInApp(session: {
+ id: string;
+ cwd: string;
+ title: string;
+ projectId: string | null;
+}): void {
+ if (useApp.getState().appMode === "chat") {
+  void openSessionWithHistory(session.id);
+  return;
+ }
+ resumeSessionInTerminal(session);
 }

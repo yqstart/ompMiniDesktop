@@ -204,10 +204,11 @@ export type UsageBucket = {
 
 /** 范围总览（派生指标全部后端算好）。 */
 export type UsageTotals = UsageBucket & {
- /** 范围内有请求的天数。 */
+ /** 有请求的天数（**全量历史**，与热力图同口径，不随所选范围裁剪）。 */
  activeDays: number;
- /** 连续活跃天数（今天还没跑但昨天跑了不算断签）。 */
+ /** 连续活跃天数（今天还没跑但昨天跑了不算断签；全量历史）。 */
  currentStreak: number;
+ /** 最长连续活跃天数（全量历史）。 */
  longestStreak: number;
  /** 缓存命中率 = cacheRead / (input + cacheRead)；无分母时为 null。 */
  cacheHitRate: number | null;
@@ -775,3 +776,272 @@ export type SkillFileContent = {
  bytes: number;
  truncated: boolean;
 };
+
+// ==================== 聊天形态（V32 恢复自 V1–V10） ====================
+
+/** 消息里的一张图片：与 omp jsonl / prompt.images 的 image 内容块同构（base64，不带 data: 前缀）。 */
+export type ImageBlock = { mimeType: string; data: string };
+
+/**
+ * `@文件` 提及被 omp 读进上下文后，`fileMention` 消息里的一条文件记录（V2 M6b）。
+ * `skippedReason` 有值时表示 omp 跳过了自动读取（binary / tooLarge）。
+ */
+export type MentionFile = {
+ path: string;
+ lineCount?: number;
+ byteSize?: number;
+ skippedReason?: string;
+};
+
+/** `check_paths` 的返回：输入框里 @提及 的存在性提示（只读 stat，不读内容）。 */
+export type PathCheck = { path: string; exists: boolean; isDir: boolean };
+
+/**
+ * 待发送的图片附件（本地读取，随 `prompt.images` 一次性发给 omp，不落覆盖层、不进草稿）。
+ * `dataBase64` 与 `ImageBlock.data` 同格式；`name` 只用于输入框里的可读标签。
+ */
+export type ImageAttachment = { name: string; mimeType: string; dataBase64: string; bytes: number };
+
+/** 模型精简引用（真值回读用，selector = provider/id）。 */
+export type ModelRef = {
+ provider: string;
+ id: string;
+ name?: string | null;
+};
+
+/** 上下文占用（omp `get_state.contextUsage`），纯透传，前端只做格式化。 */
+export type ContextUsage = {
+ tokens: number | null;
+ contextWindow: number | null;
+ /** omp 给的就是百分比（0–100）；缺失或窗口为 0 时为 null。 */
+ percent: number | null;
+};
+
+/** 上下文分项的一档（`parts[].id`，展示名一律走字典）。 */
+export type ContextPartId =
+ | "messages"
+ | "systemPrompt"
+ | "skills"
+ | "tools"
+ | "mcpTools"
+ | "systemContext";
+
+/** 会话累计缓存用量（会话文件里逐轮 usage 求和，口径与设置页「使用统计」一致）。 */
+export type ContextCacheStats = {
+ input: number;
+ cacheRead: number;
+ cacheWrite: number;
+ /** cacheRead / (input + cacheRead)，0–1；分母为 0 时 null。 */
+ hitRate: number | null;
+};
+
+/**
+ * 上下文分项（`get_context_breakdown`）。
+ *
+ * 真值与估算的分界（后端 `context.rs` 的口径，界面必须照此标注）：
+ * 「已用 / 窗口 / 非消息」是 omp 真值，「消息 = 已用 − 非消息」也是真值；
+ * 非消息的其余五档是按字符量估算后**缩放到非消息真值**的结果——各档之和恒等于真值，
+ * 但档与档之间怎么切是估算。
+ */
+export type ContextBreakdown = {
+ usedTokens: number | null;
+ contextWindow: number | null;
+ /** 0–100（与 omp 同式同值）。 */
+ percent: number | null;
+ nonMessageTokens: number | null;
+ /** 各档之和 = `usedTokens`；读不到锚点（非消息真值）时为空数组。 */
+ parts: { id: ContextPartId; tokens: number }[];
+ cache: ContextCacheStats;
+};
+
+/** 最近一轮用量（omp `message_end.message.usage`）。 */
+export type TurnUsage = {
+ input: number | null;
+ output: number | null;
+ totalTokens: number | null;
+ cacheRead: number | null;
+ reasoningTokens: number | null;
+ costTotal: number | null;
+};
+
+/**
+ * 会话运行时真值：omp `get_state` / `set_model` / `message_end` 回读的
+ * 模型、可用思考档、当前档、上下文占用与本轮用量。
+ * 打开会话时经 `get_session_runtime` 回填，其后变化经 `omp-state://<id>` 推送。
+ */
+export type SessionRuntime = {
+ model: ModelRef | null;
+ /** 当前模型可用思考档（omp `thinking.efforts`）；null = 不支持思考。 */
+ efforts: string[] | null;
+ thinkingLevel: string | null;
+ contextUsage?: ContextUsage | null;
+ usage?: TurnUsage | null;
+ /** 本轮耗时（毫秒，omp 原值）。 */
+ durationMs?: number | null;
+ /** 本轮首字延迟（毫秒）。 */
+ ttftMs?: number | null;
+ /** 排队中的消息数（`get_state.queuedMessageCount`，流式排队时展示）。 */
+ queuedCount?: number | null;
+ /** 任务计划（`get_state.todoPhases` 原样透传；只读展示）。 */
+ todoPhases?: TodoPhase[] | null;
+ /** 可用命令（`available_commands_update` 缓存；`/` 补全的数据源）。 */
+ commands?: AvailableCommand[] | null;
+};
+
+/** 任务计划的一条任务（`get_state.todoPhases` 原样透传）。 */
+export type TodoTask = { id: string; content: string; status: string };
+
+/** 任务计划的一个阶段。 */
+export type TodoPhase = { id: string; name: string; tasks: TodoTask[] };
+
+/** 可用命令的一条子命令（omp `subcommands[]` 原样透传；本期只作行内说明，不做二级补全）。 */
+export type AvailableSubcommand = { name: string; description?: string; usage?: string };
+
+/**
+ * 可用命令（`available_commands_update` 透传；`/` 补全的数据源）。
+ *
+ * `source` 实测取值：`builtin` / `skill` / `extension` / `custom` / `file`。
+ * **技能就是命令面里 `skill:<名>` 的那批**（omp 的 `skills.enableSkillCommands`），不是另一套
+ * 数据——所以补全列表不另扫技能目录，扫了只会与命令面重复，还要复刻 omp 的加载优先级。
+ * `hint` 线上形状是 `input.hint`，由 `lib/slashCommands.ts` 归一时折平（类型保留扁平写法）。
+ */
+export type AvailableCommand = {
+ name: string;
+ description?: string;
+ aliases?: string[];
+ /** 参数提示（omp `input.hint`，如 `/compact` → `[soft|remote|snapcompact] [focus]`）。 */
+ hint?: string;
+ /** 来源；`skill` 归入补全列表的「技能」组。 */
+ source?: string;
+ subcommands?: AvailableSubcommand[];
+};
+
+/**
+ * 输入框上方上下文条的 git **只读**信息（后端 `get_git_info`）。
+ * 非仓库 / 未装 git / 目录缺失时为 `isRepo:false`，前端整段隐藏分支展示，不当错误弹。
+ */
+export type GitInfo = {
+ isRepo: boolean;
+ /** 当前分支名；detached HEAD 时为短 sha；未知 null。 */
+ branch: string | null;
+ detached: boolean;
+ /** 本地分支清单（当前分支置顶，其余按最近提交倒序）。 */
+ branches: string[];
+ /** 有未提交的已跟踪文件改动；null = 未检测 / 超时。 */
+ dirty: boolean | null;
+ /** 降级原因（tooltip 与日志用）。 */
+ error: string | null;
+};
+
+/** 思考档全集（docs/v1-schedule.md §4）。 */
+export const THINKING_LEVELS = [
+ "off",
+ "minimal",
+ "low",
+ "medium",
+ "high",
+ "xhigh",
+ "max",
+ "auto",
+] as const;
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+/**
+ * omp `extension_ui_request` 里**需要用户回包**的交互方法（V2 M5 实测口径）。
+ * 其余方法（notify / setStatus / setWidget / setTitle / set_editor_text）是单向通知，
+ * `cancel` 是服务端撤回，都不进这张卡。
+ */
+export type UiMethod = "select" | "confirm" | "input" | "editor";
+
+/**
+ * 一次写 / 改文件的行数增量（工具行走尾的 `+N −M`）。
+ * 由调用参数（`write.content` / `edit.new_string` 与 `edit.old_string`）在归一时刻算好，
+ * **不保留原文**——只留两个计数，长文件内容不进前端内存。
+ */
+export type DiffStat = { added: number; removed: number };
+
+/** ViewMsg：RPC delta 与 jsonl 文件块的统一渲染模型。 */
+export type ViewMsg =
+ | {
+  kind: "user";
+  id: string;
+  text: string;
+  mentions: string[];
+  /** 随消息发出的图片（实时帧或 jsonl 的 image 内容块）；渲染为气泡内缩略图。 */
+  images?: ImageBlock[];
+  /** 因体积过大被刻意省略的图片数（历史回放不做无上限 base64 常驻）。 */
+  imagesOmitted?: number;
+ }
+ | { kind: "text"; id: string; seq: number; text: string; complete: boolean }
+ | { kind: "thinking"; id: string; text: string; seconds: number; complete: boolean }
+ | {
+  kind: "tool";
+  id: string;
+  toolCallId: string;
+  name: string;
+  intent: string;
+  argsSummary: string;
+  state: "streaming" | "running" | "ok" | "error";
+  output: string;
+  outputFull?: string;
+  streamIndex: number;
+  /** 写 / 改文件的行数增量（只有 write / edit 会有；其余工具缺省）。 */
+  diffStat?: DiffStat;
+ }
+ | {
+  kind: "approval";
+  id: string;
+  uiId: string;
+  toolName: string;
+  command: string;
+  cwd: string;
+  title: string;
+ }
+ | {
+  kind: "divider";
+  id: string;
+  divider: "model" | "thinking" | "title" | "exit" | "turn";
+  text: string;
+ }
+ /**
+  * 本地命令输出（`/` 命令经 `command_output` 透传）：无 agent turn，
+  * 渲染为灰字代码区，不触碰运行状态（状态机已由后端收敛到 idle）。
+  */
+ | { kind: "command"; id: string; output: string }
+ /**
+  * 任务计划（`get_state.todoPhases` / `todo_reminder`）：长任务的阶段清单，
+  * 只读展示（改计划走 prompt 下指令），与 ToolCard 时间线互补。
+  */
+ | { kind: "plan"; id: string; phases: TodoPhase[] }
+ /**
+  * 通用 UI 请求（非审批）：omp 的 `confirm` / `input` / `editor` 与非审批 `select`。
+  * 回包语义各不相同（`{confirmed}` / `{value}` / `{cancelled}`），由后端 `respond_ui` 按 `method` 组装。
+  */
+ | {
+  kind: "ui";
+  id: string;
+  uiId: string;
+  method: UiMethod;
+  title: string;
+  /** `confirm` 的正文。 */
+  message?: string;
+  /** `input` 的占位文案。 */
+  placeholder?: string;
+  /** `editor` 的预填内容。 */
+  prefill?: string;
+  /** 非审批 `select` 的选项。 */
+  options?: string[];
+  /** `select` 选项描述（与 `options` 位置对齐，无描述的位置为 null）。 */
+  optionDetails?: (string | null)[];
+ }
+ /** 服务端撤回（`method:"cancel"`，请求已 abort/超时）：把对应卡片从流里去掉。 */
+ | { kind: "ui-cancel"; id: string; uiId: string }
+ /** `@文件` 提及被 omp 读进上下文（`fileMention` 消息）：渲染成一排文件芯片。 */
+ | { kind: "files"; id: string; files: MentionFile[] };
+
+export type SessionStatus =
+ | { state: "running" }
+ | { state: "idle" }
+ | { state: "awaiting-approval" }
+ | { state: "error"; detail: string }
+ | { state: "exited"; detail: string };

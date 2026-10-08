@@ -101,6 +101,119 @@ pub fn dir_exists(dir: &str) -> bool {
     Path::new(dir).is_dir()
 }
 
+// ---------- git 上下文只读读取（聊天形态输入框上方上下文条用；V32 恢复自 V1–V10） ----------
+
+/// 本地分支清单上限：只读展示，不做无限清单。
+const MAX_BRANCHES: usize = 200;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GitInfo {
+    /// 是否在 git 工作区内（false = 非仓库 / git 不可用，前端据此隐藏分支展示）。
+    #[serde(rename = "isRepo")]
+    pub is_repo: bool,
+    /// 当前分支名；detached HEAD 时为短 sha；未知为 null。
+    pub branch: Option<String>,
+    /// 是否 detached HEAD（前端追加「游离」提示）。
+    pub detached: bool,
+    /// 本地分支清单（当前分支置顶，其余按最近提交倒序）。
+    pub branches: Vec<String>,
+    /// 工作区是否有已跟踪文件的改动；null = 未检测 / 超时。
+    pub dirty: Option<bool>,
+    /// 非仓库 / 命令失败的原因（只用于 tooltip 与日志，不弹窗）。
+    pub error: Option<String>,
+}
+
+impl GitInfo {
+    /// 降级值：非仓库、目录缺失、找不到 git 都走这里。
+    pub fn not_repo(error: Option<String>) -> Self {
+        Self { is_repo: false, branch: None, detached: false, branches: vec![], dirty: None, error }
+    }
+}
+
+/// 解析 `git symbolic-ref -q --short HEAD`：detached HEAD 时无输出 → None。
+pub fn parse_branch_name(out: &str) -> Option<String> {
+    let t = out.trim();
+    if t.is_empty() {
+        None
+    } else {
+        Some(t.to_string())
+    }
+}
+
+/// 解析 `git for-each-ref --format=%(refname:short) refs/heads`：
+/// 去空行、去重（保序）、当前分支置顶、截断到 [`MAX_BRANCHES`]。
+pub fn parse_branches(out: &str, current: Option<&str>) -> Vec<String> {
+    let mut list: Vec<String> = vec![];
+    for line in out.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let name = line.to_string();
+        if !list.contains(&name) {
+            list.push(name);
+        }
+    }
+    if let Some(cur) = current {
+        if let Some(pos) = list.iter().position(|b| b == cur) {
+            let head = list.remove(pos);
+            list.insert(0, head);
+        }
+    }
+    list.truncate(MAX_BRANCHES);
+    list
+}
+
+/// 解析 `git status --porcelain --untracked-files=no`：任一行非空即有改动。
+/// 只统计已跟踪文件，未跟踪文件不扫（大仓库里这步最慢）。
+pub fn parse_dirty(out: &str) -> bool {
+    out.lines().any(|l| !l.trim().is_empty())
+}
+
+/// 解析 `git rev-parse --short HEAD`（detached HEAD 的展示名）。
+pub fn parse_short_sha(out: &str) -> Option<String> {
+    let t = out.trim();
+    if t.is_empty() {
+        None
+    } else {
+        Some(t.to_string())
+    }
+}
+
+/// 读取一个目录的 git 上下文。目录不存在 / 非仓库 / git 不可用都返回降级值，不抛错。
+pub async fn read_git_info(git: &str, dir: &str) -> GitInfo {
+    // 1) 是不是工作区：`rev-parse --is-inside-work-tree` 输出 true 才算
+    match run_git(git, dir, &["rev-parse", "--is-inside-work-tree"]).await {
+        Ok(out) if out.trim() == "true" => {}
+        Ok(_) => return GitInfo::not_repo(None),
+        Err(e) => return GitInfo::not_repo(Some(e)),
+    }
+    // 2) 当前分支：detached HEAD 时 symbolic-ref 退出码非 0，属正常情况
+    let mut branch = match run_git(git, dir, &["symbolic-ref", "-q", "--short", "HEAD"]).await {
+        Ok(out) => parse_branch_name(&out),
+        Err(_) => None,
+    };
+    // 3) detached（或无提交）时用短 sha 顶替分支名，拿不到就只留「游离」标记
+    let detached = branch.is_none();
+    if detached {
+        branch = run_git(git, dir, &["rev-parse", "--short", "HEAD"])
+            .await
+            .ok()
+            .and_then(|out| parse_short_sha(&out));
+    }
+    // 4) 本地分支清单：按最近提交倒序，当前分支由 parse_branches 置顶
+    let branches = run_git(
+        git,
+        dir,
+        &["for-each-ref", "--sort=-committerdate", "--format=%(refname:short)", "refs/heads"],
+    )
+    .await
+    .map(|out| parse_branches(&out, branch.as_deref()))
+    .unwrap_or_default();
+    // 5) 脏工作区标记（只读提示：有未提交改动时切分支会带着改动走）
+    let dirty = run_git(git, dir, &["status", "--porcelain", "--untracked-files=no"])
+        .await
+        .ok()
+        .map(|out| parse_dirty(&out));
+    GitInfo { is_repo: true, branch, detached, branches, dirty, error: None }
+}
+
 /// 一个 git worktree（`git worktree list --porcelain` 的解析结果）。
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -23,7 +23,7 @@ const read = (rel) => fs.readFileSync(path.join(root, rel), "utf8");
 const ipc = read("src/shared/ipc.ts");
 const api = read("src/shared/api.ts");
 const mainRs = read("src-tauri/src/main.rs");
-const rsFiles = ["commands/mod.rs", "providers.rs", "memories.rs", "usage.rs", "settings.rs", "pty.rs", "models_config.rs", "git_commit.rs", "git_ops.rs", "commit_msg.rs", "provider_usage.rs", "title_prompt.rs", "project_files.rs", "plugins.rs", "skills.rs", "omp_update.rs", "themes.rs"]
+const rsFiles = ["commands/mod.rs", "providers.rs", "memories.rs", "usage.rs", "settings.rs", "pty.rs", "models_config.rs", "git_commit.rs", "git_ops.rs", "commit_msg.rs", "provider_usage.rs", "title_prompt.rs", "project_files.rs", "plugins.rs", "skills.rs", "omp_update.rs", "themes.rs", "context.rs"]
  .map((f) => read(`src-tauri/src/${f}`));
 const providersRs = rsFiles[1];
 
@@ -37,7 +37,11 @@ for (const m of cmdSection.matchAll(/^\s*([A-Za-z0-9_]+):\s*"([a-z0-9_]+)",/gm))
 if (ipcCmds.size < 30) fail(`ipc.ts 命令常量过少（${ipcCmds.size}），解析可能失效`);
 
 // 2) main.rs 注册表：generate_handler![...] 内的命令（允许 `mod::name` 前缀；末项无逗号）
-const handlerBlock = mainRs.match(/generate_handler!\[([\s\S]*?)\]/)?.[1];
+//    先剥行注释与块注释：注释里的版本号（如「V32」）会被逐词扫描误当命令名（真出过一次）
+const handlerBlock = mainRs
+ .match(/generate_handler!\[([\s\S]*?)\]/)?.[1]
+ ?.replace(/\/\/[^\n]*/g, "")
+ .replace(/\/\*[\s\S]*?\*\//g, "");
 if (!handlerBlock) fail("main.rs 里找不到 generate_handler![...]");
 const registered = new Set(
  [...handlerBlock.matchAll(/(?:[a-z_]+::)?([a-z0-9_]+)/g)].map((m) => m[1]),

@@ -8,7 +8,8 @@
 //!   （`input` 是**未缓存**输入，缓存读 / 写单独成项）。
 //! - `message.timestamp` 是**毫秒数字**（不是 ISO 串）。
 //!
-//! 扫描是**全量**的：时间范围内的每一条 assistant 消息都要计入，所以不能像列表那样只看文件头尾。
+//! 扫描是**全量**的：每条 assistant 消息都可能落进任意一项统计（活跃日与热力图还会跨出所选范围），
+//! 所以不能像列表那样只看文件头尾。
 //! 保护手段与 `search_sessions` 同款——文件数 / 字节 / 墙钟三道预算，任何一道到点即停并把
 //! `truncated` 置 true（**宁可说「可能不全」，不假装统计完了**）。行级预筛（先看原始行里有没有
 //! `"usage"` 再解析 JSON）让真实目录（29MB）的整轮扫描保持在百毫秒级。
@@ -17,12 +18,13 @@
 //! 预算截断、缺失目录）都有单测。
 //!
 //! 每日热力图（GitHub 贡献图口径）**独立于范围窗口**：它固定看最近 [`HEAT_WEEKS`] 周并按周日对齐，
-//! 所以「今日」范围也能看到一整年日历，而三项指标仍只按所选范围聚合——界面上的「每日 / 每周 /
-//! 累计」三档只是对同一份逐日数据换取值，不是三次扫描。
+//! 所以「今日」范围也能看到一整年日历——界面上的「每日 / 每周 / 累计」三档只是对同一份逐日数据
+//! 换取值，不是三次扫描。**活跃天数与连续天数同样看全量历史、不随 `days` 裁剪**（「活跃」是使用
+//! 习惯的刻画，不该因为上方切到「今日」就退回 1 天）；只有 tokens 总量与命中率按所选范围聚合。
 
 use chrono::{DateTime, Datelike, Days, Local, NaiveDate};
 use serde::Serialize;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use tauri::State;
 
@@ -72,11 +74,11 @@ impl UsageBucket {
 pub struct UsageTotals {
     #[serde(flatten)]
     pub bucket: UsageBucket,
-    /// 范围内有请求的天数。
+    /// 有请求的天数（**全量历史**，与热力图同口径，不随所选范围裁剪）。
     pub active_days: u64,
-    /// 连续活跃天数（今天还没跑但昨天跑了不断签，GitHub 口径）。
+    /// 连续活跃天数（今天还没跑但昨天跑了不断签，GitHub 口径；全量历史）。
     pub current_streak: u64,
-    /// 范围内最长连续活跃天数。
+    /// 最长连续活跃天数（全量历史）。
     pub longest_streak: u64,
     /// 缓存命中率 = cacheRead / (input + cacheRead)；分母为 0 时 null。
     pub cache_hit_rate: Option<f64>,
@@ -183,10 +185,10 @@ pub fn parse_message_line(line: &str) -> Option<ParsedMsg> {
     })
 }
 
-/// 本地日期（`YYYY-MM-DD`）——按用户所在时区归档，与界面上的「今天」一致。
-fn local_date(ms: i64) -> Option<String> {
+/// 本地日期——按用户所在时区归档，与界面上的「今天」一致。
+fn local_date(ms: i64) -> Option<NaiveDate> {
     let dt = DateTime::from_timestamp_millis(ms)?;
-    Some(dt.with_timezone(&Local).format("%Y-%m-%d").to_string())
+    Some(dt.with_timezone(&Local).date_naive())
 }
 
 // ---------- 扫描 ----------
@@ -219,15 +221,11 @@ fn scan_usage_with(
 ) -> UsageStats {
     let today = now.date_naive();
     // 范围下界：今日 = 今天当天；近 N 日在内的是最近 N 个自然日（含今天）。
-    // 日期串是 ISO，字典序即时间序，直接比字符串。
-    let cutoff: Option<String> = match days {
-        Some(d) => Some(
-            (today - Days::new(d.saturating_sub(1) as u64)).format("%Y-%m-%d").to_string(),
-        ),
-        None => None,
-    };
+    // 只裁剪 tokens 总量与命中率——活跃天数 / 连续天数看全量历史（见模块头）。
+    let cutoff: Option<NaiveDate> =
+        days.map(|d| today - Days::new(d.saturating_sub(1) as u64));
     // 热力图窗口起点：最近 53 周的周日。范围再窄也要把这一年的日粒度算全
-    let heat_from = heat_window_start(today).format("%Y-%m-%d").to_string();
+    let heat_from = heat_window_start(today);
 
     let mut files: Vec<(std::time::SystemTime, PathBuf)> = vec![];
     if let Ok(rd) = std::fs::read_dir(root) {
@@ -252,7 +250,8 @@ fn scan_usage_with(
     let mut bytes_read = 0u64;
 
     let mut totals = UsageTotals::default();
-    let mut by_day: BTreeMap<String, UsageBucket> = BTreeMap::new();
+    // 活跃日集合：与热力图一样在范围裁剪**之前**收集（全量历史），活跃天数 / 连续天数都从它派生
+    let mut active: BTreeSet<NaiveDate> = BTreeSet::new();
     // 热力图按「日期 → 模型 → token」存：格子的读数要按模型拆开（三项指标不用它）
     let mut by_heat: BTreeMap<String, BTreeMap<String, u64>> = BTreeMap::new();
 
@@ -278,23 +277,22 @@ fn scan_usage_with(
             let Some(msg) = parse_message_line(&line) else { continue };
             let Some(date) = local_date(msg.ts_ms) else { continue };
             // 热力图在范围裁剪之前聚合：它固定看最近一年，不随上方范围切换
-            if date.as_str() >= heat_from.as_str() {
+            if date >= heat_from {
                 if let Some(u) = msg.usage.as_ref() {
                     *by_heat
-                        .entry(date.clone())
+                        .entry(date.format("%Y-%m-%d").to_string())
                         .or_default()
                         .entry(msg.model.clone())
                         .or_insert(0) += u.total;
                 }
             }
-            if let Some(c) = &cutoff {
-                if &date < c {
-                    continue;
-                }
-            }
             let Some(u) = msg.usage else { continue };
+            // 活跃日与热力图同口径：范围裁剪之前收全（切到「今日」不把活跃天数压成 1 天）
+            active.insert(date);
+            if cutoff.is_some_and(|c| date < c) {
+                continue;
+            }
             totals.bucket.add(&u);
-            by_day.entry(date).or_default().add(&u);
         }
         if started.elapsed().as_millis() as u64 >= budget.max_ms {
             truncated = true;
@@ -302,24 +300,21 @@ fn scan_usage_with(
         }
     }
 
-    let totals = finish_totals(totals, &by_day, today);
+    let totals = finish_totals(totals, &active, today);
     UsageStats { totals, heat: fill_heat(&by_heat, today), scanned_files, truncated }
 }
 
-/// 收尾：从 by_day 派生活跃天数、连续天数与命中率。
+/// 收尾：从活跃日集合派生天数、连续天数与命中率。
 fn finish_totals(
     mut totals: UsageTotals,
-    by_day: &BTreeMap<String, UsageBucket>,
+    active: &BTreeSet<NaiveDate>,
     today: NaiveDate,
 ) -> UsageTotals {
-    // by_day 的每个键都来自一条带 usage 的消息，键数即活跃天数
-    let active: Vec<NaiveDate> = by_day
-        .keys()
-        .filter_map(|k| NaiveDate::parse_from_str(k, "%Y-%m-%d").ok())
-        .collect();
-    totals.active_days = active.len() as u64;
-    totals.longest_streak = longest_streak(&active);
-    totals.current_streak = current_streak(&active, today);
+    // 集合的每个键都来自一条带 usage 的消息，键数即活跃天数（BTreeSet 天然按日期升序）
+    let days: Vec<NaiveDate> = active.iter().copied().collect();
+    totals.active_days = days.len() as u64;
+    totals.longest_streak = longest_streak(&days);
+    totals.current_streak = current_streak(&days, today);
     let denom = totals.bucket.input + totals.bucket.cache_read;
     totals.cache_hit_rate =
         if denom > 0 { Some(totals.bucket.cache_read as f64 / denom as f64) } else { None };
@@ -390,6 +385,7 @@ fn fill_heat(by_heat: &BTreeMap<String, BTreeMap<String, u64>>, today: NaiveDate
 // ---------- 命令 ----------
 
 /// 使用统计：扫会话 jsonl 聚合三项指标（范围可选：1 / 7 / 30 天，null = 全部）。
+/// 范围只作用于 tokens 总量与命中率；活跃天数 / 连续天数恒为全量历史。
 #[tauri::command]
 pub async fn get_usage_stats(
     state: State<'_, AppState>,
@@ -570,6 +566,7 @@ mod tests {
         );
         let week = scan_usage_with(&root, Some(7), now(), Budget::default());
         assert_eq!(week.totals.bucket.total, 10, "总览仍只看 7 日窗口");
+        assert_eq!(week.totals.active_days, 3, "活跃天数不受窗口影响（含一年前的 2025-09-01）");
         let jan = week.heat.iter().find(|h| h.date == "2026-01-05").expect("日历覆盖一年");
         assert_eq!(jan.total, 120, "热力图不随范围裁剪");
         assert!(week.heat.iter().all(|h| h.date != "2025-09-01"), "一年前的旧数据不进日历");
@@ -620,7 +617,7 @@ mod tests {
     }
 
     #[test]
-    fn range_filter_drops_old_days_and_keeps_today_boundary() {
+    fn range_filter_scopes_tokens_but_active_days_stay_global() {
         let root = tmp_root("range");
         write_session(
             &root,
@@ -636,23 +633,24 @@ mod tests {
             ],
         );
         let week = scan_usage_with(&root, Some(7), now(), Budget::default());
-        assert_eq!(week.totals.bucket.total, 1100, "窗口外的 9999 不能计入");
+        assert_eq!(week.totals.bucket.total, 1100, "窗口外的 9999 不能计入 tokens 总量");
         assert_eq!(week.totals.bucket.calls, 2);
-        assert_eq!(week.totals.active_days, 2);
+        assert_eq!(week.totals.active_days, 3, "活跃天数看全量历史，含窗口外的 9-6");
         assert_eq!(week.totals.current_streak, 2);
-        assert_eq!(week.totals.longest_streak, 2);
+        assert_eq!(week.totals.longest_streak, 2, "9-15 / 9-16 连成 2 天，9-6 是孤日");
 
-        // 「今日」= 只有今天
+        // 「今日」：tokens 只算今天，但活跃天数 / 连续天数与「全部」一致，不随范围缩水
         let today = scan_usage_with(&root, Some(1), now(), Budget::default());
         assert_eq!(today.totals.bucket.total, 1000);
         assert_eq!(today.totals.bucket.calls, 1);
-        assert_eq!(today.totals.active_days, 1);
-        assert_eq!(today.totals.longest_streak, 1);
+        assert_eq!(today.totals.active_days, 3);
+        assert_eq!(today.totals.current_streak, 2);
+        assert_eq!(today.totals.longest_streak, 2);
 
-        // 全部：含窗口外
+        // 全部：tokens 含窗口外
         let all = scan_usage_with(&root, None, now(), Budget::default());
         assert_eq!(all.totals.bucket.total, 11099);
-        assert_eq!(all.totals.active_days, 3);
+        assert_eq!(all.totals.active_days, today.totals.active_days);
         assert_eq!(all.totals.current_streak, 2, "中间断了 7 天，当前连的只有今天与昨天");
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -807,5 +805,15 @@ mod tests {
             stats.totals.cache_hit_rate,
         );
         assert!(stats.scanned_files > 0, "本机应有会话数据（没有就跑不出基准）");
+        // 真实数据上的口径回归：活跃天数不随范围变化，tokens 总量随范围收窄
+        let today_only = scan_usage_in(&agent.join("sessions"), Some(1), Local::now());
+        assert_eq!(
+            today_only.totals.active_days, stats.totals.active_days,
+            "「今日」档的活跃天数应与全量一致"
+        );
+        assert!(
+            today_only.totals.bucket.total <= stats.totals.bucket.total,
+            "「今日」档的 tokens 总量不应超过全量"
+        );
     }
 }
