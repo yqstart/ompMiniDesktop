@@ -120,3 +120,39 @@ describe("聊天侧栏的工作区分段（V21 容器在聊天形态的投影）
   expect(text).toContain("登录页重构");
  });
 });
+
+describe("聊天侧栏的提交入口（与终端目录行同一命令面）", () => {
+ it("项目分组头有提交键，点击打开该项目的提交面板", async () => {
+  const { TEXT } = await import("../../lib/locale");
+  await open();
+  const btn = container.querySelector(`button[aria-label="${TEXT["zh-CN"].gitCommitTitle}"]`);
+  expect(btn, "项目分组头应有提交入口").not.toBeNull();
+  (btn as HTMLButtonElement).click();
+  expect(useApp.getState().activeCommitCwd).toBe("/w/alpha");
+ });
+
+ it("有未推送提交时分组头显示待推送徽章（点击走推送）", async () => {
+  const { TEXT } = await import("../../lib/locale");
+  act(() => {
+   useApp.setState({
+    workspaceGitStates: { "/w/alpha": { path: "/w/alpha", isRepo: true, dirty: false, ahead: 3, behind: 0, upstream: "origin/main", upstreamGone: false } },
+    commitTasks: {},
+   });
+  });
+  await open();
+  const badge = container.querySelector(`button[aria-label="${TEXT["zh-CN"].gitPushTitle.replace("{0}", "3")}"]`);
+  expect(badge, "待推送徽章应渲染").not.toBeNull();
+  expect(badge?.textContent).toContain("3");
+ });
+
+ it("改名后的实时标题覆盖扫描行的旧标题", async () => {
+  await open();
+  expect(container.textContent).toContain("登录页重构");
+  act(() => {
+   useApp.setState({
+    sessions: [{ id: "s1", projectId: "p1", title: "改名后的标题", cwd: "/w/alpha", timestamp: 1, archived: false, corrupt: false, note: "改名后的标题", running: true }],
+   });
+  });
+  expect(container.textContent).toContain("改名后的标题");
+ });
+});

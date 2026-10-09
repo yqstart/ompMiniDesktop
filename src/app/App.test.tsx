@@ -214,6 +214,25 @@ describe("引用工作区文件快捷键（V22）", () => {
   expect(container.textContent).toContain(TEXT["zh-CN"].refPickTitle);
  });
 
+ it("聊天形态输入框聚焦时 ⌘⇧P 照常打开（typing 守卫放行引用键）", () => {
+  act(() => {
+   useApp.setState({
+    appMode: "chat",
+    activeSessionId: "s-1",
+    sessions: [
+     { id: "s-1", projectId: "p1", title: "会话", cwd: "/a", timestamp: 1, archived: false, corrupt: false, note: null, running: false },
+    ],
+    refPickerTarget: null,
+   });
+  });
+  const ta = document.createElement("textarea");
+  document.body.append(ta);
+  act(() => ta.focus());
+  expect(document.activeElement).toBe(ta);
+  press({ key: "p", ...mod, shiftKey: true });
+  expect(useApp.getState().refPickerTarget).toEqual({ kind: "chat", sessionId: "s-1" });
+  ta.remove();
+ });
  it("设置标签激活时 ⌘⇧P 不触发", () => {
   act(() => useApp.setState({ settingsTabActive: true }));
   press({ key: "p", ...mod, shiftKey: true });

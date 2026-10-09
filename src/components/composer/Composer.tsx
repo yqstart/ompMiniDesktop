@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { ArrowUp, AtSign, FileText, ImagePlus, TriangleWarning, X } from "reicon-react";
+import { ArrowUp, AtSign, FileText, Gauge, ImagePlus, TriangleWarning, X } from "reicon-react";
 import { useApp } from "../../stores/app";
 import { api } from "@shared/api";
 import { attachmentFromFile, dataUrl } from "../../lib/attachments";
 import { fmt } from "../../lib/locale";
 import { extractMentions } from "../../lib/mentions";
 import { commandInsert, filterCommands, isCompleteCommand, normalizeCommands, type SlashCandidate } from "../../lib/slashCommands";
+import { refreshTitleAfterFirstSend } from "../../lib/sessionOpen";
 import { useText } from "../../lib/useText";
 import { ModelPicker } from "../pickers/ModelPicker";
 import { ThinkingPicker } from "../pickers/ThinkingPicker";
 import { PermissionBadge } from "../pickers/PermissionBadge";
-import { CompactButton, OmpStatusPill, QueueBadge, RuntimeStats } from "../thread/StatusBar";
+import { CompactButton, QueueBadge } from "../thread/StatusBar";
 import { ContextBar } from "./ContextBar";
 import { ContextMeter } from "./ContextMeter";
 import { MentionList } from "./MentionList";
@@ -19,7 +20,8 @@ import { SlashMenu } from "./SlashMenu";
 
 /**
  * 会话输入框：随心输入 + 底部工具行（截图布局）。
- * 上：上下文条（项目 / git 分支）+ 附件条 + 多行输入；下左：图片 / 权限；下右：模型 / 思考档 / 发送-停止。
+ * 上：上下文条（项目 / git 分支 / 提交…）+ 附件条 + 多行输入；下左：图片 / 引用 / 权限 / 排队 / 用量；
+ * 下右：模型 / 思考档 / 发送-停止。
  * 模型·思考档·权限只放这里，顶栏不再重复（UpdateBell 除外）。
  *
  * 图片附件（V2 M6）：粘贴 / 拖拽 / 点回形针三条入口，全部读成 base64 存在内存里，
@@ -241,11 +243,14 @@ export function Composer() {
   if (!activeSessionId || (!draft.trim() && attachments.length === 0) || running || archived) return;
   const text = draft;
   const sentImages = attachments;
+  const sid = activeSessionId;
+  // 首条判定：流里还没有 user 消息 = 这是本会话第一条（标题回退只做这一次）
+  const isFirst = !(useApp.getState().eventsBySession[sid] ?? []).some((m) => m.kind === "user");
   // 乐观回显：先落一条本地 user 消息，id 带时间戳；
   // 历史回放里同一文本的 `u:<行id>` 到达时按文本合并去重，不翻倍。
   // eslint-disable-next-line react-hooks/purity -- send 是点击事件处理，非 render
   const optimisticId = `u-local-${Date.now()}`;
-  useApp.getState().appendEvents(activeSessionId, [
+  useApp.getState().appendEvents(sid, [
    {
     kind: "user",
     id: optimisticId,
@@ -256,23 +261,28 @@ export function Composer() {
      : {}),
    } as never,
   ]);
-  setDraft(activeSessionId, "");
-  clearAttachments(activeSessionId);
+  setDraft(sid, "");
+  clearAttachments(sid);
   try {
    await api.sendMessage(
-    activeSessionId,
+    sid,
     text,
     sentImages.map((a) => ({ name: a.name, mimeType: a.mimeType, dataBase64: a.dataBase64, bytes: a.bytes })),
    );
+   // 首条发送成功：本地回退先顶上 + 回读 omp 真值（rpc-ui 实测不产标题，回退即终态；
+   // TUI 侧改过名时真值覆盖回退）。失败不阻塞发送链路。
+   if (isFirst && text.trim() && sentImages.length === 0) {
+    void refreshTitleAfterFirstSend(sid, text).catch(() => undefined);
+   }
   } catch {
    // 发失败就把草稿与附件还回去、不留幽灵消息，不让用户重打一遍
-   setDraft(activeSessionId, text);
-   addAttachments(activeSessionId, sentImages);
+   setDraft(sid, text);
+   addAttachments(sid, sentImages);
    const st = useApp.getState();
    st.set({
     eventsBySession: {
      ...st.eventsBySession,
-     [activeSessionId]: (st.eventsBySession[activeSessionId] ?? []).filter((m) => m.id !== optimisticId),
+     [sid]: (st.eventsBySession[sid] ?? []).filter((m) => m.id !== optimisticId),
     },
    });
   }
@@ -505,10 +515,16 @@ export function Composer() {
       <AtSign size={16} aria-hidden />
      </button>
      <PermissionBadge compact align="left" />
-     <OmpStatusPill />
      <QueueBadge />
      <CompactButton />
-     <RuntimeStats />
+     <button
+      onClick={() => useApp.getState().set({ providerUsageOpen: true })}
+      className="cursor-pointer rounded-md p-1.5 text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+      aria-label={t.pusageTitle}
+      title={t.pusageTitle}
+     >
+      <Gauge size={16} aria-hidden />
+     </button>
      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
       <ContextMeter />
       <ModelPicker compact />
@@ -546,6 +562,6 @@ export function Composer() {
      </div>
     </div>
    </div>
-  </div>
+  </div >
  );
 }

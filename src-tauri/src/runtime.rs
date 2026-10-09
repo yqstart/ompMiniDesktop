@@ -728,7 +728,7 @@ fn dispatch<R: tauri::Runtime>(app: &AppHandle<R>, key: &str, evt: &str, status:
         }
         "response" | "message_start" | "message_update" | "message_end" | "turn_start" | "turn_end"
         | "tool_execution_start" | "tool_execution_update" | "tool_execution_end" | "model_changed"
-        | "thinking_level_changed" => {
+        | "thinking_level_changed" | "title_change" => {
             let _ = app.emit(evt, v);
         }
         _ => {

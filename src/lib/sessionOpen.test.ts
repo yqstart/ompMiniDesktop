@@ -40,7 +40,7 @@ vi.mock("@shared/api", () => ({
 
 import { api } from "@shared/api";
 import { useApp } from "../stores/app";
-import { openSessionWithHistory } from "./sessionOpen";
+import { fallbackTitleFromText, openSessionWithHistory, refreshTitleAfterFirstSend } from "./sessionOpen";
 
 describe("打开会话：历史落库与去重", () => {
  beforeEach(() => {
@@ -69,5 +69,42 @@ describe("打开会话：历史落库与去重", () => {
   expect((useApp.getState().eventsBySession[SID] ?? []).filter((m) => m.id === "hist-truncated")).toHaveLength(1);
   await openSessionWithHistory(SID);
   expect((useApp.getState().eventsBySession[SID] ?? []).filter((m) => m.id === "hist-truncated")).toHaveLength(1);
+ });
+
+ describe("首条标题回退（rpc-ui 不产标题时的本地显示）", () => {
+  it("取首条前 12 字（空白折叠，超长截断加省略号）", () => {
+   expect(fallbackTitleFromText("  你好\n世界  ")).toBe("你好 世界");
+   expect(fallbackTitleFromText("这是一个很长的需求描述要截断")).toBe("这是一个很长的需求描述要…");
+   expect(fallbackTitleFromText("帮我把登录页重构一下")).toBe("帮我把登录页重构一下");
+   expect(fallbackTitleFromText("   ")).toBeNull();
+  });
+
+  it("未命名会话：回退先顶上，回读无真值时保留回退", async () => {
+   useApp.setState({
+    sessions: [{ id: SID, projectId: "p1", title: "未命名会话 10-09", cwd: "/a", timestamp: 1, archived: false, corrupt: false, note: null, running: true }],
+   });
+   vi.mocked(api.openSession).mockResolvedValue({ id: SID, projectId: "p1", title: "未命名会话 10-09", archived: false } as never);
+   await refreshTitleAfterFirstSend(SID, "帮我把登录页重构一下登录页重构一下");
+   expect(useApp.getState().sessions.find((s) => s.id === SID)?.title).toBe("帮我把登录页重构一下登录…");
+  });
+
+  it("回读到真值时用真值覆盖回退", async () => {
+   useApp.setState({
+    sessions: [{ id: SID, projectId: "p1", title: "未命名会话 10-09", cwd: "/a", timestamp: 1, archived: false, corrupt: false, note: null, running: true }],
+   });
+   vi.mocked(api.openSession).mockResolvedValue({ id: SID, projectId: "p1", title: "登录页重构", archived: false } as never);
+   await refreshTitleAfterFirstSend(SID, "帮我把登录页重构一下");
+   expect(useApp.getState().sessions.find((s) => s.id === SID)?.title).toBe("登录页重构");
+  });
+
+  it("有备注 / 已有真标题的不碰", async () => {
+   useApp.setState({
+    sessions: [{ id: SID, projectId: "p1", title: "我的备注", cwd: "/a", timestamp: 1, archived: false, corrupt: false, note: "我的备注", running: true }],
+   });
+   vi.mocked(api.openSession).mockClear();
+   await refreshTitleAfterFirstSend(SID, "新消息不该改标题");
+   expect(useApp.getState().sessions.find((s) => s.id === SID)?.title).toBe("我的备注");
+   expect(vi.mocked(api.openSession)).not.toHaveBeenCalled();
+  });
  });
 });

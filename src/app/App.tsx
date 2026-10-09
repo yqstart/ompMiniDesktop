@@ -131,10 +131,14 @@ function useTerminalHotkeys() {
    const typing = el instanceof HTMLElement
     && !el.closest(".xterm-helper-textarea")
     && !!el.closest("input, textarea, select, [contenteditable='true']");
+   // ⌘⇧P 是两形态共用的引用浮层入口（V22/V32）：即使焦点在输入框里也要放行——
+   // 终端形态的 xterm helper textarea 本来就不算 typing，聊天形态的 Composer 是普通
+   // textarea（聊天常态就是在输入框里按这个键），被 typing 守卫吞掉等于入口断掉。
+   const refPick = key === "p" && e.shiftKey;
    // 识别到本应用组合键就先截获，避免浏览器默认或漏进 PTY；模态或输入中只阻断不执行。
    e.preventDefault();
    e.stopPropagation();
-   if (e.repeat || hasOpenDialog() || typing) return;
+   if (e.repeat || hasOpenDialog() || (typing && !refPick)) return;
    const s = useApp.getState();
    // 聊天形态：只有「⌘W 关设置」「⌘T 新建聊天」「⌘⇧P 引用工作区文件」有意义；其余终端快捷键不参与
    if (s.appMode === "chat") {

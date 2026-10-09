@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, ChevronRight, Folder, FolderError, FolderPlus, Inbox, Layers, Plus, Search, X } from "reicon-react";
+import { AlertTriangle, Archive, ArrowUpCircle, BranchDown, BranchUp, ChevronRight, Folder, FolderError, FolderPlus, Inbox, Layers, Loader, Plus, Search, X } from "reicon-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "@shared/api";
 import type { ProjectView, SessionView } from "@shared/types";
@@ -10,6 +10,7 @@ import { pickAndAddProject, startChatInProject } from "../../lib/projects";
 import { groupSessionsByProject } from "../../lib/sessions";
 import { openSessionWithHistory } from "../../lib/sessionOpen";
 import { runSessionBatch } from "../../lib/sessionBatch";
+import { isCommitTaskRunning, openCommitPanel, pushWorkspace } from "../../lib/commitTasks";
 import { useText } from "../../lib/useText";
 import { SidebarBottom } from "./SidebarBottom";
 import { SidebarTop } from "./SidebarTop";
@@ -99,6 +100,12 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
  const projects = useApp((s) => s.projects);
  const workspaceGroups = useApp((s) => s.workspaceGroups);
  const activeSessionId = useApp((s) => s.activeSessionId);
+ // 已打开会话的实时视图（标题真相）：改名 / 首条回退 / title_change 实时帧只写 store，
+ // 本地扫描列表靠它覆盖行标题，否则改名后侧栏 permanent 陈旧（改名根本不触发重扫）。
+ const storeSessions = useApp((s) => s.sessions);
+ // git 行徽章的数据（与终端目录行同一份快照；刷新时机由 App 的 useWorkspaceGitRefresh 统一管）。
+ const gitStates = useApp((s) => s.workspaceGitStates);
+ const commitTasks = useApp((s) => s.commitTasks);
  const [sessions, setSessions] = useState<SessionView[]>([]);
  const [scan, setScan] = useState<{ total: number; scanned: number }>({ total: 0, scanned: 0 });
  const [loaded, setLoaded] = useState(false);
@@ -213,7 +220,18 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
 
  const q = query.trim().toLowerCase();
  const matchSession = (s: SessionView) => (q ? `${s.title}\n${s.cwd}`.toLowerCase().includes(q) : true);
- const { groups, orphanActive } = useMemo(() => groupSessionsByProject(projects, sessions), [projects, sessions]);
+ // 扫描行 × 已打开会话的实时视图：同 id 以 store 为准（标题/归档/running 的真相），
+ // 扫描窗口外的新会话（打开过但扫不到）也补一行——否则刚建的会话在列表里看不见。
+ const mergedSessions = useMemo(() => {
+  const live: Record<string, SessionView> = {};
+  for (const s of storeSessions) live[s.id] = s;
+  const out = sessions.map((s) => live[s.id] ?? s);
+  for (const s of storeSessions) {
+   if (!s.archived && !out.some((x) => x.id === s.id)) out.unshift(s);
+  }
+  return out;
+ }, [sessions, storeSessions]);
+ const { groups, orphanActive } = useMemo(() => groupSessionsByProject(projects, mergedSessions), [projects, mergedSessions]);
  const visibleGroups = groups.map((g) => ({ project: g.project, active: g.active.filter(matchSession) }));
  const visibleOrphan = orphanActive.filter(matchSession);
  const matchCount = visibleGroups.reduce((n, g) => n + g.active.length, 0) + visibleOrphan.length;
@@ -239,7 +257,78 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
  /** 分组头与「未归属」共用的动作键（＋ / 归档全部）——图标槽与计数同槽互斥，悬浮零跳动。 */
  const actionButton =
   "flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-100 hover:bg-active hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40";
-
+ /** 项目分组头的 git 状态徽章（与终端目录行同一份快照同一套语义，只是按项目主目录取）：dirty 点 / 待推送（可点）/ 落后（只读）/ 任务态（可点开面板）。无快照时不占位。 */
+ const gitBadgesFor = (path: string, missing: boolean) => {
+  if (missing) return null;
+  const gs = gitStates[path];
+  if (!gs?.isRepo) return null;
+  const task = commitTasks[path];
+  const running = task ? isCommitTaskRunning(task.phase) : false;
+  const failed = task?.phase === "failed";
+  const dirty = gs.dirty;
+  const ahead = gs.ahead;
+  const behind = gs.behind;
+  if (!dirty && ahead <= 0 && behind <= 0 && !running && !failed) return null;
+  return (
+   <span className="flex shrink-0 items-center gap-1" onClick={(e) => e.preventDefault()}>
+    {dirty && (
+     <span className="flex size-5 items-center justify-center rounded-sm bg-surface" title={t.gitDirtyTitle} aria-label={t.gitDirtyTitle}>
+      <span className="size-1.5 rounded-full bg-accent" aria-hidden />
+     </span>
+    )}
+    {ahead > 0 && (
+     <button
+      onClick={(e) => {
+       e.stopPropagation();
+       pushWorkspace(path);
+      }}
+      title={fmt(t.gitPushTitle, ahead)}
+      aria-label={fmt(t.gitPushTitle, ahead)}
+      className="flex h-5 cursor-pointer items-center gap-0.5 rounded-sm bg-surface px-1 text-accent transition-colors duration-100 hover:bg-hover"
+     >
+      <BranchUp size={11} aria-hidden />
+      <span className="font-mono text-[10px] leading-none">{ahead}</span>
+     </button>
+    )}
+    {behind > 0 && (
+     <span
+      title={fmt(t.gitBehindTitle, behind)}
+      aria-label={fmt(t.gitBehindTitle, behind)}
+      className="flex h-5 items-center gap-0.5 rounded-sm bg-surface px-1 text-warn"
+     >
+      <BranchDown size={11} aria-hidden />
+      <span className="font-mono text-[10px] leading-none">{behind}</span>
+     </span>
+    )}
+    {running && (
+     <button
+      onClick={(e) => {
+       e.stopPropagation();
+       useApp.getState().setActiveCommitCwd(path);
+      }}
+      title={t.gitRunningTitle}
+      aria-label={t.gitRunningTitle}
+      className="flex size-5 cursor-pointer items-center justify-center rounded-sm bg-surface text-accent transition-colors duration-100 hover:bg-hover"
+     >
+      <Loader size={12} aria-hidden className="animate-spin" />
+     </button>
+    )}
+    {failed && (
+     <button
+      onClick={(e) => {
+       e.stopPropagation();
+       useApp.getState().setActiveCommitCwd(path);
+      }}
+      title={t.gitFailedTitle}
+      aria-label={t.gitFailedTitle}
+      className="flex size-5 cursor-pointer items-center justify-center rounded-sm bg-surface text-danger transition-colors duration-100 hover:bg-hover"
+     >
+      <AlertTriangle size={12} aria-hidden />
+     </button>
+    )}
+   </span>
+  );
+ };
  /** 一个项目分组（分组头 + 进行中会话列表）：平铺与工作区分段两种排布共用同一份。 */
  const projectBlock = (project: ProjectView, active: SessionView[]) => (
   <details key={project.id} className="group/proj mt-1" open={!q || active.length > 0}>
@@ -254,12 +343,22 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
       <span className="ml-1.5 truncate font-mono text-[11px] text-faint">{project.path}</span>
      )}
     </span>
-    <span className="relative flex h-5 w-[48px] shrink-0 items-center justify-end">
+    {gitBadgesFor(project.path, project.missing)}
+    <span className="relative flex h-5 w-[72px] shrink-0 items-center justify-end">
      <span className={`font-mono ${active.length === 0 ? "invisible" : "group-hover/proj:invisible"}`}>{active.length}</span>
      <span
       className={`absolute inset-y-0 right-0 items-center gap-0.5 ${active.length === 0 ? "flex" : "hidden group-hover/proj:flex"}`}
       onClick={(e) => e.preventDefault()}
      >
+      <button
+       onClick={() => openCommitPanel(project.path)}
+       disabled={project.missing || busy}
+       className={actionButton}
+       aria-label={t.gitCommitTitle}
+       title={project.missing ? t.gitCommitNotRepo : t.gitCommitTitle}
+      >
+       <ArrowUpCircle size={12} />
+      </button>
       <button
        onClick={() => void newChat(project)}
        disabled={project.missing || busy}

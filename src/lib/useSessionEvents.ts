@@ -388,10 +388,20 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dic
  }
  if (t === "subagent_progress" || t === "subagent_event") return out;
  if (t === "turn_start" || t === "turn_end" || t === "agent_start" || t === "agent_end") return out;
- // 单向宿主通知（握手期就会到，现在经回放正常抵达）：没有渲染面，安静忽略，
- // 不占「未知帧」告警位（那是留给真正的协议漂移的）。
- // 命令面同理：它有专门的消费者（见 `useSessionEvents` 里的事件监听），落到这里只保证不告警。
- if (t === "advisor_cost_changed" || t === "available_commands_update") return out;
+ // 会话标题变更（TUI 侧的自动标题 / `/rename` 会写 jsonl `title_change`；rpc-ui 实测不产生，
+ // 但 TUI 里改过的会话在聊天里打开时历史回放里有——实时帧同样消费，避免改名后标题陈旧）。
+ // 只更新 store.sessions 里该会话的标题（备注 note 优先的口径在后端 display_title，实时帧
+ // 里没有 note 上下文：已有备注的会话不覆盖备注显示——TopBar 取 title 字段，备注优先已由后端落定）。
+ if (t === "title_change" && typeof frame.title === "string" && frame.title.trim()) {
+  const title = (frame.title as string).trim();
+  const st = useApp.getState();
+  const cur = st.sessions.find((s) => s.id === sid);
+  // 有备注的会话标题显示的是备注（display_title 口径），实时标题不该覆盖它
+  if (cur && !cur.note?.trim()) {
+   st.set({ sessions: st.sessions.map((s) => (s.id === sid ? { ...s, title } : s)) });
+  }
+  return out;
+ }
  // 其余未知帧：忽略不崩，但每个类型只告警一次（M4 协议漂移 guard——
  // omp 大版本升级后事件名对不上时，日志里能直接看出来是哪一类帧变了）。
  if (!unknownFrameTypes.has(t)) {

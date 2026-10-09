@@ -1,20 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
+import { ArrowUpCircle } from "reicon-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
 import { resolveContext } from "../../lib/context";
+import { openCommitPanel } from "../../lib/commitTasks";
 import { useText } from "../../lib/useText";
 import { ProjectPicker } from "../pickers/ProjectPicker";
 import { BranchPicker } from "../pickers/BranchPicker";
-import { UsageLimits } from "./UsageLimits";
 import type { GitInfo } from "@shared/types";
 
 /**
- * 输入框上方的上下文条：左「项目」、右「git 分支」，再往右是「用量限额」（截图那一行）。
+ * 输入框上方的上下文条：左「项目」、右「git 分支」，再往右是「提交…」（截图那一行）。
  *
- * - 三者共用一个互斥槽 `composerMenu`，同一时刻只开一个下拉；都向上弹，
+ * - 项目 / 分支共用一个互斥槽 `composerMenu`，同一时刻只开一个下拉；都向上弹，
  *   只遮消息流、不遮正在打字的输入框。
- * - 项目 = 这条消息落到哪个项目；分支 = 该目录当前的 git 状态，**只读**；
- *   用量限额 = 当前会话供应商的配额窗口（`omp usage`，没有配额数据时自身不渲染）。
+ * - 项目 = 这条消息落到哪个项目；分支 = 该目录当前的 git 状态，**只读**（切分支回终端）；
+ *   「提交…」= 打开工作区提交面板（与终端形态目录行 hover 键同一命令面，cwd = 会话目录）。
  * - 一个项目都没有时整条不渲染：空态的「选择目录」已是唯一主入口，不在这里重复。
  * - 查不到就什么都不显示（不闪「非 Git 目录」）；确实不是仓库时才给那行灰字说明。
  */
@@ -58,7 +59,17 @@ export function ContextBar() {
      {t.notGitRepo}
     </span>
    ) : null}
-   <UsageLimits />
+   {git?.isRepo && cwd ? (
+    <button
+     onClick={() => openCommitPanel(cwd)}
+     className="flex shrink-0 cursor-pointer items-center gap-1 rounded-md px-2 py-1 whitespace-nowrap text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+     aria-label={t.gitCommitTitle}
+     title={t.gitCommitTitle}
+    >
+     <ArrowUpCircle size={13} aria-hidden className="shrink-0 opacity-70" />
+     <span className="whitespace-nowrap">{t.gitCommitTitle}</span>
+    </button>
+   ) : null}
   </div>
  );
 }

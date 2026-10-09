@@ -98,3 +98,24 @@ describe("实时流管线：工具卡", () => {
   expect(card.kind === "tool" && card.intent).toBe("看看文件");
  });
 });
+
+describe("实时流管线：标题", () => {
+ it("title_change 更新会话标题（不进消息流）", async () => {
+  const { useApp } = await import("../stores/app");
+  useApp.setState({
+   sessions: [{ id: "s1", projectId: "p1", title: "未命名会话 10-09", cwd: "/a", timestamp: 1, archived: false, corrupt: false, note: null, running: true }],
+  });
+  const msgs = frameToViewMsgs("s1", { type: "title_change", title: "登录页重构" }, dict);
+  expect(msgs).toHaveLength(0);
+  expect(useApp.getState().sessions.find((s) => s.id === "s1")?.title).toBe("登录页重构");
+ });
+
+ it("有备注的会话：实时标题不覆盖备注显示", async () => {
+  const { useApp } = await import("../stores/app");
+  useApp.setState({
+   sessions: [{ id: "s1", projectId: "p1", title: "我的备注", cwd: "/a", timestamp: 1, archived: false, corrupt: false, note: "我的备注", running: true }],
+  });
+  frameToViewMsgs("s1", { type: "title_change", title: "omp 的标题" }, dict);
+  expect(useApp.getState().sessions.find((s) => s.id === "s1")?.title).toBe("我的备注");
+ });
+});

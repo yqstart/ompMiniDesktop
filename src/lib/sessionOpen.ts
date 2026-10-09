@@ -71,6 +71,35 @@ export async function refreshSessionView(id: string): Promise<void> {
 }
 
 /**
+ * 首条用户消息的本地标题回退（rpc-ui 不生成 `title_change`，见 `useSessionEvents` 的同名分支）：
+ * 取首条文本的前 12 个字符（去空白折行），只写 `store.sessions` 的显示字段、不写盘不写备注。
+ * omp 侧标题一旦到位（`title_change` 实时帧 / 下次 `refreshSessionView`），以真值为准覆盖它。
+ */
+export function fallbackTitleFromText(text: string): string | null {
+ const clean = text.replace(/\s+/g, " ").trim();
+ if (!clean) return null;
+ return clean.length <= 12 ? clean : `${clean.slice(0, 12)}…`;
+}
+
+/** 首条发送后：本地回退先顶上（不闪「未命名」），再回读一次 omp 真值（有标题就覆盖）。 */
+export async function refreshTitleAfterFirstSend(id: string, text: string): Promise<void> {
+ const cur = useApp.getState().sessions.find((s) => s.id === id);
+ // 已有备注 / 已有真标题的不碰：回退只服务「未命名」会话
+ if (cur?.note?.trim() || (cur?.title && !cur.title.startsWith("未命名会话") && !cur.title.startsWith("Untitled"))) return;
+ const fallback = fallbackTitleFromText(text);
+ if (fallback) {
+  const st = useApp.getState();
+  st.set({ sessions: st.sessions.map((s) => (s.id === id ? { ...s, title: fallback } : s)) });
+ }
+ // 回读 omp 真值：rpc-ui 实测不产标题时保持回退；TUI 侧改过名时这里会被真值覆盖
+ await refreshSessionView(id);
+ const latest = useApp.getState().sessions.find((s) => s.id === id);
+ if (fallback && latest && (latest.title.startsWith("未命名会话") || latest.title.startsWith("Untitled"))) {
+  useApp.getState().set({ sessions: useApp.getState().sessions.map((s) => (s.id === id ? { ...s, title: fallback } : s)) });
+ }
+}
+
+/**
  * 打开会话的**唯一实现**（会话弹窗 / 目录行 / 空态共用，避免两处漂移）：
  * 选中即读底 → 起/聚焦长驻 RPC → 补拉运行时真值 → 拉历史去重合并 → 再读底。
  *
