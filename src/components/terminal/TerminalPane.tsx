@@ -14,6 +14,7 @@ import { TEXT, fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
 import { installWkInputFallback } from "../../lib/termInput";
 import { installImeCompositionWrap } from "../../lib/termIme";
+import { installShiftWheelScroll } from "../../lib/termWheel";
 import { notifyTerminalAppearance } from "../../lib/termAppearance";
 
 /**
@@ -66,6 +67,9 @@ export function TerminalPane({ term, active }: { term: TerminalView; active: boo
   const releaseWkInput = installWkInputFallback(x);
   // 行尾中文预编辑不再把工作区推偏：合成视图 / textarea 在整行宽度里换行（见 lib/termIme.ts）
   const releaseImeWrap = installImeCompositionWrap(x);
+  // shift+滚轮 = 回看滚动缓冲：omp 开着「鼠标支持」（tui.mouse）时 xterm 6 会把滚轮交给应用，
+  // 而它自己的 shift 旁路是半成品（事件被吞、视口不动）——壳侧接管（见 lib/termWheel.ts）
+  const releaseShiftWheel = installShiftWheelScroll(x, host);
   termRef.current = x;
   fitRef.current = fit;
   const dataSub = x.onData((d) => {
@@ -98,6 +102,7 @@ export function TerminalPane({ term, active }: { term: TerminalView; active: boo
    parsedSub.dispose();
    releaseWkInput();
    releaseImeWrap();
+   releaseShiftWheel();
    mo.disconnect();
    x.dispose();
    termRef.current = null;

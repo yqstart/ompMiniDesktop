@@ -43,6 +43,28 @@
 
 一个既有的量测细节（改动前也一样，不是本次引入）：xterm 的 `.xterm` 元素比面板容器矮约 10px（按整行高吸附），所以按钮到**终端内容底边**的可见间距约 2px、到面板底边才是 12px——垂直位置与改动前一致。
 
+**补记（2026-10-09）：shift+滚轮 = 回看滚动缓冲（壳侧接管，`lib/termWheel.ts`）。**
+用户实测「终端中不能向上滚动查看原来的输出内容」。根因不是回底键，而是**滚轮整条链在「omp 开了鼠标支持」时断了**：
+
+| 环节 | 实测（omp 18.8.6 / `@xterm/xterm` 6.0.0） |
+|---|---|
+| omp 侧 | 本机 `omp config get tui.mouse` = **true**（「鼠标支持 / Mouse Click-to-Focus」）→ 启动即开鼠标上报：PTY 探针在 0.28s 抓到 `\x1b[?1000h` `\x1b[?1003h` `\x1b[?1006h`（无备用屏 `?1049h`） |
+| 普通滚轮 | xterm 把滚轮**交给应用**（协议带 wheel 位 → 自绘滚动器的滚轮处理停用）→ 转成 SGR 上报（真 Chromium 实测 PTY 收到 `\x1b[<35;…M`（移动）+ `\x1b[<64;…M`（滚轮））。**omp 主视图对滚轮上报完全无反应**：连喂 4 个上报，PTY 输出 0 字节——所以普通滚轮在这台机器上是「什么都不发生」 |
+| shift+滚轮 | omp 自己的设置说明写的就是「…wheel scroll becomes shift+wheel while on」，但 xterm 6.0.0 只实现了半截：`CoreMouseService.consumeWheelEvent` 见到 `shiftKey` 返回 0（= 不发上报），外层 handler 却照样 `preventDefault + stopPropagation` → **事件被整个吞掉**（实测：视口不动、`onData` 一字节没有、`cap-window` 之后再无冒泡）。上游 master 的 `_handleWheel` 仍是同款（`preventDefault + stopPropagation` 无条件执行），所以这不是等升级能解决的事 |
+
+修复：壳侧在**宿主元素上以捕获相位**接管 shift+滚轮（早于 xterm 挂在 `.xterm` / `.xterm-scrollable-element` 上的所有监听），自己折算行数喂 `term.scrollLines()`；普通滚轮与备用屏（alt buffer，没有回看历史）一律不碰。折算口径与 xterm 的 `consumeWheelEvent` 同构（像素模式 ÷ 行高、行 / 页模式直接换算、余量跨事件累计——触控板每次只有几个像素，不累计永远凑不满一行），只去掉它那套「小增量 ×0.3」的阻尼。
+
+端到端核对（`pnpm build` + 静态托管 `dist` + 注入 `__TAURI_INTERNALS__` mock，1400×900，mock 推 omp 同款鼠标模式 + 500 行再叠 5 行新输出）：
+
+| 场景 | 结果 |
+|---|---|
+| 普通滚轮（合成 `WheelEvent` 打在 `.xterm-screen`） | `defaultPrevented` = true、PTY 收到 `\x1b[<64;1;1M`（上报照旧）、视口不动 |
+| 普通滚轮（Puppeteer `page.mouse.wheel`，指针在终端内） | PTY 收到 `\x1b[<35;71;23M` + `\x1b[<64;71;23M`，视口不动 |
+| 左键按下 | PTY 收到 `\x1b[<0;14;13M`（点击照样上报给 omp） |
+| **shift+滚轮** | 视口 line 0457 → 0431（26 行）、**PTY 零字节**（不污染 omp 输入） |
+| 连滚三次 + 点回底键 | 0457 → 0365 → 0339 → 0274；按钮（英文界面下 `Jump to latest output`）浮出，点击后回到最新（line 4999…）且按钮消失 |
+| 回看中来新输出 | 视口顶行保持 0274 不动（与 V25 既有口径一致） |
+
 ## 4. 边界（明确不做）
 
 - 不做「新输出条数」计数徽章、不做未读小点——先看这枚键够不够用。
