@@ -1,4 +1,7 @@
-import type { DownloadEvent } from "@tauri-apps/plugin-updater";
+import { getVersion } from "@tauri-apps/api/app";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
+import type { DownloadEvent, Update } from "@tauri-apps/plugin-updater";
 import { useApp } from "../stores/app";
 import { TEXT } from "./locale";
 import type { UpdateState } from "@shared/types";
@@ -7,13 +10,16 @@ import type { UpdateState } from "@shared/types";
  * 应用内更新：直接面向 GitHub Release `latest.json`（Tauri updater 标准链路）。
  * 入口 = 左栏字标行的版本 chip（V30，`components/sidebar/AppUpdateChip.tsx`）→ `UpdateDialog`；
  * 检查更新的按钮也在弹窗里（设置 ›「关于」的更新区块已随 V30 迁走）。
- * - auto（启动静默检查）：有更新弹窗提醒（本轮已「稍后」过则只留 chip 上的状态），不打断用户。
+ * 检查结论一律落在 chip 上（与 omp 链路 `lib/ompUpdate.ts` 同款语义）：`checking` 转轮 →
+ * `latest` 绿点 / `available` accent / `error` warn——**auto 与 manual 共用同一套落库**，
+ * 区别只在「有新版本时是否自动弹窗」。
+ * - auto（启动静默检查）：有新版本弹窗提醒（本轮已「稍后」过则只留 chip 上的状态），不打断用户。
  * - manual（chip / 弹窗里点检查）：有更新弹窗；无更新 / 失败在弹窗里给明确反馈。
  * - 稍后：关闭弹窗但保留 chip 上的状态，下次启动重新检查。
  * - 安装完成：询问「立即重启 / 稍后」（稍后则下次启动生效）。
  */
 
-let pending: import("@tauri-apps/plugin-updater").Update | null = null;
+let pending: Update | null = null;
 let checking = false;
 let installing = false;
 
@@ -32,7 +38,6 @@ export function getAppVersion(): Promise<string> {
  versionPromise ??= (async () => {
   if (!isTauri()) return "dev";
   try {
-   const { getVersion } = await import("@tauri-apps/api/app");
    return await getVersion();
   } catch {
    return "dev";
@@ -41,7 +46,7 @@ export function getAppVersion(): Promise<string> {
  return versionPromise;
 }
 
-/** 启动时调用一次：静默检查，有更新只点亮入口。 */
+/** 启动时调用一次：静默检查，结论落在版本 chip 上（转轮 → 绿点 / accent / warn）。 */
 export async function autoCheckOnBoot(): Promise<void> {
  if (!isTauri() || import.meta.env.DEV) return;
  // 稍后过的版本本轮不再打扰（重启后重置）
@@ -59,9 +64,9 @@ export async function checkForUpdate(
  }
  if (checking || installing) return "skipped";
  checking = true;
- if (mode === "manual") setUpdate({ update: { status: "checking" } });
+ // auto 与 manual 都写 checking：chip 立刻转轮，不停在「还没查」的灰点上（与 omp 链路同款）
+ setUpdate({ update: { status: "checking" } });
  try {
-  const { check } = await import("@tauri-apps/plugin-updater");
   const update = await check();
   if (!update) {
    if (pending) {
@@ -69,7 +74,8 @@ export async function checkForUpdate(
     pending = null;
    }
    const current = await getAppVersion();
-   setUpdate({ update: { status: mode === "manual" ? "latest" : "idle", current } });
+   // 已是最新：auto 与 manual 同一结论（chip 绿点）——旧口径 auto 写 idle，chip 会一直灰
+   setUpdate({ update: { status: "latest", current } });
    return "latest";
   }
   pending = update;
@@ -86,8 +92,8 @@ export async function checkForUpdate(
   return "available";
  } catch (e) {
   const message = e instanceof Error ? e.message : String(e);
-  if (mode === "manual") setUpdate({ update: { status: "error", message } });
-  else console.warn("[ompMiniDesktop] 自动检查更新失败", e);
+  // 失败落 error（auto 也一样）：chip 黄点、原因在弹窗里——「还没查」与「查失败」不给同一种灰
+  setUpdate({ update: { status: "error", message } });
   return "error";
  } finally {
   checking = false;
@@ -158,6 +164,5 @@ export async function relaunchToApply(): Promise<void> {
   await pending.close().catch(() => undefined);
   pending = null;
  }
- const { relaunch } = await import("@tauri-apps/plugin-process");
  await relaunch();
 }

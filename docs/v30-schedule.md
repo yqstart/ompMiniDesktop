@@ -73,8 +73,12 @@
 - 不做「上次检查时间 / 上次检查结果来自哪次启动」这类事实行：本应用链路的 `UpdateState` 没有
   时间戳（只有 omp 链路的 `OmpUpdate` 有），要加先扩状态机。
 - 不做系统通知 / Dock 角标：chip 本身就是常驻提醒（沿用 V24 的「不弹系统通知」口径）。
-- 不为「启动静默检查失败」加界面提示：沿用既有口径（auto 失败只 `console.warn`，manual 才落
-  `error` 态给原因）。
+- 启动静默检查的结论**落 chip**（2026-10-09 修订，原口径「auto 失败只 `console.warn`、成功后
+  写 `idle`」作废，见文末补记）：`checking` 转轮 → 无新版本 `latest` 绿点 / 有新版本 `available`
+  accent（按「稍后」记录决定弹窗与否）/ 失败 `error` 黄点（原因在弹窗里）——与 omp 链路同款；
+  不弹系统通知。
 - 不在「关于」保留版本号展示：应用版本在 chip 上常驻可见（`v0.9.0`），弹窗里也有「当前 v…」。
 
 **补记（V31）：「关于」页签本身随后整页退场。** omp 的运行环境诊断（路径 / agentDir / 重新检测 / 指定路径）在 V31 搬进 `OmpUpdateDialog`（事实表下方新增「omp 诊断」块），那一页没有别的内容可放，于是连页签一起删掉（设置页八 → 七）。本节里「关于只剩 omp 运行环境诊断」的说法只描述 V30 当时的形态；迁移理由与实测见 `docs/v31-schedule.md`。
+
+**补记（2026-10-09，启动自动检查的结论落库）**：V30 的 auto 检查在「已是最新」时写 `idle`（chip 保持灰点、`aria-label` 是「点击检查更新」——本节 §3「启动」场景记录的就是这个时点的行为），失败只 `console.warn` 不落状态。用户实测反馈「首次进来软件版本是灰色的」，与 omp 链路（`docs/v24-schedule.md`：启动即检查，转轮 → 已最新绿点 / 有新版本 accent / 失败黄点）不一致。现行口径 = **auto 与 manual 共用同一套落库**（`lib/appUpdate.ts`：`checking` → `latest` / `available` / `error`），区别只剩「auto 在有新版本时按 `updateDismissedVersion` 决定是否弹窗」；配合 `App.tsx` 启动 effect 的 `autoCheckOnBoot()`，首次进来即：转轮 → 绿点 / accent / 黄点。回归由 `src/lib/appUpdate.test.ts` 钉住（无更新写 latest、失败落 error、auto「稍后」不打扰）；顺带把该模块的动态 `import()` 改成静态导入（仓库惯例，`@tauri-apps/*` 一律顶层导入）。

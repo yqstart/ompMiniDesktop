@@ -296,7 +296,8 @@ export function App() {
  useTitlePromptSync();
 
  useEffect(() => {
-  // 启动静默检查更新（有更新点亮设置入口的小点，不打断）
+  // 启动静默检查应用更新：检查中转轮、结论落 chip（已最新绿点 / 有新版本 accent / 失败 warn）；
+  // 有新版本才弹窗（本轮已「稍后」过则只留 chip 状态），不打断
   void autoCheckOnBoot();
  }, []);
 
