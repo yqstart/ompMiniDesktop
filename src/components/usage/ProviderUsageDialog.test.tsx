@@ -13,6 +13,8 @@ import { ProviderUsageDialog } from "./ProviderUsageDialog";
  * - 每个供应商一张卡（套餐名 + provider id），窗口行 = 窗口名 + 进度条 + 百分比 + 重置倒计时；
  * - 上游 `exhausted` / `warning` 也要反映成状态（sr-only 文本，颜色不是唯一信号）；
  * - 「配了但无用量数据」与「已停用的凭据」显式列出；空报告给空态；
+ * - **用户主动登出 / 删除 / 被替换的凭据墓碑不进警示块**（那是用户自己的动作，
+ *   见 `disabledCredentialsToWarn`）；
  * - 失败时若有旧数据继续显示（错误行 + 旧卡片），不闪空。
  *
  * 数据层的取数行为在 `lib/providerUsage.test.ts` 里单测；这里用 mock 快照只验证 UI 映射。
@@ -151,21 +153,39 @@ describe("供应商用量弹窗", () => {
   expect(text).toContain("commandcode");
  });
 
- it("已停用的凭据给警示块；有账号没有用量数据给一行说明", async () => {
+ it("已停用的凭据给警示块（用户主动登出的墓碑不提示）；有账号没有用量数据给一行说明", async () => {
   setSnapshot({
    data: usage({
     reports: [report("opencode-go", { planType: "OpenCode Go", limits: [limit()] })],
     disabledCredentials: [
      { provider: "anthropic", kind: "oauth", email: "me@example.com", accountId: null, cause: "refresh failed", disabledAtMs: 1 },
+     { provider: "cursor", kind: "oauth", email: null, accountId: "acc-9", cause: "logged out by user", disabledAtMs: 2 },
     ],
-    accountsWithoutUsage: [{ provider: "cursor", kind: "oauth", email: null, accountId: "acc-1" }],
+    accountsWithoutUsage: [{ provider: "windsurf", kind: "oauth", email: null, accountId: "acc-1" }],
    }),
   });
   const text = await renderDialog();
   expect(text).toContain("已停用的凭据");
   expect(text).toContain("me@example.com");
   expect(text).toContain("refresh failed");
+  expect(text).not.toContain("cursor");
+  expect(text).not.toContain("logged out by user");
   expect(text).toContain("1 个已登录账号本次没有拿到用量数据");
+ });
+
+ it("只剩用户主动登出的墓碑时，整块警示不渲染", async () => {
+  setSnapshot({
+   data: usage({
+    reports: [report("cursor", { planType: "Cursor Pro", limits: [limit()] })],
+    disabledCredentials: [
+     { provider: "cursor", kind: "oauth", email: null, accountId: "acc-9", cause: "logged out by user", disabledAtMs: 2 },
+    ],
+   }),
+  });
+  const text = await renderDialog();
+  expect(text).toContain("Cursor Pro");
+  expect(text).not.toContain("已停用的凭据");
+  expect(text).not.toContain("重新登录该供应商即可恢复");
  });
 
  it("失败时保留旧数据（错误行 + 旧卡片都在），无数据时只给错误行", async () => {

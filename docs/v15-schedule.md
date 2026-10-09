@@ -87,6 +87,7 @@ ProviderUsageDialog（弹窗；V15 交付时是设置页页签 ProviderUsagePane
 - 每窗口一行：窗口名（`5h` / `7d` / `monthly` 走字典，未知 `windowId` 回退上游 `windowLabel`）+ 纯 CSS 进度条 + 百分比 + 重置倒计时；`notes` 有则下一行小字；
 - 状态：<80% `accent`、≥80%（或上游 `status:warning`）`warn`、用尽（`exhausted` / ≥100%，条钳在 100%）`danger`——颜色之外永远有百分比数字与 sr-only 状态词；
 - 「无用量数据」块 = `configuredProviders − reports`（配了但上游没探针）；「已停用的凭据」块（`danger` 色调）列出自动停用的账号 + 原因 + 「重新登录可恢复」；`accountsWithoutUsage` 非空给一行计数；
+  - **用户主动动作的墓碑不进警示块（2026-10-09 用户实测修订）**：`omp auth-broker logout`（应用供应商页的「登出」就是它）对凭据做的是**软删**——本机 `agent.db` 实测只写 `disabled_cause = "logged out by user"`（行留在库里、不会自己消失），而 `omp usage --json` 每次都把它报进 `disabledCredentials`（上游 18.8.6 的 `gyi()` 只过滤 `deleted by user` / `replaced by …` 两类，登出这类故意留着）。照单渲染的结果是自相矛盾：在应用里登出 cursor 后，用量弹窗又红字提示「重新登录该供应商即可恢复」，且只要不重登就一直提示（用户实测：「我的 cursor 已经登出了，但是查询用量处还是展示 cursor 相关的内容」）。现在 `lib/providerUsage.ts` 的 `disabledCredentialsToWarn` 把**登出 / 删除 / 被替换**三类墓碑滤出警示块（刷新失败 / 上游失效等真故障照旧提示「重新登录可恢复」），该供应商整个从弹窗消失——「无用量数据」判定仍用**上游原始清单**（`providersWithoutUsage`），登出的供应商不会换个块再冒出来。回归：`providerUsage.test.ts`（三类墓碑 + 大小写 + 无 cause）+ `ProviderUsageDialog.test.tsx`（只含登出条目时整块不渲染）。
 - 刷新：进入页签拉一次（60s 内复用模块缓存，切页签往返不重拉）+ 手动刷新；**不自动轮询**（设置页是查看场景，omp 自身缓存也是分钟级；要实时看用 TUI 的 `/usage`）；
 - 相对时间（更新于 N 前 / N 后重置）每 30 秒推进一次（不随渲染乱跳）；失败保留旧值 + 一行错误，不闪空；
 - 空态（无 reports）：说明「登录一个有用量查询的供应商后这里就会出现」；`OMP_MISSING` / 命令失败原样透传后端消息。

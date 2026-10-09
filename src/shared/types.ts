@@ -284,7 +284,11 @@ export type ProviderUsageAccount = {
  accountId: string | null;
 };
 
-/** 被自动停用的凭据（刷新失败 / 上游失效；界面提示需重新登录）。 */
+/**
+ * 被停用的凭据（上游原始清单，含用户主动登出 / 删除造成的墓碑）。
+ * 界面只对**非用户主动**的停用（刷新失败 / 上游失效）提示重新登录，见
+ * `lib/providerUsage.ts` 的 `disabledCredentialsToWarn`。
+ */
 export type ProviderUsageDisabled = ProviderUsageAccount & {
  /** 停用原因（上游英文原文）；上游没给为 null。 */
  cause: string | null;

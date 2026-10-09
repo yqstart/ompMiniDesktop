@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderUsage, ProviderUsageReport, UsageLimit } from "@shared/types";
 import { TEXT } from "./locale";
 import {
+ disabledCredentialsToWarn,
  fmtAmount,
  fmtPercent,
  formatAgo,
@@ -116,6 +117,22 @@ describe("providersWithoutUsage", () => {
    ],
   });
   expect(providersWithoutUsage(u)).toEqual(["opencode-go"]);
+ });
+});
+
+describe("disabledCredentialsToWarn", () => {
+ it("用户主动动作的墓碑不提示（登出 / 删除 / 被替换，含大小写差异），其余照常提示", () => {
+  const u = usage({
+   disabledCredentials: [
+    { provider: "cursor", kind: "oauth", email: null, accountId: "acc-1", cause: "logged out by user", disabledAtMs: 1 },
+    { provider: "openai-codex", kind: "oauth", email: "me@example.com", accountId: null, cause: "Deleted by user", disabledAtMs: 2 },
+    { provider: "zai", kind: "oauth", email: null, accountId: null, cause: "replaced by newer credential", disabledAtMs: 3 },
+    { provider: "anthropic", kind: "oauth", email: "me@example.com", accountId: null, cause: "oauth refresh failed: invalid_grant", disabledAtMs: 4 },
+    { provider: "windsurf", kind: "oauth", email: null, accountId: null, cause: null, disabledAtMs: 5 },
+   ],
+  });
+  expect(disabledCredentialsToWarn(u).map((d) => d.provider)).toEqual(["anthropic", "windsurf"]);
+  expect(disabledCredentialsToWarn(null)).toEqual([]);
  });
 });
 

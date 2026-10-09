@@ -6,6 +6,7 @@ import { useText } from "../../lib/useText";
 import { useApp } from "../../stores/app";
 import { DialogShell } from "../settings/DialogShell";
 import {
+ disabledCredentialsToWarn,
  fmtAmount,
  fmtPercent,
  formatAgo,
@@ -33,6 +34,8 @@ import {
  * - 打开拉一次（60s 内复用模块缓存，反复开合不重拉）+ 面板上的手动刷新；
  * - 失败保留上一份数据（旧值 + 一行错误），不闪空；
  * - 「配了但上游拿不到用量」的供应商显式列出并写明原因——静默少一块比一行说明糟糕得多；
+ * - 「已停用的凭据」只提示**非用户主动**的停用（刷新失败 / 上游失效）；登出 / 删除 / 被替换
+ *   造成的墓碑不提示（那是用户自己的动作，见 `disabledCredentialsToWarn`）；
  * - 相对时间（更新于 N 前 / N 后重置）每 30 秒推进一次，不随渲染乱跳。
  */
 export function ProviderUsageDialog() {
@@ -59,6 +62,7 @@ export function ProviderUsageDialog() {
 
  const groups = groupReports(data?.reports ?? []);
  const missing = providersWithoutUsage(data);
+ const disabled = disabledCredentialsToWarn(data);
  const fetched = latestFetchedAt(data);
  const updated = fetched && now ? fmt(t.pusageUpdatedAgo, formatAgo(now - fetched, locale)) : "";
 
@@ -133,7 +137,7 @@ export function ProviderUsageDialog() {
     </div>
    )}
 
-   {data && data.disabledCredentials.length > 0 && <DisabledBlock items={data.disabledCredentials} />}
+   {disabled.length > 0 && <DisabledBlock items={disabled} />}
 
    {data && data.accountsWithoutUsage.length > 0 && (
     <p className="mt-2 text-[11px] text-faint">{fmt(t.pusageAccountsWithout, data.accountsWithoutUsage.length)}</p>
@@ -242,7 +246,10 @@ function LimitBar({ limit, className }: { limit: UsageLimit; className?: string 
  );
 }
 
-/** 被自动停用的凭据（刷新失败 / 上游失效）：红字提示需重新登录，否则用户只会看到「额度没了」。 */
+/**
+ * 被自动停用的凭据（刷新失败 / 上游失效）：红字提示需重新登录，否则用户只会看到「额度没了」。
+ * 用户主动动作的墓碑（登出 / 删除 / 被替换）不经这里——调用方 `disabledCredentialsToWarn` 已滤掉。
+ */
 function DisabledBlock({ items }: { items: ProviderUsageDisabled[] }) {
  const t = useText();
  return (

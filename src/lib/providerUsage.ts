@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { api } from "@shared/api";
-import type { ProviderUsage, ProviderUsageReport, UsageLimit } from "@shared/types";
+import type { ProviderUsage, ProviderUsageDisabled, ProviderUsageReport, UsageLimit } from "@shared/types";
 import type { Locale, Text } from "./locale";
 
 /**
@@ -183,6 +183,9 @@ export function windowNames(t: Text, limits: UsageLimit[]): string[] {
  * 都不出现——界面必须把「配了却看不到」如实说出来，而不是静默少一块；
  * 停用的凭据与补充探针**失败的**各有专门块（那两块的语义是「有路径但这次没拿到」，
  * 不是「没有查询路径」），从这份清单里排除。
+ *
+ * 这里的「停用凭据」用的是**上游原始清单**（含用户主动登出的墓碑）——登出的供应商整个不该
+ * 再进「无用量数据」块，显示侧的收窄（哪些要提示）在 `disabledCredentialsToWarn`。
  */
 export function providersWithoutUsage(usage: ProviderUsage | null): string[] {
  const configured = usage?.configuredProviders ?? [];
@@ -191,6 +194,25 @@ export function providersWithoutUsage(usage: ProviderUsage | null): string[] {
  const failed = new Set((usage?.extraFailures ?? []).map((f) => f.provider));
  const disabled = new Set((usage?.disabledCredentials ?? []).map((d) => d.provider));
  return configured.filter((p) => !withData.has(p) && !failed.has(p) && !disabled.has(p));
+}
+
+/**
+ * 「已停用的凭据」警示块要显示的条目：剔掉**用户主动动作的墓碑**（登出 / 删除 / 被替换），
+ * 其余（刷新失败 / 上游失效……）照旧提示「重新登录该供应商即可恢复」。
+ *
+ * `logged out by user` 是 `omp auth-broker logout <provider>`（应用自己的供应商页「登出」即它）
+ * 对凭据做的**软删**——本机 `agent.db` 实测 `disabled_cause = "logged out by user"`，行留在库里、
+ * `omp usage --json` **每次**照报（上游 18.8.6 的 `gyi()` 只过滤 `deleted by user` / `replaced by …`
+ * 两类，登出这类故意留着）。登出是用户要的结果：在应用里登出后弹窗再红字教你重新登录，是
+ * 自相矛盾；而且墓碑长期留在库里（不会自己消失），不滤掉会一直提示。
+ *
+ * 别拿这份清单去算「无用量数据」（`providersWithoutUsage` 用的是上游原始清单，登出的供应商
+ * 整个不该再出现在那块里）。
+ */
+export function disabledCredentialsToWarn(usage: ProviderUsage | null): ProviderUsageDisabled[] {
+ // 上游 cause 原文前缀，大小写不敏感（后两类上游自己就过滤了，一并兜住保持口径一致）
+ const actioned = /^(logged out by user|deleted by user|replaced by)/i;
+ return (usage?.disabledCredentials ?? []).filter((d) => !(d.cause && actioned.test(d.cause)));
 }
 
 /**
