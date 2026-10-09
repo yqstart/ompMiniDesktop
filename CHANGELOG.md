@@ -29,6 +29,7 @@
 - **聊天消息流的文本不再双份（V1–V10 的历史缺陷，恢复时修正）**：`message_end(assistant)` 的 `content` 携带全文（omp 18.8.3 真机实测），而流式 deltas 已经渲染过一遍——旧实现用随机 id 再推一条独立文本行，真机每轮答复都会重复一次。现在终帧文本与流式路径**共用同一个 id**（`${sid}:${contentIndex}`）以 `__append` 原地补全（订阅错过流式帧时仍会补出整段，不丢内容）。回归测试见 `useSessionEvents.test.ts`。
 - **「使用统计」的活跃天数不再随上方范围缩水（用户实测：切到「今日」时活跃天数也跟着变）**：活跃天数 / 连续 / 最长此前从**范围裁剪之后**的按日聚合里派生——切到「今日」就只剩今天跑过的那一天（没跑过直接 0），而这三项刻画的是使用习惯，与「这一档看多少 token」无关。现在活跃日集合与「Token 活动」热力图同口径，在范围裁剪**之前**收全（`usage.rs` 的 `scan_usage_with`；范围只裁剪 tokens 总量与命中率），四档范围下活跃天数 / 连续 / 最长完全一致（「今日」与「全部」相同）。回归测试 `usage::tests::range_filter_scopes_tokens_but_active_days_stay_global` 钉住（跨窗口的旧数据计入活跃天数、但不计入窗口内 tokens 总量）。
 - **CI 的 macOS 签名链路修好：p12 换旧式算法、证书 CN 补 Apple 前缀、DN 补 OU**：首个 0.10.0 构建在 macOS 矩阵连挂两处——①`security import` 拒收 OpenSSL 3 默认的 PBES2/AES-256 打包（`MAC verification failed during PKCS12 import`），脚本改为支持时用 `-legacy`（RC2/3DES + SHA1 经典格式）；②tauri 的签名身份解析（tauri-macos-sign）**只按 7 个 Apple 前缀在钥匙串里找证书、且要求证书带 `organizationalUnit`**，自签名证书据此补成 `CN = Apple Development: ompMiniDesktop Signing` + `OU`；`tauri-build.mjs` 与 Release 工作流的 `APPLE_SIGNING_IDENTITY` 同步为完整 CN。
+- **CI 构建修好：Tauri 的 npm 包与 Rust crate 版本对齐**：V32 恢复依赖时两侧 lock 各自解析漂移——`tauri` crate 漂到 2.12.1 而 `@tauri-apps/api` 留在 2.11.1、`@tauri-apps/plugin-process` 漂到 2.4.0 而 `tauri-plugin-process` 留在 2.3.1；tauri CLI 在构建前对两侧做 major/minor 配对检查，不匹配直接拒构建（本地与 CI 四平台同挂）。现在 `@tauri-apps/api` 升到 2.12.1（配 `tauri` 2.12）、`tauri-plugin-process` 升到 2.4.0（配 `@tauri-apps/plugin-process` 2.4），检查器零不匹配。
 
 ## [0.10.0] - 2026-10-08
 
