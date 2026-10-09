@@ -2,7 +2,7 @@ import { api } from "@shared/api";
 import type { CheckoutView, ProjectView, SidebarSelection } from "@shared/types";
 import { useApp } from "../stores/app";
 import { TEXT } from "./locale";
-import { createChatIn, openSessionWithHistory } from "./sessionOpen";
+import { createChatIn, openSessionWithHistory, type SessionHint } from "./sessionOpen";
 import { selectionScopePaths } from "./workspaceGroups";
 
 /**
@@ -69,7 +69,7 @@ export function openChatForCheckout(ws: CheckoutView): void {
  const s = useApp.getState();
  const running = s.sessions.filter((x) => x.cwd === ws.path && x.running && !x.archived).pop();
  if (running) {
-  void openSessionWithHistory(running.id);
+  void openSessionWithHistory(running.id, running);
   return;
  }
  if (s.activeSessionId) {
@@ -150,15 +150,12 @@ export function resumeSessionInTerminal(session: {
 }
 
 /** 会话弹窗 / 归档恢复的「打开」：**按当前形态分流**——终端形态开终端 resume，
- *  聊天形态进聊天视图（`open_session` 起 / 聚焦长驻 RPC 并拉历史）。 */
-export function resumeSessionInApp(session: {
- id: string;
- cwd: string;
- title: string;
- projectId: string | null;
-}): void {
+ *  聊天形态进聊天视图（`open_session` 起 / 聚焦长驻 RPC 并拉历史）。
+ *  调用方手上的列表行（`SessionHint`）一并带给打开实现：项目 / 标题 / cwd 先落地，
+ *  不必等 resume 的 spawn 握手（见 `openSessionWithHistory`）。 */
+export function resumeSessionInApp(session: SessionHint): void {
  if (useApp.getState().appMode === "chat") {
-  void openSessionWithHistory(session.id);
+  void openSessionWithHistory(session.id, session);
   return;
  }
  resumeSessionInTerminal(session);

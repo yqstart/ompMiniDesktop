@@ -5,7 +5,7 @@
 > 结论：**壳侧引用浮层**——⌘⇧P 搜索工作区成员项目的文件，Enter 把 `@<绝对路径>` 注入终端输入框。
 > 本稿记录上游实测、设计与完成口径；改动这块前先读它。
 >
-> **V32 二次口径（2026-10-09）起两种形态共用这只浮层**：聊天形态下同一个 ⌘⇧P（以及 Composer 工具行的 `AtSign` 键）
+> **V32 二次口径（2026-10-09）起两种形态共用这只浮层**：聊天形态下同一个 ⌘⇧P（以及 Composer 工具行的 `Files` 键，原 `AtSign`——2026-10-09 晚换，见 `docs/v32-schedule.md` §7.9）
 > 把 `@<绝对路径>` 追加进 Composer 草稿（`store.refPickerTarget.kind === "chat"`），并已实测 `omp --mode rpc-ui`
 > 的 prompt 会把 cwd 之外的绝对路径提及展开成 `fileMention` 进上下文。详见 `docs/v32-schedule.md` §7.5。
 

@@ -48,7 +48,7 @@ function SessionRow({
   <div className={`group relative flex h-8 min-w-0 items-center rounded-md pr-1 pl-2 transition-colors duration-100 ${active ? "bg-active" : "hover:bg-hover"}`}>
    {active && <span aria-hidden className="absolute top-1/2 left-0 h-3.5 w-[2px] -translate-y-1/2 rounded-full bg-accent" />}
    <button
-    onClick={() => void openSessionWithHistory(s.id)}
+    onClick={() => void openSessionWithHistory(s.id, s)}
     className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
     aria-label={fmt(t.chatAria, s.title)}
    >
@@ -332,9 +332,12 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
  /** 一个项目分组（分组头 + 进行中会话列表）：平铺与工作区分段两种排布共用同一份。 */
  const projectBlock = (project: ProjectView, active: SessionView[]) => (
   <details key={project.id} className="group/proj mt-1" open={!q || active.length > 0}>
-   <summary className="relative flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1.5 text-[13px] text-muted transition-colors duration-100 hover:bg-hover [&::-webkit-details-marker]:hidden">
-    <ChevronRight size={12} aria-hidden className="shrink-0 transition-transform duration-150 group-open/proj:rotate-90" />
-    <Folder size={13} aria-hidden className="shrink-0 text-faint" />
+   {/* 项目头与终端形态的项目头同款（`ProjectGroup`）：没有折叠箭头——点击整行即展开 / 收起，
+       文件夹图标进 `bg-surface` 小盒（展开时上强调色、目录缺失上 warn） */}
+   <summary className="relative flex cursor-pointer items-center gap-1.5 rounded-md px-1 py-1.5 text-[13px] text-muted transition-colors duration-100 hover:bg-hover [&::-webkit-details-marker]:hidden">
+    <span className={`flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface transition-colors duration-100 ${project.missing ? "text-warn" : "text-muted group-open/proj:text-accent"}`}>
+     <Folder size={14} aria-hidden />
+    </span>
     <span className="min-w-0 flex-1 truncate">
      <span className="font-semibold text-foreground">{project.name}</span>
      {project.missing ? (
@@ -477,11 +480,20 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
         const countLabel = fmt(t.wsGroupCount, String(members.length));
         return (
          <details key={section.key} className="group/ws mt-2" open={!q || hits > 0}>
-          <summary className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1.5 text-[12px] text-muted transition-colors duration-100 hover:bg-hover [&::-webkit-details-marker]:hidden">
-           <ChevronRight size={12} aria-hidden className="shrink-0 transition-transform duration-150 group-open/ws:rotate-90" />
-           <Layers size={13} aria-hidden className="shrink-0 text-accent" />
-           <span className="min-w-0 flex-1 truncate font-semibold text-foreground">{section.name ?? t.wsGroupUngrouped}</span>
-           <span className="shrink-0 font-mono text-[11px] text-faint" title={countLabel} aria-label={countLabel}>
+          {/* 工作区头与终端形态的组头同款（`WorkspaceGroupSection`）：没有折叠箭头——点击整行即展开 / 收起，
+              图标进 `bg-surface` 小盒，展开时 `Layers` 与名字上强调色，行尾是成员计数小盒 */}
+          <summary className="flex cursor-pointer items-center gap-1.5 rounded-md px-1 py-1.5 text-[13px] text-muted transition-colors duration-100 hover:bg-hover [&::-webkit-details-marker]:hidden">
+           <span className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface text-muted transition-colors duration-100 group-open/ws:text-accent">
+            <Layers size={14} aria-hidden />
+           </span>
+           <span className="min-w-0 flex-1 truncate font-semibold text-foreground transition-colors duration-100 group-open/ws:text-accent">
+            {section.name ?? t.wsGroupUngrouped}
+           </span>
+           <span
+            className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-sm bg-surface px-1 font-mono text-[10px] leading-none text-faint"
+            title={countLabel}
+            aria-label={countLabel}
+           >
             {members.length}
            </span>
           </summary>

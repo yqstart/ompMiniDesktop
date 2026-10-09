@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { ArrowUp, AtSign, FileText, Gauge, ImagePlus, TriangleWarning, X } from "reicon-react";
+import { ArrowUp, FileText, Files, Gauge, ImagePlus, TriangleWarning, X } from "reicon-react";
 import { useApp } from "../../stores/app";
 import { api } from "@shared/api";
 import { attachmentFromFile, dataUrl } from "../../lib/attachments";
@@ -512,7 +512,7 @@ export function Composer() {
       aria-label={t.refPickTitle}
       title={t.refPickComposerTitle}
      >
-      <AtSign size={16} aria-hidden />
+      <Files size={16} aria-hidden />
      </button>
      <PermissionBadge compact align="left" />
      <QueueBadge />

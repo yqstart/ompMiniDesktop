@@ -6,6 +6,7 @@
  * 这条链路此前没有测试覆盖——排查「打开已有会话不显示」问题时它是最先被怀疑的对象。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SessionView } from "@shared/types";
 
 const SID = "sess-open-1";
 
@@ -29,7 +30,17 @@ const HISTORY_LINES = [
 
 vi.mock("@shared/api", () => ({
  api: {
-  openSession: vi.fn(async (id: string) => ({ id, projectId: "p1", title: "t", archived: false })),
+  openSession: vi.fn(async (id: string) => ({
+   id,
+   projectId: "p1",
+   title: "t",
+   cwd: "/a",
+   timestamp: 1,
+   archived: false,
+   corrupt: false,
+   note: null,
+   running: true,
+  })),
   getSessionRuntime: vi.fn(async () => null),
   getHistory: vi.fn(async () => ({ lines: structuredClone(HISTORY_LINES), truncated: false })),
  },
@@ -69,6 +80,54 @@ describe("打开会话：历史落库与去重", () => {
   expect((useApp.getState().eventsBySession[SID] ?? []).filter((m) => m.id === "hist-truncated")).toHaveLength(1);
   await openSessionWithHistory(SID);
   expect((useApp.getState().eventsBySession[SID] ?? []).filter((m) => m.id === "hist-truncated")).toHaveLength(1);
+ });
+
+ describe("已知视图（hint）：先落地再等 open", () => {
+  /** 列表行：左栏 / 归档页点在手上的那一行。 */
+  const ROW: SessionView = {
+   id: SID,
+   projectId: "p9",
+   title: "列表里的标题",
+   cwd: "/w/p9",
+   timestamp: 7,
+   archived: false,
+   corrupt: false,
+   note: null,
+   running: false,
+  };
+
+  it("open 未返回时项目 / 目录 / 标题就已在（上下文条不再先显示「未归属」），返回后按真值收敛", async () => {
+   // 项目目标为 ES2021，没有 Promise.withResolvers（同 ModelsPanel.test.tsx 的口径）
+   let finish!: (value: SessionView) => void;
+   vi.mocked(api.openSession).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+   const pending = openSessionWithHistory(SID, ROW);
+   // 慢 open 期间（真实后端要 spawn + 握手 1–3s）：这一行已经在 store 里，项目名立刻可用
+   expect(useApp.getState().sessions.find((s) => s.id === SID)).toMatchObject({
+    projectId: "p9",
+    cwd: "/w/p9",
+    title: "列表里的标题",
+   });
+   finish({ ...ROW, projectId: "p1", cwd: "/a", running: true });
+   await pending;
+   const after = useApp.getState().sessions.find((s) => s.id === SID);
+   // 后端说了算的字段（项目 / 目录 / running）收敛；标题留给 open / title_change / 首条回退那条线
+   expect(after).toMatchObject({ projectId: "p1", cwd: "/a", running: true });
+   expect(after?.title).toBe("列表里的标题");
+  });
+
+  it("慢 open 期间用户已切走：行照落，但不把选中抢回来、不抹掉那个会话的状态", async () => {
+   // 项目目标为 ES2021，没有 Promise.withResolvers（同 ModelsPanel.test.tsx 的口径）
+   let finish!: (value: SessionView) => void;
+   vi.mocked(api.openSession).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+   const pending = openSessionWithHistory(SID, ROW);
+   useApp.setState({ activeSessionId: "other", statusBySession: { [SID]: { state: "running" } } });
+   finish({ ...ROW, running: true });
+   await pending;
+   const st = useApp.getState();
+   expect(st.activeSessionId).toBe("other");
+   expect(st.statusBySession[SID]?.state).toBe("running");
+   expect(st.sessions.some((s) => s.id === SID)).toBe(true);
+  });
  });
 
  describe("首条标题回退（rpc-ui 不产标题时的本地显示）", () => {

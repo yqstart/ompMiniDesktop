@@ -1,8 +1,32 @@
 import { api } from "@shared/api";
+import type { SessionView } from "@shared/types";
 import { useApp } from "../stores/app";
 import { fmt, TEXT } from "./locale";
 import { viewMsgsFromJsonlLines } from "./viewmsg";
 import { syncSessionRuntime } from "./useSessionEvents";
+
+/**
+ * 打开会话时调用方**手上已有的列表行**（左栏扫描行 / 归档行 / store 行 / 新建结果）：
+ * `openSessionWithHistory` 先把它的 id / 项目 / 目录 / 标题落进 store，再等 `open_session` 收敛。
+ * 只拿 id 打开是不够的——见 `openSessionWithHistory` 的说明。缺的字段按 `hintRow` 的默认值补。
+ */
+export type SessionHint = Pick<SessionView, "id" | "projectId" | "title" | "cwd"> & Partial<SessionView>;
+
+/** 列表行 → store 行：缺的字段给安全默认值（时间用当下、`running` 视为「正要跑」），
+ *  open 返回后由真值字段收敛（`running` / `archived` / 项目 / 目录）。 */
+function hintRow(h: SessionHint): SessionView {
+ return {
+  id: h.id,
+  projectId: h.projectId,
+  title: h.title,
+  cwd: h.cwd,
+  timestamp: h.timestamp ?? Date.now(),
+  archived: h.archived ?? false,
+  corrupt: h.corrupt ?? false,
+  note: h.note ?? null,
+  running: h.running ?? true,
+ };
+}
 
 /**
  * 消息流回底（Thread 的 `role="log"` 容器）：双 rAF 等首帧绘制完成再读底，
@@ -38,7 +62,7 @@ export async function createChatIn(
    statusBySession: { ...st.statusBySession, [created.id]: { state: "idle" } },
    sidebarOpen: false,
   });
-  await openSessionWithHistory(created.id);
+  await openSessionWithHistory(created.id, created);
   return { ok: true, id: created.id };
  } catch (e) {
   const t = TEXT[useApp.getState().locale];
@@ -103,25 +127,47 @@ export async function refreshTitleAfterFirstSend(id: string, text: string): Prom
  * 打开会话的**唯一实现**（会话弹窗 / 目录行 / 空态共用，避免两处漂移）：
  * 选中即读底 → 起/聚焦长驻 RPC → 补拉运行时真值 → 拉历史去重合并 → 再读底。
  *
+ * `hint` = 调用方手上的列表行（左栏扫描行 / 归档行 / store 行 / 新建结果），**先落地再等 open**：
+ * 上下文条的项目选择器、顶栏标题、消息列的 cwd 都读 `store.sessions`，而没开过的会话
+ * `open_session` 要 spawn `omp --mode rpc-ui --resume` 并等握手（实测 1–3 s）、失败时这一行
+ * 还会一直缺席——只拿 id 打开就会先显示「未归属 / 未命名会话」（用户实测：「点击已经存在的
+ * 会话，输入框上方的项目有时展示不出来」）。hint 先顶上，`open_session` 返回后按真值收敛。
+ *
  * 全程不抛错：会话打不开（文件被删 / omp 缺失）时仍允许看旧缓存，
  * 状态胶囊会报 exited / omp 不可用，不由这里弹错。
  */
-export async function openSessionWithHistory(id: string): Promise<void> {
+export async function openSessionWithHistory(id: string, hint?: SessionHint): Promise<void> {
  // 换会话＝换消息流：把「首屏增量」窗口重置回第一页（否则沿用上一个会话的展开量）
  useApp.getState().resetThreadLimit(id);
+ // 已知视图先落地（还没有这一行才落）：慢 open 期间项目 / 标题 / cwd 立刻就是对的
+ const st0 = useApp.getState();
+ if (hint && hint.id === id && !st0.sessions.some((s) => s.id === id)) {
+  st0.set({ sessions: [hintRow(hint), ...st0.sessions] });
+ }
  useApp.getState().set({ activeSessionId: id, sidebarOpen: false });
  // 切换即读底：新会话消息先落位，Thread 才有可滚内容
  scrollThreadToBottom();
  try {
   const opened = await api.openSession(id);
   const cur = useApp.getState();
-  // 搜索命中的会话可能落在扫描窗口之外（列表里没有这一行）：把它补进列表，
-  // 否则顶栏标题与上下文条会显示成「未命名会话 / 未归属」。
-  const known = cur.sessions.some((s) => s.id === opened.id);
+  // 已有行（hint / 扫描行 / 之前打开过）只收敛后端说了算的四个字段——标题留给
+  // open / title_change / 首条回退那几条既有路径（本地乐观标题不能被「未命名会话」顶掉）；
+  // 搜索命中的会话可能落在扫描窗口之外（列表里没有这一行）：把它补进列表。
+  const rows = cur.sessions.some((s) => s.id === opened.id)
+   ? cur.sessions.map((s) =>
+    s.id === opened.id
+     ? { ...s, running: opened.running, archived: opened.archived, projectId: opened.projectId, cwd: opened.cwd }
+     : s,
+   )
+   : [opened, ...cur.sessions];
+  // 慢 open 期间用户可能已经切到别的会话：行照落，但**别把选中抢回来**（状态同理，
+  // 那个会话可能真的在跑，不该被这里的「先按 idle 起手」抹掉）
+  const stillActive = cur.activeSessionId === opened.id;
   cur.set({
-   activeSessionId: opened.id,
-   ...(known ? {} : { sessions: [opened, ...cur.sessions] }),
-   statusBySession: { ...cur.statusBySession, [opened.id]: { state: "idle" } },
+   ...(stillActive
+    ? { activeSessionId: opened.id, statusBySession: { ...cur.statusBySession, [opened.id]: { state: "idle" } } }
+    : {}),
+   sessions: rows,
   });
   // 运行时真值：**必须等 open 返回之后再补拉**——resume 的长驻进程是在 `open_session`
   // 里 spawn 的，订阅建立时那次补拉必然早于它完成（拉不到），于是模型 / 思考档 /
@@ -169,8 +215,8 @@ export async function openSessionWithHistory(id: string): Promise<void> {
     },
    ]);
   }
-  // 历史落位后再读一次底，保证停在最新处
-  scrollThreadToBottom();
+  // 历史落位后再读一次底，保证停在最新处（慢历史期间用户已切走就别拽别人的消息列）
+  if (useApp.getState().activeSessionId === id) scrollThreadToBottom();
  } catch {
   // 历史加载失败不阻塞选中
  }

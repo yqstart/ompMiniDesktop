@@ -230,7 +230,7 @@ export function SessionPopup({
         >
          <button
           onClick={() => {
-           resumeSessionInApp({ id: s.id, cwd: s.cwd, title: s.title, projectId: s.projectId });
+           resumeSessionInApp(s);
            onClose();
           }}
           disabled={s.corrupt || busy}

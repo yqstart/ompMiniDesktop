@@ -89,7 +89,8 @@ export function ArchivedSessions() {
     setError(fmt(t.archivedPartialRestore, res.failed.map((f) => f.message || f.id).join("；")));
     return;
    }
-   resumeSessionInApp({ id: s.id, cwd: s.cwd, title: s.title, projectId: s.projectId });
+   // 已经取消归档了：列表行里的 archived 是旧的（还带着 true），打开时按「已恢复」落行
+   resumeSessionInApp({ ...s, archived: false });
    setReloadKey((k) => k + 1);
   } catch (e) {
    setError(e instanceof Error ? e.message : t.archivedRestore);

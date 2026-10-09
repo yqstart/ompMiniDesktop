@@ -273,7 +273,7 @@ pump 帧流     → omp-event://<id> → frameToViewMsgs + mergeViewMsgs → sto
   （`appendReference`：草稿末尾非空白先补空格 + `@"…"` 引号形式 + 尾随空格），随后
   `composerFocusSeq + 1` → Composer 的 textarea 拿回焦点；草稿里的提及芯片与 `check_paths` 校验照常生效。
 - 入口：聊天形态 **⌘⇧P**（与终端同键；设置标签激活 / 没有打开会话时不触发）+ Composer 工具行的
-  `AtSign` 键（图标键，title/aria = 「引用工作区文件（⌘⇧P）：插入其他成员项目的文件路径」）。
+  `Files` 键（原 `AtSign`，2026-10-09 晚换，见 §7.9；图标键，title/aria = 「引用工作区文件（⌘⇧P）：插入其他成员项目的文件路径」）。
 - 测试：`workspaceFiles.test.ts` 的 `appendReference`（补空格 / 引号）、`ReferencePicker.test.tsx` 的
   聊天目标用例（追加草稿、不写 PTY、交还焦点、会话没了自收浮层）、`App.test.tsx` 的聊天 ⌘⇧P 用例。
 - 浏览器核对（构建产物 + mock 的真实 Chromium）：聊天形态 → 打开会话（cwd = 成员项目 A）→ ⌘⇧P
@@ -334,3 +334,58 @@ pump 帧流     → omp-event://<id> → frameToViewMsgs + mergeViewMsgs → sto
 | 4 | 聊天左栏无 git 状态表达、会话行标题改名后陈旧、用量弹窗只有终端标签栏有入口 | 分组头加 git 徽章（dirty / 待推送可点 / 落后只读 / 任务态）+ 扫描行与 store 实时视图合并 + 工具行加 Gauge 键（同一弹窗） |
 
 验证：`pnpm check`（523 vitest + e2e:ipc 95）+ `cargo test --locked`（211）全绿。
+
+### 7.9 观感对齐（2026-10-09 晚，用户口径）：左栏组头去箭头 + 引用键不再用 `@`
+
+用户口径两条：①「聊天形态左侧工作区去除展开收起的图标，样式上与终端形态保持一致」；
+②「聊天形态引用工作区其他项目文件的图标换一个其他的图标，不要用 @ 符号」。
+
+| # | 位置 | 改动 |
+|---|---|---|
+| 1 | `ChatSidebar` 工作区段头（`group/ws`） | 去 `ChevronRight`——终端 `WorkspaceGroupSection` 的组头本来就没有折叠箭头（点击整行即展开 / 收起）；`Layers` 从 13px 裸图标换成终端同款 `size-6 bg-surface` 小盒（展开时随 `group-open/ws:` 上强调色）、名字回 13px 并随展开上强调色、成员计数换成同款计数小盒（`h-6 min-w-6 bg-surface font-mono text-[10px]`） |
+| 2 | `ChatSidebar` 项目头（`group/proj`） | 同上：去 `ChevronRight`，`Folder` 换 `size-6 bg-surface` 小盒（展开 accent / 目录缺失 warn），与终端 `ProjectGroup` 的项目头同款 |
+| 3 | `Composer` 工具行引用键 | `AtSign`（@ 符号）换 `Files`（重叠文件图标）——`@` 与输入框里原生 @提及补全语义太容易混；title / aria 文案不变 |
+
+「未归属会话」段（`group/orphan`）保持原样（仍有折叠箭头）——它不属于「工作区」，终端侧也没有对应物。
+展开 / 收起状态仍由原生 `<details>` 的 `open` 属性承载（CSS `group-open/…:` 消费），两处头都不引 JS 状态。
+
+验证：`pnpm check`（**525** vitest + e2e:ipc 95）全绿；构建产物 + `__TAURI_INTERNALS__` mock 的真实
+Chromium（1280×820，`omp.appMode.v1 = chat`）实测：聊天左栏两个段头 / 三个项目头（DOM 断言）——
+段头与项目头的**第一个子元素都是 `bg-surface` 小盒**（无折叠箭头）、段头 `summary` 里只剩 1 个 svg（Layers）、
+整页 `summary` 里 `rotate-90` 箭头 **0 个**；整行点击仍收起 / 展开，且颜色状态正确（展开 = 图标与名字
+accent `rgb(165,180,252)`、收起 = 图标 muted `rgb(184,184,184)` / 名字 foreground，与终端组头同款）；
+Composer 工具行的引用键渲染 `Files` 图标（svg 首段 `M 8.3333 14.3333 …`，`aria-label` / `title` 不变），
+`@` 不再出现；与终端形态左栏对照截图同一套盒语言。
+
+### 7.10 打开会话：先把「已知视图」落进 store（2026-10-09 晚，用户口径）
+
+用户口径：「点击已经存在的会话，输入框上方的项目有时展示不出来」（用户在弹出的定位里确认：就是
+`ContextBar` 的项目选择器，与模型选择器无关）。
+
+**根因**：`ContextBar` 的项目选择器读 `store.sessions`（`lib/context.ts` 的 `resolveContext`：只认会话归属，
+`projectId` 为 null 就是「未归属」）。旧 `openSessionWithHistory(id)` 只拿 id，而 `open_session` 对**没开过**
+的会话要 spawn `omp --mode rpc-ui --resume` 并等握手（实测 1–3 s）才返回 SessionView——选定一刻就已切
+`activeSessionId`，但那一行要等返回才补进 store：这段空窗里选择器落到 `t.unassigned`「未归属」（顶栏同时
+落「未命名会话」），`open_session` 失败时（catch 静默）就一直错着。触发条件「有时」= 该会话本次运行里
+之前有没有打开过（第二次点已经是已知行，不闪）。
+
+**改动**（`lib/sessionOpen.ts`）：
+
+| # | 位置 | 改动 |
+|---|---|---|
+| 1 | `openSessionWithHistory(id, hint?)` | 新增 `SessionHint`（`Pick<SessionView,"id"\|"projectId"\|"title"\|"cwd"> & Partial<SessionView>` = 调用方手上的列表行）与 `hintRow()`（缺的字段给安全默认值：时间用当下、`running` 视为「正要跑」）；**还没这一行时先落进 store**，再切 `activeSessionId` |
+| 2 | 同上（open 返回后） | 已有行只收敛后端说了算的四个字段（`running` / `archived` / `projectId` / `cwd`）——**标题仍归 open / `title_change` / 首条回退那几条既有路径**（本地乐观标题不能被「未命名会话」顶掉）；没有行才整行落 `opened`（原口径） |
+| 3 | 同上（乱序回包） | 慢 open 的响应晚到时不再把 `activeSessionId` 写回旧会话（也不再把该会话的状态抹成 idle）——只在仍停在该会话时才写；历史落位后的读底同理 |
+| 4 | 四个入口 | `ChatSidebar` 会话行（`s`）/ `createChatIn`（`created`）/ `openChatForCheckout`（store 行）/ `resumeSessionInApp`（归档页「打开」，先把 `archived` 按「已恢复」落） |
+
+**实测**（构建产物 + `__TAURI_INTERNALS__` mock 的真实 Chromium；`open_session` 故意慢 3 s）：
+
+| 场景 | 修复前 | 修复后 |
+|---|---|---|
+| 点一个本次运行没打开过的会话，读项目选择器 | 立刻「未归属」、400 ms 后仍「未归属」、3 s 后才变项目名 | 立刻就是项目名 |
+| 先点 A（慢 3 s）再点 B（立即返回），3.3 s 后读选择器 | 被抢回 **A** 的项目（选中回退） | 停在 **B** 的项目 |
+| 点「未归属会话」组的会话 | 「未归属」 | 「未归属」（该行本来就没有项目，属正确表达） |
+
+回归：`sessionOpen.test.ts` 的「已知视图（hint）：先落地再等 open」两条（慢 open 期间项目 / 目录 / 标题已在；
+慢 open 期间切走不抢选中、不抹状态）；`pnpm check` 全绿。
+
