@@ -68,8 +68,17 @@ const norm = (s: string) => s.replace(/\s+/g, "");
  * jsonl 里的 ``Use parallel `task` research agents`` 渲染出来是 `Use parallel task research agents`。
  * 逐字符比对只要样例里出现反引号 / 加粗星号 / 链接括号就必然假阴性（实测本机会话里就有）。
  * 工具名比对仍用 `norm`：它依赖「• <name>」里的 `•` 这个标点。
+ *
+ * **图片标记要先抹掉再比**：omp 自己的转录（jsonl 文本）里是 `[Image #1, 1159x200]`，
+ * 而它自己的 `omp render --plain` 把它画成 `🖼 #1`——同一处内容两种写法（实测：本机一条
+ * 首条消息带粘贴图片的会话里，样例开头正好是「如图[Image #1, 1159x200]…」，
+ * 渲染输出里却只有「如图🖼 #1…」，于是硬断言必然假阴性）。两边各自抹掉自己的写法。
  */
-const content = (s: string) => s.replace(/[^\p{L}\p{N}]+/gu, "");
+const content = (s: string) =>
+ s
+  .replace(/\[Image #\d+[^\]]*\]/g, "")
+  .replace(/🖼\s*#\d+/gu, "")
+  .replace(/[^\p{L}\p{N}]+/gu, "");
 
 /** 会话头 + 前 `HEAD_ENTRIES` 条的定长切片（对拍输入与取样判据共用同一份）。 */
 function sliceOf(file: string): string[] {
@@ -157,8 +166,13 @@ describe.skipIf(!hasOmp || cases.length === 0)("omp render --plain 对拍", () =
    ];
    if (toolNames.length > 0) {
     // render 会把同名工具折叠成「• Read (2)」这类汇总行、被中断 turn 里的工具也不显示，
-    // 所以按命中率判（真实会话实测约 0.5–1.0），不作为硬性一致条件
-    const toolHit = toolNames.filter((n) => hay.toLowerCase().includes(`•${n.toLowerCase()}`));
+    // 所以按命中率判（真实会话实测约 0.5–1.0），不作为硬性一致条件。
+    // 标点有两副：`•`（汇总行）与 `●`（单条调用带参数）——实测同一会话里两种并存，
+    // 只认 `•` 会在「这个切片里唯一的工具调用恰好画成 ●」时假阴性（本机一条最小会话即如此）。
+    const toolHit = toolNames.filter((n) => {
+     const name = n.toLowerCase();
+     return hay.toLowerCase().includes(`•${name}`) || hay.toLowerCase().includes(`●${name}`);
+    });
     expect(toolHit.length).toBeGreaterThanOrEqual(1);
    }
    // 助手正文不做断言：`omp render` 对长回复有折叠（⟦Ctrl+O: Expand⟧）、被中断的

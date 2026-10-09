@@ -8,6 +8,7 @@ import { useText } from "../../lib/useText";
 import { fmt } from "../../lib/locale";
 import { canInjectReference, insertFileReference } from "../../lib/termRef";
 import {
+ appendReference,
  buildRefItems,
  buildRefTree,
  flattenRefTree,
@@ -67,17 +68,21 @@ type Section = { key: string; name: string; count: number; rows: RefRow[] };
 
 /**
  * 引用工作区文件（V22）：⌘⇧P 打开；搜索**其他**成员项目的文件（当前项目不列——本项目文件在
- * 输入框里用 omp 原生 `@` 直接可补全）；Enter 把 `@<绝对路径> ` 注入目标终端输入框
- * （bracketed paste、**不回车、不发送**）。结果按项目分组、以资源管理器式目录树展示
- * （chevron 折叠 / 目录与文件类型图标 / 只走文件行的键盘导航）。
+ * 输入框里用 omp 原生 `@` 直接可补全）；Enter 把 `@<绝对路径> ` 注入**引用目标**：
+ * - 终端形态（`refPickerTarget.kind === "terminal"`）：bracketed paste 进该终端输入框
+ *   （**不回车、不发送**），只在 π = 等待输入时允许（否则给忙碌提示，与改名同一口径）；
+ * - 聊天形态（`kind === "chat"`，V32 二次口径）：**追加进该会话的 Composer 草稿**并把焦点
+ *   交还输入框——omp 在 prompt 时会把 `@<路径>` 展开成 fileMention 消息（含 cwd 之外的
+ *   绝对路径，2026-10-09 真机实测），跨项目文件因此照样进上下文。
+ * 结果按项目分组、以资源管理器式目录树展示（chevron 折叠 / 目录与文件类型图标 / 只走文件行的键盘导航）。
  *
- * 数据只在打开时拉一次（后端 60s 缓存）——输入不触发 IPC。目标终端必须
- * 「运行中且 π = 等待输入」，否则给忙碌提示（与改名同一口径）。
+ * 数据只在打开时拉一次（后端 60s 缓存）——输入不触发 IPC。
  */
 export function ReferencePicker(): React.JSX.Element | null {
  const t = useText();
- const targetId = useApp((s) => s.refPickerTerminalId);
+ const target = useApp((s) => s.refPickerTarget);
  const terminals = useApp((s) => s.terminals);
+ const chatSessions = useApp((s) => s.sessions);
  const checkouts = useApp((s) => s.checkouts);
  const projects = useApp((s) => s.projects);
  const workspaceGroups = useApp((s) => s.workspaceGroups);
@@ -94,12 +99,15 @@ export function ReferencePicker(): React.JSX.Element | null {
   keys: EMPTY_COLLAPSED,
  });
 
- const term = terminals.find((x) => x.id === targetId);
+ const term = target?.kind === "terminal" ? terminals.find((x) => x.id === target.id) : undefined;
+ const chatCwd = target?.kind === "chat" ? chatSessions.find((s) => s.id === target.sessionId)?.cwd ?? null : null;
+ /** 引用来源目录：终端用它的 cwd，聊天用该会话的 cwd（两者都据此解析「当前项目」）。 */
+ const cwd = term ? term.cwd : chatCwd;
  const scope = useMemo(
-  () => (term
-   ? referenceScope(term.cwd, workspaceGroups, checkouts, projects)
+  () => (cwd
+   ? referenceScope(cwd, workspaceGroups, checkouts, projects)
    : { primary: null, others: [] }),
-  [term, workspaceGroups, checkouts, projects],
+  [cwd, workspaceGroups, checkouts, projects],
  );
 
  const paths = useMemo(() => scope.others.map((p) => p.path), [scope]);
@@ -108,7 +116,7 @@ export function ReferencePicker(): React.JSX.Element | null {
 
  // 打开（或重试）时拉一次文件列表；只有异步回调里才写 state。
  useEffect(() => {
-  if (!term || paths.length === 0) return;
+  if (cwd === null || paths.length === 0) return;
   let active = true;
   api
    .listProjectFiles(paths)
@@ -123,7 +131,7 @@ export function ReferencePicker(): React.JSX.Element | null {
   return () => {
    active = false;
   };
- }, [term, paths, loadKey]);
+ }, [cwd, paths, loadKey]);
 
  const load = useMemo<LoadState>(
   () => (paths.length === 0
@@ -136,10 +144,10 @@ export function ReferencePicker(): React.JSX.Element | null {
   [paths, loaded, loadKey],
  );
 
- // 目标终端被关掉（标签关闭等）：浮层没有目标了，直接收掉。
+ // 引用目标没了（终端标签被关 / 聊天会话被删）：浮层没有目标，直接收掉。
  useEffect(() => {
-  if (!term) useApp.getState().set({ refPickerTerminalId: null });
- }, [term]);
+  if (cwd === null) useApp.getState().set({ refPickerTarget: null });
+ }, [cwd]);
 
  // 查询一变，之前的折叠状态自动失效（命中链路必须可见）——不需要 effect。
  const collapsedKeys = collapseState.query === query ? collapseState.keys : EMPTY_COLLAPSED;
@@ -182,10 +190,21 @@ export function ReferencePicker(): React.JSX.Element | null {
  const activeIndex = total > 0 ? Math.min(cursor, total - 1) : -1;
  const active = activeIndex >= 0 ? fileRows[activeIndex] ?? null : null;
 
- const close = () => useApp.getState().set({ refPickerTerminalId: null });
+ const close = () => useApp.getState().set({ refPickerTarget: null });
  const choose = (item: RefItem) => {
   const s = useApp.getState();
-  const live = s.terminals.find((x) => x.id === targetId);
+  if (target?.kind === "chat") {
+   // 聊天形态：追加进该会话的草稿（尾随空格让 omp 的提及解析立刻收口），焦点交还输入框
+   const sid = target.sessionId;
+   if (!s.sessions.some((x) => x.id === sid)) {
+    close();
+    return;
+   }
+   s.setDraft(sid, appendReference(s.draftOf(sid), item.abs));
+   s.set({ refPickerTarget: null, composerFocusSeq: s.composerFocusSeq + 1 });
+   return;
+  }
+  const live = s.terminals.find((x) => x.id === target?.id);
   if (!live) {
    close();
    return;
@@ -195,11 +214,11 @@ export function ReferencePicker(): React.JSX.Element | null {
    return;
   }
   insertFileReference(live.id, item.abs);
-  s.set({ refPickerTerminalId: null });
+  s.set({ refPickerTarget: null });
   s.focusTerminal(live.id);
  };
 
- if (!targetId) return null;
+ if (!target || cwd === null) return null;
 
  const failed = load.state === "failed";
  const truncated = load.state === "ready" && load.groups.some((group) => group.truncated);

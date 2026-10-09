@@ -200,6 +200,19 @@ kbd {
  background: transparent;
 }
 
+/* 聊天消息列的滚动容器（`Thread` 的 `thread-scroll`）：滚动条同样交给上面的全 app 口径，
+   这里只负责“它必须是个滚动容器”。V1–V10 的 `index.css` 里有同名的这条规则
+   （`overflow-y: scroll` + `overscroll-behavior: contain`），V11 重写样式时被并进
+   `.no-scrollbar`、随聊天界面一起删除；**V32 恢复聊天形态时只取回了组件、没取回它**——
+   于是消息列没有 overflow：内容直接溢出到输入框那一条（浏览器把它画在输入框卡片周围，
+   就是用户实测的「文字重叠」），跟随滚动 / 回看增量 / `onScroll` 加载更早 / 切会话读底
+   这些靠 `scrollTop` 的逻辑也全部落空。改这一块前先确认它在（有单测与实测口径：
+   正文超出一屏时 `scrollHeight > clientHeight`、`scrollTop` 能被程序化写到非 0）。 */
+.thread-scroll {
+ overflow-y: auto;
+ overscroll-behavior: contain;
+}
+
 /* 终端不显示滚动条（滚动照常：滚轮/键盘/scrollback/程序化滚动都走 xterm 核心，与滑块无关）。
    xterm 6 的滚动条是自绘 DOM（`.xterm-scrollable-element > .scrollbar`，绝对定位 overlay），
    原生 `::-webkit-scrollbar` 规则够不着；滚动时它会显形（`visible` 类），隐藏滑块即可。

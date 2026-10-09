@@ -50,14 +50,10 @@ export async function loadCheckouts(): Promise<CheckoutView[]> {
 
 /** 打开或聚焦某目录行的终端：已有该目录的终端 → 聚焦最近一个；否则新建。
  *
- * 聊天形态下同一次点击的语义换成「打开聊天」：该目录已有运行中的聊天会话 → 聚焦它；
- * 否则在该目录新建一个聊天会话（与终端形态的「点目录 = 开一个会话」完全平行）。 */
+ * V32 二次口径起聊天形态有**自己的左栏**（`ChatSidebar` 的会话列表），工作区树只在终端形态
+ * 可见——目录行点击不再做形态分流，这里就是终端语义的唯一定义。 */
 export function openOrFocusCheckout(ws: CheckoutView): void {
  if (ws.missing) return;
- if (useApp.getState().appMode === "chat") {
-  openChatForCheckout(ws);
-  return;
- }
  const s = useApp.getState();
  const existing = s.terminals.filter((t) => t.cwd === ws.path);
  if (existing.length > 0) {
@@ -67,7 +63,8 @@ export function openOrFocusCheckout(ws: CheckoutView): void {
  s.openTerminal({ projectId: ws.projectId, cwd: ws.path, label: checkoutLabel(ws) });
 }
 
-/** 聊天形态的目录行点击：运行中的聊天会话优先聚焦，没有就新建一个（懒写盘，空转无副作用）。 */
+/** `⌘T`（聊天形态）的执行侧：该目录已有运行中的聊天 → 聚焦它；当前聊天就在该目录 → 留着；
+ *  否则在该目录新建一个（懒写盘，空转无副作用）。 */
 export function openChatForCheckout(ws: CheckoutView): void {
  const s = useApp.getState();
  const running = s.sessions.filter((x) => x.cwd === ws.path && x.running && !x.archived).pop();

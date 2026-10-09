@@ -300,6 +300,17 @@ export function referenceInsertText(absPath: string): string {
  return `@${quoted} `;
 }
 
+/**
+ * 把引用追加到**聊天草稿**尾部（V32 二次口径：聊天形态走 Composer 草稿而不是 PTY）。
+ * 草稿末尾不是空白时先补一个空格——omp 的提及要求 `@` 在行首或紧跟在空白之后
+ * （`lib/mentions.ts` 与上游 `extractFileMentions` 同一口径），否则那一行不会被展开
+ * 成 fileMention（实测：`…是：@/tmp/x` 不算提及、`…是： @/tmp/x` 才算）。
+ */
+export function appendReference(draft: string, absPath: string): string {
+ const head = draft.length > 0 && !/\s$/.test(draft) ? `${draft} ` : draft;
+ return `${head}${referenceInsertText(absPath)}`;
+}
+
 /** 项目根 + 仓库相对路径 → 绝对路径（POSIX；壳目标平台 macOS/Linux）。 */
 export function joinAbs(root: string, rel: string): string {
  return `${root.replace(/\/+$/, "")}/${rel}`;

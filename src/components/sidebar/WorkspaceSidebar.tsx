@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Folder, FolderPlus, Layers, Search, Settings, X } from "reicon-react";
+import { Folder, FolderPlus, Layers, Search, X } from "reicon-react";
 import { api } from "@shared/api";
 import type { ProjectView, WorkspaceView } from "@shared/types";
 import { useApp } from "../../stores/app";
@@ -10,14 +10,11 @@ import { pickAndAddProject } from "../../lib/projects";
 import { isMacKeyboard } from "../../lib/termInput";
 import { TEXT } from "../../lib/locale";
 import { useText } from "../../lib/useText";
-import { LanguageToggle } from "../LanguageToggle";
-import { ThemeToggle } from "../ThemeToggle";
-import { AppModeToggle } from "../AppModeToggle";
-import { AppUpdateChip } from "./AppUpdateChip";
 import { DropLine } from "./DropLine";
-import { OmpUpdateChip } from "./OmpUpdateChip";
 import { ProjectGroup } from "./ProjectGroup";
 import { SessionPopup } from "./SessionPopup";
+import { SidebarBottom } from "./SidebarBottom";
+import { SidebarTop } from "./SidebarTop";
 import { WorkspaceGroupDialog } from "./WorkspaceGroupDialog";
 import { WorkspaceGroupSection } from "./WorkspaceGroupSection";
 /** 左栏刷新：项目列表 + 工作区 / 目录行清单（项目增删 / 重定位 / 移除 / 工作区编辑后都回这里）。 */
@@ -48,7 +45,14 @@ type DragSession = {
  target: ProjectDropTarget | null;
 };
 
-export function WorkspaceSidebar() {
+/**
+ * 终端形态的左栏（V11 起的「工作区 → 项目 → 目录行」树）。
+ *
+ * V32 二次口径：与聊天形态的 `ChatSidebar` **各自常驻、只切显隐**（`visible`）——
+ * 卸载会丢掉树的滚动位置、拖拽会话与刷新状态，且每次切形态都要重拉 `list_projects` +
+ * `git worktree list`（`refreshSidebar`），切显隐则两边状态原样保留。
+ */
+export function WorkspaceSidebar({ visible }: { visible: boolean }) {
  const projects = useApp((s) => s.projects);
  const workspaceGroups = useApp((s) => s.workspaceGroups);
  const checkouts = useApp((s) => s.checkouts);
@@ -266,19 +270,10 @@ export function WorkspaceSidebar() {
  };
 
  return (
-  <aside className="flex h-full w-full flex-col overflow-hidden border-r border-border bg-sidebar">
-   <div data-tauri-drag-region className="h-10 shrink-0" aria-hidden />
+  <aside className={`${visible ? "flex" : "hidden"} h-full w-full flex-col overflow-hidden border-r border-border bg-sidebar`}>
+   {/* 顶栏（红绿灯占位 + 形态切换 + 两枚版本 chip）：与聊天形态的 `ChatSidebar` 共用同一份 */}
+   <SidebarTop />
    <div className="shrink-0 px-3 pb-3">
-    <div data-tauri-drag-region className="flex h-9 items-center gap-2 px-1 pb-2">
-     <span className="pointer-events-none text-[14px] font-semibold tracking-tight text-foreground">
-      <span className="font-mono text-accent">omp</span>MiniDesktop
-     </span>
-     {/* 字标行右端 = 两个更新入口（V30）：本应用版本 chip + omp 运行时版本 chip */}
-     <div className="ml-auto flex min-w-0 items-center gap-1.5">
-      <AppUpdateChip />
-      <OmpUpdateChip />
-     </div>
-    </div>
     <button
      onClick={() => useApp.getState().set({ quickSwitcherOpen: true })}
      aria-label={t.quickSwitcherAria}
@@ -399,33 +394,7 @@ export function WorkspaceSidebar() {
      )}
     </div>
    </div>
-   <div className="shrink-0 border-t border-border px-3 py-3">
-    {/* 形态切换单独一行（V32）：与「设置/语言/皮肤」同属底部区，但不挤那一行——
-        底部行的最小宽度（288px 临界）是按设置 + 语言 + 皮肤算的，见 stores/app.ts 的 SIDEBAR_MIN。 */}
-    <div className="mb-2 flex items-center gap-2">
-     <AppModeToggle />
-     <span className="min-w-0 truncate text-[11px] text-faint">{t.modeSection}</span>
-    </div>
-    <div className="flex items-center gap-1.5">
-     <button
-      onClick={() => {
-       const st = useApp.getState();
-       // 聊天形态：设置不是标签，再点一次「设置」= 返回聊天（终端形态保持「聚焦设置」不变）
-       if (st.appMode === "chat" && st.settingsTabActive) st.closeSettingsTab();
-       else st.openSettingsTab();
-       useApp.getState().set({ sidebarOpen: false });
-      }}
-      className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
-      aria-label={t.settingsOpenAria}
-      title={t.settingsOpenAria}
-     >
-      <Settings size={15} aria-hidden className="shrink-0" />
-      <span className="whitespace-nowrap">{t.settingsOpenAria}</span>
-     </button>
-     <LanguageToggle />
-     <ThemeToggle />
-    </div>
-   </div>
+   <SidebarBottom />
    {groupDialog && (
     <WorkspaceGroupDialog
      key={groupDialog.group?.id ?? "new"}
@@ -456,6 +425,6 @@ export function WorkspaceSidebar() {
     </div>,
     document.body,
    )}
-  </aside >
+  </aside>
  );
 }

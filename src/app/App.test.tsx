@@ -43,7 +43,18 @@ vi.mock("@tauri-apps/api/event", () => ({
  }),
 }));
 vi.mock("../components/sidebar/WorkspaceSidebar", () => ({
- WorkspaceSidebar: () => <div data-testid="sidebar">sidebar</div>,
+ WorkspaceSidebar: ({ visible = true }: { visible?: boolean }) => (
+  <div data-testid="sidebar" data-visible={String(visible)}>
+   sidebar
+  </div>
+ ),
+}));
+vi.mock("../components/sidebar/ChatSidebar", () => ({
+ ChatSidebar: ({ visible = true }: { visible?: boolean }) => (
+  <div data-testid="chat-sidebar" data-visible={String(visible)}>
+   chat-sidebar
+  </div>
+ ),
 }));
 vi.mock("../components/terminal/TerminalView", () => ({
  TerminalView: () => <div data-testid="terminals">terminals</div>,
@@ -99,11 +110,12 @@ beforeEach(() => {
   settingsTabActive: false,
   sidebarOpen: false,
   quickSwitcherOpen: false,
-  refPickerTerminalId: null,
+  refPickerTarget: null,
   terminalFocusSeq: 0,
   localeMode: "system",
   locale: "zh-CN",
   appMode: "terminal",
+  chatFormUsed: false,
  });
  container = document.createElement("div");
  document.body.append(container);
@@ -148,6 +160,17 @@ describe("应用外壳快捷键与侧栏", () => {
 
  it("桌面只挂载一份侧栏", () => {
   expect(container.querySelectorAll('[data-testid="sidebar"]').length).toBe(1);
+  // 聊天侧栏懒挂载：纯终端形态下不挂（不白付聊天侧的读盘调用）
+  expect(container.querySelectorAll('[data-testid="chat-sidebar"]').length).toBe(0);
+ });
+
+ it("形态切换：左栏随形态互换（聊天侧栏首次用到才挂载，两栏都只切显隐）", () => {
+  act(() => useApp.getState().setAppMode("chat"));
+  expect(container.querySelector('[data-testid="sidebar"]')?.getAttribute("data-visible")).toBe("false");
+  expect(container.querySelector('[data-testid="chat-sidebar"]')?.getAttribute("data-visible")).toBe("true");
+  act(() => useApp.getState().setAppMode("terminal"));
+  expect(container.querySelector('[data-testid="sidebar"]')?.getAttribute("data-visible")).toBe("true");
+  expect(container.querySelector('[data-testid="chat-sidebar"]')?.getAttribute("data-visible")).toBe("false");
  });
 
  it("⌘1..9 只在当前选中范围的终端里编号", () => {
@@ -172,19 +195,34 @@ describe("引用工作区文件快捷键（V22）", () => {
   await act(async () => {
    await new Promise((resolve) => setTimeout(resolve, 0));
   });
-  expect(useApp.getState().refPickerTerminalId).toBe("t-1");
+  expect(useApp.getState().refPickerTarget).toEqual({ kind: "terminal", id: "t-1" });
+  expect(container.textContent).toContain(TEXT["zh-CN"].refPickTitle);
+ });
+
+ it("聊天形态 ⌘⇧P：目标 = 当前聊天会话（浮层注入 Composer 草稿）", async () => {
+  act(() => {
+   useApp.setState({
+    appMode: "chat",
+    activeSessionId: "s-1",
+    sessions: [
+     { id: "s-1", projectId: "p1", title: "会话", cwd: "/a", timestamp: 1, archived: false, corrupt: false, note: null, running: false },
+    ],
+   });
+  });
+  press({ key: "p", ...mod, shiftKey: true });
+  expect(useApp.getState().refPickerTarget).toEqual({ kind: "chat", sessionId: "s-1" });
   expect(container.textContent).toContain(TEXT["zh-CN"].refPickTitle);
  });
 
  it("设置标签激活时 ⌘⇧P 不触发", () => {
   act(() => useApp.setState({ settingsTabActive: true }));
   press({ key: "p", ...mod, shiftKey: true });
-  expect(useApp.getState().refPickerTerminalId).toBeNull();
+  expect(useApp.getState().refPickerTarget).toBeNull();
  });
 
  it("⌘P（不带 shift）不触发引用浮层", () => {
   press({ key: "p", ...mod });
-  expect(useApp.getState().refPickerTerminalId).toBeNull();
+  expect(useApp.getState().refPickerTarget).toBeNull();
  });
 
  it("浮层打开时 ⌘T / ⌘⇧P 被对话框守卫挡住（不新建终端、不叠加浮层）", async () => {
@@ -196,7 +234,7 @@ describe("引用工作区文件快捷键（V22）", () => {
   press({ key: "t", ...mod });
   press({ key: "p", ...mod, shiftKey: true });
   expect(useApp.getState().terminals.length).toBe(before);
-  expect(useApp.getState().refPickerTerminalId).toBe("t-1");
+  expect(useApp.getState().refPickerTarget).toEqual({ kind: "terminal", id: "t-1" });
  });
 });
 

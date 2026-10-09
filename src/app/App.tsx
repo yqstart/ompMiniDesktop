@@ -7,6 +7,7 @@ import { api } from "@shared/api";
 import { IPC } from "@shared/ipc";
 import type { ModelCatalog, TermTabState } from "@shared/types";
 import { WorkspaceSidebar } from "../components/sidebar/WorkspaceSidebar";
+import { ChatSidebar } from "../components/sidebar/ChatSidebar";
 import { TerminalView } from "../components/terminal/TerminalView";
 import { TerminalTabs } from "../components/terminal/TerminalTabs";
 import { QuickSwitcher } from "../components/terminal/QuickSwitcher";
@@ -135,10 +136,15 @@ function useTerminalHotkeys() {
    e.stopPropagation();
    if (e.repeat || hasOpenDialog() || typing) return;
    const s = useApp.getState();
-   // 聊天形态：只有「⌘W 关设置」有意义；⌘T 换成新建聊天，其余终端快捷键不参与
+   // 聊天形态：只有「⌘W 关设置」「⌘T 新建聊天」「⌘⇧P 引用工作区文件」有意义；其余终端快捷键不参与
    if (s.appMode === "chat") {
     if (key === "w" && s.settingsTabActive) s.closeSettingsTab();
     else if (key === "t") newChatInSelection();
+    else if (key === "p") {
+     // ⌘⇧P 引用工作区文件（V22 浮层；聊天形态注入 Composer 草稿）：设置标签激活 / 没有会话时不触发
+     if (s.settingsTabActive || !s.activeSessionId) return;
+     s.set({ refPickerTarget: { kind: "chat", sessionId: s.activeSessionId } });
+    }
     return;
    }
    if (key === "t") {
@@ -148,7 +154,7 @@ function useTerminalHotkeys() {
    } else if (key === "p") {
     // ⌘⇧P 引用工作区文件（V22）：设置标签激活 / 没有终端时不触发
     if (s.settingsTabActive || !s.activeTerminalId) return;
-    s.set({ refPickerTerminalId: s.activeTerminalId });
+    s.set({ refPickerTarget: { kind: "terminal", id: s.activeTerminalId } });
    } else if (key === "w") {
     // 设置标签激活时，⌘W 关的是设置标签（终端标签的关闭语义不变）
     if (s.settingsTabActive) {
@@ -281,7 +287,7 @@ function SidebarShell({
  );
 }
 export function App() {
- const { settingsTabOpen, settingsTabActive, closingTerminalId, set, sidebarWidth, setSidebarWidth, updateDialogOpen, ompUpdateDialogOpen, sidebarOpen, quickSwitcherOpen, providerUsageOpen, refPickerTerminalId, appMode, chatFormUsed } = useApp();
+ const { settingsTabOpen, settingsTabActive, closingTerminalId, set, sidebarWidth, setSidebarWidth, updateDialogOpen, ompUpdateDialogOpen, sidebarOpen, quickSwitcherOpen, providerUsageOpen, refPickerTarget, appMode, chatFormUsed } = useApp();
  const t = useText();
  useTheme();
  useLocale();
@@ -347,7 +353,12 @@ export function App() {
      if (w !== sidebarWidth) setSidebarWidth(w);
     }}
    >
-    <WorkspaceSidebar />
+    {/* 左栏随形态切换（V32 二次口径）：终端形态 = 工作区树，聊天形态 = 会话侧栏
+        （V1–V10 的 Sidebar 骨架）。两栏**都常驻、只切显隐**——卸载会丢掉树的滚动位置与
+        列表状态，每次切形态还要重拉 `list_projects` + `git worktree list`（终端侧）与
+        重扫会话目录（聊天侧）；聊天侧首次用到才挂载（`chatFormUsed`，与 `ChatView` 同一门槛）。 */}
+    <WorkspaceSidebar visible={appMode === "terminal"} />
+    {chatFormUsed && <ChatSidebar visible={appMode === "chat"} />}
    </SidebarShell>
    <main inert={sidebarOpen ? true : undefined} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background md:my-2 md:mr-2 md:rounded-xl md:border md:border-border">
     <HealthBanner />
@@ -381,7 +392,7 @@ export function App() {
    {ompUpdateDialogOpen && <OmpUpdateDialog />}
    {quickSwitcherOpen && <QuickSwitcher />}
    {providerUsageOpen && <ProviderUsageDialog />}
-   {refPickerTerminalId && <ReferencePicker />}
+   {refPickerTarget && <ReferencePicker />}
   </div>
  );
 }

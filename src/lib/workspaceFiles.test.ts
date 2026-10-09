@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CheckoutView, ProjectFiles, ProjectView, WorkspaceView } from "@shared/types";
 import {
+ appendReference,
  buildRefItems,
  buildRefTree,
  flattenRefTree,
@@ -249,5 +250,22 @@ describe("注入文本（referenceInsertText / joinAbs）", () => {
  it("根带尾斜杠不产生双斜杠", () => {
   expect(joinAbs("/a/", "x.ts")).toBe("/a/x.ts");
   expect(joinAbs("/a", "sub/x.ts")).toBe("/a/sub/x.ts");
+ });
+});
+
+describe("聊天草稿追加（appendReference）", () => {
+ it("草稿末尾不是空白时先补一个空格（提及要求 @ 在行首或空白之后）", () => {
+  expect(appendReference("看看这个：", "/p/be/src/api.ts")).toBe("看看这个： @/p/be/src/api.ts ");
+  expect(appendReference("first line\nsecond", "/a/b.ts")).toBe("first line\nsecond @/a/b.ts ");
+ });
+
+ it("空草稿 / 末尾已有空白：不补空格", () => {
+  expect(appendReference("", "/a/b.ts")).toBe("@/a/b.ts ");
+  expect(appendReference("看这个 ", "/a/b.ts")).toBe("看这个 @/a/b.ts ");
+  expect(appendReference("看这个\n", "/a/b.ts")).toBe("看这个\n@/a/b.ts ");
+ });
+
+ it("路径含空白走引号形式（与注入终端同一份 referenceInsertText）", () => {
+  expect(appendReference("", "/a/b c.ts")).toBe('@"/a/b c.ts" ');
  });
 });

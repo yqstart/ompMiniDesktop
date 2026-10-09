@@ -105,8 +105,9 @@ const ZH = {
  quickSwitcherTargetGone: "目标已不可用，请重新选择",
  quickSwitcherMissingWorkspace: "目录不存在",
  quickSwitcherCheckouts: "工作区目录",
- // 引用工作区文件（V22）：⌘⇧P 浮层——把 @路径 注入终端输入框
+ // 引用工作区文件（V22）：⌘⇧P 浮层——终端形态注入输入框、聊天形态追加进草稿
  refPickTitle: "引用工作区文件",
+ refPickComposerTitle: "引用工作区文件（⌘⇧P）：插入其他成员项目的文件路径",
  refPickSearchPlaceholder: "搜索文件名或路径（项目名也可）",
  refPickInsertHint: "Enter 插入 @路径（不发送）",
  refPickGroupCount: "{0}（{1}）",
@@ -114,7 +115,7 @@ const ZH = {
  refPickLoadFailed: "文件列表读取失败",
  refPickRetry: "重试",
  refPickEmpty: "没有匹配的文件",
- refPickNoProject: "找不到这个终端所属的项目",
+ refPickNoProject: "找不到当前终端 / 会话所属的项目",
  refPickScopeHint: "当前项目不在多项目工作区里，没有可引用的其他项目；本项目文件直接在输入框用 @ 引用即可。",
  refPickLimitHint: "每个项目只显示前 {0} 条匹配，继续输入以缩小范围",
  refPickBusy: "终端忙碌：等本轮结束（π 显示等待输入）后再试",
@@ -968,7 +969,7 @@ const ZH = {
  emptyNewChatIn: "会话会在 {0} 下新建",
  emptyPickProjectFirst: "先在左栏选择一个项目",
  emptyShortcuts: "Enter 发送 · Shift+Enter 换行 · Esc 停止",
- chatEmptyStart: "从左栏选择一个目录开始新会话，或在项目的会话弹窗里打开历史会话",
+ chatEmptyStart: "从左栏选择一个会话继续，或在项目上点 ＋ 新建一个会话",
  chatEmptyReadyBody: "会话已就绪——在下面输入第一条消息开始对话",
 
  // 顶栏
@@ -1367,8 +1368,9 @@ const EN: Record<TextKey, string> = {
  quickSwitcherTargetGone: "Target is no longer available, pick another",
  quickSwitcherMissingWorkspace: "Directory missing",
  quickSwitcherCheckouts: "Workspace directories",
- // Reference workspace file (V22): ⌘⇧P overlay — inserts an @path into the terminal input
+ // Reference workspace file (V22): ⌘⇧P overlay — terminal inserts into its input, chat appends to the draft
  refPickTitle: "Reference workspace file",
+ refPickComposerTitle: "Reference workspace file (⌘⇧P): insert a path from another member project",
  refPickSearchPlaceholder: "Search by file name, path, or project",
  refPickInsertHint: "Enter inserts the @path (does not send)",
  refPickGroupCount: "{0} ({1})",
@@ -1376,7 +1378,7 @@ const EN: Record<TextKey, string> = {
  refPickLoadFailed: "Failed to load file list",
  refPickRetry: "Retry",
  refPickEmpty: "No matching files",
- refPickNoProject: "The project for this terminal was not found",
+ refPickNoProject: "Could not find the project of the current terminal / chat",
  refPickScopeHint: "No other projects to reference: this project is not in a multi-project workspace (use @ in the input for its own files).",
  refPickLimitHint: "Showing the first {0} matches per project; keep typing to narrow down",
  refPickBusy: "Terminal busy: wait until this turn ends (π shows ready) and try again",
@@ -2206,7 +2208,7 @@ const EN: Record<TextKey, string> = {
  emptyNewChatIn: "The chat will be created under {0}",
  emptyPickProjectFirst: "Pick a project in the sidebar first",
  emptyShortcuts: "Enter to send · Shift+Enter for a newline · Esc to stop",
- chatEmptyStart: "Pick a directory on the left to start a new chat, or open a past chat from a project's session list",
+ chatEmptyStart: "Pick a chat on the left to continue it, or hit + on a project to start a new one",
  chatEmptyReadyBody: "The chat is ready — type your first message below to begin",
  unnamedChat: "Untitled chat",
  openSidebar: "Open sidebar",

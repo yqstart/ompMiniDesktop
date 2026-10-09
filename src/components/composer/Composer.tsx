@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { ArrowUp, FileText, ImagePlus, TriangleWarning, X } from "reicon-react";
+import { ArrowUp, AtSign, FileText, ImagePlus, TriangleWarning, X } from "reicon-react";
 import { useApp } from "../../stores/app";
 import { api } from "@shared/api";
 import { attachmentFromFile, dataUrl } from "../../lib/attachments";
@@ -27,8 +27,13 @@ import { SlashMenu } from "./SlashMenu";
  */
 export function Composer() {
  const t = useText();
- const { activeSessionId, draftOf, setDraft, statusBySession, sessions, attachmentsOf, addAttachments, removeAttachment, clearAttachments, currentModel, currentRuntime, models } =
+ const { activeSessionId, draftOf, setDraft, statusBySession, sessions, attachmentsOf, addAttachments, removeAttachment, clearAttachments, currentModel, currentRuntime, models, composerFocusSeq } =
   useApp();
+ const taRef = useRef<HTMLTextAreaElement | null>(null);
+ /** 引用浮层注入草稿后回到输入框接着写（与终端的 `focusTerminal` 同一手法：序号信号）。 */
+ useEffect(() => {
+  if (composerFocusSeq > 0) taRef.current?.focus();
+ }, [composerFocusSeq]);
  const persistDraft = (sid: string | null, text: string) => {
   setDraft(sid, text);
   if (sid) {
@@ -79,7 +84,7 @@ export function Composer() {
   };
  }, [mentionKey, cwd, mentions]);
 
-// 补全浮层有两套：`/` 命令面（数据是 omp 自己的 `available_commands_update`）与 `@` 路径。
+ // 补全浮层有两套：`/` 命令面（数据是 omp 自己的 `available_commands_update`）与 `@` 路径。
  // 两者互斥——草稿以 `/` 开头时整条就是一条命令，不该再冒出路径候选。
  const commands = useMemo(() => normalizeCommands(currentRuntime?.commands), [currentRuntime?.commands]);
  // `/` 补全只在草稿是单条命令、光标还在首个 token 内时开。**流式中不开**：那时 Enter 走 follow_up
@@ -362,6 +367,7 @@ export function Composer() {
      <SlashMenu cands={slashCands} active={slashIdx} query={slashToken ?? ""} onPick={pickCommand} onHover={hoverSlash} />
     )}
     <textarea
+     ref={taRef}
      id="composer"
      rows={3}
      value={draft}
@@ -484,6 +490,19 @@ export function Composer() {
       title={t.attachAddTitle}
      >
       <ImagePlus size={16} aria-hidden />
+     </button>
+     {/* 引用**其他**工作区成员项目的文件（V22 浮层；与 ⌘⇧P 同一入口）：注入草稿 `@<绝对路径>`，
+         omp 在 prompt 时展开成 fileMention——本项目文件直接在输入框用 `@` 补全即可 */}
+     <button
+      onClick={() => {
+       if (activeSessionId) useApp.getState().set({ refPickerTarget: { kind: "chat", sessionId: activeSessionId } });
+      }}
+      disabled={!activeSessionId || awaiting}
+      className="cursor-pointer rounded-md p-1.5 text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-40"
+      aria-label={t.refPickTitle}
+      title={t.refPickComposerTitle}
+     >
+      <AtSign size={16} aria-hidden />
      </button>
      <PermissionBadge compact align="left" />
      <OmpStatusPill />

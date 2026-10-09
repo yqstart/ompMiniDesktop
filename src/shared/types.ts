@@ -466,6 +466,16 @@ export type SidebarSelection =
  | { kind: "group"; id: string | null }
  | { kind: "checkout"; path: string };
 
+/**
+ * 引用工作区文件浮层的目标（V22；V32 二次口径起两种形态共用）：
+ * - `terminal`：注入该终端的 PTY 输入框（bracketed paste）；
+ * - `chat`：追加进该会话的 Composer 草稿（`@<绝对路径> `）并把焦点交还输入框。
+ * 两种目标都从各自的 cwd 解析「当前项目」，浮层只列**其他**工作区成员项目的文件。
+ */
+export type RefPickerTarget =
+ | { kind: "terminal"; id: string }
+ | { kind: "chat"; sessionId: string };
+
 // ---------- 工作区提交 / 推送（V19） ----------
 
 /**

@@ -7,16 +7,20 @@
 
 ## 0. 一句话
 
-**同一个 app、两种形态，左栏共用（工作区 → 项目 → 目录行），主区互换**：
-终端形态 = 标签栏 + PTY 里的 omp TUI；聊天形态 = 顶栏 + 消息流 + Composer（RPC 里的 omp 会话）。
-切换入口在左栏底部行（`AppModeToggle`，持久化 `omp.appMode.v1`）；**两侧运行中的进程都不中断**。
+**同一个 app、两种形态，左栏与主区都随形态切换**：
+终端形态 = 工作区树左栏 + 标签栏 + PTY 里的 omp TUI；聊天形态 = 会话侧栏左栏 + 顶栏 + 消息流 + Composer（RPC 里的 omp 会话）。
+切换入口在左栏顶栏（**原字标位**，`AppModeToggle`，持久化 `omp.appMode.v1`）；**两侧运行中的进程都不中断**。
+
+> **二次口径（2026-10-09，用户口径）**：切换键从底部区**上移到字标位**、字标「ompMiniDesktop」退场；
+> **左栏随形态切换**（终端 = 工作区树，聊天 = 会话侧栏，V1–V10 的 Sidebar 骨架恢复并适配）——
+> 详见 §7；本文 §1–§6 保留 V32 交付时的原始记录，凡与 §7 冲突处**以 §7 为准**。
 
 ## 1. 用户口径与决策（2026-10-08）
 
 | 决策点 | 选择 | 落地口径 |
 |---|---|---|
-| 切换粒度 | **全局切换** | 整个 app 在两种形态间整体切换（左栏共享，主区互换），同一时间只有一种形态 |
-| 聊天形态的左栏 | **沿用当前工作区树** | 不恢复 V10 的独立 Sidebar；聊天入口接进现有左栏（目录行点击 / 项目会话弹窗 / 归档页） |
+| 切换粒度 | **全局切换** | 整个 app 在两种形态间整体切换（**左栏与主区都互换**——二次口径；V32 交付时是「左栏共享，主区互换」），同一时间只有一种形态 |
+| 聊天形态的左栏 | **~~沿用当前工作区树~~ → 会话侧栏**（二次口径 2026-10-09 改） | ~~不恢复 V10 的独立 Sidebar；聊天入口接进现有左栏（目录行点击 / 项目会话弹窗 / 归档页）~~；现行为 `ChatSidebar`（V1–V10 的 Sidebar 骨架恢复并适配：添加项目 + 会话搜索 + 项目分组会话列表 + 未归属 + 扫描窗口），工作区树只在终端形态可见，见 §7 |
 | 功能范围 | **V10 全量恢复** | 消息流 / 审批卡 / 工具行 / 思考折叠 / 模型与思考档切换 / 权限 / @提及 / `/` 命令 / 图片附件 / 上下文条 / 计划 todo / 导出 Markdown / 任务通知 |
 
 由此推出的两个关键设计（本文的根）：
@@ -127,14 +131,14 @@ response(prompt,true) → agent_start → turn_start → message_start(user) →
     sessionApprovals / composerMenu / threadLimit*`）与 `appMode`;
   - `lib/locale.ts`：从 V1–V10 迁回 357 个聊天文案键（中英同键）+ 4 个新键（形态切换 / 返回聊天 / 聊天空态）。
 - **形态切换机制**：`appMode`（`"terminal" | "chat"`，localStorage `omp.appMode.v1`，默认 terminal）。
-  `App.tsx` 用 CSS 显隐同时挂载两侧；聊天形态下：
+  `App.tsx` 用 CSS 显隐同时挂载两侧（~~左栏~~ 主区；**二次口径起左栏也随形态切换**，见 §7）；聊天形态下：
   - 设置页（`settingsTabOpen/settingsTabActive` 复用）盖住主区，页内多一个「返回聊天」（`showClose`），
     左栏「设置」按钮在聊天形态是开 / 关切换，`⌘W` 也关设置；
   - 终端快捷键（⌘T / ⌘1..9 / ⌘⇧K / ⌘⇧P）不参与，`⌘T` 改为「新建聊天」（`newChatInSelection`）。
 - **跨形态的会话行为**（`lib/checkouts.ts` / `lib/sessionOpen.ts`）：
-  - `resumeSessionInApp`：会话弹窗与归档页的「打开」按当前形态分流；
-  - `openOrFocusCheckout`：目录行点击按当前形态分流；
+  - `resumeSessionInApp`：**归档页**的「打开」按当前形态分流（会话弹窗只在终端形态可见，见 §7）；
   - `createChatIn(cwd)`：新建聊天（懒写盘：不跑 turn 不落 jsonl，空转无副作用）。
+  - ~~`openOrFocusCheckout`：目录行点击按当前形态分流~~（二次口径起工作区树只在终端形态可见，目录行点击 = 终端语义，见 §7）。
 - **消息流修正（相对 V1–V10 的唯一行为改动）**：`message_end(assistant)` 的文本块不再另起随机 id
   新行，而是与流式 deltas 同 id `__append` 补全——真机（18.8.3）会双份渲染，见 §2.2。
 
@@ -152,13 +156,16 @@ pump 帧流     → omp-event://<id> → frameToViewMsgs + mergeViewMsgs → sto
 
 ## 4. 界面口径
 
-- **形态切换键**（左栏底部区第一行）：两档分段控件（`Command` = 终端 / `Chat` = 聊天），
+- **形态切换键**（左栏顶栏、**原字标位**；二次口径见 §7）：两档分段控件（`Command` = 终端 / `Chat` = 聊天），
   与语言 / 皮肤切换同款视觉（radiogroup + 方向键循环 + 24×26 档位按钮 + `bg-active` 选中底）；
-  右侧跟一行 `应用形态` 小字标签。**不挤底部那行**——「设置 / 语言 / 皮肤」的最小宽度（288px 临界）
-  是既有的硬约束，形态切换单独占一行。
-- 聊天形态主区：`TopBar`（会话名可点击改备注 + 复制 Markdown；更新入口不再放这里——那是左栏字标行两枚 chip 的职责）
+  字标「ompMiniDesktop」退场，右端两枚版本 chip 不动。~~交付时在左栏底部区第一行、右侧跟一行「应用形态」小字标签
+  （单独占一行以避开底部 288px 临界）~~。
+- 聊天形态左栏（`ChatSidebar`；二次口径，见 §7）：添加项目主入口 → 会话搜索（标题 / 目录过滤）→
+  项目分组（进行中会话列表、行首绿点 = 进程在跑、悬浮归档）→「未归属会话」组 → 扫描窗口提示；
+  顶栏 / 底栏与终端形态共用（`SidebarTop` / `SidebarBottom`）。
+- 聊天形态主区：`TopBar`（会话名可点击改备注 + 复制 Markdown；更新入口不再放这里——那是左栏顶栏两枚 chip 的职责）
   / `Thread`（消息流，首屏 200 条按需加载）/ `Composer`（上下文条 + 附件 + 输入 + 工具行：图片 / 权限 / 模型 / 思考档 / 状态胶囊 / 上下文环 / 发送·停止）。
-- 聊天侧空态：无项目 → 与左栏同一份「选择目录」入口；有项目但未打开会话 → 「从左栏选目录 / 会话开始」；
+- 聊天侧空态：无项目 → 与左栏同一份「选择目录」入口；有项目但未打开会话 → 「从左栏选一个会话继续，或点 ＋ 新建」；
   会话已建好但还没有消息 → 「输入第一条消息」。
 - 设置页在聊天形态下多一个「返回聊天」（左上），终端形态不变（关闭走标签栏 × / ⌘W）。
 
@@ -183,6 +190,113 @@ pump 帧流     → omp-event://<id> → frameToViewMsgs + mergeViewMsgs → sto
 
 - **不做**：聊天形态的标签体系（单会话视图，V10 口径）；会话与终端的**运行时绑定**（同一会话在两个形态各开一个进程是允许的
   ——omp 层面互不感知，壳侧不做互斥提示）；聊天形态的工作区协作注入（`--add-dir` / 拓扑 prompt 是终端 spawn 的事，
-  RPC 侧不适用）；聊天形态的提交 / 推送面板（V19 是终端形态专属）；形态切换快捷键（底部键 + 持久化已覆盖主要场景）。
+  RPC 侧不适用）；聊天形态的提交 / 推送面板（V19 是终端形态专属）；形态切换快捷键（形态键 + 持久化已覆盖主要场景）。
 - **沿用 V1–V10 的旧边界**：审批语义（once/always/deny）、思考档前端过滤、`/plan` `/goal` 等 TUI-only 命令在聊天里不出现。
 - `<cwd>/.omp/config.yml` 等项目级配置对聊天会话同样生效（omp 侧行为，壳侧不干预）。
+
+## 7. 二次口径（2026-10-09）：切换键上移 + 左栏随形态切换（含当日下午的第三轮：工作区分段 / 跨项目引用）
+
+用户口径（截图 + 三点）：
+1. 形态切换键放到**原字标位**（红框处），**「ompMiniDesktop」字标退场**；
+2. **切换形态时左侧的工作区形态也要跟着切换**（此前两形态共用一套终端形态的工作区树）。
+
+### 7.1 落地形态
+
+| 形态 | 左栏 | 主区 |
+|---|---|---|
+| `terminal` | `WorkspaceSidebar`（工作区树：快速切换 + 添加项目 + 新建工作区 + 项目 / 目录行） | 标签栏 + PTY 里的 omp TUI |
+| `chat` | `ChatSidebar`（**V1–V10 的 Sidebar 骨架恢复并适配**：添加项目主入口 + 会话搜索 + **按工作区分段**（§7.4）+ 项目分组会话列表 +「未归属会话」组 + 扫描窗口提示） | 顶栏 + 消息流 + Composer |
+
+- **共享件**：`components/sidebar/SidebarTop.tsx`（40px 红绿灯占位 + `AppModeToggle` + 右端两枚版本 chip；整行是拖窗区）
+  与 `SidebarBottom.tsx`（设置入口 + 语言 + 皮肤）——两形态各渲染一份，几何一致；
+  左栏底部回到**一行**（`SIDEBAR_MIN` 的 288px 临界口径不变）。
+- **两栏都常驻、只切 CSS 显隐**（`visible` prop）：卸载会丢树的滚动位置 / 列表与搜索词，且每次切形态都要重拉
+  `list_projects` + `git worktree list`（终端侧）与重扫会话目录（聊天侧）。聊天侧 **`chatFormUsed` 首次用到才挂载**
+  （与 `ChatView` 同一门槛；纯终端用户不付聊天侧的读盘调用）。
+- **`ChatSidebar` 的取数与刷新**：数据 = `list_sessions`（**组件局部持有**，不写 `store.sessions`——那一份是聊天视图
+  「已知会话」的合并集，窗口外的老会话不该被顶掉）；项目清单用全局 `projects`（空的时候兜底拉一次）。
+  刷新时机 = 挂载 / 切到聊天形态（`visible` 上升沿）/ 会话切换后（防抖 400ms——新建会话与 `running` 标记靠它进列表）/
+  归档与添加项目后；「继续扫描」按 `SCAN_STEP`（500，上限 5000，与后端 `scan_window` 同口径）递增窗口重拉。
+- **聊天左栏的动作**：行点击 = `openSessionWithHistory`（起 / 聚焦长驻 RPC + 拉历史）；项目分组头「＋」=
+  `startChatInProject`（在该项目主目录下新建聊天）；行内 / 分组级归档走 `runSessionBatch`（与归档页同一份分批与失败聚合）；
+  目录缺失的项目给「重定位」（`relocate_project`，只改覆盖层绑定）；「添加项目」成功后顺手 `loadCheckouts()`——
+  两栏常驻，切回终端形态即是最新树。
+
+### 7.2 随之收口的死代码与文案
+
+- `openOrFocusCheckout` 的**聊天分支删除**（工作区树只在终端形态可见，目录行点击回到纯终端语义）；
+  `openChatForCheckout` 仍在（`⌘T` 新建聊天的执行侧）。`resumeSessionInApp` 保留——**归档页**在所有形态都能用（设置入口）。
+- 聊天侧空态引导语改口径（「从左栏选一个目录」→「从左栏选一个会话，或在项目上点 ＋ 新建」，中英同改）。
+- `sessionList.ts` / `search.ts`（V2 M7b 正文搜索）**仍不恢复**：搜索只过滤标题与目录（`search_sessions` 随 V11 删除）。
+
+### 7.3 验证（2026-10-09 实测）
+
+- `pnpm check` 全绿（typecheck + lint + **483** vitest + e2e:ipc 95 命令双向核对）；新增 `App.test.tsx` 用例
+  「形态切换：左栏随形态互换」（聊天侧栏懒挂载 + 两栏可见性随 `appMode`）。
+- 构建产物 + `__TAURI_INTERNALS__` mock 的真实 Chromium（`init_scripts` 注入 + reload）逐项走通：
+  终端形态顶栏 = 切换键 + 两枚 chip（无字标）→ 切聊天形态（DOM 上两栏、可见一份）→
+  会话列表按项目分组（含 worktree 归属会话）/ 归档会话不列 / 扫描条「已扫描最近 500 个（共 683 个）」→
+  搜索「CI」只剩命中行 + 「1 个标题匹配」→ 项目头 ＋ 走 `create_session` → 列表出现新会话 →
+  行内归档走 `archive_sessions` → 行消失 → 切回终端形态（工作区树 + 快速切换回来）→ 再切聊天（列表状态保留）。
+- 顺带修掉一个既有对拍缺陷（与本期改动无关、但会挡住 `pnpm check`）：`parity.test.ts` 的正文比对没抹
+  **omp 自己的图片标记**——jsonl 里存的是 `[Image #1, 1159x200]`、`omp render --plain` 画的是 `🖼 #1`，
+  含粘贴图片的会话必然假阴性（用 HEAD 干净工作树复现过）。现在两边各自抹掉自己的写法再比。
+
+### 7.4 左栏第三轮（2026-10-09 下午）：聊天形态也要看得见「工作区」
+
+用户口径（截图 + 一句）：终端工作区里「工作区 → 多个项目」，而聊天形态的左栏完全没有工作区概念。
+
+- **`ChatSidebar` 按工作区分段**：数据直接用全局 `workspaceGroups` + `projects`（与终端树同一份）；
+  排序 = `workspaceGroups` 的顺序 → 段内项目按 `projects` 顺序（= 左栏全局顺序）；
+  段头 = `Layers` + 工作区名 + 成员项目数（`wsGroupCount` 的 aria/title）；
+  没进组的项目收进「未分组」段（`wsGroupUngrouped`，与终端树同一套措辞）；**没有自定义工作区就平铺**
+  （与终端树同一条口径：单项目 / 未分组用户无感）；**空工作区不占段**（聊天这里没有可聊的会话，
+  容器的编辑 / 拖拽仍只在终端形态）。搜索时与项目分组同款：命中的段强制展开。
+- 取数兜底：项目 / 工作区清单由终端侧栏在启动时拉过（两栏都常驻）；聊天侧只兜「一个项目都没有 /
+  有项目但工作区还没拉回来」的冷路径，且**每次挂载只兜一次**（`coldLoaded` ref），不每次切形态都补。
+- 测试：`ChatSidebar.test.tsx`（有工作区分段 + 未分组段 / 没有工作区就平铺 / 归档会话不列）。
+
+### 7.5 左栏第三轮：聊天形态的跨项目文件引用（同一只 ⌘⇧P 浮层）
+
+用户口径：「工作区可以包含多个项目，**并且项目间的文件可以选择**」。上游实测（2026-10-09，本机 omp 18.8.6）：
+
+- 先探针确认了链路：`omp --mode rpc-ui` 的 `prompt` 会把 `@<绝对路径>`（**cwd 之外的路径**也算）
+  展开成一条 `fileMention` 消息进上下文——模型直接答出文件内容、没有自己调工具；**不需要 `--add-dir`**。
+  两个前提：`@` 必须在行首或**紧随空白**（`…是：@/tmp/x` 不展开、`…是： @/tmp/x` 展开，与
+  `lib/mentions.ts` / 上游 `extractFileMentions` 同一口径）；文件必须存在。
+- 于是聊天侧只剩「挑选」这一步：**复用 V22 的 `ReferencePicker`**，把目标从「终端 id」抽象成
+  `RefPickerTarget = { kind: "terminal"; id } | { kind: "chat"; sessionId }`（`store.refPickerTarget`，旧字段
+  `refPickerTerminalId` 删除）。cwd（= 解析「当前项目」的依据）从目标来：终端用它的 cwd、聊天用该会话的 cwd。
+- 注入分流：终端仍是 bracketed paste 进 PTY（忙碌提示不变）；聊天**追加进该会话的 Composer 草稿**
+  （`appendReference`：草稿末尾非空白先补空格 + `@"…"` 引号形式 + 尾随空格），随后
+  `composerFocusSeq + 1` → Composer 的 textarea 拿回焦点；草稿里的提及芯片与 `check_paths` 校验照常生效。
+- 入口：聊天形态 **⌘⇧P**（与终端同键；设置标签激活 / 没有打开会话时不触发）+ Composer 工具行的
+  `AtSign` 键（图标键，title/aria = 「引用工作区文件（⌘⇧P）：插入其他成员项目的文件路径」）。
+- 测试：`workspaceFiles.test.ts` 的 `appendReference`（补空格 / 引号）、`ReferencePicker.test.tsx` 的
+  聊天目标用例（追加草稿、不写 PTY、交还焦点、会话没了自收浮层）、`App.test.tsx` 的聊天 ⌘⇧P 用例。
+- 浏览器核对（构建产物 + mock 的真实 Chromium）：聊天形态 → 打开会话（cwd = 成员项目 A）→ ⌘⇧P
+  浮层只列 B 的 `src/api/client.ts` 等 → 搜 `client` → Enter → 草稿变成
+  `@/w/tracsys_web/src/api/client.ts `、浮层关闭、焦点回到 `#composer`、`check_paths` 校验通过。
+
+### 7.6 修复（2026-10-09）：聊天消息列丢了 `overflow` → 输入框上方「文字重叠」
+
+用户实测（截图红框）：输入框正上方糊着一段重叠文字（读起来像「未归属会话」+「思考 · 持续了 0 秒」+「用量」三层叠在一起）。
+
+- **根因**：那不是三层 DOM 叠着，而是**消息列没有 `overflow`、内容直接溢出到输入框那一条**——
+  `Thread` 的滚动容器类 `.thread-scroll` 的规则（`overflow-y: scroll` + `overscroll-behavior: contain`）
+  在 V11 重写样式时被并进 `.no-scrollbar` 一起删除；**V32 恢复聊天组件时只取回了 TSX、没取回这条 CSS**
+  （`git grep thread-scroll` 当时只命中 `Thread.tsx`）。于是：溢出内容被浏览器画在输入框卡片周围
+  （卡片不透明，遮住一部分，剩下的露在那一条里 = 用户看到的「重叠」）；`Thread.tsx` 里靠
+  `scrollTop`/`clientHeight`/`onScroll` 的**跟随滚动 / 回看增量 / 加载更早 / 切会话读底**全部空转
+  （长会话表现为「不滚、只看得到开头」）。
+- **修复**：`src/index.css` 恢复 `.thread-scroll { overflow-y: auto; overscroll-behavior: contain; }`
+  （滚动条仍交给全 app 的隐藏口径，不再抄 V10 那三条 `::-webkit-scrollbar`）。顺手做了一次全量排查：
+  V10 的 `index.css` 选择器 vs 现在——**只有这一条丢了**（`.md-body` / `.no-focus-ring` / `.hljs-*` 都还在）。
+- **实测（构建产物 + mock 的真实 Chromium，30 轮会话）**：
+  - 修复前（临时 `overflow: visible` 复现）：`overflow-y: visible`、最后一行底边在 4466px（消息列盒子底 707px）、
+    输入框那一条能命中消息内容（4 个采样点）；
+  - 修复后：`overflow-y: auto`、`scrollHeight 4449 / clientHeight 654`、打开即自动读底 `scrollTop 3795`、
+    最后一行底边 671 ≤ 消息列底 707（严格裁切）、输入框那一条 **0** 个消息像素。
+- **核对清单增补**（写进 `AGENTS.md` 的界面核对段）：聊天形态的真实 UI 核对必须有「长会话」一档
+  （`get_history` ≥ 30 轮），断言 `scrollHeight > clientHeight`、`scrollTop` 能到非 0、
+  最后一条消息的底边不越过消息列的底边——**短会话（≤ 一屏）看不出来**，这正是 V32 交付时漏掉它的原因。

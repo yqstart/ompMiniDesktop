@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CheckoutView, CommitOutcome, CommitTaskView, HealthInfo, ImageAttachment, ModelCatalog, OmpUpdate, OmpUpdateRun, ProjectView, SessionRuntime, SessionStatus, SessionView, SidebarSelection, TerminalStatus, TerminalView, TodoPhase, UpdateState, ViewMsg, WorkspaceGitState, WorkspaceView } from "@shared/types";
+import type { CheckoutView, CommitOutcome, CommitTaskView, HealthInfo, ImageAttachment, ModelCatalog, OmpUpdate, OmpUpdateRun, ProjectView, RefPickerTarget, SessionRuntime, SessionStatus, SessionView, SidebarSelection, TerminalStatus, TerminalView, TodoPhase, UpdateState, ViewMsg, WorkspaceGitState, WorkspaceView } from "@shared/types";
 import type { Locale, LocaleMode } from "../lib/locale";
 import { loadLocaleMode, resolveLocale, saveLocaleMode, systemLang } from "../lib/locale";
 import { applyTheme, loadTheme, saveTheme, type ThemeMode } from "../lib/theme";
@@ -135,10 +135,13 @@ type AppState = {
  quickSwitcherOpen: boolean;
  /** 「供应商用量」弹窗是否打开（V15；入口是标签栏右上角的 `Gauge` 键，同样只在打开时挂载）。 */
  providerUsageOpen: boolean;
- /** 引用工作区文件浮层（V22）的目标终端 id（null = 关闭；同样只在打开时挂载）。 */
- refPickerTerminalId: string | null;
+ /** 引用工作区文件浮层（V22）的目标（null = 关闭；同样只在打开时挂载）。
+  *  V32 二次口径起两种形态共用这个浮层：终端形态注入 PTY 输入框，聊天形态追加进 Composer 草稿。 */
+ refPickerTarget: RefPickerTarget | null;
  /** 终端聚焦序号：每次成功打开或聚焦终端 +1，让选择同一终端也能恢复 xterm 焦点。 */
  terminalFocusSeq: number;
+ /** Composer 聚焦序号（聊天形态）：引用浮层注入草稿后 +1，让输入框拿回焦点接着写。 */
+ composerFocusSeq: number;
  /** 打开一个新终端并聚焦（返回新 id）。`resume` = 以 `omp --resume` 恢复历史会话。 */
  openTerminal: (opts: {
   projectId: string | null;
@@ -367,8 +370,9 @@ export const useApp = create<AppState>((set, get) => ({
  selection: null,
  quickSwitcherOpen: false,
  providerUsageOpen: false,
- refPickerTerminalId: null,
+ refPickerTarget: null,
  terminalFocusSeq: 0,
+ composerFocusSeq: 0,
  openTerminal: ({ projectId, cwd, label, resume = null }) => {
   const id = crypto.randomUUID();
   const term: TerminalView = {

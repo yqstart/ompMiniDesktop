@@ -59,7 +59,7 @@ beforeEach(() => {
    { projectId: "be", projectName: "BE", path: "/p/be", branch: "main", head: null, isMain: true, missing: false },
   ],
   locale: "zh-CN",
-  refPickerTerminalId: "t1",
+  refPickerTarget: { kind: "terminal", id: "t1" },
   sidebarOpen: false,
  });
  container = document.createElement("div");
@@ -135,7 +135,7 @@ describe("引用工作区文件浮层", () => {
 
   press("Enter");
   expect(mock.ptyWrite).toHaveBeenCalledWith("t1", "\u001b[200~@/p/be/src/api.ts \u001b[201~");
-  expect(useApp.getState().refPickerTerminalId).toBeNull();
+  expect(useApp.getState().refPickerTarget).toBeNull();
  });
 
  it("目录行可折叠：子树隐藏、目录行保留、再点恢复", async () => {
@@ -160,6 +160,35 @@ describe("引用工作区文件浮层", () => {
   expect(container.textContent).toContain(t.refPickScopeHint);
  });
 
+ it("聊天形态：回车把 @绝对路径 追加进草稿（不写 PTY）、交还焦点信号并关闭", async () => {
+  act(() => {
+   useApp.setState({
+    refPickerTarget: { kind: "chat", sessionId: "s1" },
+    sessions: [
+     { id: "s1", projectId: "fe", title: "会话", cwd: "/p/fe", timestamp: 1, archived: false, corrupt: false, note: null, running: false },
+    ],
+    drafts: { s1: "看看这个：" },
+   });
+  });
+  await open();
+  expect(mock.listProjectFiles).toHaveBeenCalledWith(["/p/be"]);
+  typeQuery("api");
+  press("Enter");
+  expect(useApp.getState().drafts.s1).toBe("看看这个： @/p/be/src/api.ts ");
+  expect(mock.ptyWrite).not.toHaveBeenCalled();
+  expect(useApp.getState().refPickerTarget).toBeNull();
+  expect(useApp.getState().composerFocusSeq).toBeGreaterThan(0);
+ });
+
+ it("聊天形态：会话已不在 store（被删）→ 浮层自收、不渲染", async () => {
+  act(() => {
+   useApp.setState({ refPickerTarget: { kind: "chat", sessionId: "gone" }, sessions: [], drafts: {} });
+  });
+  await open();
+  expect(useApp.getState().refPickerTarget).toBeNull();
+  expect(container.textContent).toBe("");
+ });
+
  it("终端忙碌（π 非等待输入）：不注入、给提示、浮层留着", async () => {
   act(() => {
    useApp.setState({
@@ -169,7 +198,7 @@ describe("引用工作区文件浮层", () => {
   await open();
   press("Enter");
   expect(mock.ptyWrite).not.toHaveBeenCalled();
-  expect(useApp.getState().refPickerTerminalId).toBe("t1");
+  expect(useApp.getState().refPickerTarget).toEqual({ kind: "terminal", id: "t1" });
   expect(container.textContent).toContain(t.refPickBusy);
  });
 

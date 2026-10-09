@@ -11,7 +11,8 @@ import appIcon from "../../../design-system/icon/omp-mini-icon.svg";
  *
  * - `no-project`：一个项目都没有——与左栏主入口同一份逻辑（`pickAndAddProject`），空态即入口；
  * - `no-session + hasSession`：会话已建好但还没有消息——提示去输入框发第一条；
- * - `no-session + !hasSession`：聊天视图没有打开任何会话——提示从左栏选目录 / 会话开始。
+ * - `no-session + !hasSession`：聊天视图没有打开任何会话——提示去左栏的会话侧栏（`ChatSidebar`）
+ *   选一个会话，或在项目分组头上点 ＋ 新建。
  */
 export function ChatEmptyState({
  kind,
