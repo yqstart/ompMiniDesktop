@@ -282,7 +282,6 @@ function CommitTaskCard({ cwd }: { cwd: string }) {
 								onChange={(e) => setCommitMessage(cwd, e.target.value)}
 								readOnly={running}
 								rows={4}
-								spellCheck={false}
 								placeholder={t.gitMsgPlaceholder}
 								aria-label={t.gitMsgPlaceholder}
 								className="w-full resize-y rounded-md border border-border bg-surface px-2.5 py-2 font-mono text-[12px] leading-5 break-words outline-none focus:border-accent read-only:opacity-70"

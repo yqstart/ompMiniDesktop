@@ -5,6 +5,7 @@ pub mod git_commit;
 pub mod git_info;
 pub mod git_ops;
 pub mod memories;
+pub mod models_config;
 pub mod omp_update;
 pub mod overlay;
 pub mod plugins;

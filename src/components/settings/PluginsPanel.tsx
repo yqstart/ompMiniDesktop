@@ -524,7 +524,6 @@ export function PluginsPanel() {
          if (e.key === "Enter") void doInstall();
         }}
         placeholder={t.pluginsInstallPlaceholder}
-        spellCheck={false}
         className="min-h-9 rounded-md border border-border bg-background px-3 py-2 font-mono text-[13px] outline-none focus:border-accent"
        />
       </label>

@@ -368,7 +368,13 @@ export function App() {
         - 聊天侧同理要保住订阅与滚动位置；
         所以形态切换一律走 CSS，运行中的进程两侧都不中断，切回来原样还在。
         终端形态内：标签栏常驻（设置标签是单例），终端区与设置页也按老规矩切显隐。 */}
-    <div className={appMode === "terminal" ? "flex min-h-0 min-w-0 flex-1 flex-col" : "hidden"}>
+    <div className={appMode === "terminal"
+     ? settingsTabActive
+      // 设置标签激活：容器里只剩标签栏（终端区已 hidden）——不许再长高（flex-none），
+      // 否则它与设置页同为 flex-1、把 main 对半分，设置页被顶到下半屏（V32 遗留缺陷，用户实测）
+      ? "flex min-h-0 min-w-0 flex-none flex-col"
+      : "flex min-h-0 min-w-0 flex-1 flex-col"
+     : "hidden"}>
      <TerminalTabs />
      <TerminalView visible={appMode === "terminal" && !settingsTabActive} />
     </div>

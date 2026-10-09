@@ -779,8 +779,6 @@ function LoginFlow({
       <input
        value={text}
        type="password"
-       autoComplete="off"
-       spellCheck={false}
        disabled={starting || closing || sending}
        onChange={(e) => setText(e.target.value)}
        placeholder={t.loginInputHint}

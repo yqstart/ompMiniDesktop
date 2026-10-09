@@ -579,7 +579,6 @@ function SettingRow({
       value={jsonText}
       onChange={(e) => onJsonChange(e.target.value)}
       rows={4}
-      spellCheck={false}
       aria-label={fmt(t.allSettingsJsonAria, ariaName)}
       className="w-full rounded-md border border-border bg-background px-2.5 py-2 font-mono text-[12px] leading-5 outline-none focus:border-accent"
      />

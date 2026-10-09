@@ -116,8 +116,6 @@ export function CustomProviderEditForm({
      <input
       value={form.apiKey}
       type="password"
-      autoComplete="off"
-      spellCheck={false}
       onChange={(e) => onChange({ ...form, apiKey: e.target.value })}
       placeholder="MY_GW_KEY"
       title={t.customFormApiKeyHint}
@@ -152,91 +150,91 @@ export function CustomProviderEditForm({
      const invalidContext = !isValidModelLimit(m.contextWindow);
      const invalidMaxTokens = !isValidModelLimit(m.maxTokens);
      return (
-     <div key={i} className="mt-3 rounded-lg border border-border-soft bg-background p-3 sm:p-4">
-      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-       <input
-        value={m.id}
-        onChange={(e) => setModel(i, { id: e.target.value })}
-        placeholder="model-id"
-        aria-label={t.customModelId}
-        aria-invalid={duplicate || !m.id.trim()}
-        aria-describedby={duplicate || !m.id.trim() ? `${fieldId}-model-${i}-error` : undefined}
-        className={`${inputCls} col-span-2 font-mono sm:col-span-1`}
-       />
-       <input
-        value={m.name}
-        onChange={(e) => setModel(i, { name: e.target.value })}
-        placeholder={t.customModelName}
-        aria-label={t.customModelName}
-        className={inputCls}
-       />
-       <button
-        onClick={() => onChange({ ...form, models: form.models.filter((_, j) => j !== i) })}
-        disabled={form.models.length <= 1}
-        aria-label={t.customModelRemove}
-        title={t.customModelRemove}
-        className="flex min-h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-danger disabled:opacity-30"
-       >
-        <Trash2 size={11} aria-hidden />
-       </button>
-      </div>
-      {(duplicate || !m.id.trim()) && <p id={`${fieldId}-model-${i}-error`} className="mt-2 text-xs text-danger">{duplicate ? t.customModelDuplicate : t.customFormRequired}</p>}
-      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-3 text-[12px]">
-       <label className="flex items-center gap-1.5">
-        <span className="text-muted">{t.customModelContext}</span>
+      <div key={i} className="mt-3 rounded-lg border border-border-soft bg-background p-3 sm:p-4">
+       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
         <input
-         value={m.contextWindow}
-         onChange={(e) => setModel(i, { contextWindow: e.target.value })}
-         inputMode="numeric"
-         placeholder="128000"
-         aria-label={t.customModelContext}
-         aria-invalid={invalidContext}
-         aria-describedby={invalidContext ? `${fieldId}-model-${i}-limits` : undefined}
-         className="w-24 rounded-md border border-border bg-surface px-2 py-1.5 text-right font-mono focus:border-accent"
+         value={m.id}
+         onChange={(e) => setModel(i, { id: e.target.value })}
+         placeholder="model-id"
+         aria-label={t.customModelId}
+         aria-invalid={duplicate || !m.id.trim()}
+         aria-describedby={duplicate || !m.id.trim() ? `${fieldId}-model-${i}-error` : undefined}
+         className={`${inputCls} col-span-2 font-mono sm:col-span-1`}
         />
-       </label>
-       <label className="flex items-center gap-1.5">
-        <span className="text-muted">{t.customModelMaxTokens}</span>
         <input
-         value={m.maxTokens}
-         onChange={(e) => setModel(i, { maxTokens: e.target.value })}
-         inputMode="numeric"
-         placeholder="8192"
-         aria-label={t.customModelMaxTokens}
-         aria-invalid={invalidMaxTokens}
-         aria-describedby={invalidMaxTokens ? `${fieldId}-model-${i}-limits` : undefined}
-         className="w-24 rounded-md border border-border bg-surface px-2 py-1.5 text-right font-mono focus:border-accent"
+         value={m.name}
+         onChange={(e) => setModel(i, { name: e.target.value })}
+         placeholder={t.customModelName}
+         aria-label={t.customModelName}
+         className={inputCls}
         />
-       </label>
-       <label className="flex items-center gap-1.5">
-        <span className="text-muted">{t.customModelReasoning}</span>
-        <Switch on={m.reasoning} disabled={busy} label={t.customModelReasoning} onToggle={() => setModel(i, { reasoning: !m.reasoning })} />
-       </label>
-       <div className="flex items-center gap-1.5">
-        <span className="text-muted">{t.customModelInput}</span>
-        {(["text", "image"] as const).map((mode) => {
-         const on = m.input.includes(mode);
-         return (
-          <button
-           key={mode}
-           onClick={() =>
-            setModel(i, {
-             input: on ? m.input.filter((x) => x !== mode) : [...m.input, mode],
-            })
-           }
-           aria-pressed={on}
-           disabled={on && m.input.length === 1}
-           className={`cursor-pointer rounded border px-1.5 py-0.5 transition-colors duration-100 hover:bg-hover ${on ? "border-accent/60 text-accent" : "border-border text-muted"
-            }`}
-          >
-           {mode === "text" ? t.customModelText : t.customModelImage}
-          </button>
-         );
-        })}
+        <button
+         onClick={() => onChange({ ...form, models: form.models.filter((_, j) => j !== i) })}
+         disabled={form.models.length <= 1}
+         aria-label={t.customModelRemove}
+         title={t.customModelRemove}
+         className="flex min-h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-danger disabled:opacity-30"
+        >
+         <Trash2 size={11} aria-hidden />
+        </button>
        </div>
+       {(duplicate || !m.id.trim()) && <p id={`${fieldId}-model-${i}-error`} className="mt-2 text-xs text-danger">{duplicate ? t.customModelDuplicate : t.customFormRequired}</p>}
+       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-3 text-[12px]">
+        <label className="flex items-center gap-1.5">
+         <span className="text-muted">{t.customModelContext}</span>
+         <input
+          value={m.contextWindow}
+          onChange={(e) => setModel(i, { contextWindow: e.target.value })}
+          inputMode="numeric"
+          placeholder="128000"
+          aria-label={t.customModelContext}
+          aria-invalid={invalidContext}
+          aria-describedby={invalidContext ? `${fieldId}-model-${i}-limits` : undefined}
+          className="w-24 rounded-md border border-border bg-surface px-2 py-1.5 text-right font-mono focus:border-accent"
+         />
+        </label>
+        <label className="flex items-center gap-1.5">
+         <span className="text-muted">{t.customModelMaxTokens}</span>
+         <input
+          value={m.maxTokens}
+          onChange={(e) => setModel(i, { maxTokens: e.target.value })}
+          inputMode="numeric"
+          placeholder="8192"
+          aria-label={t.customModelMaxTokens}
+          aria-invalid={invalidMaxTokens}
+          aria-describedby={invalidMaxTokens ? `${fieldId}-model-${i}-limits` : undefined}
+          className="w-24 rounded-md border border-border bg-surface px-2 py-1.5 text-right font-mono focus:border-accent"
+         />
+        </label>
+        <label className="flex items-center gap-1.5">
+         <span className="text-muted">{t.customModelReasoning}</span>
+         <Switch on={m.reasoning} disabled={busy} label={t.customModelReasoning} onToggle={() => setModel(i, { reasoning: !m.reasoning })} />
+        </label>
+        <div className="flex items-center gap-1.5">
+         <span className="text-muted">{t.customModelInput}</span>
+         {(["text", "image"] as const).map((mode) => {
+          const on = m.input.includes(mode);
+          return (
+           <button
+            key={mode}
+            onClick={() =>
+             setModel(i, {
+              input: on ? m.input.filter((x) => x !== mode) : [...m.input, mode],
+             })
+            }
+            aria-pressed={on}
+            disabled={on && m.input.length === 1}
+            className={`cursor-pointer rounded border px-1.5 py-0.5 transition-colors duration-100 hover:bg-hover ${on ? "border-accent/60 text-accent" : "border-border text-muted"
+             }`}
+           >
+            {mode === "text" ? t.customModelText : t.customModelImage}
+           </button>
+          );
+         })}
+        </div>
+       </div>
+       {(invalidContext || invalidMaxTokens) && <p id={`${fieldId}-model-${i}-limits`} className="mt-2 text-xs text-danger">{t.customModelLimitInvalid}</p>}
       </div>
-      {(invalidContext || invalidMaxTokens) && <p id={`${fieldId}-model-${i}-limits`} className="mt-2 text-xs text-danger">{t.customModelLimitInvalid}</p>}
-     </div>
      );
     })}
     <button

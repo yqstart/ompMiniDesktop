@@ -14,9 +14,17 @@
 //! 为什么是增量 UTF-8 解码（而不是 `from_utf8_lossy`，也不是 base64 全量转发）：
 //! TUI 输出里的中文 / emoji 多字节序列会跨读块边界，lossy 会把撕裂处变成「�」；
 //! base64 则让每一帧都要背上 33% 膨胀与一次前端解码。增量解码两头都不吃。
+//!
+//! V33：每个终端的启动参数都注入一个 per-spawn 的 `--config` 覆盖层
+//! （`<appData>/omp-mini/omp-spawn-overlay.yml`，内容见 [`SPAWN_OVERLAY_YAML`]），
+//! 关掉 omp 18.8+ 编辑器（TUI 输入框）的拼写辅助——行内单词补全提示 / 拼错词标记 /
+//! 自动纠正（用户实测「输入英文字母总是提示我大写、横杠」）。走 per-spawn 覆盖层而不是
+//! 改全局 `config.yml`：与 `--add-dir` 同一条口径——只影响壳内终端，不动用户在别处
+//! 自己跑的 omp。
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
@@ -27,6 +35,7 @@ use tauri::ipc::Channel;
 use tauri::State;
 
 use crate::commands::{cmd_err, AppState, CmdError};
+use crate::models_config::write_atomic;
 
 /// 单个 UTF-8 字符最多 4 字节；残留超过它就是坏数据，不用再等。
 const UTF8_MAX_SEQ: usize = 4;
@@ -125,13 +134,58 @@ pub struct PtySpawnOpts {
     pub append_system_prompt: Option<String>,
 }
 
+/// spawn 覆盖层文件名：与 `overlay.json` 同放在 app 数据目录的 `omp-mini/` 下。
+const SPAWN_OVERLAY_FILE: &str = "omp-spawn-overlay.yml";
+
+/// spawn 覆盖层内容（V33）：关掉 omp 编辑器（TUI 输入框）的拼写辅助三件套。
+///
+/// 上游事实（omp 18.8.6 二进制 + 上游源码 / `docs/settings.md` 核对，详见 `docs/v33-schedule.md`）：
+/// - omp 18.8+ 在 macOS 上默认开着一套编辑器拼写辅助（`packages/tui/src/prompt/`）：
+///   `spelling.autocomplete` 默认 `auto`（= macOS 词典的**行内单词补全提示**，打字时在光标后
+///   画 ghost 补全；实测 `hel` 提示 `hello`、`iph` 提示 `iphoto`——候选含大写 / 连字符变体，
+///   正是用户看到的「提示我大写、横杠」）、`spelling.typoDetection` 默认 `true`（拼错词波浪线）、
+///   `spelling.autocorrect` 默认 `false`（自动纠正）。三个都显式关掉，将来上游改默认值也不回潮。
+/// - `--config` 覆盖层是上游一等公民：优先级高于全局 / 项目配置、只在本次进程生效
+///   （`docs/settings.md`：CLI overlay「for that one process」）。**覆盖层文件缺失 / 非法是
+///   硬错误**——所以 [`ensure_spawn_overlay`] 先确保写成功，写不了就不注入 `--config`。
+/// - 未知键与非法值对上游都是容忍的（实测：加不存在的键照样启动）——老版本 omp 不认识
+///   `spelling.*` 时本文件只是无害的赘述。
+const SPAWN_OVERLAY_YAML: &str = "\
+# ompMiniDesktop 注入（per-spawn `--config` 覆盖层；只对壳内终端生效，不改全局 config.yml）：
+# 关掉 omp 编辑器的拼写辅助——输入框不要行内补全提示 / 拼错词波浪线 / 自动纠正。
+spelling:
+  autocomplete: off
+  typoDetection: false
+  autocorrect: false
+";
+
+/// 确保覆盖层文件存在且内容最新；返回可交给 `--config` 的路径。
+/// 任何一步失败都返回 `None`（不注入——覆盖层缺失对 omp 是硬错误，宁可退回默认行为，
+/// 也不能让终端起不来）。
+pub fn ensure_spawn_overlay(dir: &Path) -> Option<PathBuf> {
+    let path = dir.join(SPAWN_OVERLAY_FILE);
+    let up_to_date = std::fs::read_to_string(&path)
+        .map(|cur| cur == SPAWN_OVERLAY_YAML)
+        .unwrap_or(false);
+    if !up_to_date && write_atomic(&path, SPAWN_OVERLAY_YAML).is_err() {
+        return None;
+    }
+    Some(path)
+}
+
 /// 组装 `omp` 启动参数（纯函数，单测锁着）。
 ///
 /// 为什么用 per-spawn 的 `--add-dir` 而不是全局配置 `workspace.additionalDirectories`：
 /// 后者对**所有**会话生效，会污染用户在终端里自己跑的 omp；前者只在壳内终端生效，无副作用。
+/// 同一条口径（V33）：编辑器拼写辅助也走 per-spawn 的 `--config` 覆盖层
+/// （[`SPAWN_OVERLAY_YAML`]），不写用户的全局 `config.yml`。
 /// `--append-system-prompt` 用 `=` 形式（实测多行文本可原样注入）。
-pub fn build_omp_args(opts: &PtySpawnOpts) -> Vec<String> {
+pub fn build_omp_args(opts: &PtySpawnOpts, overlay: Option<&str>) -> Vec<String> {
     let mut args: Vec<String> = vec!["--cwd".into(), opts.cwd.clone()];
+    if let Some(path) = overlay {
+        args.push("--config".into());
+        args.push(path.to_string());
+    }
     for dir in &opts.add_dirs {
         args.push("--add-dir".into());
         args.push(dir.clone());
@@ -275,7 +329,14 @@ pub async fn pty_spawn(
         }
     }
 
-    let args = build_omp_args(&opts);
+    // 拼写辅助覆盖层（V33）：确保文件存在后再注入 `--config`；写不出来就不注入，
+    // 退化为 omp 默认行为而不是让终端起不来（覆盖层文件缺失对 omp 是硬错误）。
+    let overlay = state
+        .overlay_path
+        .parent()
+        .and_then(ensure_spawn_overlay)
+        .map(|p| p.to_string_lossy().into_owned());
+    let args = build_omp_args(&opts, overlay.as_deref());
     let size = PtySize { rows: opts.rows.max(2), cols: opts.cols.max(2), pixel_width: 0, pixel_height: 0 };
     let spawned = spawn_pty(&bin, &args, &opts.cwd, size)
         .map_err(|e| cmd_err("PTY_SPAWN", e, None))?;
@@ -478,9 +539,10 @@ mod tests {
         assert_eq!(status.exit_code(), 0);
     }
 
-    /// V21 参数拼装：`--add-dir` 逐个、说明用 `=` 形式、空说明不注入、resume 殿后。
+    /// V21 参数拼装：`--add-dir` 逐个、说明用 `=` 形式、空说明不注入、resume 殿后；
+    /// V33：覆盖层路径可选，给出时紧随 `--cwd` 注入 `--config`。
     #[test]
-    fn build_omp_args_includes_workspace_flags() {
+    fn build_omp_args_includes_workspace_flags_and_overlay() {
         let base = PtySpawnOpts {
             id: "t1".into(),
             cwd: "/a".into(),
@@ -491,10 +553,25 @@ mod tests {
             append_system_prompt: Some("工作区说明\n第二行".into()),
         };
         assert_eq!(
-            build_omp_args(&base),
+            build_omp_args(&base, None),
             vec![
                 "--cwd",
                 "/a",
+                "--add-dir",
+                "/b",
+                "--add-dir",
+                "/c",
+                "--append-system-prompt=工作区说明\n第二行",
+            ]
+        );
+        // 覆盖层：`--config` 紧随 `--cwd`，其余参数顺序不变
+        assert_eq!(
+            build_omp_args(&base, Some("/data/omp-spawn-overlay.yml")),
+            vec![
+                "--cwd",
+                "/a",
+                "--config",
+                "/data/omp-spawn-overlay.yml",
                 "--add-dir",
                 "/b",
                 "--add-dir",
@@ -506,14 +583,48 @@ mod tests {
         let mut o = base.clone();
         o.add_dirs = vec![];
         o.append_system_prompt = Some("   ".into());
-        assert_eq!(build_omp_args(&o), vec!["--cwd", "/a"]);
+        assert_eq!(build_omp_args(&o, None), vec!["--cwd", "/a"]);
 
         // resume 追加在最后
         let mut o = base.clone();
         o.add_dirs = vec![];
         o.append_system_prompt = None;
         o.resume = Some("abc".into());
-        assert_eq!(build_omp_args(&o), vec!["--cwd", "/a", "--resume", "abc"]);
+        assert_eq!(build_omp_args(&o, None), vec!["--cwd", "/a", "--resume", "abc"]);
+        assert_eq!(
+            build_omp_args(&o, Some("/x.yml")),
+            vec!["--cwd", "/a", "--config", "/x.yml", "--resume", "abc"]
+        );
+    }
+
+    /// V33 覆盖层文件：首次写、内容一致不重写、被外部改坏后恢复；
+    /// 目标不可写时给 None（调用方因此不注入 `--config`，终端照常能起）。
+    #[test]
+    fn ensure_spawn_overlay_writes_and_repairs() {
+        let dir = std::env::temp_dir().join(format!("omp-overlay-it-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = ensure_spawn_overlay(&dir).expect("首次应写入成功");
+        assert_eq!(path, dir.join("omp-spawn-overlay.yml"));
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("autocomplete: off"), "{text}");
+        assert!(text.contains("typoDetection: false"), "{text}");
+        assert!(text.contains("autocorrect: false"), "{text}");
+
+        // 被外部改坏（或旧版本残留）→ 下次调用恢复成壳的最新内容
+        std::fs::write(&path, "spelling:\n  autocomplete: auto\n").unwrap();
+        ensure_spawn_overlay(&dir).expect("改坏后应恢复");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), SPAWN_OVERLAY_YAML);
+
+        // 目标路径被文件占住 → 写不进去 → None
+        let blocked = std::env::temp_dir().join(format!("omp-overlay-blocked-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&blocked);
+        std::fs::create_dir_all(&blocked).unwrap();
+        let occupied = blocked.join("occupied");
+        std::fs::write(&occupied, "x").unwrap();
+        assert!(ensure_spawn_overlay(&occupied).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&blocked);
     }
 
     /// kill 路径：**忽略 SIGHUP 的进程**（omp TUI 的真实行为——只发 SIGHUP 会挂住）也必须被
