@@ -389,3 +389,49 @@ Composer 工具行的引用键渲染 `Files` 图标（svg 首段 `M 8.3333 14.33
 回归：`sessionOpen.test.ts` 的「已知视图（hint）：先落地再等 open」两条（慢 open 期间项目 / 目录 / 标题已在；
 慢 open 期间切走不抢选中、不抹状态）；`pnpm check` 全绿。
 
+### 7.11 发送链路三处修复（2026-10-09 晚，用户口径）：消息不再双份、思考中可见、状态胶囊恢复
+
+用户口径：「聊天形态输入框输入后回车，我输入的内容会被发送两次，并且发送后无任何响应，没有思考中……
+或者其他证明 omp 运行的字样」。
+
+**证据与根因**（三处前端缺陷叠加，后端与 omp 侧无涉）：
+
+1. **显示双份**（不是真双发）。jsonl 实测：用户那轮只有**一条** user 消息（`01a11fb6` 会话 17:18 的
+   「我希望界面样式和操作方式上对齐IntelliJ IDEA」，10 秒后 assistant 记录 `aborted` / `Interrupted by user`）
+   ——prompt 只发出去一次。双份来自两个渲染源各推一条：Composer 发送时的**乐观回显**（`u-local-*`）
+   + omp 收到 prompt 后的**实时回显**（`message_start` role=user，omp 18.8.6 实测帧序在
+   `response(prompt) → agent_start → turn_start` 之后、assistant 之前）；`mergeViewMsgs` 对 user
+   消息没有合并规则、实时管线推的 id 是随机 `u-<ts>`，两条都留下。
+2. **「思考中…」永不出现**。实时管线的思考块只在 `thinking_end` 才推一条完成态——整个思考阶段
+   界面没有任何运行迹象。
+3. **状态胶囊漏恢复**。V10 的 `OmpStatusPill`（工具行常驻「运行中 / 等待审批 / 出错 / 已退出 / 就绪」）
+   在 V32 恢复 Composer 时遗漏（旧版导入它，新版没有），输入框附近没有任何「omp 在跑」的可见字样。
+
+**改动**：
+
+| # | 文件 | 改动 |
+|---|---|---|
+| 1 | `lib/useSessionEvents.ts` | 实时回显 id 改 `u-echo-<ts>`（可识别为「待确认的回显」）；thinking 在**首个 delta 就推** `complete:false` 块（同 id），`thinking_end` 就地落定；空思考（前后都无内容）不产块 |
+| 2 | `lib/mergeEvents.ts` | 合并规则两条：thinking 按同 id 原位覆盖（流式 → 完成态一块到底）；`u-echo-*` 到达时按同文本接管 `u-local-*`（换 id，不翻倍；无匹配则照常 push） |
+| 3 | `lib/sessionOpen.ts` | 历史替换的匹配集合从 `u-local-*` 扩到 `u-local-*` / `u-echo-*`，并改按出现顺序的队列配对（同文本连发不互相顶掉）；顺手修「一轮历史替换多条时基于旧快照 set、后一次覆盖前一次」的缺陷 |
+| 4 | `components/thread/StatusBar.tsx` + `components/composer/Composer.tsx` | 恢复 `OmpStatusPill`（照 V10 实现：常驻、颜色 + 文字双信号），工具行插在权限键之后 |
+| 5 | `components/composer/Composer.tsx`（同轮核对时发现） | 发送链路的清空 / 回滚从 `setDraft`（只清内存）改为 `persistDraft`（带 localStorage 同步）——否则已发送的内容留在 `omp.drafts.v1`，应用重启后 `hydrateDrafts` 把发出去的稿子恢复回输入框（「幽灵草稿」）；核对中反复 reload 时被它咬到（草稿在实验之间残留） |
+
+**回归**：`useSessionEvents.test.ts` 新增 5 条——回显接管（发一次一条）、同文本连发一对一、无乐观回显
+照常显示、思考流式（mid 态 `complete:false` → end 落定同一条）、空思考不产块；failing-before 对拍
+（临时回退 `useSessionEvents.ts` / `mergeEvents.ts`，新用例 4 红，修复后相关 49 项全绿）。
+
+**UI 级核对**（构建产物 + `__TAURI_INTERNALS__` mock 的真实 Chromium，2026-10-09 晚实测）：
+
+| 步骤 | 断言 | 结果 |
+|---|---|---|
+| 发送「你好」 | 消息列 1 条用户气泡；localStorage 草稿已删 | ✅（修复前草稿残留） |
+| 注入 omp 真实形状的回显帧（`message_start` role=user） | **仍 1 条气泡**（修复前变 2 条） | ✅ |
+| `thinking_start`（无内容） | 不产块 | ✅ |
+| `thinking_delta` × 2 | 「思考中…」出现（修复前全程无） | ✅ |
+| `thinking_end` + assistant 文本流 | 同一条思考块落定「思考 · N 秒」；正文渲染 | ✅ |
+| `omp-status` running / idle | 状态胶囊「运行中 / 就绪」切换（修复前组件不存在） | ✅ |
+
+**未做**：`RuntimeStats`（V10 的 token / 耗时 / TTFT 块）同批遗漏但不在本次报障内，维持现状（上下文环
+`ContextMeter` 与 `CompactButton` 已提供上下文可见性）。
+

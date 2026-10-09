@@ -4,6 +4,75 @@ import { contextPercent } from "../../lib/ctxUsage";
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
 
+export type OmpStatusKind = "ready" | "running" | "awaiting-approval" | "error" | "exited";
+
+/**
+ * 输入框内的 omp 状态胶囊：常驻展示（借鉴 Cursor / Codex 底部状态条的做法）。
+ * 就绪态也占位显示「就绪」，避免用户误以为状态丢失；非就绪（运行中 / 等待审批 /
+ * 出错 / 已退出 / omp 不可用）用颜色 + 文字双信号强调。
+ * 只读展示，不可点击；颜色不作唯一信号，一律配文字。
+ *
+ * V32 恢复聊天形态时漏掉了本组件（V10 的 Composer 工具行里就有），
+ * 于是输入框附近没有任何「omp 在跑」的可见字样——发送后只剩消息列能干等。
+ */
+export function OmpStatusPill() {
+ const t = useText();
+ const { activeSessionId, statusBySession, health, sessions } = useApp();
+ const status = activeSessionId ? statusBySession[activeSessionId]?.state : undefined;
+ // 后端 list_sessions 的 running 快照兜底：事件还没到之前也能看到运行中。
+ const runningFallback = activeSessionId
+  ? sessions.find((s) => s.id === activeSessionId)?.running
+  : false;
+
+ let kind: OmpStatusKind;
+ let text: string;
+ if (!health) {
+  kind = "running";
+  text = t.statusChecking;
+ } else if (!health.ok) {
+  kind = "error";
+  text = t.statusOmpDown;
+ } else if (status === "running" || (!status && runningFallback)) {
+  kind = "running";
+  text = t.statusRunning;
+ } else if (status === "awaiting-approval") {
+  kind = "awaiting-approval";
+  text = t.statusAwaiting;
+ } else if (status === "error") {
+  kind = "error";
+  text = t.statusError;
+ } else if (status === "exited") {
+  kind = "exited";
+  text = t.statusExited;
+ } else {
+  // idle / 未知一律收敛为就绪常驻位（对应 Cursor 右下角常亮的连接态）。
+  kind = "ready";
+  text = activeSessionId ? t.statusReady : t.statusNoSession;
+ }
+
+ const dot =
+  kind === "ready"
+   ? "bg-ok/70"
+   : kind === "running"
+    ? "bg-accent animate-pulse"
+    : kind === "awaiting-approval"
+     ? "bg-warn"
+     : kind === "error"
+      ? "bg-danger"
+      : "bg-muted/50";
+ return (
+  <span
+   className="flex shrink-0 cursor-default items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] text-muted"
+   role="status"
+   aria-label={fmt(t.statusAria, text)}
+   title={text}
+  >
+   <span className={`h-1.5 w-1.5 rounded-full ${dot}`} aria-hidden />
+   {text}
+  </span>
+ );
+}
+
 
 /**
  * 输入框工具行里的只读用量：上下文占用 / 本轮 token / 耗时 / TTFT。

@@ -119,3 +119,66 @@ describe("实时流管线：标题", () => {
   expect(useApp.getState().sessions.find((s) => s.id === "s1")?.title).toBe("我的备注");
  });
 });
+
+describe("实时流管线：用户回显", () => {
+ const echoFrame = (text: string): Record<string, unknown> => ({
+  type: "message_start",
+  message: { role: "user", content: [{ type: "text", text }] },
+ });
+
+ it("omp 的实时回显接管本地乐观回显：发一次只有一条气泡", () => {
+  // Composer 发送时的乐观回显（appendEvents 直接进流，不走本管线）
+  let cur: ViewMsg[] = [{ kind: "user", id: "u-local-123", text: "你好", mentions: [] }];
+  cur = mergeViewMsgs(cur, frameToViewMsgs("s1", echoFrame("你好"), dict) as IncomingViewMsg[]);
+  const users = cur.filter((m) => m.kind === "user");
+  expect(users, "回显到达后只该剩一条用户消息（此前的缺陷是两条都留着）").toHaveLength(1);
+  expect(users[0].id.startsWith("u-echo-"), "本地行被换成回显版本").toBe(true);
+ });
+
+ it("连发两条相同文本：回显按顺序一对一接管，不互相顶掉", () => {
+  let cur: ViewMsg[] = [{ kind: "user", id: "u-local-1", text: "继续", mentions: [] }];
+  cur = mergeViewMsgs(cur, frameToViewMsgs("s1", echoFrame("继续"), dict) as IncomingViewMsg[]);
+  // 第二条的乐观回显（直接 append），随后第二条回显到达
+  cur = [...cur, { kind: "user", id: "u-local-2", text: "继续", mentions: [] }];
+  cur = mergeViewMsgs(cur, frameToViewMsgs("s1", echoFrame("继续"), dict) as IncomingViewMsg[]);
+  const users = cur.filter((m) => m.kind === "user");
+  expect(users).toHaveLength(2);
+  expect(users.every((m) => m.id.startsWith("u-echo-"))).toBe(true);
+ });
+
+ it("没有乐观回显的消息（排队 / 别处发来）照常显示", () => {
+  const cur = mergeViewMsgs([], frameToViewMsgs("s1", echoFrame("排队消息"), dict) as IncomingViewMsg[]);
+  expect(cur.filter((m) => m.kind === "user")).toHaveLength(1);
+ });
+});
+
+describe("实时流管线：思考", () => {
+ const thinkingFrame = (type: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+  type: "message_update",
+  assistantMessageEvent: { type, contentIndex: 0, ...extra },
+ });
+
+ it("思考中可见：首个 delta 就有 complete:false 的块，end 就地落定同一条", () => {
+  let cur: ViewMsg[] = [];
+  const push = (f: Record<string, unknown>) => {
+   cur = mergeViewMsgs(cur, frameToViewMsgs("s1", f, dict) as IncomingViewMsg[]);
+  };
+  push(thinkingFrame("thinking_start"));
+  expect(cur.filter((m) => m.kind === "thinking"), "还没内容时不产块").toHaveLength(0);
+  push(thinkingFrame("thinking_delta", { delta: "先看" }));
+  push(thinkingFrame("thinking_delta", { delta: "目录" }));
+  const mid = cur.find((m) => m.kind === "thinking");
+  expect(mid?.kind === "thinking" && mid.complete, "流式中 = 「思考中…」").toBe(false);
+  expect(mid?.kind === "thinking" && mid.text).toBe("先看目录");
+  push(thinkingFrame("thinking_end", { content: "先看目录" }));
+  const thinks = cur.filter((m) => m.kind === "thinking");
+  expect(thinks, "整段思考始终只有一块").toHaveLength(1);
+  expect(thinks[0].kind === "thinking" && thinks[0].complete).toBe(true);
+  expect(thinks[0].kind === "thinking" && thinks[0].text).toBe("先看目录");
+ });
+
+ it("空思考不产块：只有 start/end 且无内容时不出现「思考 · 0 秒」噪声", () => {
+  const cur = feed([thinkingFrame("thinking_start"), thinkingFrame("thinking_end", { content: "" })]);
+  expect(cur.filter((m) => m.kind === "thinking")).toHaveLength(0);
+ });
+});

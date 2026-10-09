@@ -75,7 +75,10 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dic
    const { images, omitted } = imagesFromContent(m.content);
    out.push({
     kind: "user",
-    id: `u-${Date.now()}`,
+    // 前缀 `u-echo-` = 「待确认的实时回显」：omp 收到 prompt 后会把用户消息回显回来，
+    // 而 Composer 发送时已乐观回显过一条 `u-local-*`。mergeViewMsgs 按同文本把本地行
+    // 换成这条（换 id），不翻倍——「发一次出现两条」就是这两条各渲染了一次。
+    id: `u-echo-${Date.now()}`,
     text,
     mentions: [],
     ...(images.length > 0 ? { images } : {}),
@@ -102,14 +105,22 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dic
    fold.startedAt = Date.now();
   } else if (e.type === "thinking_delta") {
    fold.thinking += e.delta ?? "";
+   // 流式「思考中…」：首个 delta 就按同 id 推出（mergeViewMsgs 原位覆盖）。
+   // 此前只在 thinking_end 落一条完成态——思考全程界面上没有任何运行迹象。
+   out.push({ kind: "thinking", id: key, text: fold.thinking, seconds: 0, complete: false });
   } else if (e.type === "thinking_end") {
-   out.push({
-    kind: "thinking",
-    id: key,
-    text: e.content ?? fold.thinking,
-    seconds: Math.max(0, Math.round((Date.now() - fold.startedAt) / 1000)),
-    complete: true,
-   });
+   const text = e.content || fold.thinking;
+   // 空思考不产块（模型只发 thinking_start/end 不带内容时，此前会留下一条
+   // 「思考 · 持续了 0 秒」的空块噪声）；有内容的就地落定为完成态。
+   if (text.trim()) {
+    out.push({
+     kind: "thinking",
+     id: key,
+     text,
+     seconds: Math.max(0, Math.round((Date.now() - fold.startedAt) / 1000)),
+     complete: true,
+    });
+   }
    fold.thinking = "";
    fold.thinkingId = null;
   } else if (e.type === "toolcall_start") {

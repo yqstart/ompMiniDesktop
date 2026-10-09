@@ -12,7 +12,7 @@ import { useText } from "../../lib/useText";
 import { ModelPicker } from "../pickers/ModelPicker";
 import { ThinkingPicker } from "../pickers/ThinkingPicker";
 import { PermissionBadge } from "../pickers/PermissionBadge";
-import { CompactButton, QueueBadge } from "../thread/StatusBar";
+import { CompactButton, OmpStatusPill, QueueBadge } from "../thread/StatusBar";
 import { ContextBar } from "./ContextBar";
 import { ContextMeter } from "./ContextMeter";
 import { MentionList } from "./MentionList";
@@ -209,7 +209,9 @@ export function Composer() {
   if (!activeSessionId || (!draft.trim() && attachments.length === 0) || archived) return;
   const text = draft;
   const sentImages = attachments;
-  setDraft(activeSessionId, "");
+  // 清空 / 回滚都走 persistDraft（带 localStorage 同步）：只清内存的话，
+  // 已发送的内容下次启动会被 hydrateDrafts 从 `omp.drafts.v1` 恢复回输入框（幽灵草稿）。
+  persistDraft(activeSessionId, "");
   clearAttachments(activeSessionId);
   try {
    const fn = mode === "steer" ? api.steerMessage : api.followUpMessage;
@@ -219,7 +221,7 @@ export function Composer() {
     sentImages.map((a) => ({ name: a.name, mimeType: a.mimeType, dataBase64: a.dataBase64, bytes: a.bytes })),
    );
   } catch {
-   setDraft(activeSessionId, text);
+   persistDraft(activeSessionId, text);
    addAttachments(activeSessionId, sentImages);
   }
  };
@@ -228,11 +230,11 @@ export function Composer() {
   // `/` 开头是本地命令：经 run_slash 直发（command_output 回来，无 agent turn）
   if (!running && draft.trim().startsWith("/") && attachments.length === 0 && activeSessionId && !archived) {
    const cmd = draft.trim();
-   setDraft(activeSessionId, "");
+   persistDraft(activeSessionId, "");
    try {
     await api.runSlash(activeSessionId, cmd);
    } catch {
-    setDraft(activeSessionId, cmd);
+    persistDraft(activeSessionId, cmd);
    }
    return;
   }
@@ -261,7 +263,7 @@ export function Composer() {
      : {}),
    } as never,
   ]);
-  setDraft(sid, "");
+  persistDraft(sid, "");
   clearAttachments(sid);
   try {
    await api.sendMessage(
@@ -276,7 +278,7 @@ export function Composer() {
    }
   } catch {
    // 发失败就把草稿与附件还回去、不留幽灵消息，不让用户重打一遍
-   setDraft(sid, text);
+   persistDraft(sid, text);
    addAttachments(sid, sentImages);
    const st = useApp.getState();
    st.set({
@@ -515,6 +517,9 @@ export function Composer() {
       <Files size={16} aria-hidden />
      </button>
      <PermissionBadge compact align="left" />
+     {/* omp 状态胶囊（V10 恢复项）：常驻显示 运行中 / 等待审批 / 出错 / 已退出，
+         运行中是 accent 呼吸点 + 「运行中」文字双信号——发送后不再没有任何运行迹象 */}
+     <OmpStatusPill />
      <QueueBadge />
      <CompactButton />
      <button

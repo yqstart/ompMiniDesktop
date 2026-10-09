@@ -85,6 +85,25 @@ export function mergeViewMsgs(cur: ViewMsg[], incoming: IncomingViewMsg[]): View
    else out.push(next);
    continue;
   }
+  // 思考块：流式增量与完成帧共用同一个 id（`${sid}:${contentIndex}`），按 id 原位覆盖
+  //（complete:false 「思考中…」→ true 「思考 · N 秒」），整段思考始终只有一块。
+  if (next.kind === "thinking") {
+   const idx = out.findIndex((x) => x.kind === "thinking" && x.id === next.id);
+   if (idx >= 0) {
+    out[idx] = next;
+    continue;
+   }
+  }
+  // omp 的实时回显（`message_start` role=user，`u-echo-*`）与 Composer 的乐观回显
+  //（`u-local-*`）是同一条消息的两个版本：同文本的本地行被回显接管（换成回显版本），
+  // 不翻倍——否则「发一次」会在消息列渲染成两条相同的气泡。
+  if (next.kind === "user" && next.id.startsWith("u-echo-")) {
+   const idx = out.findIndex((x) => x.kind === "user" && x.id.startsWith("u-local-") && x.text === next.text);
+   if (idx >= 0) {
+    out[idx] = next;
+    continue;
+   }
+  }
   if (next.kind === "tool") {
    const idx = out.findIndex((x) => x.kind === "tool" && x.id === next.id);
    if (idx >= 0) {

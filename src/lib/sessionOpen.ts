@@ -184,21 +184,36 @@ export async function openSessionWithHistory(id: string, hint?: SessionHint): Pr
   // 用历史版本替换本地版（行 id 稳定），不翻倍。
   const cur_list = cur.eventsBySession[id] ?? [];
   const seen = new Set(cur_list.map((m) => m.id));
-  const local_by_text = new Map(
-   cur_list.filter((m) => m.kind === "user" && m.id.startsWith("u-local-")).map((m) => [m.kind === "user" ? m.text : "", m.id]),
-  );
+  // 本地版 user 消息（乐观回显 `u-local-*` / omp 实时回显 `u-echo-*`，见 mergeEvents）：
+  // 历史里同一文本的 `u:<行id>` 到达时视为同一条，用历史版本替换（行 id 稳定），不翻倍。
+  // 同文本多条按出现顺序逐个配对（队列，而不是每文本只留一条——连发两条相同消息时
+  // 后者会被顶掉）。
+  const local_by_text = new Map<string, string[]>();
+  for (const m of cur_list) {
+   if (m.kind === "user" && (m.id.startsWith("u-local-") || m.id.startsWith("u-echo-"))) {
+    const arr = local_by_text.get(m.text) ?? [];
+    arr.push(m.id);
+    local_by_text.set(m.text, arr);
+   }
+  }
   const fresh = viewMsgsFromJsonlLines(page.lines, TEXT[useApp.getState().locale]).filter((m) => {
    if (seen.has(m.id)) return false;
-   if (m.kind === "user" && local_by_text.has(m.text)) {
-    const local_id = local_by_text.get(m.text) as string;
-    local_by_text.delete(m.text);
-    cur.set({
-     eventsBySession: {
-      ...cur.eventsBySession,
-      [id]: (cur.eventsBySession[id] ?? []).map((x) => (x.id === local_id ? m : x)),
-     },
-    });
-    return false;
+   if (m.kind === "user") {
+    const arr = local_by_text.get(m.text);
+    const local_id = arr?.shift();
+    if (local_id) {
+     if (arr && arr.length === 0) local_by_text.delete(m.text);
+     // 每次替换都读最新快照：一轮历史里替换多条本地消息时，基于旧快照的 set
+     // 会把上一次替换覆盖回去（第一条又变回本地版 → 重复显示）。
+     const st = useApp.getState();
+     st.set({
+      eventsBySession: {
+       ...st.eventsBySession,
+       [id]: (st.eventsBySession[id] ?? []).map((x) => (x.id === local_id ? m : x)),
+      },
+     });
+     return false;
+    }
    }
    return true;
   });
