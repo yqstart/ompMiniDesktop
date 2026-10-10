@@ -186,4 +186,3 @@ and report vulnerabilities privately per [SECURITY.md](SECURITY.md).
 ## 相关项目
 
 - [oh-my-pi](https://github.com/ldx/oh-my-pi) —— 本 app 驱动的上游 agent CLI
-- [PrismCode](https://github.com/yqstart/PrismCode) —— 轻量桌面代码编辑器（同作者，Tauri；明确不做 AI 面板，与本项目互补）
