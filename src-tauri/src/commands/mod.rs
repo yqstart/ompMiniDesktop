@@ -1015,7 +1015,6 @@ pub fn list_archived_in(
         return vec![];
     }
     let Ok(rd) = std::fs::read_dir(root) else { return vec![] };
-    let prefixes: Vec<String> = wanted.iter().map(|id| id.chars().take(8).collect()).collect();
     let mut out: Vec<SessionView> = vec![];
     for entry in rd.flatten() {
         let Ok(files) = std::fs::read_dir(entry.path()) else { continue };
@@ -1024,10 +1023,12 @@ pub fn list_archived_in(
             if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
                 continue;
             }
-            // 文件名前缀里带归档 id（真实布局：`sessions/<slug>/<时间戳>_<id>.jsonl`，
-            // 与 `session_file_for` 同一套约定位），用整条路径比以免漏掉 id 落在目录名上的情况
+            // 文件名主干带完整会话 id（真实布局：`sessions/<slug>/<时间戳>_<id>.jsonl`，
+            // 与 `session_file_for` 同一套约定）。**不用 8 字符前缀**：同一分钟建的两个
+            // 会话前缀相同，前缀过滤会把无关文件也读进来（那头里的 id 复核能挡住错行，
+            // 但没必要读）；用整条路径比以免漏掉 id 落在目录名上的情况。
             let full = path.to_string_lossy();
-            if !prefixes.iter().any(|p| !p.is_empty() && full.contains(p.as_str())) {
+            if !wanted.iter().any(|id| !id.is_empty() && full.contains(id.as_str())) {
                 continue;
             }
             let head = parse_session_head(&path);
@@ -1054,25 +1055,39 @@ pub fn list_archived_in(
     out
 }
 
-pub(crate) fn session_file_for(agent: &std::path::Path, id_prefix: &str) -> Option<PathBuf> {
-    let mut best: Option<(i64, PathBuf)> = None;
+/// 按**完整会话 id** 在 sessions 树里定位 jsonl（真实布局 `sessions/<slug>/<ISO 时间戳>_<id>.jsonl`）。
+///
+/// 只认完整 id（`stem == id` 或 `stem` 以 `_<id>` 结尾），**不许退回 8 字符前缀**——
+/// uuid v7 的前 8 个字符是毫秒时间戳的高 32 位，**同一分钟内建的两个会话前 8 位必然相同**
+/// （真机实测：`01a123c6-9b8c…` 与 `01a123c6-f958…`，同一分钟里建的两个聊天会话）。
+/// 前缀匹配会命中「文件名最大」的那个 = **另一个会话**：读历史读错文件、删除删错文件、
+/// `--resume <前缀>` 拉起另一个会话（omp 侧同口径取最新，实测），正在跑的会话还会被
+/// 同 id 补位顶掉（进行中的轮次被中止，用户侧表现就是「切换会话把会话打断」）。
+///
+/// `id` 也允许是 `parse_session_head` 损坏兜底给的文件名主干（`<时间戳>_<id>`）——
+/// 那一支由 `stem == id` 兼容。同一 id 命中多个 slug 目录时取字典序最大的整条路径（新目录）。
+pub(crate) fn session_file_for(agent: &std::path::Path, id: &str) -> Option<PathBuf> {
+    if id.is_empty() {
+        return None;
+    }
+    let suffix = format!("_{id}");
+    let mut best: Option<PathBuf> = None;
     let Ok(rd) = std::fs::read_dir(agent.join("sessions")) else { return None };
     for entry in rd.flatten() {
         let Ok(files) = std::fs::read_dir(entry.path()) else { continue };
         for f in files.flatten() {
             let p = f.path();
-            let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string();
-            if p.extension().and_then(|s| s.to_str()) == Some("jsonl") && name.contains(id_prefix) {
-                let ts = p.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map(|_| 0).unwrap_or(0);
-                let _ = ts;
-                // 用文件名前缀时间排序：取字典序最大（ts 前缀）
-                if best.as_ref().map(|b| name > b.1.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string()).unwrap_or(true) {
-                    best = Some((0, p));
-                }
+            let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+            let Some(stem) = name.strip_suffix(".jsonl") else { continue };
+            if stem != id && !stem.ends_with(&suffix) {
+                continue;
+            }
+            if best.as_ref().map(|b| p > *b).unwrap_or(true) {
+                best = Some(p);
             }
         }
     }
-    best.map(|b| b.1)
+    best
 }
 
 /// 会话归属判定的**唯一入口**（新建 / 打开 / 归档清单共用）：
@@ -1164,8 +1179,7 @@ pub async fn delete_sessions(state: State<'_, AppState>, ids: Vec<String>) -> Re
 
 async fn delete_session_inner(state: &State<'_, AppState>, id: &str) -> Result<(), CmdError> {
     let agent = state.agent_dir.lock().await.clone();
-    let prefix = id.chars().take(8).collect::<String>();
-    if let Some(path) = session_file_for(&agent, &prefix) {
+    if let Some(path) = session_file_for(&agent, id) {
         let _ = std::fs::remove_file(&path);
         // 同名前缀目录（去 .jsonl 后缀）
         if let Some(stem) = path.file_name().and_then(|s| s.to_str()) {
@@ -1220,8 +1234,7 @@ pub(crate) async fn remember_project_pref(
         return;
     }
     let agent = state.agent_dir.lock().await.clone();
-    let prefix: String = session_id.chars().take(8).collect();
-    let Some(path) = session_file_for(&agent, &prefix) else {
+    let Some(path) = session_file_for(&agent, session_id) else {
         return;
     };
     let head = parse_session_head(&path);
@@ -1281,10 +1294,7 @@ pub fn unlanded_views(
 ) -> Vec<SessionView> {
     candidates
         .iter()
-        .filter(|(sid, _, _)| {
-            let prefix: String = sid.chars().take(8).collect();
-            session_file_for(agent, &prefix).is_none()
-        })
+        .filter(|(sid, _, _)| session_file_for(agent, sid).is_none())
         .map(|(sid, cwd, created_ms)| {
             let note = notes.get(sid).cloned();
             SessionView {
@@ -1373,8 +1383,7 @@ pub async fn open_session(app: AppHandle, state: State<'_, AppState>, id: String
     if let Some((rt_cwd, rt_created)) = rt {
         let ov = state.overlay.lock().await;
         let agent = state.agent_dir.lock().await.clone();
-        let prefix = id.chars().take(8).collect::<String>();
-        let head = session_file_for(&agent, &prefix)
+        let head = session_file_for(&agent, &id)
             .map(|p| parse_session_head(&p))
             .unwrap_or(SessionHead { id: id.clone(), cwd: String::new(), timestamp: 0, title: String::new(), file: String::new(), corrupt: false });
         let session_cwd = owner_cwd(&head.cwd, &rt_cwd);
@@ -1426,8 +1435,7 @@ async fn spawn_session_runtime<R: tauri::Runtime>(
     id: &str,
 ) -> Result<SessionHead, CmdError> {
     let agent = state.agent_dir.lock().await.clone();
-    let prefix = id.chars().take(8).collect::<String>();
-    let Some(path) = session_file_for(&agent, &prefix) else {
+    let Some(path) = session_file_for(&agent, id) else {
         return Err(cmd_err("NOT_FOUND", "会话文件不存在，可能已被删除".into(), None));
     };
     let head = parse_session_head(&path);
@@ -1440,10 +1448,13 @@ async fn spawn_session_runtime<R: tauri::Runtime>(
     };
     let spawn_cwd = if head.cwd.is_empty() { "/tmp".into() } else { head.cwd.clone() };
     let approval = state.overlay.lock().await.session_approval.get(id).cloned();
+    // `--resume` 必须给**完整会话 id**（终端侧 resume 一直是全 id 口径）：omp 对前缀的
+    // 解析取「最新匹配的那个」（实测），8 字符前缀在同一分钟建的两个会话间会拉起**另一个
+    // 会话**——新进程以那个会话的身份登记，若它正在跑就被同 id 补位顶掉（进行中的轮次被中止）。
     let (sid, _, _meta) = crate::runtime::spawn_long_lived(
         app,
         state.runtime.clone(),
-        crate::runtime::SpawnOpts { bin, cwd: spawn_cwd, resume: Some(prefix), model: None, thinking: None, approval },
+        crate::runtime::SpawnOpts { bin, cwd: spawn_cwd, resume: Some(id.to_string()), model: None, thinking: None, approval },
     )
     .await?;
     if let Ok(mut run) = state.running.try_lock() {
@@ -1478,8 +1489,7 @@ pub async fn get_history(state: State<'_, AppState>, id: String) -> Result<serde
     // 读 jsonl 全量转 ViewMsg 载荷（前端经 viewmsg 归一）。
     // 超过回放上限时 `truncated: true` 如实上报——绝不静默截断（前端在流尾注明）。
     let agent = state.agent_dir.lock().await.clone();
-    let prefix = id.chars().take(8).collect::<String>();
-    let Some(path) = session_file_for(&agent, &prefix) else {
+    let Some(path) = session_file_for(&agent, &id) else {
         return Err(cmd_err("NOT_FOUND", "会话文件不存在，可能已被删除".into(), None));
     };
     let text = std::fs::read_to_string(&path).map_err(|_| cmd_err("CORRUPT", "会话文件已损坏，可删除".into(), None))?;
@@ -1875,7 +1885,13 @@ pub async fn get_session_runtime(
     id: String,
 ) -> Result<Option<crate::runtime::SessionMeta>, CmdError> {
     let map = state.runtime.lock().await;
-    Ok(map.get(&id).map(|r| r.meta.clone()))
+    Ok(map.get(&id).map(|r| {
+        let mut meta = r.meta.clone();
+        // 活动态真值：状态事件是推送，前端切走期间收不到——回读把当前状态带上，
+        // 切回一个正在跑的会话才不会被显示成 idle（见 `SessionMeta.status`）。
+        meta.status = Some(crate::runtime::activity_state_label(r.activity.state()).to_string());
+        meta
+    }))
 }
 
 /// 全局权限档（`tools.approvalMode`，读 omp 全局配置；cwd 钉 agentDir 与设置页同层）。
@@ -1981,7 +1997,10 @@ pub fn load_state<R: tauri::Runtime>(app: &AppHandle<R>) -> AppState {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_project_order, assign_members, catalog_fresh, clean_workspace_name, list_archived_in, load_cached, owner_project, scan_window, MODELS_TTL_MS};
+    use super::{
+        apply_project_order, assign_members, catalog_fresh, clean_workspace_name, kill_runtime, list_archived_in, load_cached,
+        load_state, owner_project, scan_window, session_file_for, spawn_session_runtime, AppState, MODELS_TTL_MS,
+    };
     use crate::overlay::{Overlay, Project};
     use std::collections::HashMap;
 
@@ -2132,6 +2151,100 @@ mod tests {
             "最新归档排前面"
         );
         assert!(out.iter().all(|s| s.project_id.is_none()), "没有项目时全部算未归属");
+    }
+
+    /// 会话定位（`session_file_for`）只认**完整 id**：8 字符前缀在同一分钟内建的两个会话间
+    /// 必然相同（uuid v7 前 8 位 = 毫秒时间戳高 32 位），拿前缀找文件会命中「文件名更大的
+    /// 那个」= **另一个会话**——真机表现：读历史读错文件、删除删错文件、`--resume` 拉起
+    /// 另一个会话（omp 侧同口径取最新，实测）。
+    #[test]
+    fn session_file_for_matches_full_id_only() {
+        let root = std::env::temp_dir().join(format!("omp-session-id-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("sessions").join("--tmp-demo--")).unwrap();
+        let dir = root.join("sessions");
+        // 同一分钟建的两个会话（真机形状：id 前 8 位相同）
+        let old_id = "01a123c6-9b8c-76a4-85ab-10ba5ee9d179";
+        let new_id = "01a123c6-f958-7524-b1be-53b4fb030bf6";
+        let old_file = "2026-10-10T03-06-20-940Z_01a123c6-9b8c-76a4-85ab-10ba5ee9d179.jsonl";
+        let new_file = "2026-10-10T03-06-44-952Z_01a123c6-f958-7524-b1be-53b4fb030bf6.jsonl";
+        write_session(&dir, old_file, old_id, "旧会话", &[]);
+        write_session(&dir, new_file, new_id, "新会话", &[]);
+
+        assert_eq!(session_file_for(&root, old_id).unwrap(), dir.join("--tmp-demo--").join(old_file));
+        assert_eq!(session_file_for(&root, new_id).unwrap(), dir.join("--tmp-demo--").join(new_file));
+        // 8 字符前缀不再命中任何文件（旧的 contains 口径会命中更大的那个 = 新会话）
+        assert!(session_file_for(&root, "01a123c6").is_none());
+        // 损坏兜底给的「文件名主干」id 也能定位自己
+        assert_eq!(
+            session_file_for(&root, "2026-10-10T03-06-20-940Z_01a123c6-9b8c-76a4-85ab-10ba5ee9d179").unwrap(),
+            dir.join("--tmp-demo--").join(old_file)
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `spawn_session_runtime` 的 `--resume` 必须给**完整会话 id**（前缀会拉起同一分钟里
+    /// 另一个会话，那个会话若在跑就被同 id 补位顶掉 = 进行中的轮次被中止）。
+    ///
+    /// 用桩 omp（把 argv 落文件 + 走三行握手回包）验证参数，不依赖真实 omp / AI 调用。
+    #[tokio::test]
+    async fn spawn_session_runtime_resumes_by_full_id() {
+        use tauri::Manager;
+        let root = std::env::temp_dir().join(format!("omp-session-spawn-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("sessions").join("--tmp-demo--")).unwrap();
+        let dir = root.join("sessions");
+        let old_id = "01a123c6-9b8c-76a4-85ab-10ba5ee9d179";
+        let new_id = "01a123c6-f958-7524-b1be-53b4fb030bf6";
+        write_session(&dir, "2026-10-10T03-06-20-940Z_01a123c6-9b8c-76a4-85ab-10ba5ee9d179.jsonl", old_id, "旧会话", &[]);
+        write_session(&dir, "2026-10-10T03-06-44-952Z_01a123c6-f958-7524-b1be-53b4fb030bf6.jsonl", new_id, "新会话", &[]);
+        let old_file = dir.join("--tmp-demo--").join("2026-10-10T03-06-20-940Z_01a123c6-9b8c-76a4-85ab-10ba5ee9d179.jsonl");
+
+        // 桩 omp：记录 argv → 回 ready → 对 h-state 回身份（其余握手命令忽略），直到 stdin 关闭
+        let argv_path = root.join("argv.txt");
+        let resp = serde_json::json!({
+            "id": "h-state",
+            "type": "response",
+            "success": true,
+            "data": {"sessionId": old_id, "sessionFile": old_file.to_string_lossy()},
+        })
+        .to_string();
+        let stub = root.join("stub-omp.sh");
+        std::fs::write(
+            &stub,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{argv}'\nprintf '{{\"type\":\"ready\"}}\\n'\nwhile IFS= read -r line; do\n  case \"$line\" in\n    *h-state*) printf '%s\\n' '{resp}' ;;\n  esac\ndone\n",
+                argv = argv_path.display(),
+                resp = resp,
+            ),
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app 构建失败");
+        let state = load_state(app.handle());
+        *state.agent_dir.lock().await = root.clone();
+        *state.omp_path.lock().await = Some(stub.to_string_lossy().to_string());
+        app.manage(state);
+
+        let head = spawn_session_runtime(app.handle(), &app.state::<AppState>(), old_id)
+            .await
+            .expect("resume 拉起失败");
+        assert_eq!(head.id, old_id, "读到的文件头必须是目标会话自己的");
+        let argv = std::fs::read_to_string(&argv_path).unwrap();
+        let args: Vec<&str> = argv.lines().collect();
+        let i = args.iter().position(|a| *a == "--resume").expect("argv 里没有 --resume");
+        assert_eq!(args[i + 1], old_id, "--resume 必须是完整会话 id（前缀会拉起另一个会话）");
+
+        // 收尾：哨兵让 pump 退出（stdin 关闭 → 桩的 read 循环结束、进程退出）
+        kill_runtime(&app.state::<AppState>(), old_id);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

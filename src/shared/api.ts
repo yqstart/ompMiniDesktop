@@ -209,12 +209,11 @@ export const api = {
  setModelRole: (role: string, selector: string | null) =>
   call<ModelRolesInfo>(IPC.setModelRole, { role, selector }),
  /**
-  * Ctrl+P 快速切换环（omp `cycleOrder`）：条目是角色 id（不是模型 selector），
-  * 顺序即 omp 里 Ctrl+P / Shift+Ctrl+P 的轮换顺序；空数组 = 不切换任何模型。
-  * 写是整数组覆盖（array 键直接写），返回**回读**的真值。
+  * 同步 Ctrl+P 轮换序（omp `cycleOrder`）：环是「模型角色」的派生投影——后端按角色展示
+  * 顺序取已配置模型、按**模型基名**保序去重（`:思考档` 后缀不算另一个模型；重复模型保留
+  * 第一个出现的角色），已是目标值就不写；**幂等**，返回回读的真值。打开模型页与改角色后各跑一次。
   */
- getCycleOrder: () => call<string[]>(IPC.getCycleOrder),
- setCycleOrder: (order: string[]) => call<string[]>(IPC.setCycleOrder, { order }),
+ syncCycleOrder: () => call<string[]>(IPC.syncCycleOrder),
  /**
   * 失败转移链（设置 › 模型）：omp `retry.fallbackChains` 的读写与两个配套开关
   * （`retry.modelFallback` / `retry.fallbackRevertPolicy`），写的是 omp 全局配置。

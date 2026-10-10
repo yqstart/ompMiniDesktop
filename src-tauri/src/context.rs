@@ -344,8 +344,7 @@ pub async fn get_context_breakdown(
         }
     };
     let agent = state.agent_dir.lock().await.clone();
-    let prefix: String = id.chars().take(8).collect();
-    let facts = session_file_for(&agent, &prefix)
+    let facts = session_file_for(&agent, &id)
         .and_then(|p| scan_session_file(&p))
         .unwrap_or_default();
 

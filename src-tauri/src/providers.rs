@@ -29,7 +29,9 @@
 //! **Ctrl+P 快速切换环（`cycleOrder`）**是同页的第三个键：array 型，**整数组覆盖写**
 //! （不是读-改-写）；与角色共用 `roles_edit` 锁——两次 `omp config set` 并发写在同一份
 //! config.yml 上会互相覆盖。核对的键名：`cycleOrder`（读回是 `{key, value, type:"array"}`，
-//! 实测空数组与中文角色名都能写）。
+//! 实测空数组与中文角色名都能写）。**2026-10-10 起环没有手动编辑面**：`sync_cycle_order`
+//! 把它对齐成 `modelRoles` 的派生投影（见 [`derive_cycle_order`]）——打开模型页与
+//! 角色写入后都跑一次，已是目标值就不写（幂等）。
 //!
 //! 纯逻辑（解析、合并、校验）都在文末单测里锁着，进程调用只负责喂字符串。
 
@@ -369,9 +371,10 @@ pub fn apply_role_edit(
 
 /// omp `cycleOrder`（Ctrl+P / Shift+Ctrl+P 的轮换序）：条目是**角色 id**，不是模型 selector。
 ///
-/// 上游语义（`getRoleModelCycle`，18.2.4 二进制核对）：环里的角色逐个按 `modelRoles`
-/// 解析模型，未配置模型 / 没有可用凭证的角色**直接跳过**（`default` 角色例外——回退当前
-/// 模型）；环空 = Ctrl+P 不切换任何模型。匹配规则全在 omp 里，壳侧只做整数组读写。
+/// 上游语义（`getRoleModelCycle`；18.2.4 首核、18.8.7 二进制复核语义未变）：环里的角色逐个
+/// 按 `modelRoles` 解析模型，未配置模型 / 没有可用凭证的角色**直接跳过**（`default` 角色
+/// 例外——回退当前模型）；环空 = Ctrl+P 不切换任何模型。匹配规则全在 omp 里，壳侧只做
+/// 整数组读写。
 ///
 /// 解析容错照 `parse_chains` 的精神：值不是数组就按空环；非字符串条目丢弃；
 /// 名字合法性走 `validate_role_name`（空白 / 控制字符的名字进 config.yml 没意义）；
@@ -388,8 +391,8 @@ pub fn parse_cycle_order(v: &serde_json::Value) -> Vec<String> {
     normalize_cycle_order(&items)
 }
 
-/// 写前归一（读路径也走它）：丢弃非法名字、保序去重。
-/// 界面只会从候选里选，这里防的是手写 / 并发产生的脏值——写进 config.yml 的必须是干净的角色名。
+/// 解析归一：丢弃非法名字、保序去重（`parse_cycle_order` 走它，`derive_cycle_order` 的输出
+/// 天然满足这两条）。防的是手写 / 并发产生的脏值——进 config.yml 的必须是干净的角色名。
 pub fn normalize_cycle_order(items: &[String]) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
@@ -399,6 +402,54 @@ pub fn normalize_cycle_order(items: &[String]) -> Vec<String> {
         }
         if seen.insert(s.clone()) {
             out.push(s.clone());
+        }
+    }
+    out
+}
+
+/// selector 的「模型基名」：剥掉末尾的 `:思考档` 后缀（**只在后缀是已知档位时才剥**——
+/// 模型 id 里的其它冒号原样保留）。与前端 `lib/modelSelector.ts` 的 `splitSelector`、
+/// `git_ops::commit_model_args` 同一口径；档位全集取 `runtime::EFFORT_ORDER`（omp `--thinking`）。
+fn selector_base(sel: &str) -> &str {
+    match sel.rsplit_once(':') {
+        Some((base, level))
+            if !base.is_empty() && crate::runtime::EFFORT_ORDER.contains(&level) =>
+        {
+            base
+        }
+        _ => sel,
+    }
+}
+
+/// **Ctrl+P 轮换序的派生投影**（用户口径 2026-10-10，含当日二次确认的去重口径）：环 = 模型
+/// 角色的忠实投影，不再由用户手动挑角色 / 排顺序。
+///
+/// 规则：按界面展示顺序遍历角色表——[`BUILTIN_ROLES`] 表序在前，其余角色随后按键序
+/// （serde_json 的 map 是 BTreeMap，键序 = 字母序，与前端 `roleKeys` 的展示顺序一致）；
+/// 只取**已配置模型**（值是非空字符串，trim 后非空）且名字合法的角色；按**模型基名**
+/// （[`selector_base`]——`:思考档` 后缀不算另一个模型）**保序去重**——重复模型保留第一个
+/// 出现的角色。产物直接整组写进 omp 的 `cycleOrder`。
+pub fn derive_cycle_order(roles: &serde_json::Map<String, serde_json::Value>) -> Vec<String> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out: Vec<String> = Vec::new();
+    let ordered = BUILTIN_ROLES
+        .iter()
+        .map(|s| s.to_string())
+        .chain(
+            roles
+                .keys()
+                .filter(|k| !BUILTIN_ROLES.contains(&k.as_str()))
+                .cloned(),
+        );
+    for role in ordered {
+        if validate_role_name(&role).is_err() {
+            continue;
+        }
+        if let Some(sel) = roles.get(&role).and_then(|v| v.as_str()) {
+            let sel = sel.trim();
+            if !sel.is_empty() && seen.insert(selector_base(sel).to_string()) {
+                out.push(role);
+            }
         }
     }
     out
@@ -924,42 +975,53 @@ pub async fn set_model_role(
     Ok(roles_info(&vals))
 }
 
-/// Ctrl+P 快速切换环（`cycleOrder`）：条目是角色 id，顺序即轮换顺序。
+/// Ctrl+P 快速切换环（`cycleOrder`）：**环 = 模型角色的派生投影**（用户口径 2026-10-10），
+/// 没有手动编辑面——本命令把它对齐成 [`derive_cycle_order`] 的结果。
+///
+/// 读 `modelRoles` + 当前 `cycleOrder`（一次 `config list`）→ 已是目标值就不写；
+/// 否则整组覆盖写 + 回读（空数组 = 清空环，合法）。与 `set_model_role` 共用 `roles_edit`
+/// 锁——两次 `omp config set` 并发写同一份 config.yml 会互相覆盖。「打开模型页」与
+/// 「角色写入后」都调它，**幂等**，返回同步后的真值。
 #[tauri::command]
-pub async fn get_cycle_order(
+pub async fn sync_cycle_order(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<String>, CmdError> {
     let bin = omp_bin(&state)?;
-    let vals = config_values_global(&state, &bin, &["cycleOrder"])
+    sync_cycle_order_with_bin(&bin, &state).await
+}
+
+/// 上一命令的内核（bin 显式传入）：真机冒烟测试往这里塞**临时包装脚本**（换 agentDir 再 exec
+/// 真 omp），走与生产完全相同的代码路径，又不必经过 `discover_omp_path`（测试绝不碰真实配置）。
+pub(crate) async fn sync_cycle_order_with_bin(
+    bin: &str,
+    state: &tauri::State<'_, AppState>,
+) -> Result<Vec<String>, CmdError> {
+    let _guard = state.roles_edit.lock().await;
+    let vals = config_values_global(state, bin, &["modelRoles", "cycleOrder"])
         .await
-        .map_err(|e| cmd_err("CYCLE_READ_FAILED", e, None))?;
+        .map_err(|e| cmd_err("CYCLE_SYNC_FAILED", e, None))?;
+    let roles = vals
+        .get("modelRoles")
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    let desired = derive_cycle_order(&roles);
     let order = vals
         .get("cycleOrder")
         .cloned()
         .unwrap_or(serde_json::Value::Null);
-    Ok(parse_cycle_order(&order))
-}
-
-/// 整表写回环：array 键直接覆盖写（不是「读-改-写」），空数组 = 清空环。
-///
-/// 与 `set_model_role` 共用 `roles_edit` 锁——两者都是对同一份 config.yml 的
-/// `omp config set`，串行化避免两次写入并发互相覆盖；写完回读一次确认。
-#[tauri::command]
-pub async fn set_cycle_order(
-    state: tauri::State<'_, AppState>,
-    order: Vec<String>,
-) -> Result<Vec<String>, CmdError> {
-    let bin = omp_bin(&state)?;
-    let _guard = state.roles_edit.lock().await;
-    let json = serde_json::to_string(&normalize_cycle_order(&order))
-        .map_err(|e| cmd_err("CYCLE_WRITE_FAILED", format!("切换环序列化失败：{e}"), None))?;
-    run_omp(&bin, &["config", "set", "cycleOrder", &json])
+    let current = parse_cycle_order(&order);
+    if desired == current {
+        return Ok(current);
+    }
+    let json = serde_json::to_string(&desired)
+        .map_err(|e| cmd_err("CYCLE_SYNC_FAILED", format!("轮换序序列化失败：{e}"), None))?;
+    run_omp(bin, &["config", "set", "cycleOrder", &json])
         .await
-        .map_err(|e| cmd_err("CYCLE_WRITE_FAILED", format!("写入切换环失败：{e}"), None))?;
-    // 回读：写入被 omp 静默丢弃时，界面不该显示一个其实没生效的环
-    let vals = config_values_global(&state, &bin, &["cycleOrder"])
+        .map_err(|e| cmd_err("CYCLE_SYNC_FAILED", format!("写入 Ctrl+P 轮换序失败：{e}"), None))?;
+    // 回读：写入被 omp 静默丢弃时，调用方不该假设它生效（与 set_model_role 同一口径）
+    let vals = config_values_global(state, bin, &["cycleOrder"])
         .await
-        .map_err(|e| cmd_err("CYCLE_READ_FAILED", e, None))?;
+        .map_err(|e| cmd_err("CYCLE_SYNC_FAILED", e, None))?;
     let order = vals
         .get("cycleOrder")
         .cloned()
@@ -1286,8 +1348,8 @@ mod tests {
     }
 
     #[test]
-    fn cycle_order_write_normalizes_to_json_array() {
-        // 写路径同样的归一（丢弃 + 保序去重）
+    fn cycle_order_normalize_drops_dirty_and_keeps_order() {
+        // 丢弃 + 保序去重（`parse_cycle_order` 的归一内核）
         let out = normalize_cycle_order(&[
             "default".into(),
             "default".into(),
@@ -1300,8 +1362,128 @@ mod tests {
             serde_json::to_string(&normalize_cycle_order(&["my-role_2".into(), "default".into()]))
                 .unwrap();
         assert_eq!(json, r#"["my-role_2","default"]"#);
-        // 空数组 = 合法的「清空环」（不能写 null）
-        assert_eq!(serde_json::to_string(&normalize_cycle_order(&[])).unwrap(), "[]");
+    }
+
+    /// 环 = 模型角色的派生投影：按展示顺序（内置表序 → 自定义键序）遍历，已配置模型
+    /// 按基名去重、保留第一个出现的角色；空值 / 非字符串 / 非法名不进环。
+    #[test]
+    fn derive_cycle_order_follows_display_order_and_dedupes_models() {
+        let m = |json: &str| {
+            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(json).unwrap()
+        };
+        // 空表 → 空环
+        assert!(derive_cycle_order(&m("{}")).is_empty());
+        // 内置角色按表序在前，自定义角色随后按键序（字母序）
+        assert_eq!(
+            derive_cycle_order(&m(r#"{"zeta":"p/z","default":"p/x","smol":"p/y","alpha":"p/a"}"#)),
+            vec!["default", "smol", "alpha", "zeta"]
+        );
+        // 同一模型被多个角色配置 → 只保留第一个出现的角色
+        assert_eq!(
+            derive_cycle_order(&m(r#"{"slow":"p/x","smol":"p/x","default":"p/x"}"#)),
+            vec!["default"]
+        );
+        assert_eq!(
+            derive_cycle_order(&m(r#"{"default":"p/x","smol":"p/x","slow":"p/y","plan":"p/y"}"#)),
+            vec!["default", "slow"]
+        );
+        // `:思考档` 后缀不算另一个模型（用户口径二次确认）——同一模型的不同档位变体也去重
+        assert_eq!(
+            derive_cycle_order(&m(r#"{"default":"p/x:high","smol":"p/x:low","slow":"p/x:high"}"#)),
+            vec!["default"]
+        );
+        // 非已知档位的冒号是模型名的一部分（`p/y:beta` 与 `p/y` 是两个模型）
+        assert_eq!(
+            derive_cycle_order(&m(r#"{"default":"p/y:beta","smol":"p/y"}"#)),
+            vec!["default", "smol"]
+        );
+        // 空串 / 纯空白 / null / 非字符串 → 不进环
+        assert_eq!(
+            derive_cycle_order(&m(
+                r#"{"default":"p/x","vision":"","plan":null,"commit":"  ","tiny":12}"#
+            )),
+            vec!["default"]
+        );
+        // 手写脏值（角色名带空白）被跳过，不 panic
+        assert!(derive_cycle_order(&m(r#"{"a b":"p/x"}"#)).is_empty());
+    }
+
+    /// 真机慢测试（`--ignored`）：`sync_cycle_order` 的完整代码路径（真实 omp + 临时 agentDir）——
+    /// 写角色 → 派生（档位变体不算另一个模型）→ 整组覆盖写 → 回读，重复调用幂等。
+    /// 全程经**临时包装脚本**（设 `PI_CODING_AGENT_DIR` 再 exec 真 omp）+ `*_with_bin` 内核：
+    /// 既走生产同一条代码路径，又绝无可能读写真实 agentDir（此前种子直接调真 omp 覆写过真实
+    /// `modelRoles`——测试里任何 omp 调用都必须带包装脚本，别再犯）。
+    #[cfg(unix)]
+    #[tokio::test]
+    #[ignore = "慢测试：真实 omp + 临时 agentDir"]
+    async fn real_sync_cycle_order_smoke() {
+        let bin = std::env::var("OMP_BIN").unwrap_or_else(|_| "/opt/homebrew/bin/omp".into());
+        if !std::path::Path::new(&bin).is_file() {
+            eprintln!("[cycle-smoke] 跳过：本机找不到 omp（可用 OMP_BIN 指定）");
+            return;
+        }
+        let tmp = std::env::temp_dir().join(format!("omp-mini-cycle-smoke-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let wrapper = tmp.join("omp-with-agentdir.sh");
+        std::fs::write(
+            &wrapper,
+            format!(
+                "#!/bin/sh\nPI_CODING_AGENT_DIR='{}' exec '{}' \"$@\"\n",
+                tmp.display(),
+                bin
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&wrapper, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app 构建失败");
+        let state = crate::commands::load_state(app.handle());
+        *state.agent_dir.lock().await = tmp.clone();
+        app.manage(state);
+        let st = app.state::<AppState>();
+
+        run_omp_in(
+            Some(&tmp),
+            &wrapper.to_string_lossy(),
+            &[
+                "config",
+                "set",
+                "modelRoles",
+                r#"{"default":"a/x:high","smol":"a/y:low","slow":"a/x","extra":"b/z:beta"}"#,
+            ],
+        )
+        .await
+        .unwrap();
+        // 派生：default(a/x:high) → smol(a/y:low) → extra(b/z:beta)；slow 与 default 同基名去重
+        assert_eq!(
+            sync_cycle_order_with_bin(&wrapper.to_string_lossy(), &st)
+                .await
+                .unwrap(),
+            vec!["default", "smol", "extra"]
+        );
+        let out = run_omp_in(
+            Some(&tmp),
+            &wrapper.to_string_lossy(),
+            &["config", "get", "cycleOrder", "--json"],
+        )
+        .await
+        .unwrap();
+        let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+        assert_eq!(
+            v.get("value").cloned().unwrap(),
+            serde_json::json!(["default", "smol", "extra"])
+        );
+        // 幂等：第二次调用同值（已是目标值不写，不报错）
+        assert_eq!(
+            sync_cycle_order_with_bin(&wrapper.to_string_lossy(), &st)
+                .await
+                .unwrap(),
+            vec!["default", "smol", "extra"]
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

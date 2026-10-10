@@ -900,6 +900,9 @@ export type SessionRuntime = {
  todoPhases?: TodoPhase[] | null;
  /** 可用命令（`available_commands_update` 缓存；`/` 补全的数据源）。 */
  commands?: AvailableCommand[] | null;
+ /** 当前活动态（**只在 `get_session_runtime` 回读里带**：状态事件是推送，切走期间收不到，
+ *  切回时靠这次回读补真值；事件推送里为 null，前端按事件维护自己那份副本）。 */
+ status?: SessionStatus["state"] | null;
 };
 
 /** 任务计划的一条任务（`get_state.todoPhases` 原样透传）。 */

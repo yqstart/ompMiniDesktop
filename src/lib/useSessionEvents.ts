@@ -434,6 +434,10 @@ function applyRuntime(sid: string, rt: SessionRuntime) {
   currentRuntime: rt,
   ...(rt.model ? { currentModel: `${rt.model.provider}/${rt.model.id}` } : {}),
   currentThinking: level,
+  // 活动态真值（只有回读带）：补回「切走期间错过」的状态事件——不补的话，切回一个正在跑的
+  // 会话会显示成 idle：流式「思考中」指示不出现，输入框还会把下一句当新 prompt 发出去
+  // （运行中应当走 follow_up / steer，普通 prompt 会打断进行中的轮次）。
+  ...(rt.status ? { statusBySession: { ...s.statusBySession, [sid]: { state: rt.status } as SessionStatus } } : {}),
   ...(Array.isArray(rt.todoPhases) && rt.todoPhases.length > 0
    ? { plansBySession: { ...s.plansBySession, [sid]: rt.todoPhases } }
    : {}),

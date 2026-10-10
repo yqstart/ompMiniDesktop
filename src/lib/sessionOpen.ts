@@ -161,11 +161,19 @@ export async function openSessionWithHistory(id: string, hint?: SessionHint): Pr
    )
    : [opened, ...cur.sessions];
   // 慢 open 期间用户可能已经切到别的会话：行照落，但**别把选中抢回来**（状态同理，
-  // 那个会话可能真的在跑，不该被这里的「先按 idle 起手」抹掉）
+  // 那个会话可能真的在跑，不该被这里的「先按 idle 起手」抹掉）。
+  // 状态也不许无条件压成 idle：只在**还没有任何状态记录**的新会话上起手，
+  // 已有记录（running / awaiting-approval…）保持并等 `syncSessionRuntime` 的回读收敛——
+  // 压 idle 会让切回一个正在跑的会话显示成「就绪」：指示不出现、下一条消息还会被当成
+  // 新 prompt 发出去（运行中应当走排队 / 转向），一句追问就把进行中的轮次打断。
   const stillActive = cur.activeSessionId === opened.id;
+  const knownStatus = cur.statusBySession[opened.id] !== undefined;
   cur.set({
    ...(stillActive
-    ? { activeSessionId: opened.id, statusBySession: { ...cur.statusBySession, [opened.id]: { state: "idle" } } }
+    ? {
+     activeSessionId: opened.id,
+     ...(knownStatus ? {} : { statusBySession: { ...cur.statusBySession, [opened.id]: { state: "idle" } } }),
+    }
     : {}),
    sessions: rows,
   });

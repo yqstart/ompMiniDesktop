@@ -19,7 +19,6 @@ const h = vi.hoisted(() => ({
  roles: { slow: "y/gpt-5.6-astra:auto:medium" } as Record<string, string>,
  models: [] as ModelInfo[],
  chains: {} as Record<string, string[]>,
- cycleOrder: [] as string[],
 }));
 
 vi.mock("@shared/api", () => ({
@@ -33,11 +32,7 @@ vi.mock("@shared/api", () => ({
    };
   }),
   getFallbackChains: vi.fn(async () => ({ chains: h.chains, modelFallback: true, revertPolicy: "cooldown-expiry" })),
-  getCycleOrder: vi.fn(async () => [...h.cycleOrder]),
-  setCycleOrder: vi.fn(async (order: string[]) => {
-   h.cycleOrder = order;
-   return [...order];
-  }),
+  syncCycleOrder: vi.fn(async () => [] as string[]),
   setModelRole: vi.fn(async (role: string, selector: string | null) => {
    if (selector) h.roles[role] = selector;
    else delete h.roles[role];
@@ -70,7 +65,6 @@ beforeEach(() => {
  h.roles = { ...CR };
  h.models = [];
  h.chains = {};
- h.cycleOrder = [];
  useApp.setState({ settingsTabActive: true, models: null, myModels: [], locale: "zh-CN" });
  container = document.createElement("div");
  document.body.append(container);
@@ -188,9 +182,8 @@ describe("ModelsPanel 的 omp 侧识别", () => {
   expect(container.textContent).not.toContain("demo/stale");
  });
 
- it("角色读取失败时给错误与重试；重试后角色行与行内环状态一起恢复", async () => {
+ it("角色读取失败时给错误与重试；重试后角色行恢复", async () => {
   vi.mocked(api.getModelRoles).mockRejectedValueOnce(new Error("roles boom"));
-  h.cycleOrder = ["slow"];
   act(() => root.render(<ModelsPanel />));
   await flush();
   expect(container.textContent).toContain("roles boom");
@@ -202,60 +195,28 @@ describe("ModelsPanel 的 omp 侧识别", () => {
   await flush();
   expect(container.textContent).toContain("demo/fresh");
   expect(container.textContent).not.toContain("roles boom");
-  // 环融合在角色行上：slow 已在环 → 该行开关显示位次
-  expect((container.querySelector('[aria-label="移出环 深思"]') as HTMLButtonElement).textContent).toContain("第 1 位");
  });
 
- it("快速切换环融合在角色行：开关 / 上移 / 下移 / 移出都按当前顺序整组写回", async () => {
-  h.cycleOrder = ["default", "smol"];
+ it("环是角色表的派生投影：挂载后与改角色后各同步一次，行内不再有环控件", async () => {
+  const syncSpy = vi.mocked(api.syncCycleOrder);
+  syncSpy.mockClear();
+  h.models = [
+   { provider: "demo", id: "plain", selector: "demo/plain", name: "Plain", contextWindow: 1000, maxTokens: 100, reasoning: false, thinking: [], input: ["text"] },
+  ];
+  h.roles = { default: "demo/plain" };
   act(() => root.render(<ModelsPanel />));
   await flush();
-  const lastWrite = () => {
-   const calls = vi.mocked(api.setCycleOrder).mock.calls;
-   return calls[calls.length - 1][0];
-  };
-  const click = (label: string) =>
-   act(() => (container.querySelector(`[aria-label="${label}"]`) as HTMLButtonElement).click());
+  // 打开页面：环对齐一次；行内环控件（开关 / 位次 / 上下移）已随手动编辑面一起退场
+  expect(syncSpy).toHaveBeenCalledTimes(1);
+  expect(container.querySelector('[aria-label="添加角色 默认"]')).toBeNull();
+  expect(container.querySelector('[aria-label="移出环 默认"]')).toBeNull();
 
-  // 环内的行显示位次，环外的行显示未在轮换
-  expect((container.querySelector('[aria-label="移出环 默认"]') as HTMLButtonElement).textContent).toContain("第 1 位");
-  expect((container.querySelector('[aria-label="添加角色 深思"]') as HTMLButtonElement).textContent).toBe("未在轮换");
-
-  // 开开关（深思不在环）→ 追加到末尾
-  click("添加角色 深思");
+  // 换另一个角色的模型 → 角色写入后自动再同步一次
+  act(() => (container.querySelector('[aria-label="选择 深思"]') as HTMLButtonElement).click());
+  const dialog = container.querySelector('[role="dialog"][aria-modal="true"]')!;
+  act(() => (dialog.querySelector('[title="demo/plain"]') as HTMLButtonElement).click());
   await flush();
-  expect(lastWrite()).toEqual(["default", "smol", "slow"]);
-
-  // 上移深思（末尾）→ 换到中间
-  click("上移 深思");
-  await flush();
-  expect(lastWrite()).toEqual(["default", "slow", "smol"]);
-
-  // 下移默认（首位）→ 环内首尾按显示顺序交换
-  click("下移 默认");
-  await flush();
-  expect(lastWrite()).toEqual(["slow", "default", "smol"]);
-
-  // 移出默认 → 只剩两个
-  click("移出环 默认");
-  await flush();
-  expect(lastWrite()).toEqual(["slow", "smol"]);
-
-  // 首尾边界：首位不可上移、末位不可下移
-  expect((container.querySelector('[aria-label="上移 深思"]') as HTMLButtonElement).disabled).toBe(true);
-  expect((container.querySelector('[aria-label="下移 深思"]') as HTMLButtonElement).disabled).toBe(false);
-  expect((container.querySelector('[aria-label="上移 快速"]') as HTMLButtonElement).disabled).toBe(false);
-  expect((container.querySelector('[aria-label="下移 快速"]') as HTMLButtonElement).disabled).toBe(true);
- });
-
- it("孤儿的环条目（未知角色）逐条列出并可移除，不自动修剪", async () => {
-  h.cycleOrder = ["default", "ghost"];
-  act(() => root.render(<ModelsPanel />));
-  await flush();
-  expect(container.textContent).toContain("未知角色 ghost 仍在轮换中");
-  act(() => (container.querySelector('[aria-label="移出环 ghost"]') as HTMLButtonElement).click());
-  await flush();
-  expect(h.cycleOrder).toEqual(["default"]);
+  expect(syncSpy).toHaveBeenCalledTimes(2);
  });
 
  it("新建转移链排除已配置模型，切换总开关不丢失草稿", async () => {

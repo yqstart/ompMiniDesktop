@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Changed
+- **Ctrl+P 轮换序改为「模型角色的派生投影」：舍弃行内环标识，环自动取已配置的模型角色并去重（2026-10-10，用户口径：「模型角色和 ctrl + p 切换融合的不到位，期望舍弃 ctrl+p 标识，直接取模型角色中配置的模型进入 ctrl+p 的轮换，模型重复去重、保留第一个出现的」）**：上一稿把环开关 / 位次 / 上/下移搬进角色行后，环仍是**手维护**的（新配的角色不会自动进环）——现在环不再有手动编辑面，完全由「模型角色」决定：①后端新增**幂等**命令 `sync_cycle_order`（`get_cycle_order` / `set_cycle_order` 删除）：读 `modelRoles` + `cycleOrder` → 按界面角色顺序（内置表序 → 自定义字母序）取**已配置模型**的行 → 按**模型基名**（剥掉末尾的 `:思考档` 后缀——档位变体不算另一个模型，用户当日二次确认：`smol=…composer-2.5-fast:high` 与 `commit=…composer-2.5-fast:low` 去重后只留 `smol`）保序去重、保留第一个出现的角色 → 已是目标值不写，否则整组覆盖写 + 回读；与 `set_model_role` 共用 `roles_edit` 锁。②触发时机 = **打开模型页时**与**每次角色写入后**（`ModelsPanel` 的 load / saveRole 各跑一次）——omp TUI 里手改过角色或环，切回设置页即自动对齐。③角色行的环控件（开关 / `第 N 位` / 上/下移）与孤儿条提示整体退场，`rolesHint` 改写（同一个模型只轮换一次，取最靠上的那一行）；轮换同步失败在角色区单独一行提示。上游语义复核：`getRoleModelCycle` 在 18.8.7 二进制里仍按角色 id 解析、未配置 / 无凭证跳过（与 V13 的 18.2.4 口径一致）。
+  - 回归：Rust 新增 `derive_cycle_order_follows_display_order_and_dedupes_models`（内置表序 / 自定义字母序 / 重复模型保留第一个角色 / 档位变体按基名合并 / 非已知档位的冒号算模型名的一部分 / 空值与脏值跳过）+ 真机慢测试 `real_sync_cycle_order_smoke`（`--ignored`：临时 agentDir 走包装脚本端到端「写角色 → 派生 → 覆盖写 → 回读 → 幂等复调」，测试里所有 omp 调用都不得绕过包装脚本）；`ModelsPanel.test.tsx` 环用例重写（挂载后与改角色后各同步一次、行内环控件已退场），`normalize` 用例改名（语义从「写前归一」变「读容错」）。门禁：`pnpm check`（539 vitest + e2e:ipc 94 命令）· `cargo test`（lib 182 + bin 216 通过、0 失败；慢测试默认忽略）全绿。
+
+### Fixed
+- **「在工作中切换会话会直接造成该会话中止」的根因：会话定位 / `--resume` 只用 8 字符前缀，碰撞后跑到了另一个会话上（V35）**：uuid v7 的前 8 位是毫秒时间戳高 32 位——**同一分钟内建的两个会话前 8 位必然相同**（真机：同一次重试建出的 `01a123c6-9b8c…` 与 `01a123c6-f958…`），而壳侧的 `session_file_for` 收的是截断前缀、匹配规则是「文件名 contains 前缀 + 取字典序最大」→ 永远命中**新**会话：读历史读错文件、删除删错文件、`omp --resume <前缀>` 拉起另一个会话（omp 侧同口径取最新，构造夹具实测：`--resume ffffffff` 落到 `ffffffff-aaaa…`）。更糟的是新进程以那个会话的身份登记进运行表，`spawn_long_lived` 的「同 id 补位」随即**顶掉它正在跑的进程**（进行中的轮次被中止），而前端订的是发起方会话的通道——帧全进了别人的通道，界面表现为「一直没反应」。现在 `session_file_for` 只认**完整 id**（`stem == id` 或 `stem` 以 `_<id>` 结尾；损坏兜底给的文件名主干也认），全部调用点（历史 / 删除 / 归档清单 / 位置偏好回写 / 未落盘补行 / 上下文分项）与 `spawn_session_runtime` 的 `--resume` 都改传完整 id（终端侧 `resumeSessionInTerminal` 一直是全 id 口径）。
+  - 回归：Rust 新增 `session_file_for_matches_full_id_only`（同前缀双夹具各自命中自己、8 字符前缀**不再命中任何文件**、损坏兜底主干可定位）与 `spawn_session_runtime_resumes_by_full_id`（桩 omp 记 argv → 断言 `--resume` 后跟完整 id；旧口径下这两条断言都会红）；真实 omp 慢测试 `real_rpc_recycle_recover`（走的就是改过的 resume 路径）与 `real_rpc_prompt_roundtrip` 复跑通过。
+- **聊天形态切回一个正在跑的会话不再被显示成「就绪」，且流式期间补一条「思考中…」（V35，用户口径：「发送文字后无任何反应，需要在流式输出中添加思考状态」）**：①`openSessionWithHistory` 此前无条件把打开的会话状态压成 `idle`——切走再切回一个仍在中途的会话时，胶囊显示「就绪」、输入框把下一条当**新 prompt** 发出去（运行中应当走排队 / 转向），一句追问就把进行中的轮次打断；现在只在**还没有状态记录**的会话上给 idle 起手，已有记录保持，并由 `get_session_runtime` 的**回读真值**收敛（`SessionMeta` 新增 `status`：状态事件是推送、切走期间收不到，回读才带——`activity_state_label` 从 `SessionActivity` 现取，`error` / `exited` 统一报 `exited`）。②`Thread` 新增流式**「思考中…」指示行**（纯派生渲染、不写 store、不进历史）：`status === "running"` 且流尾没有「正在输出」的行（流式文本 / 未完成思考 / running·streaming 工具卡）时就补一条——慢模型（推理档拉满）从发送到首个 delta 可能几十秒到几分钟，此前那段时间消息列为空，看起来就是「发送后无任何反应」；空态判定同步放宽（运行中即使还没有消息也渲染指示行）。
+  - 回归：`sessionOpen.test.ts` 3 条（running 不被压 idle / 无记录起手 idle 后被回读覆盖 / 回读 idle 时收敛）+ `useSessionEvents.test.ts` 3 条（回读 status 落状态表 / 非当前会话不落 / 载荷无 status 不动）+ `Thread.test.tsx` 3 条（运行中且流尾无活行时补指示 / 流尾是流式文本·运行中工具卡时不补 / idle·未知状态不渲染）。门禁：`pnpm check`（540 vitest + e2e:ipc 94 命令）· `cargo test --locked`（216 通过、0 失败）+ 上条两条真实 omp 慢测试全绿。
+
 ## [0.11.1] - 2026-10-10
 
 ### Added

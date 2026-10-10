@@ -13,15 +13,22 @@ import { AssistantText } from "./AssistantText";
 import { ChatEmptyState } from "./ChatEmptyState";
 
 export function Thread() {
- const { projects, activeSessionId, eventsBySession, threadLimitSid, threadLimit, growThreadLimit, sessions } =
+ const { projects, activeSessionId, eventsBySession, statusBySession, threadLimitSid, threadLimit, growThreadLimit, sessions } =
   useApp();
  const t = useText();
  const cwd = sessions.find((s) => s.id === activeSessionId)?.cwd ?? "";
  const scroller = useRef<HTMLDivElement>(null);
  const lastCount = useRef(0);
+ const lastWorking = useRef(false);
  // 「加载更早」后要保住视口位置：记录加载前距底部的距离，插入后补回去
  const keepOffset = useRef<number | null>(null);
  const events = activeSessionId ? (eventsBySession[activeSessionId] ?? []) : [];
+ // 流式进行中（后端状态帧 / 回读真值）：流尾没有「正在输出」的行时补一条「思考中…」。
+ // 为什么必须有：慢模型（尤其推理档拉满）从发送到首个 delta 可能几十秒到几分钟，
+ // 期间「只有用户那条消息」——用户看到的就是「发送后无任何反应」。指示行是纯派生渲染，
+ // 不进 store、不参与历史与去重。
+ const status = activeSessionId ? statusBySession[activeSessionId]?.state : undefined;
+ const working = status === "running" && !hasLiveTail(events[events.length - 1]);
  // 首屏增量（MASTER §7）：只渲染最后 N 条，向上加载更多。窗口按会话重置。
  const limit = threadLimitSid === activeSessionId ? threadLimit : THREAD_PAGE;
  const hidden = Math.max(0, events.length - limit);
@@ -41,6 +48,7 @@ export function Thread() {
  // 切会话即读底：新会话消息先落位再滚到底（双 rAF 等首帧绘制完成）
  useEffect(() => {
   lastCount.current = 0;
+  lastWorking.current = false;
   const raf = requestAnimationFrame(() => {
    requestAnimationFrame(() => {
     const el = scroller.current;
@@ -49,23 +57,25 @@ export function Thread() {
   });
   return () => cancelAnimationFrame(raf);
  }, [activeSessionId]);
- // 流式追加时跟随到底：用户已手动上翻则不抢滚动
+ // 流式追加时跟随到底：用户已手动上翻则不抢滚动。指示行出现 / 消失同样算一次追加
+ // （它是流尾的一行，出现时若贴着底就该保持贴底）。
  useEffect(() => {
   const el = scroller.current;
   if (!el) {
    lastCount.current = events.length;
+   lastWorking.current = working;
    return;
   }
-  if (events.length <= lastCount.current) {
-   lastCount.current = events.length;
-   return;
-  }
+  const grew = events.length > lastCount.current;
+  const appeared = working && !lastWorking.current;
   lastCount.current = events.length;
+  lastWorking.current = working;
+  if (!grew && !appeared) return;
   const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
   if (nearBottom) el.scrollTop = el.scrollHeight;
- }, [events.length]);
+ }, [events.length, working]);
  if (projects.length === 0) return <ChatEmptyState kind="no-project" />;
- if (!activeSessionId || events.length === 0) {
+ if (!activeSessionId || (events.length === 0 && !working)) {
   return <ChatEmptyState kind="no-session" hasSession={!!activeSessionId} />;
  }
  return (
@@ -94,6 +104,32 @@ export function Thread() {
    {shown.map((m, i) => (
     <ThreadRow key={m.id} m={m} sessionId={activeSessionId} cwd={cwd} tight={isTrace(m) && isTrace(shown[i - 1])} />
    ))}
+   {working && <WorkingRow tight={isTrace(shown[shown.length - 1])} />}
+  </div>
+ );
+}
+
+/**
+ * 流尾是否已经有「正在输出」的行：流式文本 / 未完成的思考 / 正在跑（含参数流式）的工具卡。
+ * 有的话界面本身就在动（打字机 / 转圈），不必再补指示行；没有才是「发送后没反应」的窗口——
+ * 模型在思考、或刚交完工具结果在等下一步。
+ */
+const hasLiveTail = (m: ViewMsg | undefined): boolean =>
+ !!m &&
+ ((m.kind === "text" && !m.complete) ||
+  (m.kind === "thinking" && !m.complete) ||
+  (m.kind === "tool" && (m.state === "running" || m.state === "streaming")));
+
+/**
+ * 流式「思考中…」指示行（纯派生，不写 store）。
+ * 视觉与流式思考块同源（呼吸灯泡 + muted 文字）：都是「模型在思考」，读法一致。
+ */
+function WorkingRow({ tight }: { tight?: boolean }) {
+ const t = useText();
+ return (
+  <div className={`flex items-center gap-1.5 px-1.5 py-[3px] text-[13px] text-muted ${tight ? "mb-1" : "mb-4"}`}>
+   <Bulb size={13} aria-hidden className="shrink-0 animate-pulse text-accent" />
+   {t.thinking}
   </div>
  );
 }

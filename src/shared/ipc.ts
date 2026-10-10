@@ -50,9 +50,8 @@ export const IPC = {
  logoutProvider: "logout_provider",
  getModelRoles: "get_model_roles",
  setModelRole: "set_model_role",
- // 快速切换环（设置 › 模型）：Ctrl+P 轮换序 cycleOrder（array 键，整组覆盖写）
- getCycleOrder: "get_cycle_order",
- setCycleOrder: "set_cycle_order",
+ // Ctrl+P 轮换序（设置 › 模型）：cycleOrder = modelRoles 的派生投影，幂等同步
+ syncCycleOrder: "sync_cycle_order",
  // 失败转移链（设置 › 模型）：retry.fallbackChains 的读写与两个配套开关
  getFallbackChains: "get_fallback_chains",
  setFallbackChain: "set_fallback_chain",

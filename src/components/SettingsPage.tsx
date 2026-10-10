@@ -79,7 +79,7 @@ export function SettingsPage({ visible = true, showClose = false }: { visible?: 
           （`closeSettingsTab`，回到上次的终端标签），页内不放第二个关闭入口。
           omp 组：常用设置（omp 配置在本应用的唯一设置面——`lib/settingsList.ts` 的 117 项
           展示清单，按上游分组；三稿把原「更多设置」页并入）、模型（**omp 模型相关唯一管理面**：
-          供应商 / 我的模型 / 模型角色 / 快速切换环 / 失败转移）、插件（V23：`omp plugin` 的
+          供应商 / 我的模型 / 模型角色（Ctrl+P 轮换自动取这里的配置）/ 失败转移）、插件（V23：`omp plugin` 的
           清单 / 启停 / 特性 / 安装 / 卸载 / 体检）、技能（V23：`omp skill list` 的发现结果 +
           逐项启停 + SKILL.md 预览）、记忆（omp 项目记忆的查看 / 删除）。
           本应用组：使用统计（会话 jsonl 的用量聚合，只读）、已归档对话（归档管理面，归档会话不在左栏出现）。

@@ -6,7 +6,7 @@
  * 这条链路此前没有测试覆盖——排查「打开已有会话不显示」问题时它是最先被怀疑的对象。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SessionView } from "@shared/types";
+import type { SessionRuntime, SessionView } from "@shared/types";
 
 const SID = "sess-open-1";
 
@@ -91,6 +91,41 @@ describe("打开会话：历史落库与去重", () => {
   await openSessionWithHistory(SID);
   // 空基底重新全量落地——清掉只是省内存，不是丢数据
   expect(useApp.getState().eventsBySession[SID] ?? []).toHaveLength(n1);
+ });
+
+ /**
+  * 打开会话时的活动态：状态事件是推送，切走期间收不到——切回一个正在跑的会话，
+  * 打开流程不许把状态压成 idle（那会让输入框把下一句当新 prompt 发出去 = 打断进行中的
+  * 轮次，流式「思考中」指示也不会出现），并在 open 之后用运行时回读（`rt.status`）收敛真值。
+  */
+ describe("打开会话时的活动态真值", () => {
+  const runtime = (status: SessionRuntime["status"]): SessionRuntime => ({
+   model: null,
+   efforts: null,
+   thinkingLevel: null,
+   status,
+  });
+
+  it("已有状态记录的会话不被压成 idle（running 保持）", async () => {
+   useApp.setState({ statusBySession: { [SID]: { state: "running" } } });
+   vi.mocked(api.getSessionRuntime).mockResolvedValue(null);
+   await openSessionWithHistory(SID);
+   expect(useApp.getState().statusBySession[SID]?.state).toBe("running");
+  });
+
+  it("没有记录的会话起手 idle，随后被运行时回读的 status 覆盖", async () => {
+   useApp.setState({ statusBySession: {} });
+   vi.mocked(api.getSessionRuntime).mockResolvedValue(runtime("running"));
+   await openSessionWithHistory(SID);
+   expect(useApp.getState().statusBySession[SID]?.state).toBe("running");
+  });
+
+  it("回读说 idle 时状态收敛回 idle（切走期间跑完的轮次不被当成仍在跑）", async () => {
+   useApp.setState({ statusBySession: { [SID]: { state: "running" } } });
+   vi.mocked(api.getSessionRuntime).mockResolvedValue(runtime("idle"));
+   await openSessionWithHistory(SID);
+   expect(useApp.getState().statusBySession[SID]?.state).toBe("idle");
+  });
  });
 
  describe("已知视图（hint）：先落地再等 open", () => {

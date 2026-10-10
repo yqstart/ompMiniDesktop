@@ -94,12 +94,24 @@ impl SessionActivity {
         self.state.store(s, Ordering::Relaxed);
     }
 
-    fn state(&self) -> u8 {
+    /// 当前活动态（回读路径 `get_session_runtime` 用它把状态补回真值，见 [`activity_state_label`]）。
+    pub fn state(&self) -> u8 {
         self.state.load(Ordering::Relaxed)
     }
 
     fn last_active_ms(&self) -> i64 {
         self.last_active_ms.load(Ordering::Relaxed)
+    }
+}
+
+/// 活动态 → 前端口径的字符串（与 [`emit_status`] 的 `state` 一一对应；`error` / `exited`
+/// 两档共用一个活动态，回读时统一报 `exited`——前端两档的展示同为「不在跑」）。
+pub fn activity_state_label(s: u8) -> &'static str {
+    match s {
+        ACT_RUNNING => "running",
+        ACT_AWAITING => "awaiting-approval",
+        ACT_IDLE => "idle",
+        _ => "exited",
     }
 }
 
@@ -243,6 +255,13 @@ pub struct SessionMeta {
     pub todo_phases: Option<serde_json::Value>,
     /// 可用命令（`available_commands_update` 缓存）。
     pub commands: Option<serde_json::Value>,
+    /// 当前活动态（`idle` / `running` / `awaiting-approval` / `exited`）。
+    ///
+    /// **只在回读（`get_session_runtime`）里填**：`omp-status://` 的事件是推送，前端切走
+    /// 期间收不到——切回时靠这次回读把状态补回真值（否则一个正在跑的会话会显示成 idle，
+    /// 输入框会把下一句当新 prompt 发出去 = 打断进行中的轮次）。事件推送里保持 `None`，
+    /// 前端按事件维护自己那份副本。
+    pub status: Option<String>,
     /// 上下文非消息部分的字符权重（`get_state` 的 systemPrompt / dumpTools 估算）。
     /// **不进前端**：只给 `get_context_breakdown` 用，原始 systemPrompt / dumpTools 有几十 KB，
     /// 留在快照里会让每次 `omp-state` 推送都背上它。
@@ -270,6 +289,8 @@ impl SessionMeta {
             duration_ms: None,
             ttft_ms: None,
             commands: None,
+            // 活动态不在 `get_state` 回包里，由回读路径（`get_session_runtime`）从进程表现取
+            status: None,
             // 系统提示词 / 工具定义只在 get_state 里有，就地折成字符权重后丢掉原文
             ctx_weights: crate::context::weights_from_state(d),
         }

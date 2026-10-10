@@ -11,6 +11,24 @@
 > 禁用），孤儿条目（手写未知角色）改为在角色列表末尾逐条提示 + 移除按钮。`src/components/settings/CycleOrderSection.tsx`
 > 已删（`iconButton` 样式与交换逻辑搬进 `ModelsPanel.tsx`）。本文其余内容（上游实测、键语义、
 > 生效范围、边界）不变；凡涉及「独立区块」的界面描述，以本节为准。
+>
+> **⚠ 再次变更（2026-10-10 当日第二稿）：环 = 模型角色的派生投影，手动编辑面整体退场。** 用户口径
+> 「舍弃 ctrl+p 标识，直接取模型角色中配置的模型进入 ctrl+p 的轮换；模型重复去重、保留第一个出现的」——
+> 行内环开关 / 位次 / 上/下移与孤儿条提示全部删除。后端改为**幂等**命令 `sync_cycle_order`
+> （`get_cycle_order` / `set_cycle_order` 删除）：读 `modelRoles` + `cycleOrder`（一次 `config list`）→
+> 派生目标环 → 已是目标值不写，否则整组覆盖写 + 回读；与 `set_model_role` 共用 `roles_edit` 锁。
+> **派生规则**：按界面角色顺序（`BUILTIN_ROLES` 表序 → 自定义角色键序 / 字母序，与前端 `roleKeys`
+> 的展示顺序一致）遍历，只取**已配置模型**（非空字符串值）且名字合法的角色；按**模型基名**
+> （selector 剥掉末尾的 `:思考档` 后缀——**档位变体不算另一个模型**，用户当日二次确认：
+> `smol = …composer-2.5-fast:high` 与 `commit = …composer-2.5-fast:low` 去重后只留 `smol`；
+> 非已知档位的冒号算模型名的一部分，如 `p/y:beta` 与 `p/y` 是两个模型）保序去重，
+> **重复模型保留第一个出现的角色**；未配置 / 空值 / 非字符串不进环。触发时机 = 「打开模型页」与
+> 「每次角色写入后」各一次（`ModelsPanel` 的 load / saveRole）。上游语义复核：`getRoleModelCycle`
+> 在 18.8.7 二进制里仍未变（条目是角色 id；未配置 / 无凭证跳过）。回归 = `derive_cycle_order`
+> 单测 + 真机慢测试 `real_sync_cycle_order_smoke`（`--ignored`：临时 agentDir 走包装脚本端到端
+> 「写角色 → 派生 → 覆盖写 → 回读 → 幂等复调」）；对真实配置按本规则派生与手配环一致
+> （`[default, smol, slow]`，同步为 no-op）。本文其余内容（上游实测、键语义、
+> 生效范围、边界）不变；凡涉及界面 / 命令面的描述，以本节为准。
 
 ## 0. 范围与口径
 

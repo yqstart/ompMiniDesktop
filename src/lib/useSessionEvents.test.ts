@@ -1,7 +1,16 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import type { SessionStatus, ViewMsg } from "@shared/types";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SessionRuntime, SessionStatus, ViewMsg } from "@shared/types";
+
+vi.mock("@shared/api", () => ({
+ api: {
+  getSessionRuntime: vi.fn(async () => null),
+  setThinking: vi.fn(async () => undefined),
+ },
+}));
+
+import { api } from "@shared/api";
 import { useApp } from "../stores/app";
-import { __resetFolds, __resetHistoryLru, forgetSession, trimSessionHistories } from "./useSessionEvents";
+import { __resetFolds, __resetHistoryLru, forgetSession, syncSessionRuntime, trimSessionHistories } from "./useSessionEvents";
 
 /**
  * V34 内存治理的回归测试：非活跃会话的历史会被清掉（切回时重新 get_history 拉回），
@@ -89,5 +98,41 @@ describe("forgetSession：归档 / 删除后清掉会话的前端缓存", () => 
   open("s2", "idle");
   expect(() => forgetSession("nope")).not.toThrow();
   expect(Object.keys(useApp.getState().eventsBySession)).toEqual(["s2"]);
+ });
+});
+
+/**
+ * 活动态真值回读（`SessionMeta.status`，只在 `get_session_runtime` 里带）：
+ * 状态事件是推送，切走期间收不到——切回一个正在跑的会话要靠这次回读把「运行中」补回，
+ * 否则胶囊显示成就绪、流式「思考中」指示不出现，输入框还会把下一句当新 prompt 发出去
+ * （运行中应当走排队 / 转向，普通 prompt 会打断进行中的轮次）。
+ */
+describe("运行时回读：活动态真值补回状态表", () => {
+ const runtime = (status: SessionRuntime["status"]): SessionRuntime => ({
+  model: null,
+  efforts: null,
+  thinkingLevel: null,
+  status,
+ });
+
+ it("status 落到 statusBySession（切走期间错过的状态帧靠它补）", async () => {
+  useApp.setState({ activeSessionId: "s1", statusBySession: {} });
+  vi.mocked(api.getSessionRuntime).mockResolvedValue(runtime("running"));
+  await syncSessionRuntime("s1");
+  expect(useApp.getState().statusBySession["s1"]?.state).toBe("running");
+ });
+
+ it("不在当前会话时回读结果不落（避免切走后被旧会话真值覆盖）", async () => {
+  useApp.setState({ activeSessionId: "other", statusBySession: {} });
+  vi.mocked(api.getSessionRuntime).mockResolvedValue(runtime("running"));
+  await syncSessionRuntime("s1");
+  expect("s1" in useApp.getState().statusBySession).toBe(false);
+ });
+
+ it("载荷没带 status 时不动状态表（事件推送不背这个字段）", async () => {
+  useApp.setState({ activeSessionId: "s1", statusBySession: { s1: { state: "idle" } } });
+  vi.mocked(api.getSessionRuntime).mockResolvedValue(runtime(null));
+  await syncSessionRuntime("s1");
+  expect(useApp.getState().statusBySession["s1"]?.state).toBe("idle");
  });
 });

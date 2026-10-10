@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Loader, Refresh, Sliders, Star, X } from "reicon-react";
+import { Loader, Refresh, Sliders, Star } from "reicon-react";
 import { api } from "@shared/api";
 import type { FallbackChainsInfo, ModelInfo, ModelRolesInfo } from "@shared/types";
 import { useApp } from "../../stores/app";
@@ -32,25 +32,21 @@ import { StarToggle } from "./StarToggle";
  * - **omp 侧改完切回来就该看到**：角色与转移链在挂载时拉一次、**每次设置标签重新激活时重读**
  *   （终端标签里的 omp 改过 `modelRoles` 后，点回设置标签即刷新）；模型目录不额外重拉——
  *   `get_models` 后端有 5 分钟缓存，页头的「刷新」按钮才走 `refresh_models` 强制重拉。
- * - **快速切换环**（`cycleOrder`）不占独立区块，融合在**每一行模型角色**上：行内开关决定
- *   该角色是否进 omp 终端 Ctrl+P / Shift+Ctrl+P 的轮换序，上/下移调整环内顺序；与角色
- *   同款「每次操作立即写回 + 回读」。孤儿条目（config.yml 手写的未知角色）在角色列表
- *   末尾提示、可单独移除。
+ * - **Ctrl+P 快速切换环**（`cycleOrder`）没有手动编辑面（用户口径 2026-10-10）：环 = 模型
+ *   角色的派生投影——后端 `sync_cycle_order` 按角色展示顺序取已配置模型、按模型基名保序
+ *   去重（`:思考档` 后缀不算另一个模型；重复模型保留第一个出现的角色），已是目标值就不写。
+ *   本页在**加载后**与
+ *   **角色写入后**各同步一次；角色行的顺序即轮换顺序，页面上没有环开关 / 位次 / 排序按钮。
  * - 失败转移链（`retry.fallbackChains`）与角色同层，口径见 `FallbackChains.tsx`。
  * - 供应商（登录型 + 自定义）合并成一个「添加供应商」弹窗：登录型走 `omp auth-broker`
  *   （凭证进 omp 凭证库），自定义写 `<agentDir>/models.yml`——见 `ProvidersSection.tsx`。
  */
-
-/** 行内图标按钮：与角色行的按钮同一套边框 / 悬浮语言，只是内容缩成图标（环内上/下移与孤儿条移除用）。 */
-const iconButton =
- "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md border border-border text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-50";
 
 export function ModelsPanel() {
  const t = useText();
  const { models, set, myModels, setMyModels, settingsTabActive } = useApp();
  const [roles, setRoles] = useState<ModelRolesInfo | null>(null);
  const [chains, setChains] = useState<FallbackChainsInfo | null>(null);
- const [cycleOrder, setCycleOrder] = useState<string[] | null>(null);
  const [err, setErr] = useState<string | null>(null);
  const [rolesError, setRolesError] = useState<string | null>(null);
  const [chainsError, setChainsError] = useState<string | null>(null);
@@ -60,20 +56,27 @@ export function ModelsPanel() {
  const requestSeq = useRef(0);
  const rolesRevision = useRef(0);
  const chainsRevision = useRef(0);
- const cycleRevision = useRef(0);
  const roleWriting = useRef(false);
- const cycleWriting = useRef(false);
  const [savingRole, setSavingRole] = useState(false);
- const [savingCycle, setSavingCycle] = useState(false);
+
+ /** 同步 Ctrl+P 轮换序：环 = 模型角色的派生投影，后端幂等（已是目标值不写）。
+  *  页面加载与角色写入后各跑一次；失败只在角色区提示，不挡其它读取与操作。 */
+ const syncCycle = useCallback(async () => {
+  try {
+   await api.syncCycleOrder();
+   setCycleError(null);
+  } catch (e) {
+   setCycleError(e instanceof Error ? e.message : String(e || t.cycleSyncFailed));
+  }
+ }, [t.cycleSyncFailed]);
 
  /** 重读只接纳最新请求；写入后的真值不能被更早发出的读请求覆盖。 */
  const load = useCallback(async (force: boolean) => {
   const seq = ++requestSeq.current;
   const roleVersion = rolesRevision.current;
   const chainVersion = chainsRevision.current;
-  const cycleVersion = cycleRevision.current;
   /** 每个读取**各自到达即渲染**——目录（`omp models --json`，实测 2–10s；后端已收敛成
-   *  单飞 + 缓存）不该拖着角色 / 切换环 / 转移链一起白等，那是「设置页要等好几秒」的主因。 */
+   *  单飞 + 缓存）不该拖着角色 / 转移链一起白等，那是「设置页要等好几秒」的主因。 */
   const each = <T,>(req: Promise<T>, apply: (v: T) => void, onError: (msg: string) => void) =>
    req.then(
     (v) => {
@@ -108,18 +111,8 @@ export function ModelsPanel() {
      setChainsError(msg);
     },
    ),
-   each(
-    api.getCycleOrder(),
-    (v) => {
-     if (cycleVersion !== cycleRevision.current || cycleWriting.current) return;
-     setCycleOrder(v);
-     setCycleError(null);
-    },
-    (msg) => {
-     if (cycleVersion !== cycleRevision.current || cycleWriting.current) return;
-     setCycleError(msg);
-    },
-   ),
+   // 环 = 角色表的派生投影：每次加载都同步一次（同时兜掉 omp 侧手改 / 历史遗留的环）
+   syncCycle(),
    each(
     force ? api.refreshModels() : api.getModels(),
     (v) => {
@@ -129,7 +122,7 @@ export function ModelsPanel() {
     (msg) => setCatalogError(msg),
    ),
   ]);
- }, [set, t.modelsLoadFailed]);
+ }, [set, syncCycle, t.modelsLoadFailed]);
 
  // 挂载时拉一次；**每次设置标签重新激活**（从终端标签切回来）都重读——omp 侧（TUI / CLI）
  // 改过的模型角色与转移链，切回设置页就该看到，不该要求用户先点「刷新」或重开设置标签。
@@ -146,7 +139,8 @@ export function ModelsPanel() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在挂载与激活态翻转时重读
  }, [settingsTabActive]);
 
- /** 角色编辑：后端写整表并回读，返回的就是写入后的真相。 */
+ /** 角色编辑：后端写整表并回读，返回的就是写入后的真相；写完顺手同步 Ctrl+P 轮换序
+  *  （环是角色的派生投影——同步失败在角色区单独提示，不影响「角色已保存」这件事）。 */
  const saveRole = async (role: string, selector: string | null) => {
   if (roleWriting.current) return;
   roleWriting.current = true;
@@ -155,30 +149,13 @@ export function ModelsPanel() {
   setErr(null);
   try {
    setRoles(await api.setModelRole(role, selector));
+   await syncCycle();
   } catch (e) {
    setErr(e instanceof Error ? e.message : String(e || t.roleSetFailed));
   } finally {
    rolesRevision.current += 1;
    roleWriting.current = false;
    setSavingRole(false);
-  }
- };
-
- /** 快速切换环编辑：整组写回并回读（与角色同款——写入后的真值不能被更早发出的读覆盖）。 */
- const saveCycleOrder = async (order: string[]) => {
-  if (cycleWriting.current) return;
-  cycleWriting.current = true;
-  cycleRevision.current += 1;
-  setSavingCycle(true);
-  setErr(null);
-  try {
-   setCycleOrder(await api.setCycleOrder(order));
-  } catch (e) {
-   setErr(e instanceof Error ? e.message : String(e || t.cycleWriteFailed));
-  } finally {
-   cycleRevision.current += 1;
-   cycleWriting.current = false;
-   setSavingCycle(false);
   }
  };
 
@@ -192,34 +169,11 @@ export function ModelsPanel() {
   }
  };
 
- /** 角色行的环开关：不在环 → 追加到末尾；已在环 → 移出（整组写回 + 回读，与角色写各自不互锁）。 */
- const toggleRoleCycle = (role: string) => {
-  if (!cycleOrder) return;
-  void saveCycleOrder(cycleOrder.includes(role) ? cycleOrder.filter((r) => r !== role) : [...cycleOrder, role]);
- };
-
- /** 环内换位（角色行的上/下移）：交换后整组写回；越界点击是 no-op（边界也由按钮 disabled 挡住）。 */
- const moveCycle = (role: string, delta: -1 | 1) => {
-  if (!cycleOrder) return;
-  const i = cycleOrder.indexOf(role);
-  const j = i + delta;
-  if (i < 0 || j < 0 || j >= cycleOrder.length) return;
-  const next = [...cycleOrder];
-  [next[i], next[j]] = [next[j], next[i]];
-  void saveCycleOrder(next);
- };
-
  const roleKeys = useMemo(() => {
   const builtin = roles?.builtin ?? [];
   const rest = Object.keys(roles?.roles ?? {}).filter((k) => !builtin.includes(k));
   return [...builtin, ...rest];
  }, [roles]);
-
- /** 环里的孤儿条目（config.yml 手写的、不在角色清单里的名字）：无行可挂，在角色列表末尾提示。 */
- const orphanRoles = useMemo(
-  () => (cycleOrder ?? []).filter((r) => !roleKeys.includes(r)),
-  [cycleOrder, roleKeys],
- );
 
  /** 目录数组：每次渲染新数组会让下面 useMemo 的依赖失效——按 `models` 记忆。 */
  const catalog = useMemo(() => models?.models ?? [], [models]);
@@ -299,7 +253,7 @@ export function ModelsPanel() {
     </div>
    </section>
 
-   {/* 模型角色 + 快速切换环：角色行 = 选模型 / 档位 + 行内环开关与顺序（Ctrl+P 的轮换序） */}
+   {/* 模型角色：角色行 = 选模型 / 档位；Ctrl+P 轮换序自动取这里的已配置模型（行序即轮换序） */}
    <section aria-label={t.rolesSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
     <div className="flex flex-wrap items-center gap-2">
      <Sliders size={16} aria-hidden className="text-muted" />
@@ -319,7 +273,7 @@ export function ModelsPanel() {
     )}
     {cycleError && (
      <p role="alert" className="mt-1.5 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
-      {t.ompSettingsStale}：{cycleError}
+      {cycleError}
      </p>
     )}
     <div className="mt-2">
@@ -340,41 +294,19 @@ export function ModelsPanel() {
       )
      ) : (
       <>
-       {roleKeys.map((role) => {
-        const cycleIndex = cycleOrder ? cycleOrder.indexOf(role) : -1;
-        return (
-         <RoleRow
-          key={role}
-          role={role}
-          label={roleLabel(role, t)}
-          current={roles.roles[role] ?? null}
-          models={candidates}
-          catalog={catalog}
-          myModels={myModels}
-          onToggleStar={(s) => setMyModels(toggleMyModel(myModels, s))}
-          disabled={savingRole}
-          onSave={saveRole}
-          cycleIndex={cycleIndex < 0 ? null : cycleIndex}
-          cycleCount={cycleOrder?.length ?? 0}
-          cycleDisabled={savingCycle || busy || cycleOrder === null}
-          onToggleCycle={() => toggleRoleCycle(role)}
-          onMoveCycle={(delta) => moveCycle(role, delta)}
-         />
-        );
-       })}
-       {orphanRoles.map((role) => (
-        <div key={role} className="flex flex-wrap items-center gap-2 border-t border-border-soft py-3">
-         <span className="min-w-0 flex-1 truncate text-[13px] text-warn">{fmt(t.cycleUnknownRole, role)}</span>
-         <button
-          onClick={() => void saveCycleOrder((cycleOrder ?? []).filter((r) => r !== role))}
-          disabled={savingCycle || busy}
-          className={iconButton}
-          aria-label={fmt(t.cycleRowRemove, role)}
-          title={fmt(t.cycleRowRemove, role)}
-         >
-          <X size={12} aria-hidden />
-         </button>
-        </div>
+       {roleKeys.map((role) => (
+        <RoleRow
+         key={role}
+         role={role}
+         label={roleLabel(role, t)}
+         current={roles.roles[role] ?? null}
+         models={candidates}
+         catalog={catalog}
+         myModels={myModels}
+         onToggleStar={(s) => setMyModels(toggleMyModel(myModels, s))}
+         disabled={savingRole}
+         onSave={saveRole}
+        />
        ))}
       </>
      )}
@@ -398,8 +330,7 @@ export function ModelsPanel() {
  );
 }
 
-/** 一行角色：角色名 + 当前 selector（模型 + 档位）+ 档位按钮 + 「选择」按钮（开模型选择弹窗）
- *  + 快速切换环的行内控件（开关 = 进 / 出环，上 / 下移 = 环内顺序）。
+/** 一行角色：角色名 + 当前 selector（模型 + 档位）+ 档位按钮 + 「选择」按钮（开模型选择弹窗）。
  *  模型列表走 `ModelPickerDialog`——行内展开会把下方角色整体推下去（点开 / 关上时页面跳动）。 */
 function RoleRow({
  role,
@@ -411,11 +342,6 @@ function RoleRow({
  onToggleStar,
  disabled,
  onSave,
- cycleIndex,
- cycleCount,
- cycleDisabled,
- onToggleCycle,
- onMoveCycle,
 }: {
  role: string;
  label: string;
@@ -426,14 +352,6 @@ function RoleRow({
  onToggleStar: (selector: string) => void;
  disabled: boolean;
  onSave: (role: string, selector: string | null) => Promise<void>;
- /** 该角色在环里的位置（0-based）；null = 不在环、或环还没读到。 */
- cycleIndex: number | null;
- /** 当前环长（环尾的下移禁用判定）。 */
- cycleCount: number;
- /** 环的写入口被锁（环读取中 / 页级刷新 / 环写入中）——与角色写的 `disabled` 分路，互不锁死整行。 */
- cycleDisabled: boolean;
- onToggleCycle: () => void;
- onMoveCycle: (delta: -1 | 1) => void;
 }) {
  const t = useText();
  const [pickerOpen, setPickerOpen] = useState(false);
@@ -449,9 +367,6 @@ function RoleRow({
  const levels = model ? thinkingLevelsOf(model.thinking) : [...THINKING_ORDER];
  // 明确不支持思考的模型（可用档只有 off）不显示档位按钮，免得点开只有「默认 / off」两项
  const canLevel = current !== null && levels.length > 1;
-
- // 环开关的完整文案（aria / title 同源）：未在环 = 「添加角色 <名字>」，在环 = 「移出环 <名字>」
- const cycleAria = cycleIndex === null ? fmt(`${t.cycleAdd} {0}`, label) : fmt(t.cycleRowRemove, label);
 
  const pick = async (m: ModelInfo) => {
   setPickerOpen(false);
@@ -520,39 +435,6 @@ function RoleRow({
      >
       {t.roleClear}
      </button>
-    )}
-    {/* 快速切换环：开关 = 进 / 出环（环内时再给上 / 下移）；环读取中或写入中时禁用 */}
-    <button
-     onClick={onToggleCycle}
-     disabled={cycleDisabled || saving}
-     aria-pressed={cycleIndex !== null}
-     aria-label={cycleAria}
-     title={cycleAria}
-     className={`shrink-0 cursor-pointer rounded-md border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50 ${cycleIndex === null ? "border-border text-muted hover:text-foreground" : "border-accent/50 bg-active text-foreground"}`}
-    >
-     {cycleIndex === null ? (cycleDisabled ? t.archivedLoading : t.cycleNotInCycle) : fmt(t.cycleInCycle, String(cycleIndex + 1))}
-    </button>
-    {cycleIndex !== null && (
-     <>
-      <button
-       onClick={() => onMoveCycle(-1)}
-       disabled={cycleDisabled || saving || cycleIndex === 0}
-       className={iconButton}
-       aria-label={fmt(t.cycleRowUp, label)}
-       title={fmt(t.cycleRowUp, label)}
-      >
-       <ArrowUp size={12} aria-hidden />
-      </button>
-      <button
-       onClick={() => onMoveCycle(1)}
-       disabled={cycleDisabled || saving || cycleIndex === cycleCount - 1}
-       className={iconButton}
-       aria-label={fmt(t.cycleRowDown, label)}
-       title={fmt(t.cycleRowDown, label)}
-      >
-       <ArrowDown size={12} aria-hidden />
-      </button>
-     </>
     )}
     {saving && <Loader size={12} className="shrink-0 animate-spin text-muted" aria-hidden />}
    </div>
