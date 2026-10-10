@@ -227,7 +227,6 @@ export function ModelsPanel() {
       </button>
      )}
     </div>
-    <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.myModelsHint}</p>
     {catalogError && (
      <p role="alert" className="mt-1.5 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
       {catalogError}
@@ -260,7 +259,6 @@ export function ModelsPanel() {
      <h2 className="text-sm font-semibold">{t.rolesSection}</h2>
      <kbd className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted">Ctrl+P</kbd>
     </div>
-    <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.rolesHint}</p>
     {roles?.storage === "project" && (
      <p className="mt-1.5 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
       {t.roleStorageProject}
@@ -276,7 +274,7 @@ export function ModelsPanel() {
       {cycleError}
      </p>
     )}
-    <div className="mt-2">
+    <div className="mt-4">
      {roles === null ? (
       rolesError ? (
        <div className="flex flex-col items-start gap-2 py-2">

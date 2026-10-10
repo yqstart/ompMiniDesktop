@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectView, SessionView } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { TEXT } from "../../lib/locale";
+import { ContextMenuProvider } from "../ContextMenu";
 import { ChatSidebar } from "./ChatSidebar";
 
 /** `vi.mock` 的工厂会被提升：用 `vi.hoisted` 拿能在用例里改行为的 mock。 */
@@ -14,6 +15,9 @@ const mock = vi.hoisted(() => ({
  listWorkspaces: vi.fn(async () => [] as unknown[]),
  listCheckouts: vi.fn(async () => [] as unknown[]),
  createWorkspace: vi.fn(),
+ updateWorkspace: vi.fn(async () => undefined),
+ deleteWorkspace: vi.fn(async () => undefined),
+ deleteSessions: vi.fn(),
 }));
 vi.mock("@shared/api", () => ({
  api: {
@@ -22,6 +26,9 @@ vi.mock("@shared/api", () => ({
   listWorkspaces: mock.listWorkspaces,
   listCheckouts: mock.listCheckouts,
   createWorkspace: mock.createWorkspace,
+  updateWorkspace: mock.updateWorkspace,
+  deleteWorkspace: mock.deleteWorkspace,
+  deleteSessions: mock.deleteSessions,
  },
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(async () => null) }));
@@ -66,6 +73,10 @@ beforeEach(() => {
  mock.listCheckouts.mockReset();
  mock.listCheckouts.mockResolvedValue([]);
  mock.createWorkspace.mockReset();
+ mock.updateWorkspace.mockReset();
+ mock.deleteWorkspace.mockReset();
+ mock.deleteSessions.mockReset();
+ mock.deleteSessions.mockImplementation(async (ids: string[]) => ({ ok: ids.length, failed: [] }));
  useApp.setState({
   projects: [P1, P2],
   workspaceGroups: [{ id: "w1", name: "全栈", createdAt: 0, projectIds: ["p1", "p2"] }],
@@ -83,12 +94,37 @@ afterEach(() => {
  container.remove();
 });
 
-/** 渲染并等 `list_sessions` 那一趟落地。 */
+/** 渲染并等 `list_sessions` 那一趟落地（右键菜单需要顶层 Provider）。 */
 async function open(): Promise<void> {
  await act(async () => {
-  root.render(<ChatSidebar visible />);
+  root.render(
+   <ContextMenuProvider>
+    <ChatSidebar visible />
+   </ContextMenuProvider>,
+  );
  });
  await act(async () => { });
+}
+
+/** 合成右键（菜单由顶层 Provider 承载，portal 到 body）。 */
+function rightClick(el: Element | null): void {
+ act(() => el?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 })));
+}
+
+function menuLabels(): (string | undefined)[] {
+ return [...document.querySelectorAll('[role="menuitem"]')].map((b) => b.textContent?.trim());
+}
+
+function menuItem(label: string): HTMLButtonElement {
+ const item = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((b) => b.textContent?.trim() === label);
+ if (!item) throw new Error(`菜单项不存在：${label}`);
+ return item;
+}
+
+function summaryFor(text: string): HTMLElement {
+ const el = [...container.querySelectorAll<HTMLElement>("summary")].find((s) => (s.textContent ?? "").includes(text));
+ if (!el) throw new Error(`summary 不存在：${text}`);
+ return el;
 }
 
 describe("聊天侧栏的工作区分段（V21 容器在聊天形态的投影）", () => {
@@ -134,12 +170,14 @@ describe("聊天侧栏的工作区分段（V21 容器在聊天形态的投影）
 });
 
 describe("聊天侧栏的提交入口（与终端目录行同一命令面）", () => {
- it("项目分组头有提交键，点击打开该项目的提交面板", async () => {
-  const { TEXT } = await import("../../lib/locale");
+ it("项目分组头右键 = 新建会话 / 提交… / 归档全部；点「提交…」打开该项目的提交面板", async () => {
+  const t = TEXT["zh-CN"];
   await open();
-  const btn = container.querySelector(`button[aria-label="${TEXT["zh-CN"].gitCommitTitle}"]`);
-  expect(btn, "项目分组头应有提交入口").not.toBeNull();
-  (btn as HTMLButtonElement).click();
+  // V36：hover 提交键退场（不再有该 aria-label 的按钮）
+  expect(container.querySelector(`button[aria-label="${t.gitCommitTitle}"]`), "hover 提交键应退场").toBeNull();
+  rightClick(summaryFor("alpha"));
+  expect(menuLabels()).toEqual([t.newSession, t.gitCommitTitle, t.archiveAllIn.replace("{0}", "alpha")]);
+  act(() => menuItem(t.gitCommitTitle).click());
   expect(useApp.getState().activeCommitCwd).toBe("/w/alpha");
  });
 
@@ -225,5 +263,70 @@ describe("聊天侧栏的工作区标题行（与终端形态同一排入口）"
   expect(created?.textContent).toContain("beta");
   // 对话框建完即关
   expect(container.querySelector(`input[placeholder="${t.wsGroupNamePlaceholder}"]`)).toBeNull();
+ });
+});
+
+describe("聊天侧栏的行级右键菜单（V36）", () => {
+ const t = TEXT["zh-CN"];
+
+ it("会话行：hover 归档键退场，右键 =「归档会话」+「删除对话」", async () => {
+  await open();
+  expect(container.querySelector(`button[aria-label="${t.archiveChat}"]`), "hover 归档键应退场").toBeNull();
+  const row = [...container.querySelectorAll<HTMLElement>("div.h-8")].find((el) => (el.textContent ?? "").includes("登录页重构"));
+  expect(row, "会话行应渲染").not.toBeUndefined();
+  rightClick(row ?? null);
+  expect(menuLabels()).toEqual([t.archiveChat, t.deleteChat]);
+ });
+
+ it("会话行：点「删除对话」→ 二次确认 → 调 delete_sessions", async () => {
+  await open();
+  const row = [...container.querySelectorAll<HTMLElement>("div.h-8")].find((el) => (el.textContent ?? "").includes("登录页重构"));
+  rightClick(row ?? null);
+  act(() => menuItem(t.deleteChat).click());
+  const dialog = document.querySelector('[role="dialog"]');
+  expect(dialog?.getAttribute("aria-label")).toBe("登录页重构");
+  expect(dialog?.textContent).toContain(t.sessDeleteConfirm);
+  const confirm = [...(dialog?.querySelectorAll("button") ?? [])].at(-1)!;
+  await act(async () => {
+   confirm.click();
+  });
+  expect(mock.deleteSessions).toHaveBeenCalledWith(["s1"]);
+ });
+
+ it("「未归属会话」组头：右键 =「归档全部」", async () => {
+  await open();
+  rightClick(summaryFor(t.orphanChats));
+  expect(menuLabels()).toEqual([t.archiveOrphanAll]);
+ });
+
+ it("工作区段头：右键 =「编辑工作区…」/「删除工作区」；删除走二次确认并调 delete_workspace", async () => {
+  await open();
+  rightClick(summaryFor("全栈"));
+  expect(menuLabels()).toEqual([t.wsGroupEdit, t.wsGroupDelete]);
+  act(() => menuItem(t.wsGroupDelete).click());
+  const dialog = document.querySelector('[role="dialog"]');
+  expect(dialog?.getAttribute("aria-label")).toBe(t.wsGroupDeleteTitle.replace("{0}", "全栈"));
+  const confirm = [...(dialog?.querySelectorAll("button") ?? [])].at(-1)!;
+  await act(async () => {
+   confirm.click();
+  });
+  expect(mock.deleteWorkspace).toHaveBeenCalledWith("w1");
+ });
+
+ it("点「编辑工作区…」打开对话框并回填名字", async () => {
+  await open();
+  rightClick(summaryFor("全栈"));
+  act(() => menuItem(t.wsGroupEdit).click());
+  const input = container.querySelector<HTMLInputElement>(`input[placeholder="${t.wsGroupNamePlaceholder}"]`);
+  expect(input?.value).toBe("全栈");
+ });
+
+ it("「未分组」段头右键不弹菜单", async () => {
+  act(() => {
+   useApp.setState({ projects: [P1, P3] });
+  });
+  await open();
+  rightClick(summaryFor(t.wsGroupUngrouped));
+  expect(document.querySelector('[role="menu"]')).toBeNull();
  });
 });

@@ -7,18 +7,23 @@ import { useApp } from "../../stores/app";
 import { openOrFocusCheckout } from "../../lib/checkouts";
 import { countRunningTerminalsIn, countTerminalsIn } from "../../lib/terminalScope";
 import { isCommitTaskRunning, openCommitPanel, pushWorkspace } from "../../lib/commitTasks";
+import { useContextMenu } from "../../lib/contextMenu";
+import type { ContextMenuEntry } from "../../lib/contextMenu";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { useText } from "../../lib/useText";
 import { fmt } from "../../lib/locale";
 
 /**
- * 左栏项目组：项目头（折叠 / 会话入口 / 移除项目）+ **目录行**列表（主目录 + git worktree）。
+ * 左栏项目组：项目头（折叠；会话 / 移除动作在右键菜单里）+ **目录行**列表（主目录 + git worktree）。
  *
  * 目录行（V21 前叫「工作区行」）= 项目主目录或一个 git worktree（**只读展示**：壳侧不创建 /
  * 不删除 worktree，要建要走 `omp worktree add`）；点击行 = 打开/聚焦该目录的终端。
  * 折叠头没有独立箭头：点击（拖柄区，未拖动时）即展开/收起；文件夹图标 = 展开状态与「当前打开
  * 的项目」（项目落在右栏选中范围里）的高亮——两者任一成立用强调色，缺失目录优先 warn。
  * 目录缺失的项目给一条 warn 行 + 「重定位」（只改覆盖层路径，不动任何会话文件）。
+ * **行内动作收进右键菜单（2026-10-10）**：项目头右键 = 「查看项目会话」/「移除项目」，
+ * 目录行右键 = 「提交…」/「推送」（有未推送提交时）；行内只留状态徽章（终端数 / 改动点 /
+ * 领先落后 / 任务态）——徽章是提示，不再是按钮堆。
  * 「移除项目」= 覆盖层解绑（后端把该项目会话标记为已归档，不删任何文件），走二次确认。
  */
 export function ProjectGroup({
@@ -43,6 +48,7 @@ export function ProjectGroup({
  const t = useText();
  const [expanded, setExpanded] = useState(true);
  const [removeOpen, setRemoveOpen] = useState(false);
+ const menu = useContextMenu();
  const selection = useApp((s) => s.selection);
  // 「当前打开的项目」：项目落在右栏当前选中范围里——
  // 工作区视图（含未分组）= 项目的 workspaceId 命中；目录视图 = 它的某个目录被选中。
@@ -76,12 +82,21 @@ export function ProjectGroup({
   }
  };
 
+ const menuItems: ContextMenuEntry[] = [
+  { label: t.wsSessionsTitle, icon: Clock, onSelect: onOpenSessions },
+  { separator: true },
+  { label: t.projRemove, icon: Trash2, danger: true, onSelect: () => setRemoveOpen(true) },
+ ];
+
  return (
   <div
    className={`relative mb-3 transition-opacity duration-100 ${dragging ? "opacity-40" : ""}`}
    data-proj-row={project.id}
   >
-   <div className="group flex min-h-9 items-center gap-1 rounded-md px-1 py-1 text-[13px] font-semibold text-foreground transition-colors duration-100 hover:bg-hover">
+   <div
+    onContextMenu={(e) => menu.open(e, menuItems)}
+    className="group flex min-h-9 items-center gap-1 rounded-md px-1 py-1 text-[13px] font-semibold text-foreground transition-colors duration-100 hover:bg-hover"
+   >
     <button
      data-project-drag
      onPointerDown={(e) => onDragStart(project.id, e)}
@@ -95,24 +110,6 @@ export function ProjectGroup({
      </span>
      <span className="min-w-0 flex-1 truncate">{project.name}</span>
     </button>
-    <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100">
-     <button
-      onClick={onOpenSessions}
-      className="flex size-6 cursor-pointer items-center justify-center rounded-sm text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
-      aria-label={t.wsSessionsAria}
-      title={t.wsSessionsTitle}
-     >
-      <Clock size={13} />
-     </button>
-     <button
-      onClick={() => setRemoveOpen(true)}
-      className="flex size-6 cursor-pointer items-center justify-center rounded-sm text-muted transition-colors duration-100 hover:bg-hover hover:text-danger"
-      aria-label={t.projRemove}
-      title={t.projRemove}
-     >
-      <Trash2 size={13} />
-     </button>
-    </span>
    </div>
 
    {project.missing && (
@@ -158,7 +155,7 @@ export function ProjectGroup({
 }
 
 /** 一个目录行：分支名 + 位置徽章 + git 状态（改动点 / 领先·落后远程徽章 / 上游缺失标记）+ 任务徽章；
- *  hover 出现「提交…」（打开提交面板）。点击行 = 打开/聚焦该目录的终端。
+ *  **右键菜单给「提交…」「推送」**（2026-10-10 起不再有 hover 提交按钮）。点击行 = 打开/聚焦该目录的终端。
  *
  *  **行标记**（同款：左侧 2px 强调竖条 + `bg-active` 填充 + 加粗分支名 + `aria-current`）两处来源：
  *  ①选中（目录视图的范围真相）；②**承载激活终端**——工作区视图下选中态在组头上，这一处是唯一能
@@ -167,7 +164,7 @@ export function ProjectGroup({
  *  状态区顺序固定为：终端数（`BrowserTerminal` + 数量，有运行中的上强调色；右栏只看当前选中范围，
  *  这个徽章是「别的分支还开着几个」的提示）→ dirty 点 → 领先（BranchUp ↑，可点=推）→
  *  落后（BranchDown ↓，只读）→ 上游缺失（LinkOff：无上游 / 上游已被删除）→ 任务徽章
- *  （运行中 / 失败；点击开任务浮层）；有任务记录时 hover 按钮让位（任务态优先，处理入口在浮层里）。 */
+ *  （运行中 / 失败；点击开任务浮层）。 */
 function CheckoutRow({
  ws,
  active,
@@ -176,6 +173,7 @@ function CheckoutRow({
  active: boolean;
 }) {
  const t = useText();
+ const menu = useContextMenu();
  const gitState = useApp((s) => s.workspaceGitStates[ws.path]);
  const task = useApp((s) => s.commitTasks[ws.path]);
  // 右栏终端视图只显示当前工作区的终端，这里的徽章是「别的分支还开着几个」的入口提示
@@ -208,17 +206,23 @@ function CheckoutRow({
      ? t.gitNoUpstreamTitle
      : null
    : null;
- // 入口可用性：有改动（可提交）或 ahead / 无上游（可推送）才给按钮；干净且同步 = 没东西可做。
+ // 入口可用性：有改动（可提交）或 ahead / 无上游（可推送）才给「提交…」；干净且同步时禁用（说明原因）。
  // 快照未知（还没拉到）时不拦——面板里的变更集与暂存校验才是最终裁决。
  const hasNothing = repoKnown && !notRepo && !dirty && ahead === 0 && gitState.upstream !== null;
  const canStart = !notRepo && !hasNothing;
  const startTitle = notRepo ? t.gitCommitNotRepo : hasNothing ? t.gitCommitDisabledTitle : t.gitCommitTitle;
 
+ const menuItems: ContextMenuEntry[] = [
+  { label: t.gitCommitTitle, icon: ArrowUpCircle, disabled: !canStart, title: startTitle, onSelect: () => openCommitPanel(ws.path) },
+  ...(ahead > 0 ? [{ label: fmt(t.gitPushTitle, ahead), icon: BranchUp, onSelect: () => pushWorkspace(ws.path) }] : []),
+ ];
+
  return (
   <div
    title={ws.path}
    aria-current={marked ? "location" : undefined}
-   className={`group/row flex min-h-8 w-full items-center rounded-md border-l-2 text-[13px] transition-colors duration-100 ${marked ? "border-accent bg-active text-foreground" : "border-transparent text-muted hover:bg-hover hover:text-foreground"
+   onContextMenu={ws.missing ? undefined : (e) => menu.open(e, menuItems)}
+   className={`flex min-h-8 w-full items-center rounded-md border-l-2 text-[13px] transition-colors duration-100 ${marked ? "border-accent bg-active text-foreground" : "border-transparent text-muted hover:bg-hover hover:text-foreground"
     } ${ws.missing ? "opacity-50" : ""}`}
   >
    <button
@@ -306,21 +310,6 @@ function CheckoutRow({
       className="flex size-5 cursor-pointer items-center justify-center rounded-sm bg-surface text-danger transition-colors duration-100 hover:bg-hover"
      >
       <AlertTriangle size={12} aria-hidden />
-     </button>
-    )}
-    {!task && !ws.missing && (
-     <button
-      onClick={(e) => {
-       e.stopPropagation();
-       openCommitPanel(ws.path);
-      }}
-      disabled={!canStart}
-      title={startTitle}
-      aria-label={startTitle}
-      className={`flex size-5 items-center justify-center rounded-sm bg-surface opacity-0 transition-opacity duration-100 group-hover/row:opacity-100 group-focus-within/row:opacity-100 ${canStart ? "cursor-pointer text-muted hover:bg-hover hover:text-foreground" : "cursor-not-allowed text-faint"
-       }`}
-     >
-      <ArrowUpCircle size={13} aria-hidden />
      </button>
     )}
    </span>

@@ -12,17 +12,16 @@ import { useText } from "../../lib/useText";
 import { ModelPicker } from "../pickers/ModelPicker";
 import { ThinkingPicker } from "../pickers/ThinkingPicker";
 import { PermissionBadge } from "../pickers/PermissionBadge";
-import { CompactButton, OmpStatusPill, QueueBadge } from "../thread/StatusBar";
+import { CompactButton, QueueBadge } from "../thread/StatusBar";
 import { ContextBar } from "./ContextBar";
-import { ContextMeter } from "./ContextMeter";
 import { MentionList } from "./MentionList";
 import { SlashMenu } from "./SlashMenu";
 
 /**
  * 会话输入框：随心输入 + 底部工具行（截图布局）。
- * 上：上下文条（项目 / git 分支 / 提交…）+ 附件条 + 多行输入；下左：图片 / 引用 / 权限 / 排队 / 用量；
+ * 上：上下文条（项目 / git 分支 / 提交…）+ 附件条 + 多行输入；下左：图片 / 引用 / 权限 / 排队 / 压缩 / 供应商用量；
  * 下右：模型 / 思考档 / 发送-停止。
- * 模型·思考档·权限只放这里，顶栏不再重复（UpdateBell 除外）。
+ * 模型·思考档·权限只放这里，顶栏不再重复（顶栏右端只有上下文用量环，2026-10-10 起）。
  *
  * 图片附件（V2 M6）：粘贴 / 拖拽 / 点回形针三条入口，全部读成 base64 存在内存里，
  * 发送时随 `prompt.images` 一次性交给 omp——应用不落盘、不写覆盖层。
@@ -89,8 +88,8 @@ export function Composer() {
  // 补全浮层有两套：`/` 命令面（数据是 omp 自己的 `available_commands_update`）与 `@` 路径。
  // 两者互斥——草稿以 `/` 开头时整条就是一条命令，不该再冒出路径候选。
  const commands = useMemo(() => normalizeCommands(currentRuntime?.commands), [currentRuntime?.commands]);
- // `/` 补全只在草稿是单条命令、光标还在首个 token 内时开。**流式中不开**：那时 Enter 走 follow_up
- // 排队，`/xxx` 是当文本发出去的，弹出补全等于暗示它能当命令跑。
+ // `/` 补全只在草稿是单条命令、光标还在首个 token 内时开。**流式中不开**：那时 Enter 走 steer
+ // 插话，`/xxx` 是当文本发出去的，弹出补全等于暗示它能当命令跑。
  const slashToken = (() => {
   if (running || !activeSessionId) return null;
   const m = /^\/(\S*)$/.exec(draft.slice(0, caret));
@@ -203,8 +202,10 @@ export function Composer() {
   }
  };
 
- // 流式中追问：running 时 Enter 走排队（follow_up，本轮后执行），
- // Cmd/Ctrl+Enter 走转向（steer，下一个工具边界生效）；idle 时还是普通发送。
+ // 流式中追问的发送语义**对齐 omp 终端**（18.8.7 实测：终端里 Enter = steering 插话、
+ // Ctrl+Q / Ctrl+Enter = follow-up 排队）——Enter 走插话（steer，进当前轮、下一个边界生效），
+ // Cmd/Ctrl+Enter 走排队（follow_up，本轮后执行）；送达处理交给 omp 自己的设置
+ //（steeringMode / followUpMode / interruptMode），壳侧不做处理；idle 时还是普通发送。
  const sendQueued = async (mode: "steer" | "follow_up") => {
   if (!activeSessionId || (!draft.trim() && attachments.length === 0) || archived) return;
   const text = draft;
@@ -239,7 +240,8 @@ export function Composer() {
    return;
   }
   if (running && activeSessionId && (draft.trim() || attachments.length > 0) && !archived) {
-   void sendQueued("follow_up");
+   // 流式中 Enter = 插话（steer），与 omp 终端的 Enter 一致
+   void sendQueued("steer");
    return;
   }
   if (!activeSessionId || (!draft.trim() && attachments.length === 0) || running || archived) return;
@@ -473,9 +475,9 @@ export function Composer() {
        void send();
       }
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && running && activeSessionId) {
-       // 流式中 Cmd/Ctrl+Enter = 转向（steer），不砍掉进行中的工作
+       // 流式中 Cmd/Ctrl+Enter = 排队（follow_up，本轮后执行）——与 omp 终端的 ctrl+enter / ctrl+q 对齐
        e.preventDefault();
-       void sendQueued("steer");
+       void sendQueued("follow_up");
       }
       if (e.key === "Escape" && running && activeSessionId) {
        void api.stop(activeSessionId).catch(() => undefined);
@@ -517,9 +519,6 @@ export function Composer() {
       <Files size={16} aria-hidden />
      </button>
      <PermissionBadge compact align="left" />
-     {/* omp 状态胶囊（V10 恢复项）：常驻显示 运行中 / 等待审批 / 出错 / 已退出，
-         运行中是 accent 呼吸点 + 「运行中」文字双信号——发送后不再没有任何运行迹象 */}
-     <OmpStatusPill />
      <QueueBadge />
      <CompactButton />
      <button
@@ -531,7 +530,6 @@ export function Composer() {
       <Gauge size={16} aria-hidden />
      </button>
      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
-      <ContextMeter />
       <ModelPicker compact />
       <ThinkingPicker compact />
       {running ? (

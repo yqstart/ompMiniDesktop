@@ -8,7 +8,7 @@ import { useText } from "../../lib/useText";
 import { useApp } from "../../stores/app";
 
 /**
- * 上下文容量（输入框工具行、模型选择器**左侧**）：容量环 + 点开的分项面板。
+ * 上下文容量（**顶栏右端**，2026-10-10 从输入框工具行搬来）：容量环 + 点开的分项面板。
  *
  * 数据来自后端 `get_context_breakdown`（读一次会话文件 + 运行时的 `get_state` 真值），
  * 这里只做格式化与按比例画柱——**不自算 token**，分项与总量都由后端给。
@@ -16,7 +16,8 @@ import { useApp } from "../../stores/app";
  * 面板底部明写了这一点：宁可说清是估算，也不让估算看起来像读数。
  *
  * 触发按钮只画环与百分比，数据取自 `omp-state` 真值（关着也是活的，不用先点开）；
- * 面板内容按需拉取，切会话不会串数据（缓存按会话 id 归属）。
+ * 面板内容按需拉取，切会话不会串数据（缓存按会话 id 归属）；面板朝**下**展开
+ * （原来的家在工作行末尾，是朝上开的）。
  */
 
 /** 分项透明度档：按行序递减，与栈式进度条一一对应（单强调色约束，不引第二色）。 */
@@ -130,7 +131,7 @@ export function ContextMeter() {
    </button>
    {open && (
     <div
-     className="absolute right-0 bottom-8 z-10 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-elevated p-3 shadow-pop"
+     className="absolute top-full right-0 z-10 mt-1 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-elevated p-3 shadow-pop"
      aria-label={t.ctxTitle}
     >
      <div className="flex items-baseline justify-between gap-2">

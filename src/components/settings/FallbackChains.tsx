@@ -100,7 +100,6 @@ export function FallbackChainsSection({
     <DiagramTree size={16} aria-hidden className="text-muted" />
     <h2 className="text-sm font-semibold">{t.fallbackSection}</h2>
    </div>
-   <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.fallbackHint}</p>
 
    {
     err && (

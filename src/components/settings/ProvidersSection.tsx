@@ -347,7 +347,6 @@ export function ProvidersSection() {
      <Key size={16} aria-hidden className="text-muted" />
      <h2 className="text-sm font-semibold">{t.providersSection}</h2>
     </div>
-    <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.providersHint}</p>
 
     {parsed.error && (
      <p role="alert" className="mt-2 rounded border border-danger/40 bg-danger/5 px-3 py-2 text-[13px] text-danger">

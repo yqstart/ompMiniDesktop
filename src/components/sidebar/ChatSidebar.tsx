@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Archive, ArrowUpCircle, BranchDown, BranchUp, ChevronRight, Folder, FolderError, FolderPlus, Inbox, Layers, Loader, Plus, Search, X } from "reicon-react";
+import { AlertTriangle, Archive, ArrowUpCircle, BranchDown, BranchUp, ChevronRight, Folder, FolderError, FolderPlus, Inbox, Layers, Loader, PenLine, Plus, Search, Trash2, X } from "reicon-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "@shared/api";
-import type { ProjectView, SessionView } from "@shared/types";
+import type { ProjectView, SessionView, WorkspaceView } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
 import { loadCheckouts, refreshSidebar } from "../../lib/checkouts";
@@ -11,7 +11,10 @@ import { groupSessionsByProject } from "../../lib/sessions";
 import { openSessionWithHistory } from "../../lib/sessionOpen";
 import { runSessionBatch } from "../../lib/sessionBatch";
 import { isCommitTaskRunning, openCommitPanel, pushWorkspace } from "../../lib/commitTasks";
+import { useContextMenu } from "../../lib/contextMenu";
+import type { ContextMenuEntry } from "../../lib/contextMenu";
 import { useText } from "../../lib/useText";
+import { ConfirmDialog } from "../ConfirmDialog";
 import { SidebarBottom } from "./SidebarBottom";
 import { SidebarTop } from "./SidebarTop";
 import { WorkspaceGroupDialog } from "./WorkspaceGroupDialog";
@@ -24,8 +27,8 @@ const SCAN_MAX = 5000;
 /**
  * 会话行（V1–V10 的形状）：`● 标题 … 时间 / 归档`。
  *
- * - 标题单行省略；右侧固定 68px 槽位：平时显示等宽时间，hover / focus-within 时换成归档键
- *   （两者同槽互斥、零位移，悬浮不跳动）；
+ * - 标题单行省略；右侧固定 68px 槽位显示等宽时间（V36 起时间常显——归档挪进**右键菜单**，
+ *   原 hover 归档键退场）；
  * - 行首绿点 = 该会话的聊天进程在跑（后端 `running` 快照）；已损坏的会话标题落 `t.corrupt`；
  * - 点击 = 打开会话（`openSessionWithHistory`：起 / 聚焦长驻 RPC 并拉历史）。
  */
@@ -33,48 +36,65 @@ function SessionRow({
  s,
  busy,
  onArchive,
+ onDelete,
 }: {
  s: SessionView;
  busy: boolean;
  onArchive: (ids: string[]) => void;
+ onDelete: (ids: string[]) => void;
 }) {
  const activeSessionId = useApp((st) => st.activeSessionId);
  const locale = useApp((st) => st.locale);
  const t = useText();
+ const menu = useContextMenu();
+ const [confirmDelete, setConfirmDelete] = useState(false);
  const active = s.id === activeSessionId;
  const time = s.corrupt
   ? t.corrupt
   : new Date(s.timestamp).toLocaleString(locale, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+ // 右键菜单（V36）：「归档会话」+「删除对话」（真删 jsonl 会话文件，先走 ConfirmDialog）——
+ // 原 hover 归档键退场
+ const menuItems: ContextMenuEntry[] = [
+  { label: s.running ? t.archiveChatRunning : t.archiveChat, icon: Archive, disabled: busy, onSelect: () => onArchive([s.id]) },
+  { separator: true },
+  { label: t.deleteChat, icon: Trash2, danger: true, disabled: busy, title: t.sessDeleteConfirm, onSelect: () => setConfirmDelete(true) },
+ ];
  return (
-  <div className={`group relative flex h-8 min-w-0 items-center rounded-md pr-1 pl-2 transition-colors duration-100 ${active ? "bg-active" : "hover:bg-hover"}`}>
-   {active && <span aria-hidden className="absolute top-1/2 left-0 h-3.5 w-[2px] -translate-y-1/2 rounded-full bg-accent" />}
-   <button
-    onClick={() => void openSessionWithHistory(s.id, s)}
-    className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
-    aria-label={fmt(t.chatAria, s.title)}
+  <>
+   <div
+    onContextMenu={(e) => menu.open(e, menuItems)}
+    className={`relative flex h-8 min-w-0 items-center rounded-md pr-1 pl-2 transition-colors duration-100 ${active ? "bg-active" : "hover:bg-hover"}`}
    >
-    <span
-     className={`h-1.5 w-1.5 shrink-0 rounded-full ${s.running ? "bg-ok" : "bg-transparent"}`}
-     aria-label={s.running ? t.statusRunning : undefined}
-     aria-hidden={!s.running}
-    />
-    <span className={`min-w-0 flex-1 truncate text-sm ${active ? "font-semibold" : ""}`}>{s.title}</span>
-    <span className="w-[68px] shrink-0 truncate text-right font-mono text-[11px] text-faint group-focus-within:invisible group-hover:invisible">
-     {time}
-    </span>
-   </button>
-   <span className="invisible absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center justify-end opacity-0 transition-opacity duration-150 group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100">
+    {active && <span aria-hidden className="absolute top-1/2 left-0 h-3.5 w-[2px] -translate-y-1/2 rounded-full bg-accent" />}
     <button
-     onClick={() => onArchive([s.id])}
-     disabled={busy}
-     className="cursor-pointer rounded-md p-1 text-muted transition-colors duration-100 hover:bg-active hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-     aria-label={s.running ? t.archiveChatRunning : t.archiveChat}
-     title={s.running ? t.archiveChatRunning : t.archiveChat}
+     onClick={() => void openSessionWithHistory(s.id, s)}
+     className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
+     aria-label={fmt(t.chatAria, s.title)}
     >
-     <Archive size={13} />
+     <span
+      className={`h-1.5 w-1.5 shrink-0 rounded-full ${s.running ? "bg-ok" : "bg-transparent"}`}
+      aria-label={s.running ? t.statusRunning : undefined}
+      aria-hidden={!s.running}
+     />
+     <span className={`min-w-0 flex-1 truncate text-sm ${active ? "font-semibold" : ""}`}>{s.title}</span>
+     <span className="w-[68px] shrink-0 truncate text-right font-mono text-[11px] text-faint">
+      {time}
+     </span>
     </button>
-   </span>
-  </div>
+   </div>
+   <ConfirmDialog
+    open={confirmDelete}
+    danger
+    title={s.title}
+    detail={t.sessDeleteConfirm}
+    confirmLabel={t.delete}
+    onConfirm={() => {
+     setConfirmDelete(false);
+     onDelete([s.id]);
+    }}
+    onCancel={() => setConfirmDelete(false)}
+   />
+  </>
  );
 }
 
@@ -95,11 +115,15 @@ function SessionRow({
  *
  * 边界：搜索只过滤**标题 / 目录**（V2 M7b 的正文搜索随 V11 的左栏会话列表删除，
  * V32 未恢复；要回来得先恢复后端 `search_sessions` 并定交互）。列表只列**进行中**的会话，
- * 已归档的在设置 ›「已归档对话」里管理。工作区在这里能**新建**（标题行的 `Layers`，
- * 与终端形态同一个 `WorkspaceGroupDialog`），编辑 / 删除 / 拖拽排序仍只在终端形态的左栏。
+ * 已归档的在设置 ›「已归档对话」里管理。工作区：新建走标题行的 `Layers`；**V36 起编辑 / 删除
+ * 也在这里**（段头右键菜单，与终端形态同款）——拖拽排序仍只在终端形态的左栏。
+ * 行级动作（V36）全部收进右键菜单、hover 动作槽退场：会话行 =「归档会话 / 删除对话」（删除真删
+ * jsonl，先走 ConfirmDialog）；项目分组头 =「新建会话 / 提交… / 归档本项目全部对话」；
+ * 「未归属会话」组 =「归档全部」。
  */
 export function ChatSidebar({ visible }: { visible: boolean }) {
  const t = useText();
+ const menu = useContextMenu();
  const projects = useApp((s) => s.projects);
  const workspaceGroups = useApp((s) => s.workspaceGroups);
  const activeSessionId = useApp((s) => s.activeSessionId);
@@ -115,8 +139,10 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
  const [query, setQuery] = useState("");
  const [error, setError] = useState<string | null>(null);
  const [busy, setBusy] = useState(false);
- /** 工作区标题行的「新建工作区」对话框（`WorkspaceGroupDialog` 的两形态共用入口）。 */
- const [groupDialogOpen, setGroupDialogOpen] = useState(false);
+ /** 工作区对话框（`WorkspaceGroupDialog` 的两形态共用入口）：null = 关；`group: null` = 新建。 */
+ const [groupDialog, setGroupDialog] = useState<{ group: WorkspaceView | null } | null>(null);
+ /** 删除工作区的二次确认（V36 右键菜单入口）。 */
+ const [confirmDelete, setConfirmDelete] = useState<WorkspaceView | null>(null);
  /** 当前扫描窗口：state 给「继续扫描」按钮显示，ref 给不依赖它的 `reload` 读最新值。 */
  const [limit, setLimit] = useState(SCAN_STEP);
  const limitRef = useRef(SCAN_STEP);
@@ -191,6 +217,24 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
   }
  };
 
+ /** 删除（会话行右键菜单）：真删 jsonl 会话文件、不可恢复——确认后走 `runSessionBatch`（分批 + 失败聚合）。 */
+ const removeSessions = async (ids: string[]) => {
+  if (ids.length === 0 || busy) return;
+  setBusy(true);
+  setError(null);
+  try {
+   const res = await runSessionBatch("delete", ids);
+   await reload();
+   if (res.failed.length > 0) {
+    setError(fmt(t.sessBatchFailed, res.failed.length, res.failed.map((f) => f.message || f.id).join("；")));
+   }
+  } catch (e) {
+   setError(e instanceof Error ? e.message : t.batchDeleteFailed);
+  } finally {
+   setBusy(false);
+  }
+ };
+
  /** 添加项目（标题行的 `FolderPlus`）：只写覆盖层；目录行与工作区树同步刷新，回来即是最新树。 */
  const addProject = async () => {
   const res = await pickAndAddProject();
@@ -212,6 +256,17 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
   const res = await refreshSidebar();
   await reload();
   if (!res.ok && res.message) setError(res.message);
+ };
+
+ /** 删除工作区（V36 段头右键菜单入口；与终端形态同一语义）：成员回归未分组，不删项目 / 文件。 */
+ const removeGroup = async (group: WorkspaceView) => {
+  setError(null);
+  try {
+   await api.deleteWorkspace(group.id);
+   await refreshWorkspaces();
+  } catch (e) {
+   setError(e instanceof Error ? e.message : t.wsGroupFailed);
+  }
  };
 
  /** 目录缺失的重定位：只改覆盖层里的绑定路径（会话文件、备注、归档标记都不动）。 */
@@ -272,9 +327,6 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
   return out.length > 0 ? out : null;
  }, [workspaceGroups, projects]);
 
- /** 分组头与「未归属」共用的动作键（＋ / 归档全部）——图标槽与计数同槽互斥，悬浮零跳动。 */
- const actionButton =
-  "flex cursor-pointer items-center justify-center rounded p-1 text-muted transition-colors duration-100 hover:bg-active hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40";
  /** 项目分组头的 git 状态徽章（与终端目录行同一份快照同一套语义，只是按项目主目录取）：dirty 点 / 待推送（可点）/ 落后（只读）/ 任务态（可点开面板）。无快照时不占位。 */
  const gitBadgesFor = (path: string, missing: boolean) => {
   if (missing) return null;
@@ -348,83 +400,64 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
   );
  };
  /** 一个项目分组（分组头 + 进行中会话列表）：平铺与工作区分段两种排布共用同一份。 */
- const projectBlock = (project: ProjectView, active: SessionView[]) => (
-  <details key={project.id} className="group/proj mt-1" open={!q || active.length > 0}>
-   {/* 项目头与终端形态的项目头同款（`ProjectGroup`）：没有折叠箭头——点击整行即展开 / 收起，
+ const projectBlock = (project: ProjectView, active: SessionView[]) => {
+  // 右键菜单（V36）：分组头的动作全部收进这里（原 hover 动作槽退场）——新建会话 / 提交… /
+  // 归档本项目全部对话（有进行中会话才出现）
+  const menuItems: ContextMenuEntry[] = [
+   { label: t.newSession, icon: Plus, disabled: project.missing || busy, title: fmt(t.newSessionIn, project.name), onSelect: () => void newChat(project) },
+   { label: t.gitCommitTitle, icon: ArrowUpCircle, disabled: project.missing || busy, title: project.missing ? t.gitCommitNotRepo : t.gitCommitTitle, onSelect: () => openCommitPanel(project.path) },
+   ...(active.length > 0
+    ? [
+     { separator: true } as const,
+     { label: fmt(t.archiveAllIn, project.name), icon: Archive, disabled: busy, title: t.archiveAllInTitle, onSelect: () => void archive(active.map((s) => s.id)) },
+    ]
+    : []),
+  ];
+  return (
+   <details key={project.id} className="group/proj mt-1" open={!q || active.length > 0}>
+    {/* 项目头与终端形态的项目头同款（`ProjectGroup`）：没有折叠箭头——点击整行即展开 / 收起，
        文件夹图标进 `bg-surface` 小盒（展开时上强调色、目录缺失上 warn） */}
-   <summary className="relative flex cursor-pointer items-center gap-1.5 rounded-md px-1 py-1.5 text-[13px] text-muted transition-colors duration-100 hover:bg-hover [&::-webkit-details-marker]:hidden">
-    <span className={`flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface transition-colors duration-100 ${project.missing ? "text-warn" : "text-muted group-open/proj:text-accent"}`}>
-     <Folder size={14} aria-hidden />
-    </span>
-    <span className="min-w-0 flex-1 truncate">
-     <span className="font-semibold text-foreground">{project.name}</span>
-     {project.missing ? (
-      <span className="ml-1.5 rounded bg-warn/15 px-1 py-px text-[11px] text-warn">{t.missingFolder}</span>
-     ) : (
-      <span className="ml-1.5 truncate font-mono text-[11px] text-faint">{project.path}</span>
-     )}
-    </span>
-    {gitBadgesFor(project.path, project.missing)}
-    <span className="relative flex h-5 w-[72px] shrink-0 items-center justify-end">
-     <span className={`font-mono ${active.length === 0 ? "invisible" : "group-hover/proj:invisible"}`}>{active.length}</span>
-     <span
-      className={`absolute inset-y-0 right-0 items-center gap-0.5 ${active.length === 0 ? "flex" : "hidden group-hover/proj:flex"}`}
-      onClick={(e) => e.preventDefault()}
-     >
-      <button
-       onClick={() => openCommitPanel(project.path)}
-       disabled={project.missing || busy}
-       className={actionButton}
-       aria-label={t.gitCommitTitle}
-       title={project.missing ? t.gitCommitNotRepo : t.gitCommitTitle}
-      >
-       <ArrowUpCircle size={12} />
-      </button>
-      <button
-       onClick={() => void newChat(project)}
-       disabled={project.missing || busy}
-       className={actionButton}
-       aria-label={fmt(t.newSessionIn, project.name)}
-       title={t.newSession}
-      >
-       <Plus size={12} />
-      </button>
-      {active.length > 0 && (
-       <button
-        onClick={() => void archive(active.map((s) => s.id))}
-        disabled={busy}
-        className={actionButton}
-        aria-label={fmt(t.archiveAllIn, project.name)}
-        title={t.archiveAllInTitle}
-       >
-        <Archive size={12} />
-       </button>
+    <summary
+     onContextMenu={(e) => menu.open(e, menuItems)}
+     className="relative flex cursor-pointer items-center gap-1.5 rounded-md px-1 py-1.5 text-[13px] text-muted transition-colors duration-100 hover:bg-hover [&::-webkit-details-marker]:hidden"
+    >
+     <span className={`flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface transition-colors duration-100 ${project.missing ? "text-warn" : "text-muted group-open/proj:text-accent"}`}>
+      <Folder size={14} aria-hidden />
+     </span>
+     <span className="min-w-0 flex-1 truncate">
+      <span className="font-semibold text-foreground">{project.name}</span>
+      {project.missing ? (
+       <span className="ml-1.5 rounded bg-warn/15 px-1 py-px text-[11px] text-warn">{t.missingFolder}</span>
+      ) : (
+       <span className="ml-1.5 truncate font-mono text-[11px] text-faint">{project.path}</span>
       )}
      </span>
-    </span>
-   </summary>
-   {project.missing && (
-    <div className="mx-1.5 mb-1 flex items-center gap-1.5 rounded-md bg-warn/10 px-2 py-1.5 text-[11px] text-warn">
-     <FolderError size={12} aria-hidden className="shrink-0" />
-     <span className="min-w-0 flex-1 truncate">{t.missingFolderHint}</span>
-     <button
-      onClick={() => void relocate(project.id, project.name)}
-      className="shrink-0 cursor-pointer rounded-sm border border-warn/40 px-1.5 py-0.5 transition-colors duration-100 hover:bg-warn/15"
-      aria-label={fmt(t.relocateAria, project.name)}
-      title={t.relocateTitle}
-     >
-      {t.relocate}
-     </button>
+     {gitBadgesFor(project.path, project.missing)}
+     {active.length > 0 && <span className="shrink-0 font-mono text-faint">{active.length}</span>}
+    </summary>
+    {project.missing && (
+     <div className="mx-1.5 mb-1 flex items-center gap-1.5 rounded-md bg-warn/10 px-2 py-1.5 text-[11px] text-warn">
+      <FolderError size={12} aria-hidden className="shrink-0" />
+      <span className="min-w-0 flex-1 truncate">{t.missingFolderHint}</span>
+      <button
+       onClick={() => void relocate(project.id, project.name)}
+       className="shrink-0 cursor-pointer rounded-sm border border-warn/40 px-1.5 py-0.5 transition-colors duration-100 hover:bg-warn/15"
+       aria-label={fmt(t.relocateAria, project.name)}
+       title={t.relocateTitle}
+      >
+       {t.relocate}
+      </button>
+     </div>
+    )}
+    <div className="mt-0.5 space-y-px border-l border-border-soft pl-1.5">
+     {active.length === 0 && <div className="px-2.5 py-1 text-[11px] text-faint">{t.noActiveChats}</div>}
+     {active.map((s) => (
+      <SessionRow key={s.id} s={s} busy={busy} onArchive={(ids) => void archive(ids)} onDelete={(ids) => void removeSessions(ids)} />
+     ))}
     </div>
-   )}
-   <div className="mt-0.5 space-y-px border-l border-border-soft pl-1.5">
-    {active.length === 0 && <div className="px-2.5 py-1 text-[11px] text-faint">{t.noActiveChats}</div>}
-    {active.map((s) => (
-     <SessionRow key={s.id} s={s} busy={busy} onArchive={(ids) => void archive(ids)} />
-    ))}
-   </div>
-  </details>
- );
+   </details>
+  );
+ };
 
  return (
   <aside className={`${visible ? "flex" : "hidden"} h-full w-full flex-col overflow-hidden border-r border-border bg-sidebar`}>
@@ -462,7 +495,7 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
      <div className="mt-2 flex shrink-0 items-center gap-2 px-1 text-[11px] font-medium tracking-wide text-faint">
       <span className="min-w-0 flex-1 truncate">{t.workspaceTitle}</span>
       <button
-       onClick={() => setGroupDialogOpen(true)}
+       onClick={() => setGroupDialog({ group: null })}
        aria-label={t.wsGroupNew}
        title={t.wsGroupNewTitle}
        className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
@@ -506,6 +539,8 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
       {sections === null
        ? visibleGroups.map(({ project, active }) => projectBlock(project, active))
        : sections.map((section) => {
+        // 「未分组」段不可编辑 / 不可删（与终端形态同款：无菜单）
+        const sectionGroup = section.key === "__ungrouped" ? null : workspaceGroups.find((g) => g.id === section.key) ?? null;
         const members = section.projectIds
          .map((id) => visibleGroups.find((g) => g.project.id === id))
          .filter((g): g is (typeof visibleGroups)[number] => g !== undefined);
@@ -514,8 +549,16 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
         return (
          <details key={section.key} className="group/ws mt-2" open={!q || hits > 0}>
           {/* 工作区头与终端形态的组头同款（`WorkspaceGroupSection`）：没有折叠箭头——点击整行即展开 / 收起，
-              图标进 `bg-surface` 小盒，展开时 `Layers` 与名字上强调色，行尾是成员计数小盒 */}
-          <summary className="flex cursor-pointer items-center gap-1.5 rounded-md px-1 py-1.5 text-[13px] text-muted transition-colors duration-100 hover:bg-hover [&::-webkit-details-marker]:hidden">
+              图标进 `bg-surface` 小盒，展开时 `Layers` 与名字上强调色，行尾是成员计数小盒；
+              V36 起行级操作收进右键菜单（「编辑工作区…」/「删除工作区」，与终端形态同款） */}
+          <summary
+           onContextMenu={sectionGroup === null ? undefined : (e) => menu.open(e, [
+            { label: t.wsGroupEdit, icon: PenLine, onSelect: () => setGroupDialog({ group: sectionGroup }) },
+            { separator: true },
+            { label: t.wsGroupDelete, icon: Trash2, danger: true, onSelect: () => setConfirmDelete(sectionGroup) },
+           ])}
+           className="flex cursor-pointer items-center gap-1.5 rounded-md px-1 py-1.5 text-[13px] text-muted transition-colors duration-100 hover:bg-hover [&::-webkit-details-marker]:hidden"
+          >
            <span className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface text-muted transition-colors duration-100 group-open/ws:text-accent">
             <Layers size={14} aria-hidden />
            </span>
@@ -536,31 +579,20 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
        })}
       {visibleOrphan.length > 0 && (
        <details className="group/orphan mt-1" open={!q || visibleOrphan.length > 0}>
-        <summary className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1.5 text-[13px] font-semibold text-muted transition-colors duration-100 hover:bg-hover [&::-webkit-details-marker]:hidden">
+        <summary
+         onContextMenu={(e) => menu.open(e, [
+          { label: t.archiveOrphanAll, icon: Archive, disabled: busy || visibleOrphan.length === 0, onSelect: () => void archive(visibleOrphan.map((s) => s.id)) },
+         ])}
+         className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1.5 text-[13px] font-semibold text-muted transition-colors duration-100 hover:bg-hover [&::-webkit-details-marker]:hidden"
+        >
          <ChevronRight size={12} aria-hidden className="transition-transform duration-150 group-open/orphan:rotate-90" />
          <Inbox size={13} aria-hidden className="shrink-0 text-faint" />
          <span className="min-w-0 flex-1 truncate">{t.orphanChats}</span>
-         <span className="relative flex h-5 w-[28px] shrink-0 items-center justify-end">
-          <span className="font-mono group-hover/orphan:invisible">{visibleOrphan.length}</span>
-          <span
-           className="absolute inset-y-0 right-0 hidden items-center gap-0.5 group-hover/orphan:flex"
-           onClick={(e) => e.preventDefault()}
-          >
-           <button
-            onClick={() => void archive(visibleOrphan.map((s) => s.id))}
-            disabled={busy || visibleOrphan.length === 0}
-            className={actionButton}
-            aria-label={t.archiveOrphanAll}
-            title={t.archiveOrphanAll}
-           >
-            <Archive size={12} />
-           </button>
-          </span>
-         </span>
+         <span className="shrink-0 font-mono">{visibleOrphan.length}</span>
         </summary>
         <div className="mt-0.5 space-y-px border-l border-border pl-1.5">
          {visibleOrphan.map((s) => (
-          <SessionRow key={s.id} s={s} busy={busy} onArchive={(ids) => void archive(ids)} />
+          <SessionRow key={s.id} s={s} busy={busy} onArchive={(ids) => void archive(ids)} onDelete={(ids) => void removeSessions(ids)} />
          ))}
         </div>
        </details>
@@ -586,15 +618,31 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
     )
    }
    <SidebarBottom />
-   {/* 新建工作区对话框（V21 的多项目容器）：与终端形态同一个组件——建完 `onChanged`
-       刷目录行 / 工作区清单 / 会话列表，两栏都常驻挂载，另一形态切过去即是最新。 */}
-   {groupDialogOpen && (
+   {/* 工作区对话框（V21 的多项目容器）：与终端形态同一个组件（新建 / 编辑共用；V36 起聊天侧
+       也能经段头右键菜单编辑 / 删除）——建完 `onChanged` 刷目录行 / 工作区清单 / 会话列表，
+       两栏都常驻挂载，另一形态切过去即是最新。 */}
+   {groupDialog && (
     <WorkspaceGroupDialog
-     group={null}
-     onClose={() => setGroupDialogOpen(false)}
+     key={groupDialog.group?.id ?? "new"}
+     group={groupDialog.group}
+     onClose={() => setGroupDialog(null)}
      onChanged={refreshWorkspaces}
     />
    )}
+   {/* 删除工作区的二次确认（右键菜单入口，V36）：成员回归未分组，不删项目 / 文件 */}
+   <ConfirmDialog
+    open={confirmDelete !== null}
+    danger
+    title={fmt(t.wsGroupDeleteTitle, confirmDelete?.name ?? "")}
+    detail={t.wsGroupDeleteBody}
+    confirmLabel={t.wsGroupDelete}
+    onConfirm={() => {
+     const group = confirmDelete;
+     setConfirmDelete(null);
+     if (group) void removeGroup(group);
+    }}
+    onCancel={() => setConfirmDelete(null)}
+   />
   </aside>
  );
 }

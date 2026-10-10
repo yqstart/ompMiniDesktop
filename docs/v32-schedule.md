@@ -108,7 +108,7 @@ response(prompt,true) → agent_start → turn_start → message_start(user) →
 
 - **恢复的文件**（V11 删除、本期原样取回并适配）：
   - 组件：`components/thread/`（Thread / TopBar / AssistantText / ToolRow / ApprovalCard / UiRequestCard /
-    MentionChips / StatusBar）、`components/composer/`（Composer / ContextBar / ContextMeter / MentionList /
+    MentionChips / StatusBar；ContextMeter 于 §7.14 从 composer 侧搬入）、`components/composer/`（Composer / ContextBar / MentionList /
     SlashMenu / UsageLimits）、`components/pickers/`（ModelPicker / ThinkingPicker / PermissionBadge / ProjectPicker / BranchPicker）；
   - 新增装配件：`components/thread/ChatView.tsx`（TopBar + Thread + StatusBar + Composer 的常驻容器，
     事件订阅与完成通知挂这里）、`components/AppModeToggle.tsx`（形态切换两档分段控件）、
@@ -148,9 +148,9 @@ response(prompt,true) → agent_start → turn_start → message_start(user) →
 点击目录行 / 会话弹窗 / 空态  → createChatIn(cwd) 或 openSessionWithHistory(id)
 open_session → spawn `omp --mode rpc-ui`（握手）→ omp-state://<id>（模型/档位/上下文/命令面）
 get_history  → jsonl 原始行 → viewMsgsFromJsonlLines → ViewMsg[]（按 id 去重合并）
-Composer 发送 → send_message / run_slash / steer / follow_up（流式中 Enter = follow_up、⌘Enter = steer）
+Composer 发送 → send_message / run_slash / steer / follow_up（流式中 Enter = steer 插话、⌘/Ctrl+Enter = follow_up 排队，§7.13）
 pump 帧流     → omp-event://<id> → frameToViewMsgs + mergeViewMsgs → store.eventsBySession
-状态 / 用量   → omp-status://<id> / omp-state://<id> → 状态胶囊、工具行的上下文/用量/耗时
+状态 / 用量   → omp-status://<id> / omp-state://<id> → 发送语义与读屏播报、顶栏的上下文用量环（§7.14）
 审批          → extension_ui_request(select) → ApprovalCard → approve / respond_ui
 ```
 
@@ -163,8 +163,8 @@ pump 帧流     → omp-event://<id> → frameToViewMsgs + mergeViewMsgs → sto
 - 聊天形态左栏（`ChatSidebar`；二次口径，见 §7）：添加项目主入口 → 会话搜索（标题 / 目录过滤）→
   项目分组（进行中会话列表、行首绿点 = 进程在跑、悬浮归档）→「未归属会话」组 → 扫描窗口提示；
   顶栏 / 底栏与终端形态共用（`SidebarTop` / `SidebarBottom`）。
-- 聊天形态主区：`TopBar`（会话名可点击改备注 + 复制 Markdown；更新入口不再放这里——那是左栏顶栏两枚 chip 的职责）
-  / `Thread`（消息流，首屏 200 条按需加载）/ `Composer`（上下文条 + 附件 + 输入 + 工具行：图片 / 权限 / 模型 / 思考档 / 状态胶囊 / 上下文环 / 发送·停止）。
+- 聊天形态主区：`TopBar`（会话名可点击改备注 + 右端上下文用量环——§7.14 起；更新入口不再放这里——那是左栏顶栏两枚 chip 的职责）
+  / `Thread`（消息流，首屏 200 条按需加载）/ `Composer`（上下文条 + 附件 + 输入 + 工具行：图片 / 引用 / 权限 / 排队·压缩 / 供应商用量 / 模型 / 思考档 / 发送·停止）。
 - 聊天侧空态：无项目 → 与左栏同一份「选择目录」入口；有项目但未打开会话 → 「从左栏选一个会话继续，或点 ＋ 新建」；
   会话已建好但还没有消息 → 「输入第一条消息」。
 - 设置页在聊天形态下多一个「返回聊天」（左上），终端形态不变（关闭走标签栏 × / ⌘W）。
@@ -461,3 +461,59 @@ Composer 工具行的引用键渲染 `Files` 图标（svg 首段 `M 8.3333 14.33
 「项目行必须重拉」这条口径由第二条用例钉住（断言新段带着成员渲染出来，空段不占段）；`pnpm check`
 （534 vitest + e2e:ipc 95）全绿。
 
+
+### 7.13 流式发送语义对齐 omp 终端（2026-10-10，用户口径）：Enter = 插话、⌘/Ctrl+Enter = 排队
+
+用户口径（截图 + 说明，红框 = 流式提示语与「排队」按钮）：「聊天框中的提示语和排队需要重新设计，发送的方式
+取决于 omp 设置的是排队发送还是插话发送，app 侧不做处理，我们需要做的仅仅是对 omp 终端的兼容」。
+
+**上游事实（omp 18.8.7，真实 TUI 实测 + 二进制内嵌源码复核）**：
+
+- **终端里 Enter = 插话（steering）**：提交处理器（`setupEditorSubmitHandler`）的流式分支**硬编码**
+  `session.prompt(e, { streamingBehavior: "steer" })`；真实 TUI 实测（临时目录里跑 `sleep 100`，运行中打
+  「插话测试一」+ Enter）：正在跑的 bash 工具被打成后台（输出行原文「Backgrounded early to handle an
+  incoming message; the command keeps running.」）并**当轮**被模型响应——不是排队。
+- **终端里 Ctrl+Q / Ctrl+Enter = 排队（follow-up）**：`app.message.followUp` 的默认键 = `["ctrl+q", "ctrl+enter"]`
+  （可重映射；本机 `keybindings.yml` 只关了 `app.quit`，没有改键）；handler = `handleFollowUp()` →
+  `session.followUp(...)`（pending chips 标「After yield」；`/queue` 同一语义）。
+- **没有能颠倒这对键位的设置**：`steeringMode` / `followUpMode` / `interruptMode` 只决定**送达之后**怎么处理
+  （多条排队是全量还是一条条送；插话是否打断正在执行的工具）——「取决于 omp 设置」的实际含义 = **app 不自己
+  发明语义，把消息按终端的两条通路转给 omp，处理方式全部交给 omp**。
+- **RPC 面三条等价**：`prompt{streamingBehavior}`、`steer`、`follow_up` 在 omp 内部收敛到同一个队列实现
+  （`Session.steer/followUp` 与 `prompt` 的流式分支最终都走 `#$s` → `agent.steer/followUp`）——壳侧现有
+  `steer_message` / `follow_up_message` 两条命令原样可用，**后端一行没动**。
+
+**改动**（原实现正好是反的：流式中 Enter = `follow_up` 排队、⌘/Ctrl+Enter = `steer`——V2 时代定的，与终端相反）：
+
+| # | 位置 | 改动 |
+|---|---|---|
+| 1 | `Composer.tsx` | 键位对调：Enter（`send()` 的流式分支）→ `sendQueued("steer")`；⌘/Ctrl+Enter → `sendQueued("follow_up")`；注释同步（含 `/` 补全「流式中不开」的解释） |
+| 2 | `locale.ts` | `placeholderRunning` 中英改写（zh：「输入追问，Enter 立即插话，⌘/Ctrl+Enter 排队本轮后执行」）；`queueTitle` 中性化——`queuedMessageCount` 本来就合计 steering + follow-up + 延迟队列，Enter 改插话后它更常非零，旧文案「本轮后按序执行」只对一半成立 |
+| 3 | 「排队」按钮 | **保留**（用户口径：显式排队入口 = ⌘/Ctrl+Enter 的鼠标入口），文案 / 位置 / 禁用条件不变；「停止」不变 |
+
+**界面核对**（`pnpm build` + 静态托管 `dist` + `__TAURI_INTERNALS__` mock 的真实 Chromium，2026-10-10 实测；
+mock 走 `addInitScript` + reload——注意本机 browser runtime 的 `page.evaluate` 落在 isolated world，
+**读 mock 状态要走 CDP `Runtime.evaluate`（main world）**，DOM 断言两个 world 都能读）：
+
+| 步骤 | 断言 | 结果 |
+|---|---|---|
+| 打开探针会话（`get_session_runtime.status = "running"`） | 占位符 = 「输入追问，Enter 立即插话，⌘/Ctrl+Enter 排队本轮后执行」 | ✅ |
+| 输入「插话冒烟A」+ Enter | mock 收到 `steer_message \| 插话冒烟A`；草稿已清 | ✅ |
+| 输入「排队冒烟B」+ Ctrl+Enter | mock 收到 `follow_up_message \| 排队冒烟B`；草稿已清 | ✅ |
+| 输入「排队冒烟C」+ 点「排队」按钮 | mock 收到 `follow_up_message \| 排队冒烟C` | ✅ |
+| 运行中工具行 | 按钮 = 「排队追问（本轮后执行）」+「停止」（与改动前同构） | ✅ |
+
+回归：`pnpm check`（540 vitest + e2e:ipc 94 命令）全绿；无 Rust / IPC 契约改动。
+
+### 7.14 顶栏右端 = 上下文用量环，输入框工具行去掉常驻状态胶囊（2026-10-10，用户口径）
+
+用户口径：「去除红框中的复制和就绪，把输入框中的用量状态放到复制的位置」（截图：顶栏右上角 = 复制键；输入框工具行的绿点「就绪」）。
+
+| # | 位置 | 改动 |
+|---|---|---|
+| 1 | `components/thread/TopBar.tsx` | 删除「复制会话为 Markdown」按钮（唯一入口 → **导出功能整件退场**：`lib/exportMd.ts` 与 `exportMd.test.ts` 删除，`copyChatMd` / `copyChatMdTitle` 与全部 `md*` 字典键中英同步移除）；右端换成 `ContextMeter` |
+| 2 | `components/thread/ContextMeter.tsx`（从 `components/composer/` 搬来） | 面板改**朝下**展开（`top-full mt-1`；原来的家在工作行末尾，是 `bottom-8` 朝上开）；触发按钮本体不变（容量环 + 百分比，数据同是 `omp-state` / `get_context_breakdown` 真值） |
+| 3 | `components/composer/Composer.tsx` | 工具行删除常驻 `OmpStatusPill`（「运行中 / 等待审批 / 出错 / 已退出 / 就绪」）与 `ContextMeter` 的挂载；`QueueBadge` / `CompactButton`（≥80% 压缩键）/ 权限徽标 / 供应商用量键不动 |
+| 4 | `components/thread/StatusBar.tsx` + `locale.ts` | `OmpStatusPill` / `OmpStatusKind` 删除（无其他调用方）；`statusAria` / `statusReady` / `statusChecking` / `statusOmpDown` / `statusNoSession` 五键中英同步移除——**状态语义本身不变**：`statusBySession` 照旧驱动发送语义（V35）与 `StatusBar` 读屏播报（`statusRunning` 等四键保留，聊天左栏「运行中」绿点也还用着） |
+
+回归：`TopBar.test.tsx` 新增「顶栏右端渲染 13% 用量环」用例（共 5 条）；`pnpm check`（538 vitest + e2e:ipc 94 命令）全绿；无 Rust / IPC 契约改动。
