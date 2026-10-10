@@ -4,7 +4,7 @@ import { Folder, FolderPlus, Layers, Search, X } from "reicon-react";
 import { api } from "@shared/api";
 import type { ProjectView, WorkspaceView } from "@shared/types";
 import { useApp } from "../../stores/app";
-import { loadCheckouts } from "../../lib/checkouts";
+import { refreshSidebar } from "../../lib/checkouts";
 import { pickDropTarget, planProjectMove, type ProjectDropHit, type ProjectDropTarget } from "../../lib/projectDrag";
 import { pickAndAddProject } from "../../lib/projects";
 import { isMacKeyboard } from "../../lib/termInput";
@@ -17,18 +17,6 @@ import { SidebarBottom } from "./SidebarBottom";
 import { SidebarTop } from "./SidebarTop";
 import { WorkspaceGroupDialog } from "./WorkspaceGroupDialog";
 import { WorkspaceGroupSection } from "./WorkspaceGroupSection";
-/** 左栏刷新：项目列表 + 工作区 / 目录行清单（项目增删 / 重定位 / 移除 / 工作区编辑后都回这里）。 */
-async function refreshSidebar(): Promise<{ ok: boolean; message: string | null }> {
- const [projects, checkouts] = await Promise.all([
-  api.listProjects().then((list) => ({ ok: true as const, list })).catch((e: unknown) => ({ ok: false as const, message: e instanceof Error ? e.message : String(e) })),
-  loadCheckouts().then((list) => ({ ok: true as const, list })).catch((e: unknown) => ({ ok: false as const, message: e instanceof Error ? e.message : String(e) })),
- ]);
- if (projects.ok) useApp.getState().set({ projects: projects.list });
- const failed: string[] = [];
- if (!projects.ok) failed.push(projects.message);
- if (!checkouts.ok) failed.push(checkouts.message);
- return failed.length === 0 ? { ok: true, message: null } : { ok: false, message: failed.join("；") };
-}
 
 /**
  * 拖拽会话（V26）：指针按下后先进「待定」，移动超过 4px 才激活（不影响点击）。

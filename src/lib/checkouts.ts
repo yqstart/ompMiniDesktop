@@ -48,6 +48,23 @@ export async function loadCheckouts(): Promise<CheckoutView[]> {
  return list;
 }
 
+/** 左栏刷新：项目列表 + 工作区 / 目录行清单（项目增删 / 重定位 / 移除 / 工作区编辑后都回这里）。
+ *
+ * 两形态的左栏（终端 `WorkspaceSidebar` / 聊天 `ChatSidebar`）**共用这一份**：两栏常驻挂载、
+ * 读的是同一个 `store`，各自维护一份刷新链会漂移（新建工作区后只有一侧见到成员项目）。
+ * 失败不回滚已落库的那一半，把消息合并带回给调用方决定显示位置。 */
+export async function refreshSidebar(): Promise<{ ok: boolean; message: string | null }> {
+ const [projects, checkouts] = await Promise.all([
+  api.listProjects().then((list) => ({ ok: true as const, list })).catch((e: unknown) => ({ ok: false as const, message: e instanceof Error ? e.message : String(e) })),
+  loadCheckouts().then((list) => ({ ok: true as const, list })).catch((e: unknown) => ({ ok: false as const, message: e instanceof Error ? e.message : String(e) })),
+ ]);
+ if (projects.ok) useApp.getState().set({ projects: projects.list });
+ const failed: string[] = [];
+ if (!projects.ok) failed.push(projects.message);
+ if (!checkouts.ok) failed.push(checkouts.message);
+ return failed.length === 0 ? { ok: true, message: null } : { ok: false, message: failed.join("；") };
+}
+
 /** 打开或聚焦某目录行的终端：已有该目录的终端 → 聚焦最近一个；否则新建。
  *
  * V32 二次口径起聊天形态有**自己的左栏**（`ChatSidebar` 的会话列表），工作区树只在终端形态

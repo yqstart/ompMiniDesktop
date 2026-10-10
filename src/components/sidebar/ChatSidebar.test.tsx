@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectView, SessionView } from "@shared/types";
 import { useApp } from "../../stores/app";
+import { TEXT } from "../../lib/locale";
 import { ChatSidebar } from "./ChatSidebar";
 
 /** `vi.mock` 的工厂会被提升：用 `vi.hoisted` 拿能在用例里改行为的 mock。 */
@@ -11,12 +12,16 @@ const mock = vi.hoisted(() => ({
  listSessions: vi.fn(),
  listProjects: vi.fn(async () => [] as unknown[]),
  listWorkspaces: vi.fn(async () => [] as unknown[]),
+ listCheckouts: vi.fn(async () => [] as unknown[]),
+ createWorkspace: vi.fn(),
 }));
 vi.mock("@shared/api", () => ({
  api: {
   listSessions: mock.listSessions,
   listProjects: mock.listProjects,
   listWorkspaces: mock.listWorkspaces,
+  listCheckouts: mock.listCheckouts,
+  createWorkspace: mock.createWorkspace,
  },
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(async () => null) }));
@@ -54,6 +59,13 @@ let root: Root;
 beforeEach(() => {
  mock.listSessions.mockReset();
  mock.listSessions.mockResolvedValue({ sessions: SESSIONS, totalFiles: 4, scannedFiles: 4 });
+ mock.listProjects.mockReset();
+ mock.listProjects.mockResolvedValue([]);
+ mock.listWorkspaces.mockReset();
+ mock.listWorkspaces.mockResolvedValue([]);
+ mock.listCheckouts.mockReset();
+ mock.listCheckouts.mockResolvedValue([]);
+ mock.createWorkspace.mockReset();
  useApp.setState({
   projects: [P1, P2],
   workspaceGroups: [{ id: "w1", name: "全栈", createdAt: 0, projectIds: ["p1", "p2"] }],
@@ -154,5 +166,64 @@ describe("聊天侧栏的提交入口（与终端目录行同一命令面）", (
    });
   });
   expect(container.textContent).toContain("改名后的标题");
+ });
+});
+
+/** 输入框赋值：绕过 React 的 value 影子状态（与 `WorkspaceGroupDialog.test.tsx` 同一套）。 */
+async function fill(input: HTMLInputElement | null, value: string): Promise<void> {
+ const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+ await act(async () => {
+  setter?.call(input, value);
+  input?.dispatchEvent(new Event("input", { bubbles: true }));
+ });
+}
+
+async function click(el: HTMLElement | null | undefined): Promise<void> {
+ await act(async () => {
+  el?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+ });
+}
+
+describe("聊天侧栏的工作区标题行（与终端形态同一排入口）", () => {
+ it("标题行给出「新建工作区」与「添加项目」两枚键", async () => {
+  const t = TEXT["zh-CN"];
+  await open();
+  expect(container.textContent).toContain(t.workspaceTitle);
+  expect(container.querySelector(`button[aria-label="${t.wsGroupNew}"]`), "新建工作区").not.toBeNull();
+  expect(container.querySelector(`button[aria-label="${t.sidebarAddProjectAria}"]`), "添加项目").not.toBeNull();
+ });
+
+ it("点「新建工作区」打开同一个对话框；建完左栏立刻出现新段与其成员", async () => {
+  const t = TEXT["zh-CN"];
+  await open();
+  expect(container.textContent).not.toContain("数据组");
+
+  // 建完工作区后端的两个变化：项目归属改了、工作区清单多一组
+  mock.createWorkspace.mockResolvedValue({ id: "w2", name: "数据组", createdAt: 0, projectIds: ["p2"] });
+  mock.listProjects.mockResolvedValue([P1, { ...P2, workspaceId: "w2" }]);
+  mock.listWorkspaces.mockResolvedValue([
+   { id: "w1", name: "全栈", createdAt: 0, projectIds: ["p1"] },
+   { id: "w2", name: "数据组", createdAt: 0, projectIds: ["p2"] },
+  ]);
+
+  await click(container.querySelector<HTMLButtonElement>(`button[aria-label="${t.wsGroupNew}"]`));
+  const nameInput = container.querySelector<HTMLInputElement>(`input[placeholder="${t.wsGroupNamePlaceholder}"]`);
+  expect(nameInput, "点标题行的 Layers 应打开工作区对话框").not.toBeNull();
+  await fill(nameInput, "数据组");
+  const beta = [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find((b) =>
+   (b.closest("label")?.textContent ?? "").includes("beta"),
+  );
+  await click(beta);
+  expect(beta?.checked, "勾选成员项目").toBe(true);
+  await click([...container.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === t.wsGroupCreate));
+
+  expect(mock.createWorkspace).toHaveBeenCalledWith("数据组", ["p2"]);
+  // 项目行必须重拉：归属没刷新的话新组在聊天左栏是「没有成员的空组」，按口径不占段
+  expect(mock.listProjects, "建完要重拉项目行").toHaveBeenCalled();
+  const created = [...container.querySelectorAll("details.group\\/ws")].find((s) => (s.textContent ?? "").includes("数据组"));
+  expect(created, "新工作区应作为分段出现在左栏").not.toBeUndefined();
+  expect(created?.textContent).toContain("beta");
+  // 对话框建完即关
+  expect(container.querySelector(`input[placeholder="${t.wsGroupNamePlaceholder}"]`)).toBeNull();
  });
 });

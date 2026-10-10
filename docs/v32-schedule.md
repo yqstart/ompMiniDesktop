@@ -435,3 +435,29 @@ Composer 工具行的引用键渲染 `Files` 图标（svg 首段 `M 8.3333 14.33
 **未做**：`RuntimeStats`（V10 的 token / 耗时 / TTFT 块）同批遗漏但不在本次报障内，维持现状（上下文环
 `ContextMeter` 与 `CompactButton` 已提供上下文可见性）。
 
+### 7.12 聊天形态也能新建工作区（2026-10-10，用户口径）：左栏补「终端工作区」标题行
+
+用户口径：「聊天形态现在没有新建工作区的功能，我需要跟图中保持一样」——附图为**终端形态左栏的标题行**
+（红框）：`终端工作区` + `Layers`（新建工作区）+ `FolderPlus`（添加项目）。§7.4 起聊天左栏只**读**工作区
+（按工作区分段展示），写入侧（新建 / 编辑 / 拖拽）留在终端形态——用户想在聊天形态里建组只能切形态。
+
+| # | 位置 | 改动 |
+|---|---|---|
+| 1 | `ChatSidebar` 顶部固定区 | 会话搜索框**下方**补一行标题（与终端 `WorkspaceSidebar` 同款：`text-[11px] font-medium tracking-wide text-faint` 标题在左 + 两枚 `size-8` 圆角 ghost 键在右）：`Layers` = 新建工作区（开两形态共用的 `WorkspaceGroupDialog`，`group=null`）、`FolderPlus` = 添加项目（同一实现 `pickAndAddProject`）；**原全宽「添加项目」主入口删除**——同一入口在同一形态出现两次就是两份真相，标题行是它的新家（空态仍有 `noProjectsAdd` 虚线提示，与终端同款） |
+| 2 | `ChatSidebar` 的 `refreshWorkspaces` | 工作区对话框的 `onChanged`：走**与终端同一个** `refreshSidebar`（项目清单 + 目录行 / 工作区清单）再补一趟 `list_sessions`（新成员的会话立刻进列表）；刷新失败落内联错误条（`reload` 成功会清 error，所以那句排在它后面）。**项目行必须重拉**：聊天分段按 `projects[].workspaceId` 取成员，只刷 `workspaceGroups` 会得到「没有成员的空组」，按 §7.4 的口径**不占段**——建完像什么都没发生 |
+| 3 | `lib/checkouts.ts` | `refreshSidebar`（原 `WorkspaceSidebar` 的模块私有函数）**上移成导出**：两形态左栏共用一条刷新链，避免两侧各写一份后漂移；`WorkspaceSidebar` 改为 import（函数体逐字未动，行为不变） |
+
+**UI 级核对**（构建产物 + `__TAURI_INTERNALS__` mock 的真实 Chromium，2026-10-10 实测）：
+
+| 步骤 | 断言 | 结果 |
+|---|---|---|
+| 聊天形态读左栏 | 搜索框（`搜索会话…`）下方一行 = `终端工作区`（11px faint，x=16）+ `Layers` / `FolderPlus`（各 32×32，右端 x=203 / 243） | ✅（与终端形态同一行同款，截图对照） |
+| 点 `Layers` | 开「新建工作区」对话框（标题 + 成员勾选列表 = 同一份 `projects`） | ✅ |
+| 填名 + 勾成员 + 创建 | 对话框关闭，左栏立刻多出该段（成员项目 + 其会话在位）；mock 的 `create_workspace` 会重写 `projects[].workspaceId`——**不重拉项目行时该段根本不会出现**（核对中确认过这条因果） | ✅ |
+| 点 `FolderPlus` | 「添加项目」照常走系统目录选择器（与终端同一实现），无内联报错 | ✅ |
+| 切回终端形态 | 「快速切换」+ 标题行 + 树与改动前逐项一致（共用刷新入口的重构没动行为） | ✅ |
+
+回归：`ChatSidebar.test.tsx` 新增 2 条（标题行两枚键；点 `Layers` 开对话框 → 建完左栏出现新段与其成员）——
+「项目行必须重拉」这条口径由第二条用例钉住（断言新段带着成员渲染出来，空段不占段）；`pnpm check`
+（534 vitest + e2e:ipc 95）全绿。
+

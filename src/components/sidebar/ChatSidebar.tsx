@@ -5,7 +5,7 @@ import { api } from "@shared/api";
 import type { ProjectView, SessionView } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
-import { loadCheckouts } from "../../lib/checkouts";
+import { loadCheckouts, refreshSidebar } from "../../lib/checkouts";
 import { pickAndAddProject, startChatInProject } from "../../lib/projects";
 import { groupSessionsByProject } from "../../lib/sessions";
 import { openSessionWithHistory } from "../../lib/sessionOpen";
@@ -14,6 +14,7 @@ import { isCommitTaskRunning, openCommitPanel, pushWorkspace } from "../../lib/c
 import { useText } from "../../lib/useText";
 import { SidebarBottom } from "./SidebarBottom";
 import { SidebarTop } from "./SidebarTop";
+import { WorkspaceGroupDialog } from "./WorkspaceGroupDialog";
 
 /** 每次「继续扫描」新增的窗口（与后端默认窗口一致，见 `commands::scan_window`）。 */
 const SCAN_STEP = 500;
@@ -80,10 +81,11 @@ function SessionRow({
 /**
  * 聊天形态的左栏（V32 二次口径：左栏随形态切换，V1–V10 的 Sidebar 骨架恢复并适配）。
  *
- * - 形态：添加项目主入口 → 会话搜索 → **按工作区分段**（V21 容器的投影：工作区头 =
- *   名字 + 成员项目数，成员项目内是「项目分组（进行中会话列表，含 worktree 归属）」；
- *   有自定义工作区才分段，没有就平铺；没进组的项目收进「未分组」段；空工作区不占段）→
- *   「未归属会话」组 → 扫描窗口提示；顶部与底部（顶栏 / 设置·语言·皮肤）与终端侧栏共用；
+ * - 形态：会话搜索 → **工作区标题行**（与终端 `WorkspaceSidebar` 同款：`Layers` 新建工作区、
+ *   `FolderPlus` 添加项目——两形态的工作区入口是同一条数据链、同一个对话框）→ **按工作区分段**
+ *   （V21 容器的投影：工作区头 = 名字 + 成员项目数，成员项目内是「项目分组（进行中会话列表，
+ *   含 worktree 归属）」；有自定义工作区才分段，没有就平铺；没进组的项目收进「未分组」段；
+ *   空工作区不占段）→ 「未归属会话」组 → 扫描窗口提示；顶部与底部（顶栏 / 设置·语言·皮肤）与终端侧栏共用；
  * - 数据 = `list_sessions`（**本组件局部持有**，不写 `store.sessions`——那一份是聊天视图
  *   「已知会话」的合并集，窗口外的老会话不该被它顶掉）；项目 / 工作区清单用全局
  *   `projects` / `workspaceGroups`（都为空时各兜底拉一次）；
@@ -93,7 +95,8 @@ function SessionRow({
  *
  * 边界：搜索只过滤**标题 / 目录**（V2 M7b 的正文搜索随 V11 的左栏会话列表删除，
  * V32 未恢复；要回来得先恢复后端 `search_sessions` 并定交互）。列表只列**进行中**的会话，
- * 已归档的在设置 ›「已归档对话」里管理。工作区本身在这里只读（编辑 / 新建仍在终端形态的左栏）。
+ * 已归档的在设置 ›「已归档对话」里管理。工作区在这里能**新建**（标题行的 `Layers`，
+ * 与终端形态同一个 `WorkspaceGroupDialog`），编辑 / 删除 / 拖拽排序仍只在终端形态的左栏。
  */
 export function ChatSidebar({ visible }: { visible: boolean }) {
  const t = useText();
@@ -112,6 +115,8 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
  const [query, setQuery] = useState("");
  const [error, setError] = useState<string | null>(null);
  const [busy, setBusy] = useState(false);
+ /** 工作区标题行的「新建工作区」对话框（`WorkspaceGroupDialog` 的两形态共用入口）。 */
+ const [groupDialogOpen, setGroupDialogOpen] = useState(false);
  /** 当前扫描窗口：state 给「继续扫描」按钮显示，ref 给不依赖它的 `reload` 读最新值。 */
  const [limit, setLimit] = useState(SCAN_STEP);
  const limitRef = useRef(SCAN_STEP);
@@ -186,7 +191,7 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
   }
  };
 
- /** 添加项目（顶部主入口）：只写覆盖层；目录行与工作区树同步刷新，回来即是最新树。 */
+ /** 添加项目（标题行的 `FolderPlus`）：只写覆盖层；目录行与工作区树同步刷新，回来即是最新树。 */
  const addProject = async () => {
   const res = await pickAndAddProject();
   if (res && !res.ok) setError(res.message);
@@ -194,6 +199,19 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
    void loadCheckouts().catch(() => undefined);
    await reload();
   }
+ };
+
+ /**
+  * 工作区变更后的刷新（新建工作区 / 对话框里就地加目录）：项目清单 + 目录行 / 工作区清单
+  * ——走与终端形态**同一个** `refreshSidebar`（两形态看的是同一份 `projects` / `workspaceGroups`，
+  * 项目归属变了必须重拉项目行，否则新工作区在聊天左栏是「没有成员的空组」而不占段），
+  * 再补一趟会话列表（新成员的会话立刻进列表）。刷新失败落内联错误条；
+  * `reload` 成功会清错误，所以那句必须排在它后面。
+  */
+ const refreshWorkspaces = async () => {
+  const res = await refreshSidebar();
+  await reload();
+  if (!res.ok && res.message) setError(res.message);
  };
 
  /** 目录缺失的重定位：只改覆盖层里的绑定路径（会话文件、备注、归档标记都不动）。 */
@@ -413,16 +431,9 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
    {/* 顶栏（红绿灯占位 + 形态切换 + 两枚版本 chip）：与终端形态的 `WorkspaceSidebar` 共用同一份 */}
    <SidebarTop />
    <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
-    {/* 顶部固定区（添加项目 + 搜索框）：sticky 钉在列表上方，`-mx-3 px-3` 让底色铺满容器，
+    {/* 顶部固定区（会话搜索 + 工作区标题行）：sticky 钉在列表上方，`-mx-3 px-3` 让底色铺满容器，
         滚过去的会话行不会从两侧露出 */}
     <div className="sticky top-0 z-10 -mx-3 bg-sidebar px-3 pt-1 pb-2">
-     <button
-      onClick={() => void addProject()}
-      className="mb-2 flex h-8 w-full cursor-pointer items-center justify-center gap-1.5 rounded-md border border-accent/25 bg-accent/10 px-3 text-[13px] font-medium text-accent transition-colors duration-100 hover:bg-accent/20"
-      aria-label={t.addProject}
-     >
-      <FolderPlus size={14} aria-hidden /> {t.addProject}
-     </button>
      <div className="flex items-center gap-2 rounded-md border border-border bg-background px-2.5 py-1.5 text-[13px] text-muted transition-colors duration-100 focus-within:border-accent/70 focus-within:text-foreground">
       <Search size={14} aria-hidden className="shrink-0" />
       <label htmlFor="chat-sidebar-search" className="sr-only">
@@ -444,6 +455,28 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
         <X size={12} aria-hidden />
        </button>
       )}
+     </div>
+     {/* 工作区标题行（与终端形态的 `WorkspaceSidebar` 同款同位置：标题在左、两枚键在右）：
+         `Layers` = 新建工作区（两形态同一个 `WorkspaceGroupDialog`）、`FolderPlus` = 添加项目
+         （与终端形态同一实现 `pickAndAddProject`）。 */}
+     <div className="mt-2 flex shrink-0 items-center gap-2 px-1 text-[11px] font-medium tracking-wide text-faint">
+      <span className="min-w-0 flex-1 truncate">{t.workspaceTitle}</span>
+      <button
+       onClick={() => setGroupDialogOpen(true)}
+       aria-label={t.wsGroupNew}
+       title={t.wsGroupNewTitle}
+       className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+      >
+       <Layers size={14} aria-hidden />
+      </button>
+      <button
+       onClick={() => void addProject()}
+       aria-label={t.sidebarAddProjectAria}
+       title={t.sidebarAddProjectTitle}
+       className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+      >
+       <FolderPlus size={14} aria-hidden />
+      </button>
      </div>
     </div>
     {error && (
@@ -553,6 +586,15 @@ export function ChatSidebar({ visible }: { visible: boolean }) {
     )
    }
    <SidebarBottom />
+   {/* 新建工作区对话框（V21 的多项目容器）：与终端形态同一个组件——建完 `onChanged`
+       刷目录行 / 工作区清单 / 会话列表，两栏都常驻挂载，另一形态切过去即是最新。 */}
+   {groupDialogOpen && (
+    <WorkspaceGroupDialog
+     group={null}
+     onClose={() => setGroupDialogOpen(false)}
+     onChanged={refreshWorkspaces}
+    />
+   )}
   </aside>
  );
 }
