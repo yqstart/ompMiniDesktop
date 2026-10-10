@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { ChevronDown, Refresh } from "reicon-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
-import { myModelEntries } from "../../lib/myModels";
+import { orderModelsByStars } from "../../lib/myModels";
 import { fmt } from "../../lib/locale";
 import { useDropdown } from "../../lib/useDropdown";
 import { highestThinking } from "../../lib/thinking";
@@ -71,10 +71,8 @@ export function ModelPicker({ compact = false }: { compact?: boolean }) {
   }
  };
 
- // 我的模型（按挑选顺序解析，目录里已不可用的直接不列）；一个可用项都没有时回退全部可用模型
- const favorites = myModelEntries(myModels, catalog).flatMap((e) => (e.model ? [e.model] : []));
- const showAllModels = favorites.length === 0;
- const list = (showAllModels ? catalog : favorites).filter((m) =>
+ // 候选 = 全量目录，星标项按挑选顺序置顶（只排序、不收窄范围——没挑过也看得到全部）
+ const list = orderModelsByStars(catalog, myModels).filter((m) =>
   q.trim() ? `${m.provider}/${m.id} ${m.name}`.toLowerCase().includes(q.toLowerCase()) : true,
  );
  const groups = new Map<string, ModelInfo[]>();
@@ -121,9 +119,6 @@ export function ModelPicker({ compact = false }: { compact?: boolean }) {
      </div>
      {loadErr && (
       <p role="alert" className="px-1 pt-1.5 text-xs text-danger">{fmt(t.pickerLoadError, loadErr)}</p>
-     )}
-     {showAllModels && (
-      <div className="px-1 pt-1.5 text-xs text-faint">{t.pickerAllModelsHint}</div>
      )}
      {[...groups].map(([provider, ms]) => (
       <div key={provider}>

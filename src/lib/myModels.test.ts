@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { ModelInfo } from "@shared/types";
 import {
   addManyMyModels,
-  candidateModels,
   myModelEntries,
   normalizeMyModels,
+  orderModelsByStars,
   providerSelectors,
   removeManyMyModels,
   toggleMyModel,
@@ -54,14 +54,17 @@ describe("我的模型", () => {
     ]);
   });
 
-  it("candidateModels：挑过 → 只留挑过的（按目录顺序）；空 → 全部不设限", () => {
-    expect(candidateModels(CATALOG, []).map((x) => x.selector)).toEqual(CATALOG.map((x) => x.selector));
-    // 存储顺序与目录顺序无关：结果跟目录顺序
-    expect(candidateModels(CATALOG, ["opencode-go/muse-spark", "commandcode/claude-fable-5"]).map((x) => x.selector)).toEqual([
-      "commandcode/claude-fable-5",
+  it("orderModelsByStars：空星标返回目录原序；星标按存储顺序置顶；缺席的星标被忽略", () => {
+    // 空 → 原数组原序（同一个引用，不做拷贝）
+    expect(orderModelsByStars(CATALOG, [])).toBe(CATALOG);
+    // 星标按存储顺序置顶，其余保持目录顺序、一个不少（只排序、不收窄）
+    expect(orderModelsByStars(CATALOG, ["opencode-go/muse-spark", "commandcode/claude-fable-5"]).map((x) => x.selector)).toEqual([
       "opencode-go/muse-spark",
+      "commandcode/claude-fable-5",
+      "opencode-go/deepseek-v4.1-flash",
     ]);
-    // 目录里不存在的 selector 不会凭空造出候选
-    expect(candidateModels(CATALOG, ["x/y"])).toEqual([]);
+    // 目录里不存在的 selector 被忽略；全都对不上时退回目录原序
+    expect(orderModelsByStars(CATALOG, ["x/y"]).map((x) => x.selector)).toEqual(CATALOG.map((x) => x.selector));
+    expect(orderModelsByStars(CATALOG, ["x/y", "commandcode/claude-fable-5"])[0].selector).toBe("commandcode/claude-fable-5");
   });
 });

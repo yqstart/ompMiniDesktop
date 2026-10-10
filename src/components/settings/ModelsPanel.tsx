@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader, Refresh, Sliders, Star } from "reicon-react";
+import { ArrowDown, ArrowUp, Loader, Refresh, Sliders, Star, X } from "reicon-react";
 import { api } from "@shared/api";
 import type { FallbackChainsInfo, ModelInfo, ModelRolesInfo } from "@shared/types";
 import { useApp } from "../../stores/app";
-import { candidateModels, myModelEntries, toggleMyModel } from "../../lib/myModels";
+import { myModelEntries, orderModelsByStars, toggleMyModel } from "../../lib/myModels";
 import { fmt } from "../../lib/locale";
 import { splitSelector, withLevel } from "../../lib/modelSelector";
 import { roleLabel } from "../../lib/roleNames";
 import { thinkingLevelsOf, THINKING_ORDER } from "../../lib/thinking";
 import { useText } from "../../lib/useText";
 import { useDropdown } from "../../lib/useDropdown";
-import { CycleOrderSection } from "./CycleOrderSection";
 import { FallbackChainsSection } from "./FallbackChains";
 import { ModelPickerDialog } from "./ModelPickList";
 import { ProvidersSection } from "./ProvidersSection";
@@ -19,12 +18,12 @@ import { StarToggle } from "./StarToggle";
 /**
  * 设置 › 模型：omp 模型相关的**唯一管理面**（V12b 把原「供应商」页签整体并了进来）。
  * 区块顺序 = 使用动线：**供应商 → 我的模型 → 模型角色 → 失败转移**（先添加供应商，再在弹窗里
- * 挑选模型——挑进的进「我的模型」，角色与转移的候选随之收窄）。
+ * 挑选模型——挑进的进「我的模型」，在各选单里置顶）。
  *
  * 口径：
- * - **我的模型**（本应用偏好，localStorage；`src/lib/myModels.ts`）是「小范围」的唯一开关：
- *   挑过之后，本页**模型角色**与**失败转移目标**的候选只列这些（`candidateModels`）；
- *   一个都没挑时列全部可用模型（不挡新人）。**不写 omp 的 `enabledModels`**——omp 终端里
+ * - **我的模型**（本应用偏好，localStorage；`src/lib/myModels.ts`）是**置顶排序**：
+ *   候选始终是全量可用模型，星标项（`orderModelsByStars`）在角色 / 转移弹窗里置顶；
+ *   挑没挑过都不缩小可选范围。**不写 omp 的 `enabledModels`**——omp 终端里
  *   `/model` 的可选范围不受影响。挑选入口 = 供应商行的「挑选模型」弹窗（V12c 起不再有
  *   平铺的「可用模型」目录——目录在弹窗里按供应商列出，带搜索过滤）。
  * - 模型角色写 omp 全局配置（`omp config set modelRoles`，record 整表读写 + 回读），未配置的
@@ -32,13 +31,20 @@ import { StarToggle } from "./StarToggle";
  *   档位候选按该模型声明的档裁剪。
  * - **omp 侧改完切回来就该看到**：角色与转移链在挂载时拉一次、**每次设置标签重新激活时重读**
  *   （终端标签里的 omp 改过 `modelRoles` 后，点回设置标签即刷新）；模型目录不额外重拉——
- *   `get_models` 后端有 5 分钟缓存，页内的「刷新」按钮才走 `refresh_models` 强制重拉。
+ *   `get_models` 后端有 5 分钟缓存，页头的「刷新」按钮才走 `refresh_models` 强制重拉。
+ * - **快速切换环**（`cycleOrder`）不占独立区块，融合在**每一行模型角色**上：行内开关决定
+ *   该角色是否进 omp 终端 Ctrl+P / Shift+Ctrl+P 的轮换序，上/下移调整环内顺序；与角色
+ *   同款「每次操作立即写回 + 回读」。孤儿条目（config.yml 手写的未知角色）在角色列表
+ *   末尾提示、可单独移除。
  * - 失败转移链（`retry.fallbackChains`）与角色同层，口径见 `FallbackChains.tsx`。
- * - **快速切换环**（`cycleOrder`）决定 omp 终端里 Ctrl+P / Shift+Ctrl+P 的轮换序，
- *   条目是角色；与角色行同款「每次操作立即写回 + 回读」，口径见 `CycleOrderSection.tsx`。
  * - 供应商（登录型 + 自定义）合并成一个「添加供应商」弹窗：登录型走 `omp auth-broker`
  *   （凭证进 omp 凭证库），自定义写 `<agentDir>/models.yml`——见 `ProvidersSection.tsx`。
  */
+
+/** 行内图标按钮：与角色行的按钮同一套边框 / 悬浮语言，只是内容缩成图标（环内上/下移与孤儿条移除用）。 */
+const iconButton =
+ "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md border border-border text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-50";
+
 export function ModelsPanel() {
  const t = useText();
  const { models, set, myModels, setMyModels, settingsTabActive } = useApp();
@@ -186,23 +192,59 @@ export function ModelsPanel() {
   }
  };
 
+ /** 角色行的环开关：不在环 → 追加到末尾；已在环 → 移出（整组写回 + 回读，与角色写各自不互锁）。 */
+ const toggleRoleCycle = (role: string) => {
+  if (!cycleOrder) return;
+  void saveCycleOrder(cycleOrder.includes(role) ? cycleOrder.filter((r) => r !== role) : [...cycleOrder, role]);
+ };
+
+ /** 环内换位（角色行的上/下移）：交换后整组写回；越界点击是 no-op（边界也由按钮 disabled 挡住）。 */
+ const moveCycle = (role: string, delta: -1 | 1) => {
+  if (!cycleOrder) return;
+  const i = cycleOrder.indexOf(role);
+  const j = i + delta;
+  if (i < 0 || j < 0 || j >= cycleOrder.length) return;
+  const next = [...cycleOrder];
+  [next[i], next[j]] = [next[j], next[i]];
+  void saveCycleOrder(next);
+ };
+
  const roleKeys = useMemo(() => {
   const builtin = roles?.builtin ?? [];
   const rest = Object.keys(roles?.roles ?? {}).filter((k) => !builtin.includes(k));
   return [...builtin, ...rest];
  }, [roles]);
 
+ /** 环里的孤儿条目（config.yml 手写的、不在角色清单里的名字）：无行可挂，在角色列表末尾提示。 */
+ const orphanRoles = useMemo(
+  () => (cycleOrder ?? []).filter((r) => !roleKeys.includes(r)),
+  [cycleOrder, roleKeys],
+ );
+
  /** 目录数组：每次渲染新数组会让下面 useMemo 的依赖失效——按 `models` 记忆。 */
  const catalog = useMemo(() => models?.models ?? [], [models]);
- /** 模型选择器的候选（「小范围」的唯一实现点）：我的模型非空 → 只列挑过的；空 → 全部。 */
- const candidates = useMemo(() => candidateModels(catalog, myModels), [catalog, myModels]);
+ /** 模型选择器的候选（**星标置顶的唯一实现点**）：星标按挑选顺序在前、其余按目录顺序，不收窄范围。 */
+ const candidates = useMemo(() => orderModelsByStars(catalog, myModels), [catalog, myModels]);
  /** 我的模型（按挑选顺序解析，含已不可用项——设置页要列出来给人清理）。 */
  const entries = useMemo(() => myModelEntries(myModels, catalog), [myModels, catalog]);
 
  return (
   <>
    <div className="shrink-0">
-    <h2 className="text-[20px] font-semibold tracking-tight">{t.tabModels}</h2>
+    <div className="flex flex-wrap items-center gap-2">
+     <h2 className="text-[20px] font-semibold tracking-tight">{t.tabModels}</h2>
+     {/* 页级唯一刷新：角色 / 环 / 转移 / 目录 / 供应商（经 modelsRefreshed 广播）都靠它 */}
+     <button
+      onClick={() => void refreshAll()}
+      disabled={busy}
+      className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+      aria-label={t.modelsRefresh}
+      title={t.modelsRefresh}
+     >
+      {busy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
+      {t.refresh}
+     </button>
+    </div>
     <p className="mt-1 text-[13px] text-muted">{t.tabModelsHint}</p>
    </div>
    {err && (
@@ -257,21 +299,12 @@ export function ModelsPanel() {
     </div>
    </section>
 
-   {/* 模型角色：把 omp 的 modelRoles 读写给用户（候选 = 我的模型 或 全部） */}
+   {/* 模型角色 + 快速切换环：角色行 = 选模型 / 档位 + 行内环开关与顺序（Ctrl+P 的轮换序） */}
    <section aria-label={t.rolesSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
     <div className="flex flex-wrap items-center gap-2">
      <Sliders size={16} aria-hidden className="text-muted" />
      <h2 className="text-sm font-semibold">{t.rolesSection}</h2>
-     <button
-      onClick={() => void refreshAll()}
-      disabled={busy}
-      className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
-      aria-label={t.modelsRefresh}
-      title={t.modelsRefresh}
-     >
-      {busy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
-      {t.refresh}
-     </button>
+     <kbd className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted">Ctrl+P</kbd>
     </div>
     <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.rolesHint}</p>
     {roles?.storage === "project" && (
@@ -282,6 +315,11 @@ export function ModelsPanel() {
     {rolesError && roles !== null && (
      <p role="alert" className="mt-1.5 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
       {t.ompSettingsStale}：{rolesError}
+     </p>
+    )}
+    {cycleError && (
+     <p role="alert" className="mt-1.5 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
+      {t.ompSettingsStale}：{cycleError}
      </p>
     )}
     <div className="mt-2">
@@ -301,40 +339,56 @@ export function ModelsPanel() {
        <div className="py-2 text-[13px] text-muted">{t.archivedLoading}</div>
       )
      ) : (
-      roleKeys.map((role) => (
-       <RoleRow
-        key={role}
-        role={role}
-        label={roleLabel(role, t)}
-        current={roles.roles[role] ?? null}
-        models={candidates}
-        catalog={catalog}
-        disabled={savingRole}
-        onSave={saveRole}
-       />
-      ))
+      <>
+       {roleKeys.map((role) => {
+        const cycleIndex = cycleOrder ? cycleOrder.indexOf(role) : -1;
+        return (
+         <RoleRow
+          key={role}
+          role={role}
+          label={roleLabel(role, t)}
+          current={roles.roles[role] ?? null}
+          models={candidates}
+          catalog={catalog}
+          myModels={myModels}
+          onToggleStar={(s) => setMyModels(toggleMyModel(myModels, s))}
+          disabled={savingRole}
+          onSave={saveRole}
+          cycleIndex={cycleIndex < 0 ? null : cycleIndex}
+          cycleCount={cycleOrder?.length ?? 0}
+          cycleDisabled={savingCycle || busy || cycleOrder === null}
+          onToggleCycle={() => toggleRoleCycle(role)}
+          onMoveCycle={(delta) => moveCycle(role, delta)}
+         />
+        );
+       })}
+       {orphanRoles.map((role) => (
+        <div key={role} className="flex flex-wrap items-center gap-2 border-t border-border-soft py-3">
+         <span className="min-w-0 flex-1 truncate text-[13px] text-warn">{fmt(t.cycleUnknownRole, role)}</span>
+         <button
+          onClick={() => void saveCycleOrder((cycleOrder ?? []).filter((r) => r !== role))}
+          disabled={savingCycle || busy}
+          className={iconButton}
+          aria-label={fmt(t.cycleRowRemove, role)}
+          title={fmt(t.cycleRowRemove, role)}
+         >
+          <X size={12} aria-hidden />
+         </button>
+        </div>
+       ))}
+      </>
      )}
     </div>
    </section>
 
-   {/* 快速切换环：omp cycleOrder——Ctrl+P / Shift+Ctrl+P 的轮换序（条目是角色） */}
-   <CycleOrderSection
-    order={cycleOrder}
-    roles={roleKeys}
-    selectors={roles?.roles ?? {}}
-    busy={busy}
-    saving={savingCycle}
-    loadError={cycleError}
-    onSave={saveCycleOrder}
-    onRefresh={() => void refreshAll()}
-   />
-
-   {/* 失败转移：omp retry.fallbackChains（模型请求失败时由备用模型接手）+ 两个配套开关 */}
+   {/* 失败转移：omp retry.fallbackChains（模型请求失败时由备用模型接管）+ 两个配套开关 */}
    <FallbackChainsSection
     info={chains}
     models={candidates}
     catalog={catalog}
     roles={roleKeys}
+    myModels={myModels}
+    onToggleMyModel={(s) => setMyModels(toggleMyModel(myModels, s))}
     busy={busy}
     loadError={chainsError}
     onSaved={(info) => { chainsRevision.current += 1; setChains(info); }}
@@ -344,7 +398,8 @@ export function ModelsPanel() {
  );
 }
 
-/** 一行角色：角色名 + 当前 selector（模型 + 档位）+ 档位按钮 + 「选择」按钮（开模型选择弹窗）。
+/** 一行角色：角色名 + 当前 selector（模型 + 档位）+ 档位按钮 + 「选择」按钮（开模型选择弹窗）
+ *  + 快速切换环的行内控件（开关 = 进 / 出环，上 / 下移 = 环内顺序）。
  *  模型列表走 `ModelPickerDialog`——行内展开会把下方角色整体推下去（点开 / 关上时页面跳动）。 */
 function RoleRow({
  role,
@@ -352,16 +407,33 @@ function RoleRow({
  current,
  models,
  catalog,
+ myModels,
+ onToggleStar,
  disabled,
  onSave,
+ cycleIndex,
+ cycleCount,
+ cycleDisabled,
+ onToggleCycle,
+ onMoveCycle,
 }: {
  role: string;
  label: string;
  current: string | null;
  models: ModelInfo[];
  catalog: ModelInfo[];
+ myModels: string[];
+ onToggleStar: (selector: string) => void;
  disabled: boolean;
  onSave: (role: string, selector: string | null) => Promise<void>;
+ /** 该角色在环里的位置（0-based）；null = 不在环、或环还没读到。 */
+ cycleIndex: number | null;
+ /** 当前环长（环尾的下移禁用判定）。 */
+ cycleCount: number;
+ /** 环的写入口被锁（环读取中 / 页级刷新 / 环写入中）——与角色写的 `disabled` 分路，互不锁死整行。 */
+ cycleDisabled: boolean;
+ onToggleCycle: () => void;
+ onMoveCycle: (delta: -1 | 1) => void;
 }) {
  const t = useText();
  const [pickerOpen, setPickerOpen] = useState(false);
@@ -377,6 +449,9 @@ function RoleRow({
  const levels = model ? thinkingLevelsOf(model.thinking) : [...THINKING_ORDER];
  // 明确不支持思考的模型（可用档只有 off）不显示档位按钮，免得点开只有「默认 / off」两项
  const canLevel = current !== null && levels.length > 1;
+
+ // 环开关的完整文案（aria / title 同源）：未在环 = 「添加角色 <名字>」，在环 = 「移出环 <名字>」
+ const cycleAria = cycleIndex === null ? fmt(`${t.cycleAdd} {0}`, label) : fmt(t.cycleRowRemove, label);
 
  const pick = async (m: ModelInfo) => {
   setPickerOpen(false);
@@ -446,6 +521,39 @@ function RoleRow({
       {t.roleClear}
      </button>
     )}
+    {/* 快速切换环：开关 = 进 / 出环（环内时再给上 / 下移）；环读取中或写入中时禁用 */}
+    <button
+     onClick={onToggleCycle}
+     disabled={cycleDisabled || saving}
+     aria-pressed={cycleIndex !== null}
+     aria-label={cycleAria}
+     title={cycleAria}
+     className={`shrink-0 cursor-pointer rounded-md border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50 ${cycleIndex === null ? "border-border text-muted hover:text-foreground" : "border-accent/50 bg-active text-foreground"}`}
+    >
+     {cycleIndex === null ? (cycleDisabled ? t.archivedLoading : t.cycleNotInCycle) : fmt(t.cycleInCycle, String(cycleIndex + 1))}
+    </button>
+    {cycleIndex !== null && (
+     <>
+      <button
+       onClick={() => onMoveCycle(-1)}
+       disabled={cycleDisabled || saving || cycleIndex === 0}
+       className={iconButton}
+       aria-label={fmt(t.cycleRowUp, label)}
+       title={fmt(t.cycleRowUp, label)}
+      >
+       <ArrowUp size={12} aria-hidden />
+      </button>
+      <button
+       onClick={() => onMoveCycle(1)}
+       disabled={cycleDisabled || saving || cycleIndex === cycleCount - 1}
+       className={iconButton}
+       aria-label={fmt(t.cycleRowDown, label)}
+       title={fmt(t.cycleRowDown, label)}
+      >
+       <ArrowDown size={12} aria-hidden />
+      </button>
+     </>
+    )}
     {saving && <Loader size={12} className="shrink-0 animate-spin text-muted" aria-hidden />}
    </div>
 
@@ -487,6 +595,8 @@ function RoleRow({
      selected={base}
      onPick={(m) => void pick(m)}
      onClose={() => setPickerOpen(false)}
+     myModels={myModels}
+     onToggleStar={onToggleStar}
     />
    )}
   </div>

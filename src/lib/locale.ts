@@ -397,7 +397,7 @@ const ZH = {
  // 设置 › 模型 ›「供应商」区块（合并的「添加供应商」面板：登录型凭据 + 自定义 models.yml）
  providersSection: "供应商",
  providersHint:
-  "连接模型供应商，或添加自定义端点。添加后点击「挑选模型」，将常用模型加入下方列表。",
+  "添加供应商 → 登录（或填自定义端点）→ 就地挑几个常用模型加星；加星的模型在各选单里置顶。",
  providersAdd: "添加供应商",
  providersAddTitle: "添加 {0}",
  providersAddCount: "{0} 个提供商",
@@ -405,7 +405,7 @@ const ZH = {
  providersAddSearch: "搜索提供商（名称或 id）",
  providersAddCustomHint: "自建端点 / 网关 / 本地引擎",
  providersAddHint: "按上游提示操作：要 API key 就粘贴到下面提交；给出链接就打开浏览器授权。",
- providersAddAdded: "已添加 {0}——挑几个模型加入「我的模型」：",
+ providersAddAdded: "已添加 {0}——挑几个常用模型加星，之后在各选单里置顶：",
  providersAddDone: "完成",
  providersEmptyAll: "还没有添加任何供应商。",
  providersPick: "挑选模型",
@@ -487,7 +487,7 @@ const ZH = {
  customSaveHint: "保存前用 omp 预校验；写入前自动备份",
  rolesSection: "模型角色",
  rolesHint:
-  "角色决定 omp 在不同场景用哪个模型（默认对话 / 快速任务 / 深思 / 视觉 / 架构规划…）。写入 omp 全局配置；未配置的角色按 omp 的回退规则解析。",
+  "角色决定 omp 在不同场景用哪个模型（默认对话 / 快速任务 / 深思 / 视觉 / 架构规划…）。写入 omp 全局配置；未配置的角色按 omp 的回退规则解析。每行开关决定该角色是否进 Ctrl+P / Shift+Ctrl+P 轮换，顺序即轮换顺序；环内未配置模型或无可用凭证的角色会被 omp 跳过。",
  roleUnset: "未配置",
  rolePick: "选择",
  roleClear: "清除",
@@ -507,8 +507,8 @@ const ZH = {
  roleAdvisor: "顾问",
  myModelsSection: "我的模型",
  myModelsHint:
-  "模型角色与失败转移只列出这里的星标模型；未挑选时列出全部模型。不影响终端 /model 的可选范围。",
- myModelsEmpty: "还没有星标模型。点击供应商旁的「挑选模型」开始添加。",
+  "星标模型在角色与转移选单里置顶（其余模型照常可选）；不影响终端 /model 的可选范围。",
+ myModelsEmpty: "还没有星标模型。点击供应商旁的「挑选模型」，或在任一模型选单里点星标——星标模型会在各选单里置顶。",
  myModelsCount: "{0} 个",
  myModelsClear: "清空",
  myModelsAddAria: "加入我的模型 {0}",
@@ -526,6 +526,9 @@ const ZH = {
  cycleRowUp: "上移 {0}",
  cycleRowDown: "下移 {0}",
  cycleRowRemove: "移出环 {0}",
+ cycleInCycle: "第 {0} 位",
+ cycleNotInCycle: "未在轮换",
+ cycleUnknownRole: "未知角色 {0} 仍在轮换中",
  cycleWriteFailed: "写入快速切换环失败",
  // 角色思考档（角色行上的档位按钮）：selector 的 `:档位` 后缀
  roleLevelDefault: "默认",
@@ -1651,7 +1654,7 @@ const EN: Record<TextKey, string> = {
 
  providersSection: "Providers",
  providersHint:
-  "Connect a provider or add a custom endpoint. Then use Pick models to add your everyday models to the list below.",
+  "Add a provider → sign in (or fill in a custom endpoint) → star the models you use; starred models are pinned to the top of every picker.",
  providersAdd: "Add provider",
  providersAddTitle: "Add {0}",
  providersAddCount: "{0} providers",
@@ -1659,7 +1662,7 @@ const EN: Record<TextKey, string> = {
  providersAddSearch: "Search providers (name or id)",
  providersAddCustomHint: "self-hosted / gateway / local",
  providersAddHint: "Follow the upstream prompt: paste the API key below and submit, or open the link to authorize in the browser.",
- providersAddAdded: "{0} added — star models to put them into My models:",
+ providersAddAdded: "{0} added — star your everyday models; they're pinned to the top of every picker:",
  providersAddDone: "Done",
  providersEmptyAll: "No providers added yet.",
  providersPick: "Pick models",
@@ -1741,7 +1744,7 @@ const EN: Record<TextKey, string> = {
  customSaveHint: "pre-validated by omp; backed up before writing",
  rolesSection: "Model roles",
  rolesHint:
-  "Roles pick which model omp uses in each situation (default chat / fast tasks / deep thinking / vision / planning…). Saved to omp's global config; unset roles follow omp's fallback rules.",
+  "Roles pick which model omp uses in each situation (default chat / fast tasks / deep thinking / vision / planning…). Saved to omp's global config; unset roles follow omp's fallback rules. Each row's switch puts that role into the Ctrl+P / Shift+Ctrl+P cycle, and the arrows set the cycling order; roles in the cycle with no model or no credentials are skipped by omp.",
  roleUnset: "Not set",
  rolePick: "Choose",
  roleClear: "Clear",
@@ -1761,8 +1764,8 @@ const EN: Record<TextKey, string> = {
  roleAdvisor: "Advisor",
  myModelsSection: "My models",
  myModelsHint:
-  "Roles and fallback pickers use your starred models, or all available models when none are picked. The terminal's /model list is unchanged.",
- myModelsEmpty: "No starred models yet. Use Pick models next to a provider to get started.",
+  "Starred models are pinned to the top of the role and fallback pickers; every other model stays available. The terminal's /model list is unchanged.",
+ myModelsEmpty: "No starred models yet. Use Pick models next to a provider, or hit the star in any picker — starred models are pinned to the top.",
  myModelsCount: "{0}",
  myModelsClear: "Clear",
  myModelsAddAria: "Add {0} to my models",
@@ -1779,6 +1782,9 @@ const EN: Record<TextKey, string> = {
  cycleRowUp: "Move {0} up",
  cycleRowDown: "Move {0} down",
  cycleRowRemove: "Remove {0} from the cycle",
+ cycleInCycle: "Cycle #{0}",
+ cycleNotInCycle: "Not in cycle",
+ cycleUnknownRole: "Unknown role {0} is still in the cycle",
  cycleWriteFailed: "Failed to write the quick-switch cycle",
  roleLevelDefault: "Default",
  roleLevelDefaultHint: "No level suffix — omp's own defaultThinkingLevel decides",

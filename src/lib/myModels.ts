@@ -5,9 +5,10 @@ import type { ModelInfo } from "@shared/types";
  * selector = `ModelInfo.selector`（`provider/id`，与 omp 角色值同格式），整串存取不拆分——
  * 模型的 id 里可能出现 `/`（如 `commandcode/meta/muse-spark-…`）。
  *
- * 作用域（V12b 的「小范围」口径）：**只在壳侧**——挑过之后，本应用所有模型选择器
- * （模型角色 / 失败转移目标）的候选只列这些；一个都没挑时退回全部可用模型（不挡新人）。
- * **不写 omp 的 `enabledModels`**：omp 终端里 `/model` 的可选范围不受影响。
+ * 作用域（「置顶」口径）：**只在壳侧**——本应用所有模型选择器（模型角色 / 失败转移目标 /
+ * 聊天下拉）的候选始终是全量可用模型，星标项按挑选顺序**置顶**（见 `orderModelsByStars`）；
+ * 可选范围不受影响（不挡新人、不缩小选单）。**不写 omp 的 `enabledModels`**：
+ * omp 终端里 `/model` 的可选范围不受影响。
  *
  * 存储键沿用旧版「常用模型」的 `omp.favoriteModels.v1`——升级不丢已挑的模型。
  */
@@ -83,12 +84,22 @@ export function myModelEntries(
 }
 
 /**
- * 模型选择器的候选集（**「小范围」的唯一实现点**）：
- * 我的模型非空 → 只留挑过的（按目录顺序，目录里没有的自动缺席）；
- * 空 → 全部可用模型（没挑过就不设限，避免新人打不开选择器）。
+ * 模型选择器的候选顺序（**星标置顶的唯一实现点**）：
+ * 星标项按 `myModels` 存储顺序在前，其余按 `catalog` 原顺序在后——只改顺序、不收窄范围。
+ * `myModels` 为空（或目录里一个都对不上）时返回 `catalog` 原数组；存储里目录已不存在的
+ * selector 直接忽略（只留在「我的模型」区块里标「已不可用」清理，不进选单）。
  */
-export function candidateModels(catalog: ModelInfo[], myModels: string[]): ModelInfo[] {
+export function orderModelsByStars(catalog: ModelInfo[], myModels: string[]): ModelInfo[] {
  if (myModels.length === 0) return catalog;
- const wanted = new Set(myModels);
- return catalog.filter((m) => wanted.has(m.selector));
+ const bySelector = new Map(catalog.map((m) => [m.selector, m]));
+ const starredSet = new Set<string>();
+ const starred: ModelInfo[] = [];
+ for (const selector of myModels) {
+  const model = bySelector.get(selector);
+  if (!model || starredSet.has(selector)) continue;
+  starredSet.add(selector);
+  starred.push(model);
+ }
+ if (starred.length === 0) return catalog;
+ return [...starred, ...catalog.filter((m) => !starredSet.has(m.selector))];
 }

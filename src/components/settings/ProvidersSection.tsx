@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { ArrowUpRightSquare, Check, Copy, Key, Loader, Plus, Refresh, Trash2 } from "reicon-react";
+import { ArrowUpRightSquare, Check, Copy, Key, Loader, Plus, Trash2 } from "reicon-react";
 import { api } from "@shared/api";
 import { IPC } from "@shared/ipc";
 import type { ModelCatalog, ModelInfo, ModelsConfigFile, ProviderLoginStatus, ProviderView } from "@shared/types";
@@ -48,7 +48,6 @@ export function ProvidersSection() {
  const [login, setLogin] = useState<ProviderLoginStatus | null>(null);
  const [err, setErr] = useState<string | null>(null);
  const [busy, setBusy] = useState(false);
- const [refreshing, setRefreshing] = useState(false);
  const [pendingLogout, setPendingLogout] = useState<ProviderView | null>(null);
  /** 打开「挑选模型」弹窗的供应商（登录型或自定义块；null = 关闭）——只需要 id / 标题。 */
  const [picking, setPicking] = useState<{ id: string; name: string } | null>(null);
@@ -259,6 +258,8 @@ export function ProvidersSection() {
    setFormErr(edited.error);
    return;
   }
+  /** 保存后的键名（改名场景 = 新键）：写入成功后就地开该供应商的挑模型弹窗。 */
+  const editedId = editing.id.trim();
   busyRef.current = true;
   loadVersion.current += 1;
   setBusy(true);
@@ -272,6 +273,8 @@ export function ProvidersSection() {
    setAddPick(null);
    // 写入已通过 omp 预校验——目录里立刻能看到（有凭证或免钥时）
    await load(true);
+   // 与登录成功后的就地挑选对齐：保存完直接开该新供应商的挑模型弹窗
+   setPicking({ id: editedId, name: editedId });
   } catch (e) {
    setFormErr(e instanceof Error ? e.message : t.opFailed);
   } finally {
@@ -324,17 +327,6 @@ export function ProvidersSection() {
   }
  };
 
- const refreshAll = async () => {
-  if (busyRef.current || refreshing) return;
-  setRefreshing(true);
-  setErr(null);
-  try {
-   await load(true);
-  } finally {
-   setRefreshing(false);
-  }
- };
-
  const catalog = models?.models ?? [];
  const configured = (providers ?? []).filter((p) => p.configured);
  const parsed = file ? parseModelsConfig(file.text) : { providers: [], error: null };
@@ -354,16 +346,6 @@ export function ProvidersSection() {
     <div className="flex flex-wrap items-center gap-2">
      <Key size={16} aria-hidden className="text-muted" />
      <h2 className="text-sm font-semibold">{t.providersSection}</h2>
-     <button
-      onClick={() => void refreshAll()}
-      disabled={refreshing || busy}
-      className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
-      aria-label={t.providersRefresh}
-      title={t.providersRefresh}
-     >
-      {refreshing ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
-      {t.refresh}
-     </button>
     </div>
     <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.providersHint}</p>
 

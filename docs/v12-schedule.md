@@ -180,6 +180,12 @@ Failed to load config file models, Schema error: root: must be an object (was nu
 
 两个由用户拍板的决策：**合并进「模型」页签**（设置页 6 → 5）；**「小范围」只作壳侧偏好**，不写 omp 的 `enabledModels`。
 
+> **⚠ 后续口径变更（2026-10-10，见 `CHANGELOG.md` 同日条目）：「我的模型」从「收窄候选」改为「置顶排序」。**
+> 本文描述的 `candidateModels`（挑过之后角色 / 转移候选只列这些）**已删除**——候选始终是**全量目录**，
+> 星标项按挑选顺序置顶（`lib/myModels.ts` 的 `orderModelsByStars`；角色弹窗 / 转移弹窗 / 聊天下拉共用，
+> 选单每行行首还有星标开关可直接加 / 摘）。下文「候选随之收窄到 1 个」一类描述按旧口径读——现在的
+> 语义只是顺序，可选数量不变；供应商向导同轮改为「保存自定义后直接开挑模型弹窗」+ 页级唯一刷新。
+
 ### 6.1 上游事实补充：`enabledModels` 是 omp 侧的模型白名单（本批不用，事实存档）
 
 PTY 起真实 TUI 抓 `/model` 面板实测（副本 agentDir）：

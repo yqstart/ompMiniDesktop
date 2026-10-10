@@ -130,12 +130,29 @@ describe("ModelsPanel 的 omp 侧识别", () => {
   act(() => root.render(<ModelsPanel />));
   await flush();
   expect(container.querySelector('[aria-label="设置 默认 的思考档位"]')).toBeNull();
+ });
+
+ it("候选 = 全量目录（不收窄）：星标模型置顶分组，未星标的照常可选、可加星", async () => {
+  h.models = [
+   { provider: "demo", id: "plain", selector: "demo/plain", name: "Plain", contextWindow: 1000, maxTokens: 100, reasoning: false, thinking: [], input: ["text"] },
+   { provider: "demo", id: "reason", selector: "demo/reason", name: "Reason", contextWindow: 1000, maxTokens: 100, reasoning: true, thinking: ["low", "high"], input: ["text"] },
+  ];
+  h.roles = {};
+  useApp.setState({ myModels: ["demo/reason"] });
+  act(() => root.render(<ModelsPanel />));
+  await flush();
   act(() => (container.querySelector('[aria-label="选择 默认"]') as HTMLButtonElement).click());
   // 模型列表以模态弹窗呈现（内嵌展开会把下方角色整体推下去）
-  const dialog = container.querySelector('[role="dialog"][aria-modal="true"]');
-  expect(dialog).not.toBeNull();
-  expect(dialog!.querySelector('[title="demo/reason"]')).not.toBeNull();
-  expect(dialog!.querySelector('[title="demo/plain"]')).toBeNull();
+  const dialog = container.querySelector('[role="dialog"][aria-modal="true"]')!;
+  const rows = [...dialog.querySelectorAll('button[aria-label^="使用模型"]')].map((el) => el.getAttribute("title"));
+  // 星标组（「我的模型」）在前、供应商组在后；未星标的也在（只排序、不收窄）
+  expect(dialog.textContent).toContain("我的模型");
+  expect(rows).toEqual(["demo/reason", "demo/plain"]);
+  // 行内星标 = 加入 / 移出「我的模型」（同一份 localStorage 偏好）
+  act(() => (dialog.querySelector('[aria-label="加入我的模型 Plain"]') as HTMLButtonElement).click());
+  expect(useApp.getState().myModels).toEqual(["demo/reason", "demo/plain"]);
+  act(() => (container.querySelector('[aria-label="移出我的模型 Reason"]') as HTMLButtonElement).click());
+  expect(useApp.getState().myModels).toEqual(["demo/plain"]);
  });
 
  it("角色行挑模型：弹窗点选即写回并收起，行上显示新 selector", async () => {
@@ -171,13 +188,12 @@ describe("ModelsPanel 的 omp 侧识别", () => {
   expect(container.textContent).not.toContain("demo/stale");
  });
 
- it("角色失败而切换环成功时环可用，重试可恢复角色", async () => {
+ it("角色读取失败时给错误与重试；重试后角色行与行内环状态一起恢复", async () => {
   vi.mocked(api.getModelRoles).mockRejectedValueOnce(new Error("roles boom"));
   h.cycleOrder = ["slow"];
   act(() => root.render(<ModelsPanel />));
   await flush();
   expect(container.textContent).toContain("roles boom");
-  expect(container.querySelector('[aria-label="快速切换环"]')?.textContent).toContain("深思");
   h.roles = { slow: "demo/fresh" };
   act(() => {
    const retry = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "重试");
@@ -186,38 +202,60 @@ describe("ModelsPanel 的 omp 侧识别", () => {
   await flush();
   expect(container.textContent).toContain("demo/fresh");
   expect(container.textContent).not.toContain("roles boom");
+  // 环融合在角色行上：slow 已在环 → 该行开关显示位次
+  expect((container.querySelector('[aria-label="移出环 深思"]') as HTMLButtonElement).textContent).toContain("第 1 位");
  });
 
- it("快速切换环：添加 / 上移 / 移除都按当前顺序整组写回", async () => {
+ it("快速切换环融合在角色行：开关 / 上移 / 下移 / 移出都按当前顺序整组写回", async () => {
   h.cycleOrder = ["default", "smol"];
   act(() => root.render(<ModelsPanel />));
   await flush();
-  const section = container.querySelector('[aria-label="快速切换环"]')!;
-  expect(section.textContent).toContain("默认");
-  expect(section.textContent).toContain("快速");
-
   const lastWrite = () => {
    const calls = vi.mocked(api.setCycleOrder).mock.calls;
    return calls[calls.length - 1][0];
   };
   const click = (label: string) =>
-   act(() => (section.querySelector(`[aria-label="${label}"]`) as HTMLButtonElement).click());
+   act(() => (container.querySelector(`[aria-label="${label}"]`) as HTMLButtonElement).click());
 
-  // 添加 slow（候选里点「深思」）→ 追加到末尾
-  act(() => [...section.querySelectorAll("button")].find((b) => b.textContent?.trim() === "添加角色")!.click());
-  act(() => [...section.querySelectorAll("button")].find((b) => b.textContent?.trim() === "深思")!.click());
+  // 环内的行显示位次，环外的行显示未在轮换
+  expect((container.querySelector('[aria-label="移出环 默认"]') as HTMLButtonElement).textContent).toContain("第 1 位");
+  expect((container.querySelector('[aria-label="添加角色 深思"]') as HTMLButtonElement).textContent).toBe("未在轮换");
+
+  // 开开关（深思不在环）→ 追加到末尾
+  click("添加角色 深思");
   await flush();
   expect(lastWrite()).toEqual(["default", "smol", "slow"]);
 
-  // 上移 slow → 换到中间
+  // 上移深思（末尾）→ 换到中间
   click("上移 深思");
   await flush();
   expect(lastWrite()).toEqual(["default", "slow", "smol"]);
 
-  // 移出 default → 只剩两个
+  // 下移默认（首位）→ 环内首尾按显示顺序交换
+  click("下移 默认");
+  await flush();
+  expect(lastWrite()).toEqual(["slow", "default", "smol"]);
+
+  // 移出默认 → 只剩两个
   click("移出环 默认");
   await flush();
   expect(lastWrite()).toEqual(["slow", "smol"]);
+
+  // 首尾边界：首位不可上移、末位不可下移
+  expect((container.querySelector('[aria-label="上移 深思"]') as HTMLButtonElement).disabled).toBe(true);
+  expect((container.querySelector('[aria-label="下移 深思"]') as HTMLButtonElement).disabled).toBe(false);
+  expect((container.querySelector('[aria-label="上移 快速"]') as HTMLButtonElement).disabled).toBe(false);
+  expect((container.querySelector('[aria-label="下移 快速"]') as HTMLButtonElement).disabled).toBe(true);
+ });
+
+ it("孤儿的环条目（未知角色）逐条列出并可移除，不自动修剪", async () => {
+  h.cycleOrder = ["default", "ghost"];
+  act(() => root.render(<ModelsPanel />));
+  await flush();
+  expect(container.textContent).toContain("未知角色 ghost 仍在轮换中");
+  act(() => (container.querySelector('[aria-label="移出环 ghost"]') as HTMLButtonElement).click());
+  await flush();
+  expect(h.cycleOrder).toEqual(["default"]);
  });
 
  it("新建转移链排除已配置模型，切换总开关不丢失草稿", async () => {

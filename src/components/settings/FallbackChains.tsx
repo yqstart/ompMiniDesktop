@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, DiagramTree, Loader, Refresh, X } from "reicon-react";
+import { ArrowDown, ArrowUp, DiagramTree, Loader, X } from "reicon-react";
 import { api } from "@shared/api";
 import type { FallbackChainsInfo, ModelInfo } from "@shared/types";
 import { fmt, type Text } from "../../lib/locale";
@@ -43,6 +43,8 @@ export function FallbackChainsSection({
  models,
  catalog,
  roles,
+ myModels,
+ onToggleMyModel,
  busy,
  loadError,
  onSaved,
@@ -53,6 +55,9 @@ export function FallbackChainsSection({
  catalog: ModelInfo[];
  /** 角色候选（内置 + 自定义，与角色区块同一份）。 */
  roles: string[];
+ /** 我的模型（selector，按挑选顺序）：选单的行内星标与置顶分组用。 */
+ myModels: string[];
+ onToggleMyModel: (selector: string) => void;
  busy: boolean;
  /** 读取失败（保留旧数据时显示过期提示，空快照时显示重试）。 */
  loadError: string | null;
@@ -94,16 +99,6 @@ export function FallbackChainsSection({
    <div className="flex flex-wrap items-center gap-2">
     <DiagramTree size={16} aria-hidden className="text-muted" />
     <h2 className="text-sm font-semibold">{t.fallbackSection}</h2>
-    <button
-     onClick={onRefresh}
-     disabled={busy || writing}
-     className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
-     aria-label={t.modelsRefresh}
-     title={t.modelsRefresh}
-    >
-     {busy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
-     {t.refresh}
-    </button>
    </div>
    <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.fallbackHint}</p>
 
@@ -278,6 +273,8 @@ export function FallbackChainsSection({
             models={models}
             catalog={catalog}
             roles={roles}
+            myModels={myModels}
+            onToggleMyModel={onToggleMyModel}
             usedKeys={usedKeys}
             writing={writing}
             onSave={(k, list) => void write(() => api.setFallbackChain(k, list), t.fallbackWriteFailed)}
@@ -297,6 +294,8 @@ export function FallbackChainsSection({
         models={models}
         roles={roles}
         catalog={catalog}
+        myModels={myModels}
+        onToggleMyModel={onToggleMyModel}
         usedKeys={usedKeys}
         writing={writing}
         onSave={(k, list) => void write(() => api.setFallbackChain(k, list), t.fallbackWriteFailed)}
@@ -336,6 +335,8 @@ function ChainEditor({
  models,
  catalog,
  roles,
+ myModels,
+ onToggleMyModel,
  usedKeys,
  writing,
  onSave,
@@ -347,6 +348,9 @@ function ChainEditor({
  models: ModelInfo[];
  catalog: ModelInfo[];
  roles: string[];
+ /** 我的模型（selector，按挑选顺序）：选单的行内星标与置顶分组用。 */
+ myModels: string[];
+ onToggleMyModel: (selector: string) => void;
  usedKeys: Set<string>;
  writing: boolean;
  onSave: (key: string, targets: string[]) => void;
@@ -625,6 +629,8 @@ function ChainEditor({
       setKeyPickerOpen(false);
      }}
      onClose={() => setKeyPickerOpen(false)}
+     myModels={myModels}
+     onToggleStar={onToggleMyModel}
     />
    )}
    {adding && (
@@ -636,6 +642,8 @@ function ChainEditor({
       setAdding(false);
      }}
      onClose={() => setAdding(false)}
+     myModels={myModels}
+     onToggleStar={onToggleMyModel}
     />
    )}
   </div>
