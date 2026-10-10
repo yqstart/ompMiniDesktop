@@ -5,9 +5,16 @@ import { fmt, type Text } from "./locale";
 let seq = 0;
 const nid = (p: string) => `${p}-${Date.now().toString(36)}-${seq++}`;
 
+/**
+ * 工具输出「完整版」（展开查看）的体积上限：超过即不保留——长会话里几十次大输出
+ * （日志 / 构建产物 / 全量文件内容）的全文常驻内存，会把 WebContent 吃到 GB 级。
+ * 超过上限时展开入口一起消失（`outputFull` 为空，ToolRow 不渲染「展开」）。
+ */
+export const TOOL_OUTPUT_FULL_MAX = 100_000;
+
 function truncate(text: string, limit = 2000): { out: string; full?: string } {
  if (text.length <= limit) return { out: text };
- return { out: text.slice(0, limit), full: text };
+ return { out: text.slice(0, limit), full: text.length <= TOOL_OUTPUT_FULL_MAX ? text : undefined };
 }
 
 /**

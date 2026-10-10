@@ -5,6 +5,7 @@ import type { ProjectView, SessionPage, SessionView } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { resumeSessionInApp } from "../../lib/checkouts";
 import { runSessionBatch } from "../../lib/sessionBatch";
+import { forgetSession } from "../../lib/useSessionEvents";
 import { useText } from "../../lib/useText";
 import { TEXT, fmt } from "../../lib/locale";
 import { ConfirmDialog } from "../ConfirmDialog";
@@ -99,6 +100,8 @@ export function SessionPopup({
  const toggleArchive = (s: SessionView) =>
   void runAction(async () => {
    const res = s.archived ? await api.unarchiveSessions([s.id]) : await api.archiveSessions([s.id]);
+   // 归档成功 = 会话被收起来（后端已 kill 进程）：前端缓存一并清（恢复后会重新拉）
+   if (!s.archived && res.failed.length === 0) forgetSession(s.id);
    return res.failed.length > 0 ? res.failed[0].message || null : null;
   });
 
@@ -109,6 +112,11 @@ export function SessionPopup({
   if (!target) return;
   await runAction(async () => {
    const res = await api.deleteSessions(target.ids);
+   // 删除成功 = jsonl 已删：前端缓存一并清（失败的那些保持可读）
+   const failedIds = new Set(res.failed.map((f) => f.id));
+   for (const id of target.ids) {
+    if (!failedIds.has(id)) forgetSession(id);
+   }
    return failedDetail(res.failed);
   });
  };

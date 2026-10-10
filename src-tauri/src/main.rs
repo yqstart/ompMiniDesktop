@@ -35,6 +35,9 @@ fn main() {
         .setup(|app| {
             let state = load_state(app.handle());
             app.manage(state);
+            // V34：聊天会话进程的闲置回收（内存治理）——常驻 omp 进程每个 0.5–1GB，
+            // 「浏览过的会话」不回收就会一直攒；回收后重新打开 / 发消息都会自动 resume。
+            runtime::start_idle_reaper(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

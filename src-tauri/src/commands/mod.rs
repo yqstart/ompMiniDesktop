@@ -1331,21 +1331,14 @@ pub async fn create_session(
     let Some(bin) = bin else {
         return Err(cmd_err("OMP_MISSING", "未找到 omp，无法新建会话".into(), Some("请先安装 oh-my-pi".into())));
     };
-    let key_hint = format!("new-{}", chrono::Utc::now().timestamp_millis());
+    // spawn 内部以会话 id 作 runtime 表的键（不再需要占位键换名——换名窗口会让
+    // pump 的首批帧查不到表条目：命令面缓存丢、偏好回写跳过）
     let (sid, sfile, _meta) = crate::runtime::spawn_long_lived(
         &app,
         state.runtime.clone(),
-        key_hint.clone(),
         crate::runtime::SpawnOpts { bin, cwd: cwd.clone(), resume: None, model, thinking, approval: None },
     )
     .await?;
-    // key 换成真实 session id
-    {
-        let mut m = state.runtime.lock().await;
-        if let Some(r) = m.remove(&key_hint) {
-            m.insert(sid.clone(), r);
-        }
-    }
     if let Ok(mut run) = state.running.try_lock() {
         run.insert(sid.clone(), true);
     }
@@ -1404,31 +1397,7 @@ pub async fn open_session(app: AppHandle, state: State<'_, AppState>, id: String
         });
     }
     // 否则 resume 长驻
-    let agent = state.agent_dir.lock().await.clone();
-    let prefix = id.chars().take(8).collect::<String>();
-    let Some(path) = session_file_for(&agent, &prefix) else {
-        return Err(cmd_err("NOT_FOUND", "会话文件不存在，可能已被删除".into(), None));
-    };
-    let head = parse_session_head(&path);
-    if head.corrupt {
-        return Err(cmd_err("CORRUPT", "会话文件已损坏，可删除".into(), None));
-    }
-    let bin = state.omp_path.lock().await.clone();
-    let Some(bin) = bin else {
-        return Err(cmd_err("OMP_MISSING", "未找到 omp".into(), None));
-    };
-    let spawn_cwd = if head.cwd.is_empty() { "/tmp".into() } else { head.cwd.clone() };
-    let approval = state.overlay.lock().await.session_approval.get(&id).cloned();
-    let (sid, _, _meta) = crate::runtime::spawn_long_lived(
-        &app,
-        state.runtime.clone(),
-        id.clone(),
-        crate::runtime::SpawnOpts { bin, cwd: spawn_cwd, resume: Some(prefix), model: None, thinking: None, approval },
-    )
-    .await?;
-    if let Ok(mut run) = state.running.try_lock() {
-        run.insert(sid.clone(), true);
-    }
+    let head = spawn_session_runtime(&app, &state, &id).await?;
     // 历史回放由前端 get_history 一次拉全量（实时增量经事件 pump）
     let ov = state.overlay.lock().await;
     let projects: Vec<(String, String)> = ov.projects.iter().map(|p| (p.id.clone(), p.path.clone())).collect();
@@ -1446,6 +1415,41 @@ pub async fn open_session(app: AppHandle, state: State<'_, AppState>, id: String
         running: true,
         id: head.id.clone(),
     })
+}
+
+/// resume 拉起一个没有长驻进程的会话并登记进 `runtime` 表（`open_session` 的 spawn 段
+/// 与 `send_prompt` 的自动恢复共用；调用方负责先确认 runtime 里没有这个会话）。
+/// 返回 jsonl 头（组装会话视图用）。
+async fn spawn_session_runtime<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    state: &State<'_, AppState>,
+    id: &str,
+) -> Result<SessionHead, CmdError> {
+    let agent = state.agent_dir.lock().await.clone();
+    let prefix = id.chars().take(8).collect::<String>();
+    let Some(path) = session_file_for(&agent, &prefix) else {
+        return Err(cmd_err("NOT_FOUND", "会话文件不存在，可能已被删除".into(), None));
+    };
+    let head = parse_session_head(&path);
+    if head.corrupt {
+        return Err(cmd_err("CORRUPT", "会话文件已损坏，可删除".into(), None));
+    }
+    let bin = state.omp_path.lock().await.clone();
+    let Some(bin) = bin else {
+        return Err(cmd_err("OMP_MISSING", "未找到 omp".into(), None));
+    };
+    let spawn_cwd = if head.cwd.is_empty() { "/tmp".into() } else { head.cwd.clone() };
+    let approval = state.overlay.lock().await.session_approval.get(id).cloned();
+    let (sid, _, _meta) = crate::runtime::spawn_long_lived(
+        app,
+        state.runtime.clone(),
+        crate::runtime::SpawnOpts { bin, cwd: spawn_cwd, resume: Some(prefix), model: None, thinking: None, approval },
+    )
+    .await?;
+    if let Ok(mut run) = state.running.try_lock() {
+        run.insert(sid, true);
+    }
+    Ok(head)
 }
 
 /// 会话备注名（覆盖层 notes；显示优先于 omp 原标题）。空串 = 清除备注。
@@ -1559,8 +1563,9 @@ pub async fn branch_session(app: AppHandle, state: State<'_, AppState>, id: Stri
 }
 
 /// prompt 系列的统一发送：`prompt / steer / follow_up` 共用图片组装。
-async fn send_prompt(
-    app: &AppHandle,
+/// 泛型 + `pub(crate)`：runtime.rs 的真实慢测试直接调它验「回收后发送自动恢复」。
+pub(crate) async fn send_prompt<R: tauri::Runtime>(
+    app: &AppHandle<R>,
     state: &State<'_, AppState>,
     id: &str,
     kind: &str,
@@ -1568,7 +1573,14 @@ async fn send_prompt(
     images: Option<Vec<ImageAttachment>>,
 ) -> Result<(), CmdError> {
     let map = state.runtime.clone();
-    let tx = map.lock().await.get(id).map(|r| r.tx.clone());
+    let mut tx = map.lock().await.get(id).map(|r| r.tx.clone());
+    if tx.is_none() && kind == "prompt" {
+        // 进程不在了（闲置回收 / 意外退出）：resume 拉起再发——「发消息」是用户的正常
+        // 入口，不该因为后台回收而失败（回收只发生在 idle，这里补一次就是无缝的）。
+        // steer / follow_up 不代偿：没有进行中的轮次时这两个语义本身不成立，按原样报错。
+        spawn_session_runtime(app, state, id).await?;
+        tx = map.lock().await.get(id).map(|r| r.tx.clone());
+    }
     let Some(tx) = tx else {
         return Err(cmd_err("NOT_RUNNING", "会话未启动，请先打开会话".into(), None));
     };
@@ -1685,6 +1697,10 @@ pub async fn approve(app: AppHandle, state: State<'_, AppState>, id: String, ui_
     }
     tx.send(format!("{}\n", serde_json::to_string(&resp).unwrap()))
         .map_err(|_| cmd_err("RPC_IO", "审批发送失败，进程可能已退出".into(), None))?;
+    // 审批放行即视为「等待结束」：活动态改回 running，与广播保持一致（回收只认 idle）
+    if let Some(r) = state.runtime.lock().await.get(&id) {
+        r.activity.set_state(crate::runtime::ACT_RUNNING);
+    }
     let _ = app.emit(format!("omp-status://{id}").as_str(), serde_json::json!({"state":"running"}));
     Ok(())
 }
@@ -1716,7 +1732,11 @@ pub async fn respond_ui(
     };
     tx.send(format!("{}\n", serde_json::to_string(&resp).unwrap()))
         .map_err(|_| cmd_err("RPC_IO", "回包发送失败，进程可能已退出".into(), None))?;
-    // 回包即视为「等待结束」，与 approve 一致把状态推回 running（omp 会继续跑）
+    // 回包即视为「等待结束」，与 approve 一致把状态推回 running（omp 会继续跑）；
+    // 活动态同步落 running（回收只认 idle）。
+    if let Some(r) = state.runtime.lock().await.get(&id) {
+        r.activity.set_state(crate::runtime::ACT_RUNNING);
+    }
     let _ = app.emit(format!("omp-status://{id}").as_str(), serde_json::json!({"state":"running"}));
     Ok(())
 }

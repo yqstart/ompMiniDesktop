@@ -1,4 +1,5 @@
 import { api } from "@shared/api";
+import { forgetSession } from "./useSessionEvents";
 
 /**
  * 会话批量操作的唯一实现（会话弹窗与设置页「已归档对话」共用）。
@@ -27,6 +28,14 @@ export async function runSessionBatch(
      : await api.deleteSessions(chunk);
   ok += res.ok;
   failed.push(...res.failed);
+  // 归档 / 删除后清前端缓存（只清真正成功的 id，失败的那些保持可读）；
+  // 恢复（unarchive）不清——会话正要重新用起来。
+  if (kind !== "unarchive") {
+   const failedIds = new Set(res.failed.map((f) => f.id));
+   for (const id of chunk) {
+    if (!failedIds.has(id)) forgetSession(id);
+   }
+  }
  }
  return { ok, failed };
 }

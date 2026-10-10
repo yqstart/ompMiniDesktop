@@ -4,7 +4,7 @@ import { IPC } from "@shared/ipc";
 import { api } from "@shared/api";
 import { useApp } from "../stores/app";
 import type { SessionRuntime, SessionStatus, ViewMsg } from "@shared/types";
-import { summarizeArgs, mentionFilesOf, diffStatOf } from "./viewmsg";
+import { summarizeArgs, mentionFilesOf, diffStatOf, TOOL_OUTPUT_FULL_MAX } from "./viewmsg";
 import { fmt, TEXT, type Text } from "./locale";
 import { imagesFromContent } from "./attachments";
 import { normalizeCommands } from "./slashCommands";
@@ -204,7 +204,7 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dic
     // 拒绝分支统一渲染成 dict.toolDenied（omp 回的是英文 "Tool call denied by user: xxx"）
     state: isDenied || isError ? "error" : "ok",
     output: isDenied ? dict.toolDenied : text.length > 2000 ? text.slice(0, 2000) : text,
-    outputFull: !isDenied && text.length > 2000 ? text : undefined,
+    outputFull: !isDenied && text.length > 2000 && text.length <= TOOL_OUTPUT_FULL_MAX ? text : undefined,
     streamIndex: 0,
    });
   }
@@ -242,7 +242,7 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dic
    argsSummary: "",
    state: frame.isError || denied ? "error" : "ok",
    output: denied ? dict.toolDenied : text.length > 2000 ? text.slice(0, 2000) : text,
-   outputFull: !denied && text.length > 2000 ? text : undefined,
+   outputFull: !denied && text.length > 2000 && text.length <= TOOL_OUTPUT_FULL_MAX ? text : undefined,
    streamIndex: 0,
   });
   return out;
@@ -471,19 +471,101 @@ export async function syncSessionRuntime(sid: string): Promise<void> {
  }
 }
 
+// ---------- 非活跃会话历史的内存治理（V34） ----------
+
+/** 内存里保留最近几个「打开过」的会话的完整历史（超出即清，切回时重新拉）。 */
+const KEEP_HISTORY = 3;
+
+/** 最近激活过的会话（新的在前）——历史清理的保留名单。 */
+let recentHistoryIds: string[] = [];
+
+/** 单测隔离用：清掉 LRU 记录。 */
+export function __resetHistoryLru() {
+ recentHistoryIds = [];
+}
+
+/**
+ * 把「非活跃会话」的历史从内存里清掉（保留最近 `keep` 个激活过的）。
+ *
+ * 为什么需要：`eventsBySession` 里每个**打开过**的会话都会留下全量消息（工具全量
+ * 输出文本也在里面），浏览十来个长会话就是几百 MB 到 GB 级的常驻内存。
+ * 清掉是安全的——切回会话时 `openSessionWithHistory` 本来就每次 `get_history`
+ * 全量重拉（合并按 id 去重，空基底天然支持）。
+ *
+ * 正在跑 / 等审批的会话不动：它们的流还在写，用户随时可能切回去看中间态。
+ */
+export function trimSessionHistories(activeId: string | null, keep = KEEP_HISTORY): void {
+ if (activeId) recentHistoryIds = [activeId, ...recentHistoryIds.filter((x) => x !== activeId)];
+ recentHistoryIds = recentHistoryIds.slice(0, Math.max(1, keep));
+ const keepSet = new Set(recentHistoryIds);
+ const st = useApp.getState();
+ let changed = false;
+ const next: Record<string, ViewMsg[]> = {};
+ for (const [sid, msgs] of Object.entries(st.eventsBySession)) {
+  const running = st.statusBySession[sid]?.state;
+  if (keepSet.has(sid) || running === "running" || running === "awaiting-approval") {
+   next[sid] = msgs;
+  } else {
+   changed = true;
+   folds.delete(sid);
+  }
+ }
+ if (changed) st.set({ eventsBySession: next });
+}
+
+/**
+ * 会话被归档 / 删除后清掉它的前端缓存（事件流 / 运行状态 / 计划 / 附件 / 折叠态 / LRU 名单）。
+ * 清掉是安全的：会话数据的真相在 jsonl，重新打开走 `get_history`。
+ * 归档 / 删除都会先把长驻进程 kill 掉（后端），前端也就没有理由再留着这些。
+ */
+export function forgetSession(sid: string): void {
+ folds.delete(sid);
+ recentHistoryIds = recentHistoryIds.filter((x) => x !== sid);
+ const st = useApp.getState();
+ if (
+  !(sid in st.eventsBySession) &&
+  !(sid in st.statusBySession) &&
+  !(sid in st.plansBySession) &&
+  !(sid in st.attachmentsBySession)
+ ) {
+  return;
+ }
+ const events = { ...st.eventsBySession };
+ const status = { ...st.statusBySession };
+ const plans = { ...st.plansBySession };
+ const atts = { ...st.attachmentsBySession };
+ delete events[sid];
+ delete status[sid];
+ delete plans[sid];
+ delete atts[sid];
+ st.set({ eventsBySession: events, statusBySession: status, plansBySession: plans, attachmentsBySession: atts });
+}
+
 export function useSessionEvents() {
- const { activeSessionId, set } = useApp();
+ const { activeSessionId, set, appMode } = useApp();
+
+ // 切去终端形态：聊天不在用，非当前会话的历史一并清掉（保留当前会话，切回来不空白）。
+ // 内存治理的兜底——LRU 只按「切会话」触发，切去终端用几小时的话那几份历史会一直挂着。
+ useEffect(() => {
+  if (appMode !== "terminal") return;
+  trimSessionHistories(useApp.getState().activeSessionId, 1);
+ }, [appMode]);
 
  useEffect(() => {
   const sid = activeSessionId;
   if (!sid) return;
+  // 内存治理：非活跃会话的历史只留最近 K 个（更早的清掉，切回时重新 get_history 拉回）
+  trimSessionHistories(sid);
   let off1: (() => void) | undefined;
   let off2: (() => void) | undefined;
   let off3: (() => void) | undefined;
+  // `listen` 是异步注册的：cleanup 先于注册完成时必须把「已在路上」的监听立刻解掉，
+  // 否则监听器泄漏（旧会话的帧会一直写进 store）。
+  let disposed = false;
   // 切会话先清运行时态，等真值回填（避免沿用上一个会话的模型/档位/用量）
   set({ currentModel: null, currentThinking: null, currentEfforts: null, currentRuntime: null });
   (async () => {
-   off1 = await listen<Record<string, unknown>>(IPC.chatEvent(sid), (e) => {
+   const o1 = await listen<Record<string, unknown>>(IPC.chatEvent(sid), (e) => {
     // 命令面变化（装/卸技能与扩展时 omp 会重发）：只更新运行时真值，不进消息流。
     // 握手期那一发通常早于本订阅，所以 `syncSessionRuntime` 的补拉才是第一次到位的路径，
     // 这里管的是"会话开着时命令面又变了"。
@@ -501,18 +583,34 @@ export function useSessionEvents() {
      st.set({ eventsBySession: { ...st.eventsBySession, [sid]: mergeViewMsgs(cur, msgs) } });
     }
    });
-   off2 = await listen<SessionStatus & { detail?: string }>(IPC.chatStatus(sid), (e) => {
+   if (disposed) {
+    o1();
+    return;
+   }
+   off1 = o1;
+   const o2 = await listen<SessionStatus & { detail?: string }>(IPC.chatStatus(sid), (e) => {
     const st = useApp.getState();
     set({
      statusBySession: { ...st.statusBySession, [sid]: { state: e.payload.state } as SessionStatus },
     });
    });
+   if (disposed) {
+    o2();
+    return;
+   }
+   off2 = o2;
    // 运行时真值：实时推送 + 订阅建立后补拉一次（spawn 握手可能早于本订阅；
    // 若本订阅早于 spawn，则由 `openSessionWithHistory` 在 open 返回后再补一次）
-   off3 = await listen<SessionRuntime>(IPC.chatRuntime(sid), (e) => applyRuntime(sid, e.payload));
+   const o3 = await listen<SessionRuntime>(IPC.chatRuntime(sid), (e) => applyRuntime(sid, e.payload));
+   if (disposed) {
+    o3();
+    return;
+   }
+   off3 = o3;
    void syncSessionRuntime(sid);
   })();
   return () => {
+   disposed = true;
    off1?.();
    off2?.();
    off3?.();

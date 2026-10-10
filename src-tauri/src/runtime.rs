@@ -7,7 +7,14 @@
 //! 差别是会话会挂上 `ask` 工具（模型能主动向用户提问，UI 请求走既有的
 //! `extension_ui_request` 桥）。实测对比与帧形状见 docs/rpc-memo.md §1。
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicI64, AtomicU8, Ordering},
+        Arc,
+    },
+};
 use tokio::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::{
@@ -51,6 +58,104 @@ impl SpawnOpts {
     }
 }
 
+/// 会话活动态：闲置回收的判定依据（V34）。
+///
+/// `last_active_ms` 在**每次收到 omp 帧**时 touch（spawn 时刻起算）；
+/// `state` 跟随 omp 的运行状态（帧驱动，与发给前端的 `omp-status://` 同一批更新点，
+/// 见 [`emit_status`]）。回收只认 `idle`——`running`（agent 在干活，哪怕某个工具
+/// 长时间没输出）/ `awaiting`（等用户审批）/ `exited`（异常退出）一律不碰。
+pub struct SessionActivity {
+    last_active_ms: AtomicI64,
+    state: AtomicU8,
+}
+
+/// 与 `dispatch` 发给前端的 `{"state": ...}` 字符串一一对应。
+pub const ACT_IDLE: u8 = 0;
+pub const ACT_RUNNING: u8 = 1;
+pub const ACT_AWAITING: u8 = 2;
+/// 异常退出 / 错误：与「正常 idle」区分开，回收不认它。
+pub const ACT_EXITED: u8 = 3;
+
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+impl SessionActivity {
+    fn new() -> Self {
+        Self { last_active_ms: AtomicI64::new(now_ms()), state: AtomicU8::new(ACT_IDLE) }
+    }
+
+    fn touch(&self) {
+        self.last_active_ms.store(now_ms(), Ordering::Relaxed);
+    }
+
+    /// 命令路径（approve / respond_ui 把状态改回 running）也可以直接落活动态。
+    pub fn set_state(&self, s: u8) {
+        self.state.store(s, Ordering::Relaxed);
+    }
+
+    fn state(&self) -> u8 {
+        self.state.load(Ordering::Relaxed)
+    }
+
+    fn last_active_ms(&self) -> i64 {
+        self.last_active_ms.load(Ordering::Relaxed)
+    }
+}
+
+impl Default for SessionActivity {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// 闲置回收阈值：idle 且这么久没有任何帧 → 回收（kill）长驻进程。
+/// 内存大头就是这些常驻 omp 进程（每个 0.5–1GB，实测见 docs/v17-schedule.md），
+/// 而「浏览过的会话」会一直留着——不回收，开十个会话就是十个进程。
+/// 回收后**重新打开 / 直接发消息都会自动 resume**（`send_prompt` 的自动恢复），
+/// 所以这个阈值不需要保守到「用户回来第一眼看不到会话」的程度。
+pub const IDLE_RECYCLE_MS: i64 = 30 * 60 * 1000;
+
+/// 回收扫描间隔。
+const REAP_INTERVAL_SECS: u64 = 60;
+
+/// 单个会话是否符合回收条件（纯判定，不含「已落盘」检查——那是调用处的 I/O）。
+fn idle_recyclable(act: &SessionActivity, now_ms: i64, idle_ms: i64) -> bool {
+    act.state() == ACT_IDLE && now_ms.saturating_sub(act.last_active_ms()) >= idle_ms
+}
+
+/// 闲置回收循环（app 启动时挂一次）：每 [`REAP_INTERVAL_SECS`] 秒扫一遍聊天会话进程表，
+/// 把「idle 超阈值 + 已落盘」的会话 kill 掉。
+///
+/// 为什么必须「已落盘」：omp 的 jsonl 是懒写盘的（首个 turn 才落文件），刚建好、
+/// 还没说过话的会话被回收后磁盘上什么都没有——列表靠 runtime 补的那一行会凭空消失。
+///
+/// 静默回收（不发状态事件）：回收只发生在 idle，前端状态本来就显示 idle，一致；
+/// 用户回来后发消息走自动恢复，中间不需要看见「已退出」这类会吓人的中间态。
+pub fn start_idle_reaper<R: tauri::Runtime>(app: AppHandle<R>) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(REAP_INTERVAL_SECS)).await;
+            let state = app.state::<crate::commands::AppState>();
+            let now = now_ms();
+            let victims: Vec<String> = {
+                let rt = state.runtime.lock().await;
+                rt.iter()
+                    .filter(|(_, r)| {
+                        idle_recyclable(&r.activity, now, IDLE_RECYCLE_MS)
+                            && r.session_file.as_ref().map(|f| f.exists()).unwrap_or(false)
+                    })
+                    .map(|(k, _)| k.clone())
+                    .collect()
+            };
+            for sid in victims {
+                eprintln!("[omp-mini] 回收闲置聊天会话进程：{sid}");
+                crate::commands::kill_runtime(&state, &sid);
+            }
+        }
+    });
+}
+
 pub struct RunningChild {
     pub tx: mpsc::UnboundedSender<String>,
     pub child: Child,
@@ -62,6 +167,10 @@ pub struct RunningChild {
     /// spawn 时刻（毫秒）。同理：没落盘就没有会话时间可用，列表补行时用这份事实，
     /// 而不是每次刷新都拿「现在」，免得那一行的时间随刷新跳动。
     pub created_ms: i64,
+    /// 活动态（V34 闲置回收判定 / 帧触达）。
+    pub activity: Arc<SessionActivity>,
+    /// 会话 jsonl 路径（握手 `get_state` 的 `sessionFile`）。回收只碰**已落盘**的会话。
+    pub session_file: Option<PathBuf>,
 }
 
 pub type RuntimeMap = Arc<Mutex<HashMap<String, RunningChild>>>;
@@ -286,12 +395,17 @@ impl ChunkAsm {
     }
 }
 
-/// spawn 长驻进程并完成后握手。成功返回 (session_id, session_file, 运行时真值)。
-/// 调用方负责把 RunningChild 放入 RuntimeMap 并启动 pump。
+/// spawn 长驻进程并完成握手，登记进 `RuntimeMap`（**键 = 会话 id**）并启动 pump。
+/// 成功返回 `(session_id, session_file, 运行时真值)`。
+///
+/// 为什么不用调用方给的 key 作 map 键：像 `create_session` 这样的调用方手里只有占位键
+/// （`new-<ts>`），真身份要握手才知道；而事件三通道与 pump 的 map 查询（真值快照 /
+/// 命令面缓存 / 偏好回写）**从第一帧起**就得按会话 id 走——占位键会把新建会话的帧发到
+/// 无人订阅的通道（实测见 `docs/v34-schedule.md` §1.3）。这里统一以 sid 为键，
+/// 调用方拿到的返回值即最终身份、无需换名。
 pub async fn spawn_long_lived<R: tauri::Runtime>(
     app: &AppHandle<R>,
     map: RuntimeMap,
-    key: String,
     opts: SpawnOpts,
 ) -> Result<(String, String, SessionMeta), crate::commands::CmdError> {
     let mut child = tokio::process::Command::new(&opts.bin)
@@ -387,54 +501,63 @@ pub async fn spawn_long_lived<R: tauri::Runtime>(
     // 先登记进程再起 pump：回放握手帧时会走 `update_meta`（命令面缓存等），
     // 快照里还没有这一条的话那些帧就白回了。
     let mut m = map.lock().await;
-    // 同名会话的旧进程先杀；stdin 关闭等于进程退出（code 0），open_session 会重建
-    if let Some(old) = m.remove(&key) {
+    // 同一会话的旧进程先杀（重复 open / 重开的竞态）；stdin 关闭等于进程退出（code 0）
+    if let Some(old) = m.remove(&sid) {
         let _ = old.tx.send(String::new());
         let mut c = old.child;
         let _ = c.kill().await;
     }
     m.insert(
-        key.clone(),
+        sid.clone(),
         RunningChild {
             tx,
             child,
             meta: meta.clone(),
             cwd: opts.cwd.clone(),
             created_ms: chrono::Utc::now().timestamp_millis(),
+            activity: Arc::new(SessionActivity::new()),
+            session_file: Some(PathBuf::from(&sfile)),
         },
     );
+    // pump 与回收判定共用同一份活动态（帧触达 / 状态更新都在泵里）
+    let activity = m.get(&sid).map(|r| r.activity.clone()).unwrap();
     drop(m);
 
-    // 启动后台 pump：stdin 写 + stdout 读分发（先把握手期间攒下的帧原序回放）
+    // 启动后台 pump：stdin 写 + stdout 读分发（先把握手期间攒下的帧原序回放）。
+    // 通道名与 map 查询键都用 **sid**（会话 id）：前端从订阅建立那一刻起听的永远是
+    // `omp-*://<会话 id>`——用占位键会把新建会话的所有帧发到无人订阅的通道
+    // （V34 探针实证：占位键通道收到全部帧、sid 通道一条都没有）。
     let stdin = stdin_opt.take().unwrap();
-    start_pump(app.clone(), key.clone(), reader, stdin, rx, sid.clone(), leftover);
+    start_pump(app.clone(), sid.clone(), reader, stdin, rx, leftover, activity);
 
     // 开场真值快照：omp 的握手回包里已经有模型 / 思考档 / 上下文占用，但那份回包
     // **只在本地消化**（不进事件流），而前端建订阅后的那次 `get_session_runtime` 补拉
     // 会早于 spawn 完成（拉空）——不在这里补一发，打开旧会话后工具行上的模型与思考档
     // 就一直空着，直到用户手动切一次模型。前端建订阅通常早于握手完成（会话先选中、
     // spawn 要等 omp 起来），所以这一发能收到；真收不到也有那次补拉兜底。
-    let _ = app.emit(&format!("omp-state://{key}"), &meta);
+    let _ = app.emit(&format!("omp-state://{sid}"), &meta);
     Ok((sid, sfile, meta))
 }
 
+/// `sid` = 会话 id：既是事件三通道（`omp-event` / `omp-status` / `omp-state`）的名字，
+/// 也是 pump 内所有 map 查询（真值快照 / 命令面缓存 / 项目偏好回写）的键——
+/// 与 map 的 key 解耦（create 的占位键会换名，见 [`spawn_long_lived`] 的说明）。
 fn start_pump<R: tauri::Runtime>(
     app: AppHandle<R>,
-    key: String,
+    sid: String,
     mut reader: tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
     mut stdin: ChildStdin,
     mut rx: mpsc::UnboundedReceiver<String>,
-    worker_sid: String,
     leftover: Vec<String>,
+    activity: Arc<SessionActivity>,
 ) {
-    let evt = format!("omp-event://{key}");
-    let status = format!("omp-status://{key}");
-    let _ = worker_sid;
+    let evt = format!("omp-event://{sid}");
+    let status = format!("omp-status://{sid}");
     tauri::async_runtime::spawn(async move {
         let mut asm = ChunkAsm::default();
         let mut pending: std::collections::VecDeque<String> = Default::default();
         // 状态：idle 起
-        let _ = app.emit(&status, serde_json::json!({"state":"idle"}));
+        emit_status(&app, &status, &activity, "idle", None);
         // 握手期间攒下的帧（命令面 / 单向宿主指令）按原序补发：
         // 它们到得比订阅早，不补发就等于永久丢失（`/` 补全没有数据源就是这个原因）。
         {
@@ -455,7 +578,7 @@ fn start_pump<R: tauri::Runtime>(
                 } else {
                     v
                 };
-                handle_frame(&app, &key, &evt, &status, &full, &mut stdin).await;
+                handle_frame(&app, &sid, &evt, &status, &full, &mut stdin, &activity).await;
             }
         }
         loop {
@@ -468,7 +591,7 @@ fn start_pump<R: tauri::Runtime>(
                     }
                     while let Some(l) = pending.pop_front() {
                         if let Err(e) = stdin.write_all(l.as_bytes()).await {
-                            let _ = app.emit(&status, serde_json::json!({"state":"error","detail":format!("写入失败：{e}")}));
+                            emit_status(&app, &status, &activity, "error", Some(&format!("写入失败：{e}")));
                             break;
                         }
                     }
@@ -479,6 +602,9 @@ fn start_pump<R: tauri::Runtime>(
                         Ok(Some(line)) => {
                             let line = line.trim().to_string();
                             if line.is_empty() { continue; }
+                            // 任何一帧都算活动（闲置回收的触达点）：running 的会话
+                            // 一直在推帧，天然不会被回收；真闲下来的会话才开始计时。
+                            activity.touch();
                             let v: serde_json::Value = match serde_json::from_str(&line) {
                                 Ok(v) => v,
                                 Err(_) => continue, // 坏行跳过记日志（M4 补日志通道）
@@ -492,10 +618,10 @@ fn start_pump<R: tauri::Runtime>(
                             } else {
                                 v
                             };
-                            handle_frame(&app, &key, &evt, &status, &full, &mut stdin).await;
+                            handle_frame(&app, &sid, &evt, &status, &full, &mut stdin, &activity).await;
                         }
                         _ => {
-                            let _ = app.emit(&status, serde_json::json!({"state":"exited","detail":"omp 进程已退出"}));
+                            emit_status(&app, &status, &activity, "exited", Some("omp 进程已退出"));
                             break;
                         }
                     }
@@ -588,6 +714,7 @@ async fn handle_frame<R: tauri::Runtime>(
     status: &str,
     v: &serde_json::Value,
     stdin: &mut ChildStdin,
+    activity: &SessionActivity,
 ) {
     if v.get("type").and_then(|t| t.as_str()) == Some("response") {
         match classify(v) {
@@ -670,30 +797,63 @@ async fn handle_frame<R: tauri::Runtime>(
             let _ = stdin.flush().await;
         }
     }
-    dispatch(app, key, evt, status, v);
+    dispatch(app, key, evt, status, v, activity);
 }
 
-fn dispatch<R: tauri::Runtime>(app: &AppHandle<R>, key: &str, evt: &str, status: &str, v: &serde_json::Value) {
+/// 状态唯一的出口：更新活动态（回收判定读它）+ 推 `omp-status://` 给前端。
+/// `state` 取前端口径的字符串（idle / running / awaiting-approval / error / exited）；
+/// `error` / `exited` 都归入 [`ACT_EXITED`]——回收只认 `idle`。
+fn emit_status<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    status_ch: &str,
+    activity: &SessionActivity,
+    state: &str,
+    detail: Option<&str>,
+) {
+    activity.state.store(
+        match state {
+            "running" => ACT_RUNNING,
+            "awaiting-approval" => ACT_AWAITING,
+            "idle" => ACT_IDLE,
+            _ => ACT_EXITED,
+        },
+        Ordering::Relaxed,
+    );
+    let mut payload = serde_json::json!({ "state": state });
+    if let Some(d) = detail {
+        payload["detail"] = serde_json::Value::String(d.to_string());
+    }
+    let _ = app.emit(status_ch, payload);
+}
+
+fn dispatch<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    key: &str,
+    evt: &str,
+    status: &str,
+    v: &serde_json::Value,
+    activity: &SessionActivity,
+) {
     let t = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
     match t {
         "agent_start" => {
-            let _ = app.emit(status, serde_json::json!({"state":"running"}));
+            emit_status(app, status, activity, "running", None);
         }
         "agent_end" => {
             let terminal = v.get("isTerminal").and_then(|b| b.as_bool()).unwrap_or(true);
             if terminal {
-                let _ = app.emit(status, serde_json::json!({"state":"idle"}));
+                emit_status(app, status, activity, "idle", None);
             }
         }
         // 本地命令完成信号（`prompt` 回包 `data.agentInvoked:false` 或后续
         // `prompt_result{agentInvoked:false}`）：没有 agent turn、不会有
         // `agent_end`，此处直接收敛到 idle，否则转圈停不下来。
         "response" if is_local_prompt_result(v) => {
-            let _ = app.emit(status, serde_json::json!({"state":"idle"}));
+            emit_status(app, status, activity, "idle", None);
             let _ = app.emit(evt, v);
         }
         "prompt_result" if !v.get("agentInvoked").and_then(|b| b.as_bool()).unwrap_or(true) => {
-            let _ = app.emit(status, serde_json::json!({"state":"idle"}));
+            emit_status(app, status, activity, "idle", None);
             let _ = app.emit(evt, v);
         }
         "command_output" | "notice" | "todo_reminder" | "goal_updated" | "irc_message" => {
@@ -722,7 +882,7 @@ fn dispatch<R: tauri::Runtime>(app: &AppHandle<R>, key: &str, evt: &str, status:
             // 与服务端撤回（cancel）都不是等待，别把 composer 锁住。
             let method = v.get("method").and_then(|m| m.as_str()).unwrap_or("");
             if matches!(method, "select" | "confirm" | "input" | "editor") {
-                let _ = app.emit(status, serde_json::json!({"state":"awaiting-approval"}));
+                emit_status(app, status, activity, "awaiting-approval", None);
             }
             let _ = app.emit(evt, v);
         }
@@ -865,18 +1025,11 @@ mod real_rpc_tests {
 
         // 事件面：omp-event / omp-status 都挂监听（顺带验证 emit 路径真能到监听端）。
         // 收集走无界通道（回调里只需同步 send），不引锁。
+        // 注意：通道名 = 会话 id，而 sid 要握手后才拿得到——订阅只能发生在 spawn 之后
+        // （pump 启动即回放握手期攒下的帧，这一瞬的竞态帧不作为本测试的断言对象；
+        // 前端那边有 `syncSessionRuntime` 的补拉兜底）。
         let (evt_tx, mut evt_rx) = tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
-        handle.listen("omp-event://it", move |e| {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(e.payload()) {
-                let _ = evt_tx.send(v);
-            }
-        });
         let (st_tx, mut st_rx) = tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
-        handle.listen("omp-status://it", move |e| {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(e.payload()) {
-                let _ = st_tx.send(v);
-            }
-        });
 
         let cwd = std::env::temp_dir().join(format!("omp-rpc-it-{}", std::process::id()));
         std::fs::create_dir_all(&cwd).unwrap();
@@ -887,7 +1040,6 @@ mod real_rpc_tests {
             let (sid, sfile, meta) = spawn_long_lived(
                 &handle,
                 map.clone(),
-                "it".into(),
                 SpawnOpts {
                     bin,
                     cwd: cwd.to_string_lossy().to_string(),
@@ -904,8 +1056,23 @@ mod real_rpc_tests {
                 "[real_rpc] 会话 {sid}（{sfile}）；模型 {:?}",
                 meta.model.as_ref().map(|m| format!("{}/{}", m.provider, m.id))
             );
+            // 拿到 sid 才订阅（通道名 = 会话 id；前端同口径）
+            {
+                let out = evt_tx.clone();
+                handle.listen(format!("omp-event://{sid}").as_str(), move |e| {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(e.payload()) {
+                        let _ = out.send(v);
+                    }
+                });
+                let out = st_tx.clone();
+                handle.listen(format!("omp-status://{sid}").as_str(), move |e| {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(e.payload()) {
+                        let _ = out.send(v);
+                    }
+                });
+            }
 
-            let tx = map.lock().await.get("it").unwrap().tx.clone();
+            let tx = map.lock().await.get(&sid).unwrap().tx.clone();
             tx.send("{\"id\":\"p-it\",\"type\":\"prompt\",\"message\":\"Reply with exactly: ok\"}\n".to_string())
                 .unwrap();
 
@@ -925,7 +1092,7 @@ mod real_rpc_tests {
                 }
                 let (usage, ctx_tokens) = {
                     let m = map.lock().await;
-                    let r = m.get("it");
+                    let r = m.get(&sid);
                     (
                         r.map(|r| r.meta.usage.is_some()).unwrap_or(false),
                         r.and_then(|r| r.meta.context_usage.as_ref()).and_then(|c| c.tokens),
@@ -956,13 +1123,147 @@ mod real_rpc_tests {
         // 会话流（agent_end 只推状态 idle），别拿它当完成信号。
         assert!(kinds.iter().any(|k| k == "message_update"), "应收到 message_update 流式帧");
         assert!(kinds.iter().any(|k| k == "message_end"), "应收到 message_end");
-        assert!(kinds.iter().any(|k| k == "available_commands_update"), "握手期的命令面应回放给前端");
+        // 握手期回放的 available_commands_update：本测试的订阅发生在 spawn 之后
+        // （通道名要先拿到 sid），回放帧到得比订阅早时收不到——不断言，仅记录；
+        // 「握手回放必达」的覆盖在 recycle 测试的 resume 场景（订阅先于 spawn）。
+        println!(
+            "[real_rpc] 命令面回放帧（订阅竞态，仅供参考）：{}",
+            kinds.iter().any(|k| k == "available_commands_update")
+        );
         assert!(sts.iter().any(|s| s == "running"), "状态应经过 running：{sts:?}");
         assert!(sts.iter().any(|s| s == "idle"), "状态应回到 idle：{sts:?}");
         while let Ok(v) = st_rx.try_recv() {
             sts.push(v.get("state").and_then(|s| s.as_str()).unwrap_or("").to_string());
         }
         println!("[real_rpc] 状态序列：{sts:?}");
+        let _ = std::fs::remove_dir_all(&cwd);
+    }
+
+    /// V34 回收 → 发送自动恢复的真实慢测试（**默认忽略**）。
+    ///
+    /// 验的是闲置回收之后用户直接发消息的完整链路：kill 长驻进程（与 reaper 同一入口
+    /// `kill_runtime`）→ `send_message` 发现进程不在 → `spawn_session_runtime` resume
+    /// 拉起 → 消息送达 → 新一轮事件流照常。
+    #[test]
+    #[ignore = "慢测试：真实 omp + 两次真实 AI 调用（回收与自动恢复）"]
+    fn real_rpc_recycle_recover() {
+        let Some(bin) = omp_bin() else {
+            eprintln!("[real_rpc] 跳过：本机找不到 omp（可用 OMP_BIN 指定）");
+            return;
+        };
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app 构建失败");
+        let state = crate::commands::load_state(app.handle());
+        let map = state.runtime.clone();
+        app.manage(state);
+        let handle = app.handle().clone();
+
+        let cwd = std::env::temp_dir().join(format!("omp-rpc-rc-{}", std::process::id()));
+        std::fs::create_dir_all(&cwd).unwrap();
+
+        tauri::async_runtime::block_on(async {
+            // send_message 的自动恢复走 `state.omp_path`（真实应用由健康检查落位），
+            // 测试直接注入
+            let st = handle.state::<crate::commands::AppState>();
+            *st.omp_path.lock().await = Some(bin.clone());
+
+            // 初起照 create_session 的口径：spawn 内部以会话 id 作 runtime 表的键
+            // （拿到 sid 前并不知道它，但调用方与 pump 从此都用同一个键）
+            let (sid, sfile, _meta) = spawn_long_lived(
+                &handle,
+                map.clone(),
+                SpawnOpts {
+                    bin: bin.clone(),
+                    cwd: cwd.to_string_lossy().to_string(),
+                    resume: None,
+                    model: None,
+                    thinking: None,
+                    approval: None,
+                },
+            )
+            .await
+            .expect("握手失败");
+            // 前端订阅的是**真实 sid** 的通道（拿到 sid 之后才订阅）
+            let (evt_tx, mut evt_rx) = tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
+            handle.listen(format!("omp-event://{sid}").as_str(), move |e| {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(e.payload()) {
+                    let _ = evt_tx.send(v);
+                }
+            });
+
+            // 第一轮：真实 prompt，等 message_end 回写 + agent_end 收敛
+            let tx = map.lock().await.get(&sid).unwrap().tx.clone();
+            tx.send("{\"id\":\"p-rc1\",\"type\":\"prompt\",\"message\":\"Reply with exactly: ok\"}\n".to_string())
+                .unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+            let mut first_frame = false;
+            loop {
+                assert!(std::time::Instant::now() < deadline, "第一轮 120s 没有等到 idle");
+                while let Ok(v) = evt_rx.try_recv() {
+                    if v.get("type").and_then(|t| t.as_str()) == Some("message_end") {
+                        first_frame = true;
+                    }
+                }
+                let (idle, used) = {
+                    let m = map.lock().await;
+                    let r = m.get(&sid);
+                    (
+                        r.map(|r| r.activity.state() == ACT_IDLE).unwrap_or(false),
+                        r.map(|r| r.meta.usage.is_some()).unwrap_or(false),
+                    )
+                };
+                if idle && used && first_frame {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+            assert!(first_frame, "按生产时序（订阅真实 sid 通道）没有收到第一轮 message_end");
+
+            // 等 jsonl 落盘：omp 懒写盘（首个 turn 之后才写文件，且有节流延迟），
+            // 自动恢复靠它找文件。reaper 也有同样的 file 检查——没落盘的会话本就不会被回收。
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            while !std::path::Path::new(&sfile).exists() && std::time::Instant::now() < deadline {
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            }
+            assert!(std::path::Path::new(&sfile).exists(), "60s 内 jsonl 没有落盘：{sfile}");
+
+            // 模拟闲置回收：与 reaper 同一入口 kill（只在 idle 时回收）
+            crate::commands::kill_runtime(&st, &sid);
+            assert!(map.lock().await.get(&sid).is_none(), "回收后进程应从表里移除");
+
+            // 清掉第一轮残留帧，避免第二轮把旧帧误判成新帧
+            while evt_rx.try_recv().is_ok() {}
+
+            // 用户直接发消息：应自动 resume 并成功（不是报 NOT_RUNNING）
+            crate::commands::send_prompt(&handle, &st, &sid, "prompt", "Reply with exactly: ok".into(), None)
+                .await
+                .expect("回收后发送应自动恢复，不该失败");
+            assert!(map.lock().await.get(&sid).is_some(), "发送后应自动 resume 出新进程");
+
+            // 第二轮事件流照常（新一轮 message_end；resume 新进程启动时的握手回放帧
+            // 也应到达——订阅在本轮 spawn 之前就已建立，这是「回放必达」的可确定时序）
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+            let mut second = false;
+            let mut replay = false;
+            while std::time::Instant::now() < deadline {
+                while let Ok(v) = evt_rx.try_recv() {
+                    match v.get("type").and_then(|t| t.as_str()) {
+                        Some("message_end") => second = true,
+                        Some("available_commands_update") => replay = true,
+                        _ => {}
+                    }
+                }
+                if second && replay {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+            assert!(second, "恢复后 120s 内没有等到新一轮 message_end");
+            assert!(replay, "resume 进程的握手回放帧没有到达 sid 通道");
+
+            kill_all(&map);
+        });
         let _ = std::fs::remove_dir_all(&cwd);
     }
 }
@@ -1241,5 +1542,38 @@ mod tests {
         // 状态回读回包：自己消化，不回环（get_state 不再触发注入）
         let s = serde_json::json!({"id": STATE_SYNC_ID, "type": "response", "command": "get_state", "success": true});
         assert_eq!(classify(&s), FrameAction::StateSync);
+    }
+
+    // ---------- V34 闲置回收 ----------
+
+    #[test]
+    fn session_activity_tracks_state_and_freshness() {
+        let act = SessionActivity::new();
+        assert_eq!(act.state(), ACT_IDLE, "spawn 起手是 idle");
+        act.set_state(ACT_RUNNING);
+        assert_eq!(act.state(), ACT_RUNNING);
+        // touch 刷新活动时刻（回收计时的依据）
+        act.last_active_ms.store(0, Ordering::Relaxed);
+        act.touch();
+        assert!(act.last_active_ms() > 0);
+    }
+
+    #[test]
+    fn idle_recyclable_only_for_stale_idle() {
+        let act = SessionActivity::new();
+        let now = 10_000_000i64;
+        let idle = 60_000i64;
+        // idle 且超阈值 → 可回收（边界上等于阈值也算）
+        act.last_active_ms.store(now - idle, Ordering::Relaxed);
+        assert!(idle_recyclable(&act, now, idle));
+        // 刚有帧 → 不可回收
+        act.last_active_ms.store(now - idle + 1, Ordering::Relaxed);
+        assert!(!idle_recyclable(&act, now, idle));
+        // 非 idle（跑着 / 等审批 / 异常退出）一律不回收——哪怕很久没帧
+        for st in [ACT_RUNNING, ACT_AWAITING, ACT_EXITED] {
+            act.set_state(st);
+            act.last_active_ms.store(0, Ordering::Relaxed);
+            assert!(!idle_recyclable(&act, now, idle), "state={st} 不该被回收");
+        }
     }
 }

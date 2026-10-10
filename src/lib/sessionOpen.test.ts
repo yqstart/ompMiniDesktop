@@ -82,6 +82,17 @@ describe("打开会话：历史落库与去重", () => {
   expect((useApp.getState().eventsBySession[SID] ?? []).filter((m) => m.id === "hist-truncated")).toHaveLength(1);
  });
 
+ it("历史被内存治理清掉后，重新打开会从 jsonl 全量拉回（V34 历史 LRU）", async () => {
+  await openSessionWithHistory(SID);
+  const n1 = (useApp.getState().eventsBySession[SID] ?? []).length;
+  expect(n1).toBeGreaterThan(0);
+  // 模拟 `trimSessionHistories` 对这个会话的清理（非活跃会话超出 LRU 窗口）
+  useApp.setState({ eventsBySession: {} });
+  await openSessionWithHistory(SID);
+  // 空基底重新全量落地——清掉只是省内存，不是丢数据
+  expect(useApp.getState().eventsBySession[SID] ?? []).toHaveLength(n1);
+ });
+
  describe("已知视图（hint）：先落地再等 open", () => {
   /** 列表行：左栏 / 归档页点在手上的那一行。 */
   const ROW: SessionView = {
