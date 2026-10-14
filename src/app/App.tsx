@@ -72,8 +72,9 @@ function useTitlePromptSync() {
 
 /**
  * 工作区 git 快照的刷新时机——启动 / 工作区清单变化 / 窗口转可见或重新获得焦点 /
- * **可见时 30s 兜底轮询**。任务结束后的单点刷新在 `lib/commitTasks.ts` 里；
- * 点按钮时的**后端预检**才是最终裁决。
+ * **可见时 30s 兜底轮询**。`refreshWorkspaceGitState` 同时让 `get_git_info` 的挂载实例
+ * （输入卡顶行 / 右栏「变更」）一起重读，行徽章与 git 提示不会各走各的。
+ * 任务结束后的单点刷新在 `lib/commitTasks.ts` 里；点按钮时的**后端预检**才是最终裁决。
  */
 function useWorkspaceGitRefresh() {
  const checkouts = useApp((s) => s.checkouts);

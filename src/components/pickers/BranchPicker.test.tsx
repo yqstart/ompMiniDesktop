@@ -7,9 +7,10 @@ import { useApp } from "../../stores/app";
 import { TEXT } from "../../lib/locale";
 
 /**
- * 输入卡顶行分支指示器：点分支即切（`api.switchBranch`）——成功收起浮层 + 自增
- * `gitInfoSeq`（全局 git 重读的触发信号），失败把 git 原文就地显示、浮层保持打开；
- * 点当前分支只收浮层，不发写命令。
+ * 输入卡顶行分支指示器：点分支即切（`api.switchBranch`）——成功收起浮层，并走
+ * `refreshWorkspaceGitState([cwd])`（git 状态的统一刷新入口：它自增 `gitInfoSeq`
+ * 让输入卡与右栏的查询一起重读，并刷新 ahead / behind 快照）；失败把 git 原文
+ * 就地显示、浮层保持打开、不触发全局刷新；点当前分支只收浮层，不发写命令。
  */
 const { apiMock } = vi.hoisted(() => ({
  apiMock: { switchBranch: vi.fn(async () => undefined) },

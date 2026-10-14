@@ -16,7 +16,8 @@ import type { GitInfo } from "@shared/types";
  * - 展开态：本地分支清单（当前分支置顶并打勾）+ 手动刷新；**点分支即切换**
  *   （`git switch <branch>`）——脏工作区交给 git 裁决：不冲突就带着走，冲突整条拒绝，
  *   错误原文就地显示在浮层里；壳侧不做 stash / force 代劳。
- * - 切换成功：自增 `gitInfoSeq`（同目录的全部 git 查询一起重读）+ 刷新 ahead / behind 快照。
+ * - 切换成功：走 `refreshWorkspaceGitState([cwd])`（统一刷新入口——它自增 `gitInfoSeq`，
+ *   同目录的全部 git 查询一起重读，ahead / behind 快照同步刷新）。
  */
 export function BranchPicker({
   git,
@@ -59,8 +60,8 @@ export function BranchPicker({
     setError(null);
     try {
       await api.switchBranch(cwd, b);
-      const st = useApp.getState();
-      st.set({ gitInfoSeq: st.gitInfoSeq + 1 });
+      // 统一刷新入口：它同时自增 `gitInfoSeq`（同目录的 `useGitInfo` 一起重读，分支名与
+      // 脏点立刻跟上）并刷新 ahead / behind 快照。
       void refreshWorkspaceGitState([cwd]);
       setOpen(false);
     } catch (e) {

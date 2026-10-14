@@ -231,10 +231,19 @@ function runCommand(
 /** 刷新代际：并发刷新时旧响应不得覆盖新结果。 */
 let refreshSeq = 0;
 
-/** 批量刷新工作区 git 快照（行徽章）；`paths` 省略 = 全部未缺失的工作区。失败静默。 */
+/**
+ * 批量刷新工作区 git 快照（行徽章）；`paths` 省略 = 全部未缺失的工作区。失败静默。
+ *
+ * **git 状态的统一刷新入口**：行徽章与 `get_git_info`（输入卡顶行的分支提示、右栏「变更」的
+ * 脏点与 `+X −Y`）在这里一起失效——刷新时机（启动 / 焦点 / 30s 轮询 / π 就绪 / 任务结束 /
+ * 分支切换）都是「git 可能变了」的时刻，一律自增 `gitInfoSeq` 让全部已挂载的 `useGitInfo` 重读。
+ * 漏掉这一步的后果：提交 / 推送完成后（无论活是本应用、终端还是 agent 干的），分支旁那两个
+ * 「有未提交改动」的点会一直亮着——`get_git_info` 的实例除了挂载、手动刷新与切换分支没有别的刷新时机。
+ */
 export async function refreshWorkspaceGitState(paths?: string[]): Promise<void> {
  const list = paths ?? useApp.getState().checkouts.filter((w) => !w.missing).map((w) => w.path);
  if (list.length === 0) return;
+ useApp.setState((s) => ({ gitInfoSeq: s.gitInfoSeq + 1 }));
  const seq = ++refreshSeq;
  try {
   const states = await api.getWorkspaceGitState(list);
