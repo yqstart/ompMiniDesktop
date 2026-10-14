@@ -3,6 +3,7 @@ import type { MemoryProjectView, ModelCatalog, OmpSettingsCatalog, PluginsView, 
 import { filterCatalog, SETTING_KIND_KEYS } from "./allSettings";
 import type { Locale, Text } from "./locale";
 import { OMP_SETTING_NAMES } from "./ompSettingNames";
+import { sessionTitleForDisplay } from "./sessionTitle";
 import { SETTINGS_LIST_SET } from "./settingsList";
 import type { SettingsTab } from "./settingsTabs";
 
@@ -230,7 +231,8 @@ export function searchSettings(
     id: `archived:${s.id}`,
     tab: "archived",
     focusKey: null,
-    title: s.title,
+    // 显示口径与左栏 / 归档页同一份：去掉标题开头的 Nerd Font 图标码位（见 `sessionTitle.ts`）
+    title: sessionTitleForDisplay(s.title),
     sub: "",
    }));
   if (hits.length > 0) groups.push({ tab: "archived", hits });

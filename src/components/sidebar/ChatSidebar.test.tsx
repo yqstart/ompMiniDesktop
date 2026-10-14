@@ -254,6 +254,24 @@ describe("会话行的时间展示（2026-10-13 对齐 ZCode 的紧凑相对时�
  });
 });
 
+describe("会话标题的显示口径（去掉开头的 Nerd Font 图标码位）", () => {
+ it("行里只显示去掉图标后的标题，aria-label 同一口径；原始标题数据不动", async () => {
+  const icon = "\u{F084D}";
+  mock.listSessions.mockResolvedValue({
+   sessions: [session("s9", "p1", `${icon} HGT: 修复输入框高度过高`)],
+   totalFiles: 1,
+   scannedFiles: 1,
+  });
+  await open();
+  const row = [...container.querySelectorAll<HTMLElement>("div.h-8")].find((el) =>
+   (el.textContent ?? "").includes("HGT: 修复输入框高度过高"),
+  );
+  expect(row, "会话行应按去掉图标后的标题渲染").not.toBeUndefined();
+  expect(row?.textContent ?? "", "行里不该再出现图标码位").not.toContain(icon);
+  expect(row?.querySelector("button")?.getAttribute("aria-label")).toBe("会话 HGT: 修复输入框高度过高");
+ });
+});
+
 /** 输入框赋值：绕过 React 的 value 影子状态（与 `WorkspaceGroupDialog.test.tsx` 同一套）。 */
 async function fill(input: HTMLInputElement | null, value: string): Promise<void> {
  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;

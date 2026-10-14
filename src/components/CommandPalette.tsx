@@ -9,6 +9,7 @@ import { openBtwPanel } from "../lib/btw";
 import { createChatIn, openForkedSession, openSessionWithHistory } from "../lib/sessionOpen";
 import { forgetSession } from "../lib/useSessionEvents";
 import { isMacKeyboard } from "../lib/platform";
+import { sessionTitleForDisplay } from "../lib/sessionTitle";
 import { useText } from "../lib/useText";
 
 /**
@@ -60,7 +61,7 @@ export function CommandPalette() {
    .map((s) => ({
     kind: "session",
     sid: s.id,
-    title: s.title?.trim() || t.unnamedChat,
+    title: sessionTitleForDisplay(s.title?.trim() || "") || t.unnamedChat,
     // 行尾元数据 = 项目名（对齐 Codex 的 `Search chats`：标题 + 项目名），
     // 未归属会话退回目录基名
     hint: projects.find((p) => p.id === s.projectId)?.name ?? (s.cwd.split("/").filter(Boolean).pop() || s.cwd),

@@ -9,6 +9,7 @@ import { useDropdown } from "../../lib/useDropdown";
 import { refreshSessionView } from "../../lib/sessionOpen";
 import { runSessionBatch } from "../../lib/sessionBatch";
 import { appendLocalNote } from "../../lib/localNote";
+import { sessionTitleForDisplay } from "../../lib/sessionTitle";
 
 /**
  * 中列顶部标题栏（v2 §1.2 形态）：标题居中 + 左侧 `···` 菜单 + 右侧面板开关。
@@ -30,7 +31,7 @@ export function TopBar() {
  const [draft, setDraft] = useState<{ text: string; original: string } | null>(null);
  const [menuOpen, setMenuOpen] = useState(false);
  const menuRef = useDropdown(menuOpen, () => setMenuOpen(false));
- const title = cur?.title?.trim() || t.unnamedChat;
+ const title = sessionTitleForDisplay(cur?.title?.trim() || "") || t.unnamedChat;
 
  /** 打开改名输入框：回显当前显示名——备注非空优先，否则 omp 原标题（与后端 `display_title` 同口径）。 */
  const startEdit = () => {

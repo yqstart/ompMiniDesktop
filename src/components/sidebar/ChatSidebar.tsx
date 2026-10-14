@@ -13,6 +13,7 @@ import { groupSessionsByProject } from "../../lib/sessions";
 import { openSessionWithHistory } from "../../lib/sessionOpen";
 import { runSessionBatch } from "../../lib/sessionBatch";
 import { formatSessionFullTime, formatSessionTime } from "../../lib/sessionTime";
+import { sessionTitleForDisplay } from "../../lib/sessionTitle";
 import { isCommitTaskRunning, pushWorkspace } from "../../lib/commitTasks";
 import { isMacKeyboard } from "../../lib/platform";
 import { useText } from "../../lib/useText";
@@ -74,6 +75,8 @@ function SessionRow({
  // 行内 = 紧凑相对时间（ZCode 口径）；完整时间进悬停 title。
  const time = s.corrupt ? t.corrupt : formatSessionTime(s.timestamp, t);
  const fullTime = formatSessionFullTime(s.timestamp, locale);
+ // 标题显示口径：去掉开头的 Nerd Font 图标码位（见 `lib/sessionTitle.ts`）；数据保持原样。
+ const title = sessionTitleForDisplay(s.title);
  return (
   <>
    <div
@@ -86,9 +89,9 @@ function SessionRow({
       void openSessionWithHistory(s.id, s);
      }}
      className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
-     aria-label={fmt(t.chatAria, s.title)}
+     aria-label={fmt(t.chatAria, title)}
     >
-     <span className={`min-w-0 flex-1 truncate text-sm ${active ? "font-semibold" : ""}`}>{s.title}</span>
+     <span className={`min-w-0 flex-1 truncate text-sm ${active ? "font-semibold" : ""}`}>{title}</span>
     </button>
     {/* 互斥槽（V43 二次口径）：不悬浮时显示「状态标 + 时间」，悬浮 / 聚焦整行时淡出、动作键淡入——
         按钮常驻占位（决定槽宽，标题零重排），状态与时间是绝对定位的覆盖层（pointer-events-none）；
@@ -118,7 +121,7 @@ function SessionRow({
    <ConfirmDialog
     open={confirmDelete}
     danger
-    title={s.title}
+    title={title}
     detail={t.sessDeleteConfirm}
     confirmLabel={t.delete}
     onConfirm={() => {

@@ -32,9 +32,28 @@ export function ContextPanel() {
  const setOpen = useApp((s) => s.setContextPanelOpen);
  const activeSessionId = useApp((s) => s.activeSessionId);
  const navRef = useRef<HTMLDivElement | null>(null);
+ /** 右栏自己的滚动容器（区块导航的唯一滚动目标）。 */
+ const bodyRef = useRef<HTMLDivElement | null>(null);
  const [navOpen, setNavOpen] = useState(false);
  useDropdown(navOpen, () => setNavOpen(false));
  const close = () => setOpen(false);
+ /**
+  * 区块导航定位：**只滚右栏自己的滚动容器**。
+  *
+  * 这里不能用 `scrollIntoView`——它会连带滚动祖先链上每一个可程序化滚动的容器
+  * （`main` 是 `overflow: hidden`、`document` 也是），点一下导航就可能把整个工作区
+  * 推偏（`index.css` 里 `#root` 用 `overflow: clip` 挡的就是这一类现象）；
+  * 手动算偏移只动右栏，越界部分由滚动容器自己收敛。
+  */
+ const scrollToSection = (anchor: string) => {
+  const body = bodyRef.current;
+  const target = document.getElementById(anchor);
+  if (!body || !target) return;
+  // `scroll-mt-*`（PanelSection 的 `scroll-mt-2`）在手动滚动里要自己兑现
+  const margin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0;
+  const delta = target.getBoundingClientRect().top - body.getBoundingClientRect().top - margin;
+  body.scrollTo({ top: Math.max(0, body.scrollTop + delta) });
+ };
  const SECTION_NAV = [
   { anchor: SECTION_ANCHORS.changes, icon: File, label: t.panelChanges },
   { anchor: SECTION_ANCHORS.progress, icon: CheckListSquare, label: t.panelProgress },
@@ -65,7 +84,7 @@ export function ContextPanel() {
         key={s.anchor}
         onClick={() => {
          setNavOpen(false);
-         document.getElementById(s.anchor)?.scrollIntoView({ block: "start", behavior: "smooth" });
+         scrollToSection(s.anchor);
         }}
         className="flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
        >
@@ -88,7 +107,7 @@ export function ContextPanel() {
  );
 
  const body = (
-  <div className="min-h-0 flex-1 overflow-y-auto">
+  <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto">
    {activeSessionId ? (
     <>
      <ChangesSection />

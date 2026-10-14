@@ -4,6 +4,7 @@ import { api } from "@shared/api";
 import { useApp } from "../stores/app";
 import { groupSessionsByProject } from "../lib/sessions";
 import { runSessionBatch } from "../lib/sessionBatch";
+import { sessionTitleForDisplay } from "../lib/sessionTitle";
 import { resumeSessionInApp } from "../lib/checkouts";
 import { fmt } from "../lib/locale";
 import { useText } from "../lib/useText";
@@ -209,10 +210,10 @@ export function ArchivedSessions() {
             <button
              onClick={() => void restoreSession(s)}
              className="flex min-w-0 basis-full cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 text-left @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0"
-             aria-label={s.title}
+             aria-label={sessionTitleForDisplay(s.title)}
              title={t.archivedOpenHint}
             >
-             <span className="min-w-0 basis-full truncate text-[13px] @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0">{s.title}</span>
+             <span className="min-w-0 basis-full truncate text-[13px] @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0">{sessionTitleForDisplay(s.title)}</span>
              <span className="shrink-0 font-mono text-[11px] text-faint">
               {new Date(s.timestamp).toLocaleString(locale === "zh-CN" ? "zh-CN" : "en-US", {
                year: "numeric",
@@ -225,7 +226,7 @@ export function ArchivedSessions() {
              onClick={() => void act("unarchive", [s.id])}
              disabled={busy}
              className="flex shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
-             aria-label={`${t.archivedRestore} ${s.title}`}
+             aria-label={`${t.archivedRestore} ${sessionTitleForDisplay(s.title)}`}
             >
              <Undo size={12} aria-hidden />
              {t.archivedRestore}
@@ -236,7 +237,7 @@ export function ArchivedSessions() {
              }
              disabled={busy}
              className="flex shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted transition-colors duration-100 hover:bg-hover hover:text-danger disabled:opacity-40"
-             aria-label={`${t.archivedDelete} ${s.title}`}
+             aria-label={`${t.archivedDelete} ${sessionTitleForDisplay(s.title)}`}
             >
              <Trash2 size={12} aria-hidden />
              {t.archivedDelete}
