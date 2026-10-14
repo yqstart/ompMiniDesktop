@@ -649,7 +649,8 @@ fn start_pump<R: tauri::Runtime>(
             }
         }
         // resume 的旧会话（已有用户消息、还没有标题）在进程起来时就补一次标题——
-        // 不必等下一轮对话（详见 [`maybe_auto_title`]）。
+        // 不必等下一轮对话；新会话此刻还没有用户消息，等它第一条消息到达再补
+        //（见 handle_frame 里的 is_user_message_frame 触发，详见 maybe_auto_title）。
         maybe_auto_title(session_file.as_deref(), &mut stdin, &mut auto_title).await;
         loop {
             tokio::select! {
@@ -727,11 +728,39 @@ struct AutoTitleState {
     done: bool,
     /// `/rename` 已在路上：它随后的 command_output 收尾帧本地消化，不进消息流。
     pending: bool,
+    /// 事件流里已经出现过用户消息帧（`message_start` role=user 等）：会话里已有可总结
+    /// 的内容。jsonl 落盘会滞后于帧，此时文件里读不到首条用户消息，用它兜底。
+    user_seen: bool,
 }
 
-/// 补标题该不该做：还没有任何真标题、且会话里已经有用户消息。
-fn needs_auto_title(head: &crate::session_scan::SessionHead) -> bool {
-    head.title.trim().is_empty() && head.first_user_text.is_some()
+/// 用户消息帧（`message_start` / `message_end` / `message`，role=user，且带文本块）：
+/// 见到它就说明会话里已经有可总结的用户消息——补标题的最早时机（不等整轮跑完）。
+/// 图片-only 消息不算：没有文本，omp 也生成不出标题（别触发无效注入）。
+fn is_user_message_frame(v: &serde_json::Value) -> bool {
+    if !matches!(
+        v.get("type").and_then(|t| t.as_str()),
+        Some("message_start") | Some("message_end") | Some("message")
+    ) {
+        return false;
+    }
+    let Some(m) = v.get("message") else { return false };
+    if m.get("role").and_then(|r| r.as_str()) != Some("user") {
+        return false;
+    }
+    m.get("content").and_then(|c| c.as_array()).is_some_and(|blocks| {
+        blocks.iter().any(|b| {
+            b.get("type").and_then(|t| t.as_str()) == Some("text")
+                && b.get("text")
+                    .and_then(|t| t.as_str())
+                    .is_some_and(|t| !t.trim().is_empty())
+        })
+    })
+}
+
+/// 补标题该不该做：还没有任何真标题、且会话里已经有用户消息（jsonl 里读到，或事件流里
+/// 见过用户消息帧——见 [`AutoTitleState::user_seen`]）。
+fn needs_auto_title(head: &crate::session_scan::SessionHead, user_seen: bool) -> bool {
+    head.title.trim().is_empty() && (head.first_user_text.is_some() || user_seen)
 }
 
 /// 壳侧补标题的收尾输出（omp `command_output` 帧文本，实测 18.10.3）：
@@ -739,8 +768,15 @@ fn needs_auto_title(head: &crate::session_scan::SessionHead) -> bool {
 /// 竞态 = `Session name not changed …`（补齐三种收尾都要本地消化）。
 fn is_auto_title_output(text: &str) -> bool {
     text.starts_with("Session renamed to ")
-        || text.starts_with("Could not generate a session title")
+        || auto_title_failed(text)
         || text.starts_with("Session name not changed")
+}
+
+/// 收尾输出是否代表「标题没生成出来」（消息太琐碎 / 注入时内容还没进 omp 会话）：
+/// 是的话标题还空着，允许下个时机（终态 agent_end）再试一次；
+/// 成功与「已有用户设置的名字」都不重试。
+fn auto_title_failed(text: &str) -> bool {
+    text.starts_with("Could not generate a session title")
 }
 
 /// 视情况替会话补一次标题。
@@ -753,8 +789,12 @@ fn is_auto_title_output(text: &str) -> bool {
 /// **怎么做**：会话已有用户消息却还没有标题时，注入**omp 原生命令** `/rename`（无参数 =
 /// 由 omp 生成标题并写盘；实测后台执行——prompt 回包 0.5s 内返回、生成与写盘约 2s 后完成，
 /// 不阻塞后续消息），壳侧不留本地覆盖；成功经 `session_info_update` 帧回灌前端，
-/// 收尾输出本地消化（见 [`is_auto_title_output`]）。只在 spawn 时与每次终态 agent_end
-/// 各看一眼，补过就不再回头（`AutoTitleState::done`）。
+/// 收尾输出本地消化（见 [`is_auto_title_output`]）。
+///
+/// **触发时机**（早到晚）：用户消息帧一到（`user_seen`，任务正在跑也能注入——`/` 开头在
+/// omp 侧先过命令门，早于 streaming 判定，`/rename` 无参数又走后台执行，不插话、不排队）、
+/// spawn 时（resume 的旧会话）、每次终态 agent_end（兜底重试）。补过就不再回头
+/// （`AutoTitleState::done`）。
 async fn maybe_auto_title(session_file: Option<&std::path::Path>, stdin: &mut ChildStdin, auto: &mut AutoTitleState) {
     if auto.done {
         return;
@@ -766,7 +806,7 @@ async fn maybe_auto_title(session_file: Option<&std::path::Path>, stdin: &mut Ch
         auto.done = true;
         return;
     }
-    if !needs_auto_title(&head) {
+    if !needs_auto_title(&head, auto.user_seen) {
         // 还没有用户消息（新建会话 / 文件未落盘）：留着下个时机再看
         return;
     }
@@ -857,6 +897,14 @@ async fn handle_frame<R: tauri::Runtime>(
     {
         return;
     }
+    // 补标题的最早时机：用户消息一到就注入 `/rename`（无参数 = omp 生成标题）。
+    // 任务正在跑也安全：`/` 开头在 omp 侧先过命令门（早于 streaming 判定），`/rename`
+    // 无参数又走 `runCommandInBackground` 后台执行——不插话、不排队、不阻塞当前轮次。
+    // 这样标题在任务运行中（而不是整轮结束）就生成出来，侧栏 / 顶栏不再挂「未命名会话」。
+    if is_user_message_frame(v) {
+        auto_title.user_seen = true;
+        maybe_auto_title(session_file, stdin, auto_title).await;
+    }
     if v.get("type").and_then(|t| t.as_str()) == Some("response") {
         match classify(v) {
             FrameAction::Swallow => return,
@@ -927,18 +975,21 @@ async fn handle_frame<R: tauri::Runtime>(
             }
         }
     }
-    // 一轮终了回读状态：`contextUsage` 只出现在 get_state 回包里，不回读的话输入框工具行上的
-    // 上下文占用会一直停在「打开会话那一刻」，压缩入口（≥80%）也就永远不触发。
-    // 只认终态 agent_end：非终态（还有排队 / 子代理在跑）回读没有意义。
-    if v.get("type").and_then(|t| t.as_str()) == Some("agent_end")
-        && v.get("isTerminal").and_then(|b| b.as_bool()).unwrap_or(true)
-    {
+    // 一轮终了 / 会话静止回读状态：`contextUsage` 只出现在 get_state 回包里，不回读的话
+    // 输入框工具行上的上下文占用会一直停在「打开会话那一刻」，压缩入口（≥80%）也就永远不触发。
+    // 两个信号都认：终态 agent_end，以及 `session_settled`（「一切静止」的权威信号）——
+    // 壳侧在运行中注入的后台标题生成会把本轮 agent_end 变成非终态（awaitingAsyncWork，
+    // 实测 18.10.4），只认终态的话首轮结束的这次回读就被跳过了。
+    let terminal_end = v.get("type").and_then(|t| t.as_str()) == Some("agent_end")
+        && v.get("isTerminal").and_then(|b| b.as_bool()).unwrap_or(true);
+    if terminal_end || v.get("type").and_then(|t| t.as_str()) == Some("session_settled") {
         if let Some(line) = jsonl_line(STATE_SYNC_ID, "get_state", serde_json::Value::Null) {
             let _ = stdin.write_all(line.as_bytes()).await;
             let _ = stdin.flush().await;
         }
-        // 首轮结束是补标题的第二个时机：新会话在 spawn 时还没有用户消息（文件都还没落盘），
-        // 一轮跑完才有内容可总结（详见 [`maybe_auto_title`]）。
+        // 收尾也是补标题的兜底时机：用户消息帧触发的注入要是失败
+        // （例如首条消息太琐碎、注入时内容还没进 omp 会话），在这里再试一次；
+        // resume / fork 出来的会话也在此收敛（详见 [`maybe_auto_title`]）。
         maybe_auto_title(session_file, stdin, auto_title).await;
     }
     // 补标题的 command_output 收尾帧：成功（"Session renamed to …"）与失败
@@ -949,7 +1000,13 @@ async fn handle_frame<R: tauri::Runtime>(
         && v.get("type").and_then(|t| t.as_str()) == Some("command_output")
         && v.get("text").and_then(|t| t.as_str()).is_some_and(is_auto_title_output)
     {
+        let text = v.get("text").and_then(|t| t.as_str()).unwrap_or("");
         auto_title.pending = false;
+        // 「生成不出来」：标题还空着，放回未完成态——本轮结束时兜底再试一次
+        //（用户消息帧的注入赶在内容进入 omp 会话之前就会走到这里）。
+        if auto_title_failed(text) {
+            auto_title.done = false;
+        }
         return;
     }
     dispatch(app, key, evt, status, v, activity);
@@ -1472,9 +1529,10 @@ mod real_rpc_tests {
 
     /// 壳侧补标题（V44）的真实慢测试（**默认忽略**）。
     ///
-    /// 验的是完整链路：rpc-ui 下 omp 关闭自动标题（PI_NO_TITLE=1）→ pump 在终态 agent_end
-    /// 注入 `/rename`（无参数 = 由 omp 生成）→ omp 生成标题并写盘 → `session_info_update`
-    /// 帧到前端通道、且 `command_output` 收尾帧被本地消化（不进消息流）。
+    /// 验的是完整链路与**时机**：rpc-ui 下 omp 关闭自动标题（PI_NO_TITLE=1）→ pump 在
+    /// **用户消息帧一到**就注入 `/rename`（不等整轮跑完；无参数 = 由 omp 生成）→ omp 在
+    /// **任务运行中**生成标题并写盘 → `session_info_update` 帧到前端通道、且
+    /// `command_output` 收尾帧被本地消化（不进消息流）、`/rename` 本身没被当成会话消息。
     #[test]
     #[ignore = "慢测试：真实 omp + 两次真实 AI 调用（首轮 + 生成标题）"]
     fn real_rpc_auto_title() {
@@ -1495,7 +1553,7 @@ mod real_rpc_tests {
 
         let mut sfile_out = String::new();
         tauri::async_runtime::block_on(async {
-            let (sid, sfile, _meta) = spawn_long_lived(
+            let (sid, sfile, meta0) = spawn_long_lived(
                 &handle,
                 map.clone(),
                 SpawnOpts {
@@ -1518,22 +1576,80 @@ mod real_rpc_tests {
                     let _ = evt_tx.send(v);
                 }
             });
+            // 运行状态通道（pump 推 running / idle）：用来证明标题是在**任务运行中**生成的
+            let (st_tx, mut st_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+            handle.listen(format!("omp-status://{sid}").as_str(), move |e| {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(e.payload()) {
+                    if let Some(s) = v.get("state").and_then(|s| s.as_str()) {
+                        let _ = st_tx.send(s.to_string());
+                    }
+                }
+            });
 
-            // 首条消息要有实际内容（omp 对琐碎消息会跳过标题生成——探针实测 18.10.3）
+            // 首条消息 = 一个真实的长任务：标题必须在它跑完之前就生成出来
+            //（用户诉求：收到任务的同时就生成标题，运行期别一直挂「未命名会话」）。
             let tx = map.lock().await.get(&sid).unwrap().tx.clone();
-            tx.send("{\"id\":\"p-at\",\"type\":\"prompt\",\"message\":\"请用两句话说明如何提升代码可维护性\"}\n".to_string())
+            tx.send("{\"id\":\"p-at\",\"type\":\"prompt\",\"message\":\"请在前台运行命令 `sleep 15`（不要放后台），等它结束后用一句话说明执行结果\"}\n".to_string())
                 .unwrap();
 
             // 等：jsonl 出现真标题（壳侧补的）+ 事件通道看到 session_info_update
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(150);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
+            let t0 = std::time::Instant::now();
+            // 帧时间线（诊断用；`--nocapture` 才可见）：流式增量帧只计数，其余逐条记
+            let mut timeline: Vec<String> = Vec::new();
+            let mut update_frames = 0usize;
             let mut title = String::new();
             let mut info_frame: Option<String> = None;
+            let mut title_state: Option<String> = None;
             let mut leaked_output = false;
+            let mut leaked_steer = false;
+            let mut last_state = String::new();
+            // 「轮次自然收尾」的判据：终态 agent_end，或注入的后台标题生成带来的
+            // `agent_end{awaitingAsyncWork}` 之后的 `session_settled`（实测 18.10.4：
+            // 运行中注入 `/rename` 会让本轮的 agent_end 变非终态，omp 随后发
+            // session_settled 收敛）。
+            let mut settled = false;
             while std::time::Instant::now() < deadline {
+                while let Ok(s) = st_rx.try_recv() {
+                    timeline.push(format!("{:>7}ms [status] {s}", t0.elapsed().as_millis()));
+                    last_state = s;
+                }
                 while let Ok(v) = evt_rx.try_recv() {
                     let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                    if ty == "session_info_update" {
+                    if ty == "message_update" {
+                        update_frames += 1;
+                    } else if timeline.len() < 300 {
+                        let extra = match ty {
+                            "agent_end" => format!(
+                                " terminal={:?} awaiting={:?}",
+                                v.get("isTerminal"),
+                                v.get("awaitingAsyncWork")
+                            ),
+                            "command_output" => format!(
+                                " text={:?}",
+                                v.get("text").and_then(|t| t.as_str()).unwrap_or("")
+                            ),
+                            "tool_execution_start" => format!(
+                                " tool={:?}",
+                                v.get("toolName").and_then(|t| t.as_str()).unwrap_or("")
+                            ),
+                            "session_info_update" => format!(
+                                " title={:?}",
+                                v.get("title").and_then(|t| t.as_str()).unwrap_or("")
+                            ),
+                            _ => String::new(),
+                        };
+                        timeline.push(format!("{:>7}ms {ty}{extra}", t0.elapsed().as_millis()));
+                    }
+                    if ty == "session_info_update" && info_frame.is_none() {
                         info_frame = v.get("title").and_then(|t| t.as_str()).map(str::to_string);
+                        title_state = Some(last_state.clone());
+                    }
+                    if ty == "session_settled"
+                        || (ty == "agent_end"
+                            && v.get("isTerminal").and_then(|b| b.as_bool()).unwrap_or(true))
+                    {
+                        settled = true;
                     }
                     // 补标题的收尾输出不许进消息流（本地消化）
                     if ty == "command_output"
@@ -1541,21 +1657,65 @@ mod real_rpc_tests {
                     {
                         leaked_output = true;
                     }
+                    // 注入的 `/rename` 不许变成用户消息（那不叫补标题，叫插话）
+                    if (ty == "message_start" || ty == "message_end" || ty == "message")
+                        && v
+                            .get("message")
+                            .and_then(|m| m.get("role"))
+                            .and_then(|r| r.as_str())
+                            == Some("user")
+                        && v.to_string().contains("/rename")
+                    {
+                        leaked_steer = true;
+                    }
                 }
                 title = crate::session_scan::parse_session_head(std::path::Path::new(&sfile)).title;
-                if !title.is_empty() && info_frame.is_some() {
+                // 标题先到、轮次也要自然收尾（注入不许打断任务）
+                if !title.is_empty() && info_frame.is_some() && settled {
                     break;
                 }
-                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             }
-            println!("[real_rpc] 补标题结果：jsonl={title:?} 帧={info_frame:?}");
-            assert!(!title.is_empty(), "150s 内会话标题仍为空（pump 的 /rename 注入或 omp 生成没生效）");
+            println!("[real_rpc] 补标题结果：jsonl={title:?} 帧={info_frame:?} 帧到达时状态={title_state:?} 收尾={settled}");
+            println!("[real_rpc] 帧时间线（message_update 共 {update_frames} 条）：");
+            for line in &timeline {
+                println!("[real_rpc]   {line}");
+            }
+            assert!(!title.is_empty(), "180s 内会话标题仍为空（pump 的 /rename 注入或 omp 生成没生效）");
             assert_eq!(
                 info_frame.as_deref(),
                 Some(title.as_str()),
                 "session_info_update 帧应带着新标题到达前端通道"
             );
             assert!(!leaked_output, "补标题的 command_output 收尾帧应被本地消化，不能进消息流");
+            assert!(!leaked_steer, "注入的 /rename 不许作为用户消息进入会话");
+            assert_eq!(
+                title_state.as_deref(),
+                Some("running"),
+                "标题应在任务运行中（状态收敛 idle 以前）生成——收到任务的同时补，而不是整轮跑完才补"
+            );
+            assert!(settled, "注入 /rename 后任务应自然收尾（session_settled / 终态 agent_end——注入不能打断轮次）");
+            // 回读挂点：注入的后台标题生成把本轮 agent_end 变非终态，首轮的 get_state 回读
+            // 必须发生在 `session_settled` 上——否则上下文占用停在「打开会话那一刻」。
+            // 回读是异步往返，等它落到快照（最多 5s）。
+            let before = meta0.context_usage.as_ref().and_then(|c| c.tokens);
+            let mut after: Option<i64> = None;
+            for _ in 0..25 {
+                let m = map.lock().await.get(&sid).unwrap().meta.clone();
+                let now = m.context_usage.as_ref().and_then(|c| c.tokens);
+                let fresh = matches!((before, now), (Some(b), Some(n)) if n > b)
+                    || (before.is_none() && now.is_some());
+                if fresh {
+                    after = now;
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+            println!("[real_rpc] 上下文占用：握手={before:?} 收尾后={after:?}");
+            assert!(
+                after.is_some(),
+                "收尾后应回读过 get_state——contextUsage 应反映本轮内容（大于握手时）"
+            );
 
             kill_all(&map);
         });
@@ -1638,9 +1798,50 @@ mod tests {
 
     #[test]
     fn auto_title_needs_titleless_session_with_user_message() {
-        assert!(needs_auto_title(&head_of("", Some("帮我重构登录页"))));
-        assert!(!needs_auto_title(&head_of("真标题", Some("帮我重构登录页"))), "已有真标题不再补");
-        assert!(!needs_auto_title(&head_of("", None)), "还没有用户消息不补（新会话 / 文件未落盘）");
+        assert!(needs_auto_title(&head_of("", Some("帮我重构登录页")), false));
+        assert!(
+            needs_auto_title(&head_of("", None), true),
+            "jsonl 还没落盘首条用户消息，但事件流里已见到用户消息帧：照样补（收到任务同时生成标题）"
+        );
+        assert!(!needs_auto_title(&head_of("真标题", Some("帮我重构登录页")), false), "已有真标题不再补");
+        assert!(!needs_auto_title(&head_of("真标题", None), true), "已有真标题不再补（哪怕见过用户消息帧）");
+        assert!(!needs_auto_title(&head_of("", None), false), "还没有用户消息不补（新会话 / 文件未落盘）");
+    }
+
+    /// 用户消息帧的判据：`message_start` / `message_end` / `message` + role=user + 文本块；
+    /// 助手 / 工具结果 / 图片-only / 其它帧都不算。
+    #[test]
+    fn auto_title_detects_user_message_frames() {
+        assert!(is_user_message_frame(&serde_json::json!({
+            "type": "message_start",
+            "message": { "role": "user", "content": [{ "type": "text", "text": "帮我重构登录页" }] }
+        })));
+        assert!(is_user_message_frame(&serde_json::json!({
+            "type": "message_end",
+            "message": { "role": "user", "content": [{ "type": "text", "text": "  总结  " }] }
+        })));
+        assert!(is_user_message_frame(&serde_json::json!({
+            "type": "message",
+            "message": { "role": "user", "content": [{ "type": "image", "data": "x" }, { "type": "text", "text": "看这张图" }] }
+        })));
+        assert!(!is_user_message_frame(&serde_json::json!({
+            "type": "message_start",
+            "message": { "role": "user", "content": [{ "type": "image", "data": "x" }] }
+        })), "图片-only 消息没有可总结文本，别触发无效注入");
+        assert!(!is_user_message_frame(&serde_json::json!({
+            "type": "message_start",
+            "message": { "role": "user", "content": [] }
+        })));
+        assert!(!is_user_message_frame(&serde_json::json!({
+            "type": "message_start",
+            "message": { "role": "assistant", "content": [{ "type": "text", "text": "好的" }] }
+        })));
+        assert!(!is_user_message_frame(&serde_json::json!({
+            "type": "message_end",
+            "message": { "role": "toolResult", "toolCallId": "t1" }
+        })));
+        assert!(!is_user_message_frame(&serde_json::json!({ "type": "agent_end", "isTerminal": true })));
+        assert!(!is_user_message_frame(&serde_json::json!({ "type": "message_start" })));
     }
 
     /// 补标题的收尾输出（实测 18.10.3）：成功 / 失败 / 竞态三条 command_output 都要本地消化，
@@ -1651,6 +1852,10 @@ mod tests {
         assert!(is_auto_title_output("Could not generate a session title. Use /rename <title> to set one."));
         assert!(is_auto_title_output("Session name not changed (a user-set name takes precedence)."));
         assert!(!is_auto_title_output("Advisor is enabled (openai/gpt-5.6)."));
+        // 生成失败才允许兜底重试；成功与「已有用户设置的名字」都不回头
+        assert!(auto_title_failed("Could not generate a session title. Use /rename <title> to set one."));
+        assert!(!auto_title_failed("Session renamed to 修复登录页."));
+        assert!(!auto_title_failed("Session name not changed (a user-set name takes precedence)."));
     }
 
     /// `/rename`（无参数 = 由 omp 生成标题并写盘）的注入帧形状。
