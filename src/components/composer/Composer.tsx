@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { ArrowUp, FileText, Hourglass, PenLine, Timer, TriangleWarning, X } from "reicon-react";
@@ -72,6 +72,35 @@ export function Composer() {
   }
  };
  const draft = draftOf(activeSessionId);
+ /**
+  * 输入区自动增高（MASTER §4.3）：**1 行起步**，随内容长高，到 `max-h-44` 封顶后内部滚动。
+  * 受控值从任何路径变化（打字 / 引用注入 / 队列退回 / 历史浏览）都要重算，所以挂 effect 而不是 onChange。
+  */
+ const autosize = useCallback(() => {
+  const ta = taRef.current;
+  if (!ta) return;
+  ta.style.height = "auto";
+  const h = ta.scrollHeight;
+  // jsdom 里 scrollHeight = 0（没有布局）：不动内联高度，避免把输入框量成 0
+  ta.style.height = h > 0 ? `${h}px` : "";
+ }, []);
+ useLayoutEffect(() => {
+  autosize();
+ }, [autosize, draft]);
+ // 宽度变化（窗口缩放 / 左栏拖拽）会改变折行数，要重算。观察自身：RO 会因我们写进去的高度触发，
+ // 所以只在宽度真的变了时才跑（否则自我喂食成死循环）。
+ useLayoutEffect(() => {
+  const ta = taRef.current;
+  if (!ta || typeof ResizeObserver === "undefined") return;
+  let last = ta.clientWidth;
+  const ro = new ResizeObserver(() => {
+   if (ta.clientWidth === last) return;
+   last = ta.clientWidth;
+   autosize();
+  });
+  ro.observe(ta);
+  return () => ro.disconnect();
+ }, [autosize]);
  const attachments = attachmentsOf(activeSessionId);
  /** 待发队列真值（V40）：omp 的 steering / followUp 芯片文本（`queue_update` 驱动）。 */
  const queued = queuedOf(activeSessionId);
@@ -711,10 +740,11 @@ export function Composer() {
     {slashOpen && (
      <SlashMenu cands={slashCands} active={slashIdx} query={slashToken ?? ""} onPick={pickCommand} onHover={hoverSlash} />
     )}
+    {/* 输入区：1 行起步（`rows` 只是首帧兜底，高度由 autosize 按内容写），封顶 `max-h-44` */}
     <textarea
      ref={taRef}
      id="composer"
-     rows={3}
+     rows={1}
      value={draft}
      onChange={(e) => {
       persistDraft(activeSessionId, e.target.value);
