@@ -505,3 +505,70 @@ describe("Composer V41：大段粘贴 / fast·slow / 导出", () => {
   expect(body).toContain("hello-shell");
  });
 });
+
+/**
+ * 图片附件 `#N` 占位（2026-10-15）：粘贴 / 拖拽 / `+` 菜单添加图片时，在光标处留下稳定编号的
+ * `#N`——文字与图片的对应关系写在正文里（「如图#1」），缩略图角标同编号；编号由 store 分配，
+ * 删除图片不重排、不重编号（`lib/attachments.ts` 的 withSlots）。
+ */
+describe("Composer 图片附件：`#N` 占位与角标", () => {
+ const png = (name: string) => new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], name, { type: "image/png" });
+
+ /** 触发一次带图片的粘贴（读文件 → base64 是异步：轮询等到这一批附件真正入库再断言）。 */
+ const pasteFiles = async (el: HTMLTextAreaElement, files: File[], text = "") => {
+  const ev = new Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(ev, "clipboardData", { value: { files, getData: () => text } });
+  await act(async () => {
+   el.dispatchEvent(ev);
+  });
+  await act(async () => {
+   await vi.waitFor(() => {
+    expect((useApp.getState().attachmentsBySession["s1"] ?? []).length).toBeGreaterThanOrEqual(files.length);
+   });
+  });
+ };
+
+ it("粘贴图片：光标处插入 `#1`（「如图」→「如图#1」），附件带稳定编号、角标同编号", async () => {
+  const ta = await mount(false);
+  act(() => useApp.setState({ drafts: { s1: "如图" } }));
+  await act(async () => { });
+  ta!.setSelectionRange(2, 2);
+  await pasteFiles(ta!, [png("shot.png")]);
+  const atts = useApp.getState().attachmentsBySession["s1"] ?? [];
+  expect(atts).toHaveLength(1);
+  expect(atts[0].slot).toBe(1);
+  expect(useApp.getState().drafts["s1"]).toBe("如图#1");
+  // 缩略图角标与正文占位同源
+  expect(container.textContent).toContain("#1");
+ });
+
+ it("一次粘两张 = `#1 #2`；删除后新增接 #3（编号不回收、文本不自动改）", async () => {
+  const ta = await mount(false);
+  act(() => useApp.setState({ drafts: { s1: "" } }));
+  await act(async () => { });
+  ta!.setSelectionRange(0, 0);
+  await pasteFiles(ta!, [png("a.png"), png("b.png")]);
+  expect(useApp.getState().drafts["s1"]).toBe("#1 #2");
+  expect((useApp.getState().attachmentsBySession["s1"] ?? []).map((a) => a.slot)).toEqual([1, 2]);
+  // 移除 #1：正文里的 `#1` 留作悬空引用（不自动改文本），剩余编号不动
+  await act(async () => {
+   container.querySelector<HTMLButtonElement>('button[aria-label="移除 a.png"]')!.click();
+  });
+  expect((useApp.getState().attachmentsBySession["s1"] ?? []).map((a) => a.slot)).toEqual([2]);
+  const ta2 = container.querySelector<HTMLTextAreaElement>("textarea")!;
+  const len = useApp.getState().drafts["s1"].length;
+  ta2.setSelectionRange(len, len);
+  await pasteFiles(ta2, [png("c.png")]);
+  expect((useApp.getState().attachmentsBySession["s1"] ?? []).map((a) => a.slot)).toEqual([2, 3]);
+  expect(useApp.getState().drafts["s1"]).toBe("#1 #2#3");
+ });
+
+ it("图文混贴：剪贴板文字在前、占位紧随其后（一次插入）", async () => {
+  const ta = await mount(false);
+  act(() => useApp.setState({ drafts: { s1: "看看" } }));
+  await act(async () => { });
+  ta!.setSelectionRange(2, 2);
+  await pasteFiles(ta!, [png("m.png")], "截图说明");
+  expect(useApp.getState().drafts["s1"]).toBe("看看截图说明#1");
+ });
+});

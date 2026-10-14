@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { ArrowUp, FileText, Hourglass, PenLine, Timer, TriangleWarning, X } from "reicon-react";
-import type { AvailableCommand, Goal, ViewMsg } from "@shared/types";
+import type { AvailableCommand, Goal, ImageAttachment, ViewMsg } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { api } from "@shared/api";
 import { attachmentFromFile, attachmentFromOmpImage, dataUrl } from "../../lib/attachments";
@@ -47,6 +47,9 @@ const PASTE_FILE_MIN = 2000;
  *
  * 图片附件（V2 M6）：粘贴 / 拖拽 / `+` 菜单三条入口，全部读成 base64 存在内存里，
  * 发送时随 `prompt.images` 一次性交给 omp——应用不落盘、不写覆盖层。
+ * 三条入口都在光标处留下 `#N` 占位（N = 附件稳定编号，`commitImages` 唯一收尾）：文字与图片
+ * 的对应关系写在正文里（「如图#1」），缩略图角标同编号。实测核对（omp 18.10.4 rpc-ui）：
+ * 文本原样进 user 消息、图片按数组序追加为 image 块，`#N` 只是普通文本、上游不做特殊解析。
  */
 export function Composer() {
  const t = useText();
@@ -229,15 +232,30 @@ export function Composer() {
  const model = models?.models.find((m) => `${m.provider}/${m.id}` === currentModel);
  const imageUnsupported = attachments.length > 0 && !!model?.input && !model.input.includes("image");
 
- const addFiles = async (files: File[]) => {
+ /** 在光标处插入文本、落草稿（含 localStorage）、把光标移到插入段之后——受控 textarea 的值更新
+  *  会丢光标，用 rAF 在提交后再定位；`@` 大段粘贴与图片 `#N` 占位共用。 */
+ const insertAtCaret = (sid: string, insert: string) => {
+  if (!insert) return;
+  const cur = useApp.getState().draftOf(sid) ?? "";
+  const ta = taRef.current;
+  const at = ta?.selectionStart ?? cur.length;
+  const end = ta?.selectionEnd ?? cur.length;
+  persistDraft(sid, cur.slice(0, at) + insert + cur.slice(end));
+  requestAnimationFrame(() => {
+   taRef.current?.setSelectionRange(at + insert.length, at + insert.length);
+  });
+ };
+
+ /** File[] → 附件对象（只收图片，非图片给提示）。不落库、不插占位——由 `commitImages` 收尾。 */
+ const readImages = async (files: File[]): Promise<ImageAttachment[]> => {
   const skipped = files.filter((f) => !f.type.startsWith("image/"));
   const images = files.filter((f) => f.type.startsWith("image/"));
   if (images.length === 0) {
    if (skipped.length > 0) setAttachError(t.attachOnlyImages);
-   return;
+   return [];
   }
   setAttachError(skipped.length > 0 ? t.attachSomeIgnored : null);
-  const added = [];
+  const added: ImageAttachment[] = [];
   for (const f of images) {
    try {
     added.push(await attachmentFromFile(f, t));
@@ -245,7 +263,17 @@ export function Composer() {
     setAttachError(e instanceof Error ? e.message : t.attachReadFailed);
    }
   }
-  if (added.length > 0) addAttachments(activeSessionId, added);
+  return added;
+ };
+
+ /** 图片入口的统一收尾（粘贴 / 拖拽 / `+` 菜单）：附件入库（store 分配稳定编号）并在光标处
+  *  插入 `#N` 占位（多张空格分隔）。`prefix` = 图文混贴时剪贴板附带的文字——文字在前、占位紧随
+  *  其后，拼成**一次**插入（顺序不依赖两段异步插入的先后，光标也只定位一次）。 */
+ const commitImages = (items: ImageAttachment[], prefix = "") => {
+  const sid = activeSessionId;
+  if (!sid) return;
+  const assigned = addAttachments(sid, items);
+  insertAtCaret(sid, prefix + assigned.map((a) => `#${a.slot}`).join(" "));
  };
 
  /** 大段粘贴转文件引用（V41，zcode 同款）：存临时文件 + 在光标处插入 `@<绝对路径> `。
@@ -255,16 +283,8 @@ export function Composer() {
   if (!sid) return;
   try {
    const { path } = await api.savePaste(text);
-   const cur = useApp.getState().draftOf(sid) ?? "";
-   const ta = taRef.current;
-   const at = ta?.selectionStart ?? cur.length;
-   const end = ta?.selectionEnd ?? cur.length;
-   const insert = `@${path} `;
-   persistDraft(sid, cur.slice(0, at) + insert + cur.slice(end));
+   insertAtCaret(sid, `@${path} `);
    setAttachError(fmt(t.pasteAsFile, path.split("/").pop() ?? path));
-   requestAnimationFrame(() => {
-    taRef.current?.setSelectionRange(at + insert.length, at + insert.length);
-   });
   } catch (e) {
    setAttachError(e instanceof Error ? e.message : String(e));
   }
@@ -279,7 +299,7 @@ export function Composer() {
    if (!picked) return;
    const paths = Array.isArray(picked) ? picked : [picked];
    setAttachError(null);
-   const added = [];
+   const added: ImageAttachment[] = [];
    for (const p of paths) {
     try {
      added.push(await api.readImageFile(p));
@@ -287,7 +307,7 @@ export function Composer() {
      setAttachError(e instanceof Error ? e.message : t.attachReadFailed);
     }
    }
-   if (added.length > 0) addAttachments(activeSessionId, added);
+   if (added.length > 0) commitImages(added);
   } catch (e) {
    setAttachError(e instanceof Error ? e.message : t.attachPickFailed);
   }
@@ -643,7 +663,7 @@ export function Composer() {
      if (!e.dataTransfer.files?.length) return;
      e.preventDefault();
      setDragging(false);
-     void addFiles(Array.from(e.dataTransfer.files));
+     void readImages(Array.from(e.dataTransfer.files)).then((added) => commitImages(added));
     }}
     className={`mx-auto max-w-(--measure-content) rounded-xl border bg-surface transition-colors duration-100 ${dragging ? "border-accent bg-accent/5" : awaiting ? "border-warn/60" : "border-border focus-within:border-accent/70"
      }`}
@@ -662,13 +682,19 @@ export function Composer() {
     {attachments.length > 0 && (
      <div className="flex flex-wrap gap-2 px-3 pt-3">
       {attachments.map((a, i) => (
-       <div key={`${a.name}-${i}`} className="group relative">
+       <div key={a.slot ?? `${a.name}-${i}`} className="group relative">
         <img
          src={dataUrl(a)}
          alt={a.name}
          title={`${a.name} · ${Math.round(a.bytes / 1024)}KB`}
          className="h-16 w-16 rounded-md border border-border object-cover"
         />
+        {/* 编号角标与文字里的 `#N` 占位同源（store 稳定分配）：删图不重编号，正文引用不错位 */}
+        {a.slot !== undefined && (
+         <span className="pointer-events-none absolute -top-1.5 -left-1.5 select-none rounded-md border border-border bg-surface px-1 font-mono text-[10px] leading-4 text-muted">
+          #{a.slot}
+         </span>
+        )}
         <button
          onClick={() => removeAttachment(activeSessionId, i)}
          aria-label={fmt(t.attachRemoveAria, a.name)}
@@ -775,14 +801,10 @@ export function Composer() {
        return;
       }
       e.preventDefault();
+      // 图文混贴（截图工具常同时给 text+image）：剪贴板文字在前、`#N` 占位紧随其后，
+      // 拼成**一次**插入——顺序与光标定位都不依赖两段异步插入的先后。
       const text = e.clipboardData?.getData("text/plain") ?? "";
-      if (text) {
-       const el = e.currentTarget;
-       const start = el.selectionStart ?? draft.length;
-       const end = el.selectionEnd ?? draft.length;
-       setDraft(activeSessionId, draft.slice(0, start) + text + draft.slice(end));
-      }
-      void addFiles(files);
+      void readImages(files).then((added) => commitImages(added, text));
      }}
      onKeyDown={(e) => {
       // `/` 命令补全打开时先接管键盘（它和 `@` 补全互斥，开着就说明草稿是条命令）。

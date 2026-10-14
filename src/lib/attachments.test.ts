@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import type { ImageAttachment } from "@shared/types";
 import { TEXT } from "./locale";
-import { ATTACH_MAX_BYTES, bytesToBase64, checkImage, dataUrl, imagesFromContent, mimeFromName } from "./attachments";
+import { ATTACH_MAX_BYTES, bytesToBase64, checkImage, dataUrl, imagesFromContent, mimeFromName, withSlots } from "./attachments";
 
 const zh = TEXT["zh-CN"];
 const en = TEXT.en;
@@ -73,5 +74,35 @@ describe("图片附件：内容块提取", () => {
  it("非数组内容（缺失/异常）安全返回空", () => {
   expect(imagesFromContent(undefined)).toEqual({ images: [], omitted: 0 });
   expect(imagesFromContent("nope")).toEqual({ images: [], omitted: 0 });
+ });
+});
+
+/**
+ * 稳定编号（文字里的 `#N` 占位与缩略图角标同源，见 `withSlots` / store `addAttachments`）：
+ * 删除图片不重排、不重编号——已经写在正文里的 `#N` 永远指同一张图（编号只在附件清空后从 1 重开）。
+ */
+describe("图片附件：稳定编号", () => {
+ const img = (name: string): ImageAttachment => ({ name, mimeType: "image/png", dataBase64: "", bytes: 0 });
+
+ it("从当前最大编号往后递增；删除后的编号不重用", () => {
+  const a = withSlots([], [img("a")]);
+  expect(a.map((x) => x.slot)).toEqual([1]);
+  const b = withSlots(a, [img("b"), img("c")]);
+  expect(b.map((x) => x.slot)).toEqual([2, 3]);
+  // 删掉 #1 后再添加（existing 里只剩 #2/#3）：新图接 #4，不回收 #1
+  const c = withSlots(b, [img("d")]);
+  expect(c.map((x) => x.slot)).toEqual([4]);
+ });
+
+ it("已带编号的项原样保留，新项不与之撞号（发送失败回滚 / 队列还原路径）", () => {
+  const kept = { ...img("k"), slot: 7 };
+  const r = withSlots([{ ...img("x"), slot: 2 }], [kept, img("n")]);
+  expect(r[0]).toBe(kept);
+  expect(r[1].slot).toBe(8);
+ });
+
+ it("附件清空后编号从 1 重开（发送成功即清空）", () => {
+  const r = withSlots([], [img("a"), img("b")]);
+  expect(r.map((x) => x.slot)).toEqual([1, 2]);
  });
 });

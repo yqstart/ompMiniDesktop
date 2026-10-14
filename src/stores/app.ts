@@ -5,6 +5,7 @@ import { loadLocaleMode, resolveLocale, saveLocaleMode, systemLang } from "../li
 import { applyTheme, loadTheme, saveTheme, type ThemeMode } from "../lib/theme";
 import { loadMyModels, saveMyModels } from "../lib/myModels";
 import { loadCommitLangPrefs, saveCommitLangPrefs, type CommitLangPref } from "../lib/commitLang";
+import { withSlots } from "../lib/attachments";
 
 type AppState = {
  health: HealthInfo | null;
@@ -117,7 +118,8 @@ type AppState = {
  draftOf: (sid: string | null) => string;
  setDraft: (sid: string | null, text: string) => void;
  attachmentsOf: (sid: string | null) => ImageAttachment[];
- addAttachments: (sid: string | null, items: ImageAttachment[]) => void;
+ /** 附件入库唯一入口：分配稳定编号（`slot`）并返回并入的那批（带编号，供调用方补 `#N` 占位）。 */
+ addAttachments: (sid: string | null, items: ImageAttachment[]) => ImageAttachment[];
  removeAttachment: (sid: string | null, index: number) => void;
  clearAttachments: (sid: string | null) => void;
  queuedOf: (sid: string | null) => QueuedMessages;
@@ -416,12 +418,17 @@ export const useApp = create<AppState>((set, get) => ({
  setDraft: (sid, text) =>
   set((s) => (sid ? { drafts: { ...s.drafts, [sid]: text } } : {})),
  attachmentsOf: (sid) => (sid ? get().attachmentsBySession[sid] ?? [] : []),
- addAttachments: (sid, items) =>
-  set((s) =>
-   sid && items.length > 0
-    ? { attachmentsBySession: { ...s.attachmentsBySession, [sid]: [...(s.attachmentsBySession[sid] ?? []), ...items] } }
-    : {},
-  ),
+ addAttachments: (sid, items) => {
+  if (!sid || items.length === 0) return [];
+  let assigned: ImageAttachment[] = [];
+  set((s) => {
+   const cur = s.attachmentsBySession[sid] ?? [];
+   // 稳定编号在这里唯一分配（删除不重排、清空后从 1 重开）；`#N` 占位与缩略图角标同源
+   assigned = withSlots(cur, items);
+   return { attachmentsBySession: { ...s.attachmentsBySession, [sid]: [...cur, ...assigned] } };
+  });
+  return assigned;
+ },
  removeAttachment: (sid, index) =>
   set((s) => {
    if (!sid) return {};

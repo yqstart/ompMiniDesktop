@@ -56,6 +56,22 @@ export function dataUrl(img: { mimeType: string; data?: string; dataBase64?: str
 }
 
 /**
+ * 给新附件分配稳定编号（`slot`）：从当前最大编号往后递增——删除图片**不重排、不重编号**，
+ * 文字里的 `#N` 永远指同一张图（编号只在附件清空后从 1 重开）。已带编号的项原样保留
+ * （发送失败回滚会把整批带编号的附件放回来，不该被二次分配）。
+ */
+export function withSlots(existing: ImageAttachment[], items: ImageAttachment[]): ImageAttachment[] {
+ let next = 0;
+ for (const a of existing) next = Math.max(next, a.slot ?? 0);
+ for (const a of items) if (a.slot) next = Math.max(next, a.slot);
+ return items.map((it) => {
+  if (it.slot) return it;
+  next += 1;
+  return { ...it, slot: next };
+ });
+}
+
+/**
  * omp 队列撤回返回的图片块（`{type:"image", data, mimeType}`）→ 本地附件（V40）：
  * 「编辑排队消息 / 中断还原」把图片放回输入框时用。文件名为占位（omp 不保留原名），
  * 体积按 base64 长度估算（仅用于展示）。

@@ -732,8 +732,10 @@ export type PathCheck = { path: string; exists: boolean; isDir: boolean };
 /**
  * 待发送的图片附件（本地读取，随 `prompt.images` 一次性发给 omp，不落覆盖层、不进草稿）。
  * `dataBase64` 与 `ImageBlock.data` 同格式；`name` 只用于输入框里的可读标签。
+ * `slot` = 壳侧编号：粘贴 / 拖拽 / `+` 菜单添加时在文字处留下的 `#N` 占位 + 缩略图角标。
+ * 由 store `addAttachments` 稳定分配（删除图片不重排，附件清空后从 1 重开）；发送给 omp 时显式挑字段、不带它。
  */
-export type ImageAttachment = { name: string; mimeType: string; dataBase64: string; bytes: number };
+export type ImageAttachment = { name: string; mimeType: string; dataBase64: string; bytes: number; slot?: number };
 
 /**
  * 会话待发队列快照（V40）：omp `queue_update` 帧 / `get_state.queuedMessages` 的队列真值。
