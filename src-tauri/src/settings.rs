@@ -262,8 +262,12 @@ fn settings_cwd(dir: &Path) -> Option<&Path> {
 ///
 /// cwd 钉 agentDir（与设置页同层，读全局层的有效值）；omp 不在 / 未设置 / 读失败返回 `None`，
 /// 调用方自行兜底（最高档）——这里不猜、不硬编码默认值。
-pub async fn read_default_thinking_level(state: &AppState) -> Option<String> {
-    let bin = state.omp_path.lock().await.clone()?;
+///
+/// omp 定位走 `discover_omp_path`（唯一入口）而不是 `state.omp_path`：前端**启动时**就读这一档，
+/// 那一刻诊断（`locate_omp`）还没落位；读 `state.omp_path` 会拿到 `None`，输入卡上的默认档
+/// 就退成兜底值（最高档）——与 omp 配置里实际写的档位对不上，直到用户打开菜单才补读成功。
+pub async fn read_default_thinking_level(state: &tauri::State<'_, AppState>) -> Option<String> {
+    let bin = discover_omp_path(state)?;
     let dir = state.agent_dir.lock().await.clone();
     let v = read_one(&dir, &bin, "defaultThinkingLevel").await.ok()?;
     v.get("value").and_then(|x| x.as_str()).map(str::to_string)

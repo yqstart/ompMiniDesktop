@@ -93,9 +93,22 @@ fn run_cmd(file: &str, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
+/// omp 可执行文件的定位（**唯一入口**）：覆盖层显式路径 → 已发现的缓存 → 登录 shell → 常见安装位置。
+///
+/// **别改读 `state.omp_path`**：那个只在诊断（`locate_omp`）跑完才非空——启动时前端的配置读取
+/// （权限档 / 默认思考档）与健康检查并发发出，读它拿到的是空值（档位永远卡在「读取中…」，
+/// 直到用户打开菜单才补读成功）；而诊断失败也不该把配置读取一起拖垮。反过来，缓存里已有
+/// 仍存在的路径时不必再起一次登录 shell 探测（切模型时读默认思考档会走这里）。
 pub fn discover_omp_path(state: &State<AppState>) -> Option<String> {
     if let Ok(ov) = state.overlay.try_lock() {
         if let Some(p) = ov.omp_path.as_ref() {
+            if std::path::Path::new(p).is_file() {
+                return Some(p.clone());
+            }
+        }
+    }
+    if let Ok(g) = state.omp_path.try_lock() {
+        if let Some(p) = g.as_ref() {
             if std::path::Path::new(p).is_file() {
                 return Some(p.clone());
             }
@@ -298,7 +311,7 @@ pub async fn load_catalog(
         force,
         MODELS_TTL_MS,
         || async {
-            // omp 定位走 `discover_omp_path`（唯一入口：覆盖层 → 登录 shell → 常见路径），
+            // omp 定位走 `discover_omp_path`（唯一入口：覆盖层 → 已发现的缓存 → 登录 shell → 常见路径），
             // 而不是诊断状态里的 `state.omp_path`——那个只在 `locate_omp` 成功后才非空，
             // 用它会让「诊断还没跑完 / 探测失败」连模型目录一起拖垮（供应商页与 ModelPicker 都会中招）。
             let Some(p) = discover_omp_path(state) else {
@@ -2449,12 +2462,18 @@ pub async fn get_session_runtime(
 }
 
 /// 全局权限档（`tools.approvalMode`，读 omp 全局配置；cwd 钉 agentDir 与设置页同层）。
+///
+/// omp 定位走 `discover_omp_path`（唯一入口）而不是 `state.omp_path`：前端**启动时**就水合档位，
+/// 那一刻健康检查（`locate_omp`）还没落位 `state.omp_path`——读它会拿到「未找到 omp」，
+/// 输入卡上的档位就一直卡在「读取中…」，直到用户打开菜单补读成功。
 #[tauri::command]
 pub async fn get_global_approval(state: State<'_, AppState>) -> Result<String, CmdError> {
-    let bin = state.omp_path.lock().await.clone();
-    let Some(p) = bin else {
+    let Some(p) = discover_omp_path(&state) else {
         return Err(cmd_err("OMP_MISSING", "未找到 omp".into(), None));
     };
+    // 顺手落定位缓存（与 `load_catalog` 同口径）：诊断还没跑完时，读 `state.omp_path` 的
+    // 路径（新建会话 / 起 runtime）也能直接用
+    *state.omp_path.lock().await = Some(p.clone());
     let dir = state.agent_dir.lock().await.clone();
     let cwd = dir.is_dir().then_some(dir.as_path());
     let out = crate::providers::run_omp_in(cwd, &p, &["config", "get", "tools.approvalMode", "--json"])
@@ -2479,8 +2498,7 @@ pub async fn set_global_approval(state: State<'_, AppState>, mode: String) -> Re
     if !["always-ask", "write", "yolo"].contains(&mode.as_str()) {
         return Err(cmd_err("BAD_ARG", "权限档必须是 always-ask/write/yolo".into(), None));
     }
-    let bin = state.omp_path.lock().await.clone();
-    let Some(p) = bin else {
+    let Some(p) = discover_omp_path(&state) else {
         return Err(cmd_err("OMP_MISSING", "未找到 omp".into(), None));
     };
     let dir = state.agent_dir.lock().await.clone();
@@ -2560,8 +2578,8 @@ pub fn load_state<R: tauri::Runtime>(app: &AppHandle<R>) -> AppState {
 mod tests {
     use super::{
         apply_project_order, assign_members, catalog_fresh, clean_workspace_name, derived_title, display_title,
-        kill_runtime, list_archived_in, load_cached, load_state, owner_project, rpc_request,
-        scan_window, session_file_for, spawn_session_runtime, AppState, MODELS_TTL_MS,
+        discover_omp_path, get_global_approval, kill_runtime, list_archived_in, load_cached, load_state,
+        owner_project, rpc_request, scan_window, session_file_for, spawn_session_runtime, AppState, MODELS_TTL_MS,
     };
     use crate::overlay::{Overlay, Project};
     use std::collections::HashMap;
@@ -3157,6 +3175,56 @@ done
         assert!(keys.contains(&new_id.to_string()));
 
         kill_runtime(&st, new_id);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 配置读取（权限档 / 默认思考档）不许依赖诊断是否跑完——前端**启动时**就并发发起
+    /// `loadApprovalState` / `ensureOmpDefaultThinking` 与健康检查（`locate_omp`）。
+    ///
+    /// 老实现读 `state.omp_path`：那一刻诊断还没落位，读到的是「未找到 omp」→ 输入卡上的
+    /// 权限档一直卡在「读取中…」、默认思考档退成兜底的最高档，直到用户打开菜单才补读成功
+    /// （用户报的「必须点开下拉框才加载出来」就是这个）。这里把「定位走 `discover_omp_path`」
+    /// 这条链钉死，并验缓存命中的快路径。
+    #[tokio::test]
+    async fn config_reads_work_before_diagnostics() {
+        use tauri::Manager;
+        let root = std::env::temp_dir().join(format!("omp-boot-config-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        // stub omp：`config get <key> --json` 按 key（$3）回固定值
+        let script = r#"#!/bin/sh
+case "$3" in
+  tools.approvalMode) printf '%s\n' '{"key":"tools.approvalMode","value":"yolo"}' ;;
+  defaultThinkingLevel) printf '%s\n' '{"key":"defaultThinkingLevel","value":"medium"}' ;;
+  *) printf '%s\n' '{"key":"other","value":null}' ;;
+esac
+"#;
+        let stub = write_v40_stub(&root, script);
+        let stub_path = stub.to_string_lossy().to_string();
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app 构建失败");
+        let state = load_state(app.handle());
+        // 覆盖层里的显式 omp 路径：定位的唯一入口先看它，测试因此不看本机真实的 omp
+        state.overlay.try_lock().unwrap().omp_path = Some(stub_path.clone());
+        app.manage(state);
+        let st = app.state::<AppState>();
+        assert!(st.omp_path.try_lock().unwrap().is_none(), "前置：诊断（locate_omp）还没跑");
+
+        assert_eq!(
+            get_global_approval(app.state()).await.expect("诊断跑完前也要能读到权限档"),
+            "yolo"
+        );
+        assert_eq!(
+            crate::settings::read_default_thinking_level(&st).await.as_deref(),
+            Some("medium")
+        );
+        // 顺手落定位缓存：读 `state.omp_path` 的路径（新建会话 / 起 runtime）也能直接用
+        assert_eq!(st.omp_path.try_lock().unwrap().clone(), Some(stub_path.clone()));
+        // 覆盖层被清掉（用户改回自动探测）后缓存仍命中，不必再起一次登录 shell 探测
+        st.overlay.try_lock().unwrap().omp_path = None;
+        assert_eq!(discover_omp_path(&st), Some(stub_path.clone()));
+
         let _ = std::fs::remove_dir_all(&root);
     }
 }
