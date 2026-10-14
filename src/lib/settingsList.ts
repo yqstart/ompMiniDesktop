@@ -1,47 +1,33 @@
 /**
- * 「常用设置」页展示的设置清单（docs/v28-schedule.md 三稿）。
+ * 「常用设置」页展示的设置清单（docs/v3-schedule.md §4.1；四稿筛选 2026-10-15）。
  *
- * 沿革：一稿把 519 项全量铺进「全部设置」页；二稿收敛为 108 项精选（与常用设置 42 项零交集）；
- * 三稿按用户口径删去 33 项（外观零碎 / 供应商整组 / Shell 与脚本的补充项 / 工具整组 /
- * worktree 目录 / 外部命令来源），并把两个页签**合并成一页**——本清单 = 原常用 42 项 +
- * 精选剩余 75 项 = **117 项**；「常用设置」页是 omp 设置在本应用的唯一面，
- * 全量清单在终端 `omp config list` 看。
+ * 沿革：一稿把 519 项全量铺进「全部设置」页；二稿收敛为 108 项精选；三稿按用户口径删 33 项
+ * 并把两个页签**合并成一页**（117 项）；**四稿按「桌面壳里有没有可观测差异」再筛**——
+ * 桌面端跑的是 `omp --mode rpc-ui`，终端 TUI 的一切在壳里没有对应物，留着只会让用户改了
+ * 没变化：删 37 项（外观整组只剩图片处理两项，其余按主题并组）→ **80 项**。
+ *
+ * 判据（进本清单的唯一理由 = 改这个键，壳里看得见差别，按上游 `omp config list` 的
+ * description 逐项核对，含糊项以真机 rpc-ui 探针定夺）：
+ * ① 影响 omp 的模型行为（提示词 / 工具开关 / 编辑与 read 的策略 / 子代理编排 / 记忆 / 重试）；
+ * ② 影响壳侧读数与渲染的数据面（`defaultThinkingLevel` / `tools.approvalMode` / `ask.timeout` /
+ *    压缩与上下文窗口…）；
+ * ③ 影响附件与图片进出模型的链路（`images.autoResize` / `images.blockImages` / `images.describe*`）。
+ * 一律不进：只在终端里画得出来的显示开关（主题 / 状态行 / 输入框形态 / 字形 / 终端标题 /
+ * 鼠标 / 终端内联图片 / transcript 渲染细节）、终端输入法交互（拼写 / vim / ⎋⎋）、终端通知、
+ * TUI 启动流程（启动检查更新 / 更新说明展开 / 自动恢复最近会话）、麦克风语音输入。
  *
  * 维护契约（`settingsList.test.ts` 守着）：
- * - 基础池 = omp TUI `/settings` 面板可见项（二进制里带 `ui` 元数据的那批，18.4.4 = 387 项）；
- * - 无重复；每一项在名称表（`ompSettingNames.ts`）里都有条目（行标题有中英短名）；
- *   规模 100–140（防被扩回全量）；三稿删掉的 33 项不得回流（测试钉住）；
+ * - 无重复；每一项在名称表（`ompSettingNames.ts`，覆盖上游 519 项全量）里都有条目；
+ *   规模 ≤ 80（防扩回全量）；三稿 / 四稿删掉的键不得回流（测试逐个钉住）；
  * - 顺序照上游人读清单（面板按上游分组渲染，组内顺序 = `omp config list` 的顺序）；
- * - 上游升级后新增的键**不会自动进来**——判断新键值不值得进本页时，先看它在不在
- *   TUI `/settings` 面板里。
+ * - 上游升级后新增的键**不会自动进来**——加之前先按上面的判据过一遍，再改本清单与测试。
  */
 import type { Text } from "./locale";
 
 export const SETTINGS_LIST: readonly string[] = [
- // —— appearance
- "theme.dark",
- "theme.light",
- "symbolPreset",
- "composer.shape",
- "composer.tokenRate",
- "statusLine.preset",
- "statusLine.contextLine",
- "statusLine.compactThinkingLevel",
- "terminal.showImages",
+ // —— appearance（四稿后只剩图片进模型链路的两项，按主题并入「模型」组，见 SETTING_SECTION_OVERRIDES）
  "images.autoResize",
  "images.blockImages",
- "tui.renderMermaid",
- "tui.reactions",
- "tui.titleState",
- "tui.titleSpinner",
- "tui.mouse",
- "tui.tight",
- "display.smoothStreaming",
- "display.hideToolActivity",
- "display.showTokenUsage",
- "display.showTurnTime",
- "showHardwareCursor",
- "task.showResolvedModelBadge",
 
  // —— context
  "contextPromotion.enabled",
@@ -60,9 +46,7 @@ export const SETTINGS_LIST: readonly string[] = [
  "edit.enforceSeenLines",
  "readLineNumbers",
  "read.defaultLimit",
- "read.renderMarkdown",
  "read.summarize.enabled",
- "read.toolResultPreview",
  "lsp.enabled",
  "lsp.lazy",
  "lsp.shared",
@@ -71,30 +55,17 @@ export const SETTINGS_LIST: readonly string[] = [
  "lsp.diagnosticsOnEdit",
 
  // —— interaction
- "autoResume",
  "git.enabled",
  "steeringMode",
  "followUpMode",
  "interruptMode",
- "tui.vimMode",
- "doubleEscapeAction",
- "spelling.typoDetection",
- "spelling.autocomplete",
- "spelling.autocorrect",
- "startup.checkUpdate",
  "update.channel",
  "marketplace.autoUpdate",
- "startup.changelogMode",
  "magicKeywords.enabled",
- "completion.notify",
- "error.notify",
  "ask.timeout",
- "ask.notify",
- "recap.enabled",
  "power.sleepPrevention",
  "features.unexpectedStopDetection",
  "tools.approvalMode",
- "stt.enabled",
 
  // —— internal
  "compaction.autoContinue",
@@ -113,7 +84,6 @@ export const SETTINGS_LIST: readonly string[] = [
  // —— model
  "images.describeForTextModels",
  "defaultThinkingLevel",
- "hideThinkingBlock",
  "includeWorkspaceTree",
  "personality",
  "temperature",
@@ -156,16 +126,24 @@ export const SETTINGS_LIST: readonly string[] = [
  "browser.enabled",
 ];
 
-/** 上面数组的集合形式（面板渲染时每项 O(1) 命中）。 */
-export const SETTINGS_LIST_SET: ReadonlySet<string> = new Set(SETTINGS_LIST);
+/** 上面数组的成员表（面板 / 搜索过滤时每项 O(1) 命中；静态键集用 Record，不用 Set）。 */
+export const SETTINGS_LIST_SET: Readonly<Record<string, true>> = Object.fromEntries(
+ SETTINGS_LIST.map((key) => [key, true] as const),
+);
 
 /**
- * 分组归位：上游把这两个行为开关归在 `internal`（那组其余全是凭证与机器状态，不适合放
- * 行为开关）；按原「常用设置」页的归类显示（压缩后自动继续 → 会话与上下文；技能发现 → 任务与技能）。
+ * 分组归位（键 → 上游分组名的替代）：
+ * - `compaction.autoContinue` / `skills.enabled`：上游归在 `internal`（那组其余全是凭证与
+ *   机器状态，不适合放行为开关），按原「常用设置」页的归类显示；
+ * - `images.autoResize` / `images.blockImages`：上游归在 `appearance`——四稿筛掉 TUI 显示键后
+ *   那一组只剩这两项（主题 / 状态行 / 字形都没了），标题「外观」名不副实；它们是「图片进模型
+ *   链路」的行为开关，与 `images.describeForTextModels` 同组显示。
  */
 export const SETTING_SECTION_OVERRIDES: Record<string, string> = {
  "compaction.autoContinue": "context",
  "skills.enabled": "tasks",
+ "images.autoResize": "model",
+ "images.blockImages": "model",
 };
 
 /**
@@ -181,86 +159,19 @@ export const SETTING_NOTES: Record<string, { tuiOnly?: true; minusOneIsDefault?:
 };
 
 /**
- * `composer.shape` 的内置形态表（omp 源里的静态八项；插件还能注册更多——壳侧只含内置，
- * 当前值不在表里时界面原样补一条）。
- */
-export const COMPOSER_SHAPES = ["band", "box", "claude", "pi", "borderless", "rule", "field", "rail"] as const;
-
-/**
- * 「string 但取值有限」的键（上游 `ui: { options: "runtime" }`；omp 18.4.4 恰好 3 个）
- * 的下拉取值：
- * - `theme.dark` / `theme.light`：运行时主题列表（后端 `list_omp_themes` = 内置 102 个 ∪
- *   `<agentDir>/themes/*.json`，与 omp TUI 的 `availableThemes` 同口径）；
- * - `composer.shape`：内置八形态（`COMPOSER_SHAPES`）；
- * - 其它键（含普通 string 键——路径 / URL 这类自由输入）返回 `null` = 用文本输入框。
- */
-export function runtimeChoiceValues(key: string, themeNames: readonly string[]): readonly string[] | null {
- if (key === "theme.dark" || key === "theme.light") return themeNames;
- if (key === "composer.shape") return COMPOSER_SHAPES;
- return null;
-}
-
-/**
  * 下拉选项的翻译（键 →（上游取值 → 字典键 `sv*`））。
  * 与上游同一套「选项表 + `sv*` 字典」做法：
  * - **普通词**翻成界面语言（on / off / auto、模式与档位名…）；多个键重复出现的取值共享
- *   一个字典键（`svOn` / `svOff` / `svAuto` / `svDefault` / `svNone`）；
- * - **专有名词与档位名原样显示上游取值**（`speech.voice` 的音色名、引擎名、`xhigh` / `max`、
- *   `theme.dark` / `theme.light` 的 100+ 主题名——硬翻反而误导）：**没配 label 的键 / 取值
- *   原样显示上游值**；
- * - `composer.shape`（string 但取值有限）的八个形态也在这里配翻译；
+ *   一个字典键（`svOff` / `svAuto` / `svDefault` / `svNone`）；
+ * - **专有名词与档位名原样显示上游取值**（`xhigh` / `max` 这类档位名——硬翻反而误导）：
+ *   **没配 label 的键 / 取值原样显示上游值**；
  * - `settingsList.test.ts` 守着：表里的键必须在清单里、每个字典键中英非空、
  *   字典里的每个 `sv*` 键都被本表引用（不许有孤儿——删键时同步清翻译）。
  */
 export const OPTION_LABELS: Record<string, Record<string, keyof Text>> = {
- "symbolPreset": {
-  unicode: "svSymbolsUnicode",
-  nerd: "svSymbolsNerd",
-  ascii: "svSymbolsAscii",
- },
- "composer.shape": {
-  band: "svShapeBand",
-  box: "svShapeBox",
-  claude: "svShapeClaude",
-  pi: "svShapePi",
-  borderless: "svShapeBorderless",
-  rule: "svShapeRule",
-  field: "svShapeField",
-  rail: "svShapeRail",
- },
- "statusLine.preset": {
-  default: "svDefault",
-  minimal: "svPresetMinimal",
-  compact: "svPresetCompact",
-  full: "svPresetFull",
-  nerd: "svPresetNerd",
-  ascii: "svPresetAscii",
-  custom: "svPresetCustom",
- },
- "statusLine.contextLine": {
-  off: "svOff",
-  percentage: "svCtxLinePercentage",
-  annotated: "svCtxLineAnnotated",
-  embedded: "svCtxLineEmbedded",
- },
- "tui.titleSpinner": {
-  braille: "svSpinnerBraille",
-  pulse: "svSpinnerPulse",
-  dots: "svSpinnerDots",
-  line: "svSpinnerLine",
- },
  interruptMode: {
   immediate: "svInterruptImmediate",
   wait: "svInterruptWait",
- },
- doubleEscapeAction: {
-  rewind: "svEscRewind",
-  tree: "svEscTree",
-  none: "svNone",
- },
- "spelling.autocomplete": {
-  off: "svOff",
-  auto: "svAuto",
  },
  "update.channel": {
   stable: "svChannelStable",
@@ -271,14 +182,6 @@ export const OPTION_LABELS: Record<string, Record<string, keyof Text>> = {
   notify: "svMarketNotify",
   auto: "svAuto",
  },
- "startup.changelogMode": {
-  summary: "svChangelogSummary",
-  expanded: "svChangelogExpanded",
-  hidden: "svChangelogHidden",
- },
- "completion.notify": { on: "svOn", off: "svOff" },
- "error.notify": { on: "svOn", off: "svOff" },
- "ask.notify": { on: "svOn", off: "svOff" },
  "features.unexpectedStopDetection": {
   none: "svOff",
   mechanical: "svStopMechanical",

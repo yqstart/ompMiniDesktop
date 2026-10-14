@@ -11,11 +11,9 @@
  *   与常用设置页共用同一批键）；未来上游加新分组时原样显示机器名，不吞信息；
  * - 搜索：键前缀 → 键子串 → 名称（当前语言）→ 说明 四档排序（同档保持上游顺序）；大小写不敏感；
  * - 枚举下拉的选项 label 走 `OPTION_LABELS`（展示清单里配了翻译的键；普通词翻界面
- *   语言、专有名词与档位名原样——与常用设置页同一套「选项表 + sv* 字典」做法）；**string
- *   但取值有限的键**（`theme.dark` / `theme.light` / `composer.shape`，上游
- *   `ui.options: "runtime"`）同样给下拉（主题列表运行时取、形态表内置；当前值不在表里原样
- *   补一条）；没配的键 / 取值原样显示上游值；上游没有取值表时 `choiceOptions` 给空数组，
- *   界面退化成文本输入框；
+ *   语言、专有名词与档位名原样——与常用设置页同一套「选项表 + sv* 字典」做法）；
+ *   没配的键 / 取值原样显示上游值；上游没有取值表（或非 enum）时 `choiceOptions` 给空
+ *   数组，界面退化成文本输入框；
  * - array / record 的编辑走 JSON 文本（上游按 JSON 解析这两个类型，见 `settings.rs` 头注释）：
  *   草稿解析在 `parseJsonDraft`，类型不符 / JSON 不合法都在前端先挡下来；
  * - `value === null` + `redacted === false` = 未设置（上游没有显式值）；`redacted === true` =
@@ -24,7 +22,7 @@
 
 import type { OmpCatalogItem, OmpSettingsCatalog } from "@shared/types";
 import type { Text } from "./locale";
-import { OPTION_LABELS, runtimeChoiceValues } from "./settingsList";
+import { OPTION_LABELS } from "./settingsList";
 
 /**
  * 上游分组 → 字典键（`sg_` 前缀与常用设置页共用）。
@@ -112,28 +110,17 @@ export function filterCatalog(
 /**
  * 一个键的下拉可选项。
  *
- * 取值来源分三类：
- * - **enum 键**：上游取值表（文本清单解析来的 `item.options`）；
- * - **「string 但取值有限」的键**（`theme.dark` / `theme.light` / `composer.shape`，上游
- *   `ui: { options: "runtime" }`）：`runtimeChoiceValues`——主题列表是运行时给的
- *   （后端 `list_omp_themes`，内置 ∪ `<agentDir>/themes`），形态表是壳侧内置八项；
- * - **其余键**（普通 string / 路径 / URL，以及 enum 但没有取值表的降级态）：空数组——
- *   调用方据此用文本输入框，不摆「只有当前值这一项」的残废下拉。
+ * 取值来源：**enum 键**取上游取值表（文本清单解析来的 `item.options`）；其余键（普通
+ * string / 路径 / URL，以及 enum 却没有取值表的降级态）给空数组——调用方据此用文本
+ * 输入框，不摆「只有当前值这一项」的残废下拉。
+ * （历史：`theme.dark` / `composer.shape` 这类「string 但取值有限」的运行时表随四稿
+ * 筛掉 TUI 键一并退场，见 `settingsList.ts` 头部沿革。）
  *
- * 当前值不在表里时**原样补一条**，不吞信息（自定义主题没扫到、上游加了新形态都能显示）；
- * label 走 `OPTION_LABELS`（普通词翻界面语言、专有名词与档位名原样）。
+ * 当前值不在表里时**原样补一条**，不吞信息；label 走 `OPTION_LABELS`
+ * （普通词翻界面语言、专有名词与档位名原样）。
  */
-export function choiceOptions(
- item: OmpCatalogItem,
- t: Text,
- themeNames: readonly string[] = [],
-): { value: string; label: string }[] {
- const base =
-  item.kind === "enum"
-   ? [...item.options]
-   : item.kind === "string"
-    ? [...(runtimeChoiceValues(item.key, themeNames) ?? [])]
-    : [];
+export function choiceOptions(item: OmpCatalogItem, t: Text): { value: string; label: string }[] {
+ const base = item.kind === "enum" ? [...item.options] : [];
  if (base.length === 0) return [];
  const current = typeof item.value === "string" ? item.value : null;
  if (current !== null && current !== "" && !base.includes(current)) base.push(current);

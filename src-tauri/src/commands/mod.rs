@@ -1159,9 +1159,11 @@ pub async fn archive_sessions(state: State<'_, AppState>, ids: Vec<String>) -> R
     let mut ok = 0usize;
     // 归档只改覆盖层键，逐个都不该失败；失败明细字段保留为空，与 delete_sessions 的返回结构对齐
     let failed: Vec<serde_json::Value> = vec![];
-    // 聊天形态：先停这批会话的长驻进程（归档 = 收起来；进程继续跑没有意义，还会占内存）
+    // 聊天形态：先停这批会话的长驻进程（归档 = 收起来；进程继续跑没有意义，还会占内存）。
+    // 用等锁版：`kill_runtime` 的 `try_lock` 在锁被占时会静默跳过移除，进程还活着的
+    // 会话会在下一次列表刷新里被「未落盘补行」补出来（行又冒出来）。
     for id in &ids {
-        kill_runtime(&state, id);
+        kill_runtime_awaited(&state, id).await;
     }
     {
         let mut ov = state.overlay.lock().await;
@@ -1208,9 +1210,11 @@ pub async fn delete_sessions(state: State<'_, AppState>, ids: Vec<String>) -> Re
     }
     let mut ok = 0usize;
     let mut failed: Vec<serde_json::Value> = vec![];
-    // 聊天形态：先停再删（进程若还在写盘，删掉的文件会被重新创建）
+    // 聊天形态：先停再删（进程若还在写盘，删掉的文件会被重新创建）。
+    // 用等锁版：`kill_runtime` 的 `try_lock` 在锁被占时会静默跳过移除——进程没停、
+    // 表里条目还在，下一次列表刷新就会给刚删掉的会话补一行（看着像删除又造了一个会话）。
     for id in &ids {
-        kill_runtime(&state, id);
+        kill_runtime_awaited(&state, id).await;
     }
     for id in &ids {
         match delete_session_inner(&state, id).await {

@@ -7,7 +7,7 @@ import { filterPalette, PALETTE_ACTIONS, type PaletteActionId, type PaletteEntry
 import { cycleSessionApproval } from "../lib/sessionApproval";
 import { openBtwPanel } from "../lib/btw";
 import { createChatIn, openForkedSession, openSessionWithHistory } from "../lib/sessionOpen";
-import { forgetSession } from "../lib/useSessionEvents";
+import { runSessionBatch } from "../lib/sessionBatch";
 import { isMacKeyboard } from "../lib/platform";
 import { sessionTitleForDisplay } from "../lib/sessionTitle";
 import { useText } from "../lib/useText";
@@ -119,16 +119,9 @@ export function CommandPalette() {
     if (sid) void cycleSessionApproval(sid);
     break;
    case "archive":
-    if (sid) {
-     void api
-      .archiveSessions([sid])
-      .then(() => {
-       forgetSession(sid);
-       const st2 = useApp.getState();
-       st2.set({ activeSessionId: null, sessions: st2.sessions.filter((s) => s.id !== sid) });
-      })
-      .catch(() => undefined);
-    }
+    // 归档走 `lib/sessionBatch` 的唯一实现（缓存清理 + store 行归档位同步都在那里）：
+    // 本组件自己拼一遍等于给「归档后要清什么」留第二份会漂移的副本。
+    if (sid) void runSessionBatch("archive", [sid]).catch(() => undefined);
     break;
    case "settings":
     st.openSettingsTab();

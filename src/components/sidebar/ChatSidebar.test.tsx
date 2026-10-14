@@ -400,6 +400,71 @@ describe("左栏行级悬浮图标（V43）", () => {
  });
 });
 
+/**
+ * 删除 / 归档后的行状态（2026-10-15 用户实测）：
+ * 左栏把 `store.sessions` 当真相覆盖并会把「扫描结果里没有的行」补回来（见 `mergedSessions`），
+ * 所以删过的行如果还留在 store 缓存里，下一次刷新就会整行复活——用户看到的是
+ * 「点删除以后未归属会话里又冒出一个会话」（删除后行没消失、还被顶到组首）。
+ */
+describe("会话删除 / 归档后的行状态（不许从 store 缓存复活）", () => {
+ const t = TEXT["zh-CN"];
+
+ /** 行内删除键 → 二次确认 → 确认真删。 */
+ async function deleteRowVia(title: string): Promise<void> {
+  const row = [...container.querySelectorAll<HTMLElement>("div.h-8")].find((el) => (el.textContent ?? "").includes(title));
+  expect(row, `会话行应渲染：${title}`).not.toBeUndefined();
+  await click(row?.querySelector<HTMLButtonElement>(`button[aria-label="${t.deleteChat}"]`));
+  const dialog = document.querySelector('[role="dialog"]');
+  expect(dialog, "删除要走二次确认").not.toBeNull();
+  await act(async () => {
+   ([...(dialog?.querySelectorAll("button") ?? [])].at(-1) as HTMLButtonElement).click();
+  });
+ }
+
+ it("删掉的会话不从 store 缓存补回；删的是当前会话时激活一并清掉", async () => {
+  // store 里留着这一行（点开过 / 从列表打开过）——渲染时它同时出现在扫描行与 store 行里
+  useApp.setState({ sessions: [session("s3", null, "游离会话")], activeSessionId: "s3" });
+  await open();
+  expect(container.textContent).toContain("游离会话");
+  // 后端真相：s3 已删 → 删除后那一次 list_sessions 不再返回它
+  mock.listSessions.mockResolvedValue({ sessions: SESSIONS.filter((s) => s.id !== "s3"), totalFiles: 3, scannedFiles: 3 });
+
+  await deleteRowVia("游离会话");
+
+  expect(mock.deleteSessions).toHaveBeenCalledWith(["s3"]);
+  expect(useApp.getState().sessions.some((s) => s.id === "s3"), "缓存里也不留删掉的行").toBe(false);
+  expect(container.textContent, "删掉的行不许从 store 缓存补回来").not.toContain("游离会话");
+  expect(useApp.getState().activeSessionId, "删的是当前会话：激活要清掉，别停在死会话上").toBeNull();
+ });
+
+ it("删的是别的会话时，当前会话的激活不受影响", async () => {
+  useApp.setState({ sessions: [session("s1", "p1", "登录页重构")], activeSessionId: "s1" });
+  await open();
+  mock.listSessions.mockResolvedValue({ sessions: SESSIONS.filter((s) => s.id !== "s3"), totalFiles: 3, scannedFiles: 3 });
+
+  await deleteRowVia("游离会话");
+
+  expect(useApp.getState().activeSessionId).toBe("s1");
+ });
+
+ it("归档过的会话不再留在「进行中」（store 缓存的旧 archived 不许把它顶回来）", async () => {
+  useApp.setState({ sessions: [session("s3", null, "游离会话")] });
+  await open();
+  const row = [...container.querySelectorAll<HTMLElement>("div.h-8")].find((el) => (el.textContent ?? "").includes("游离会话"));
+  // 归档后端真相：覆盖层标记 + 下一次扫描回传 archived=true
+  mock.listSessions.mockResolvedValue({
+   sessions: SESSIONS.map((s) => (s.id === "s3" ? { ...s, archived: true } : s)),
+   totalFiles: 4,
+   scannedFiles: 4,
+  });
+
+  await click(row?.querySelector<HTMLButtonElement>(`button[aria-label="${t.archiveChat}"]`));
+
+  expect(mock.archiveSessions).toHaveBeenCalledWith(["s3"]);
+  expect(container.textContent, "已归档的会话不列").not.toContain("游离会话");
+ });
+});
+
 /** 指针事件：jsdom 里用 MouseEvent 补 `pointerId`（控制器只读 clientX/clientY/pointerId）。 */
 function pointer(type: string, x: number, y: number, pointerId = 1): Event {
  const e = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 });

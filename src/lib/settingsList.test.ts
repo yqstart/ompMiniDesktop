@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { TEXT } from "./locale";
 import {
- COMPOSER_SHAPES,
  OPTION_LABELS,
- runtimeChoiceValues,
  SETTINGS_LIST,
+ SETTINGS_LIST_SET,
  SETTING_NOTES,
  SETTING_SECTION_OVERRIDES,
 } from "./settingsList";
@@ -14,17 +13,17 @@ const zh = TEXT["zh-CN"];
 const en = TEXT.en;
 
 /**
- * 「常用设置」页展示清单的维护契约（docs/v28-schedule.md 三稿）：
- * ① 无重复；② 每项有中英短名（行标题不退化）；③ 规模 100–140；④ 三稿删掉的 33 项不得回流；
- * ⑤ 翻译 / 标注 / 归位表的键都在清单里、字典键中英非空；⑥ 字典里的每个 `sv*` 键都被翻译表
- * 引用（无孤儿——删键时要同步清翻译）。
+ * 「常用设置」页展示清单的维护契约（docs/v3-schedule.md §4.1；四稿筛选 2026-10-15）：
+ * ① 无重复；② 每项有中英短名（行标题不退化）；③ 规模 80（不多不少——四稿按「壳里可观测」定稿）；
+ * ④ 三稿 / 四稿明确删掉的键不得回流；⑤ 翻译 / 标注 / 归位表的键都在清单里、字典键中英非空；
+ * ⑥ 字典里的每个 `sv*` 键都被翻译表引用（无孤儿——删键时要同步清翻译）。
  *
  * 与上游真实目录的核对在测试外做：清单 ⊆ 名称表（第 ② 条），名称表 ⊆ 519 快照且无幽灵键
  * （`ompSettingNames.test.ts`）——传递保证清单里的键都是本机上游真实存在的。
  */
 
 /** 三稿明确删掉的 33 项（用户口径）：不得回流到清单里。 */
-const REMOVED = [
+const REMOVED_WAVE3 = [
  "colorBlindMode",
  "tui.imeSafeCursor",
  "workspace.additionalDirectories",
@@ -60,9 +59,59 @@ const REMOVED = [
  "browser.headless",
 ];
 
+/**
+ * 四稿删掉的 37 项（判据 = 桌面壳里没有可观测差异，逐项对照上游 description）：
+ * - 终端外观与渲染：主题 / 字形 / 输入框形态与速率 / 状态行（三键）/ 终端内联图片 /
+ *   mermaid ASCII / 表情反应 / 终端标题（两键）/ 鼠标 / 边距 / 平滑流式 / 工具活动行 /
+ *   逐轮用量与耗时行 / 硬件光标 / 子代理模型徽标；
+ * - 终端输入：vim 模式 / ⎋⎋ 行为 / 拼写三键 / 麦克风语音输入；
+ * - TUI 启动与通知：启动检查更新 / 更新说明展开 / 自动恢复最近会话 / 完成·错误·提问三种终端通知；
+ * - transcript 渲染：read 的 Markdown 预览与内联结果行；思考块隐藏（壳侧自己渲染思考块，
+ *   该键只管 TUI 折叠，实测 jsonl 与流式帧都照常带 thinking）。
+ */
+const REMOVED_WAVE4 = [
+ "theme.dark",
+ "theme.light",
+ "symbolPreset",
+ "composer.shape",
+ "composer.tokenRate",
+ "statusLine.preset",
+ "statusLine.contextLine",
+ "statusLine.compactThinkingLevel",
+ "terminal.showImages",
+ "tui.renderMermaid",
+ "tui.reactions",
+ "tui.titleState",
+ "tui.titleSpinner",
+ "tui.mouse",
+ "tui.tight",
+ "display.smoothStreaming",
+ "display.hideToolActivity",
+ "display.showTokenUsage",
+ "display.showTurnTime",
+ "showHardwareCursor",
+ "task.showResolvedModelBadge",
+ "read.renderMarkdown",
+ "read.toolResultPreview",
+ "autoResume",
+ "tui.vimMode",
+ "doubleEscapeAction",
+ "spelling.typoDetection",
+ "spelling.autocomplete",
+ "spelling.autocorrect",
+ "startup.checkUpdate",
+ "startup.changelogMode",
+ "completion.notify",
+ "error.notify",
+ "ask.notify",
+ "recap.enabled",
+ "stt.enabled",
+ "hideThinkingBlock",
+];
+
 describe("常用设置展示清单", () => {
- it("117 项、无重复", () => {
-  expect(SETTINGS_LIST).toHaveLength(117);
+ it("80 项、无重复", () => {
+  expect(SETTINGS_LIST).toHaveLength(80);
   expect(new Set(SETTINGS_LIST).size).toBe(SETTINGS_LIST.length);
  });
 
@@ -74,20 +123,25 @@ describe("常用设置展示清单", () => {
   expect(missing, `缺名称：${missing.join(", ")}`).toEqual([]);
  });
 
- it("规模保持在精选量级（100–140 项，防止扩回全量）", () => {
-  expect(SETTINGS_LIST.length).toBeGreaterThanOrEqual(100);
-  expect(SETTINGS_LIST.length).toBeLessThanOrEqual(140);
+ it("规模钉在四稿定稿的 80 项（加项必须先过判据并改这里，防被扩回全量）", () => {
+  expect(SETTINGS_LIST.length).toBeLessThanOrEqual(80);
+  expect(SETTINGS_LIST.length).toBeGreaterThanOrEqual(60);
  });
 
  it("三稿删掉的 33 项不在清单里（不得回流）", () => {
-  expect(REMOVED).toHaveLength(33);
-  const back = REMOVED.filter((k) => SETTINGS_LIST.includes(k));
+  expect(REMOVED_WAVE3).toHaveLength(33);
+  const back = REMOVED_WAVE3.filter((k) => SETTINGS_LIST.includes(k));
+  expect(back, `回流：${back.join(", ")}`).toEqual([]);
+ });
+
+ it("四稿删掉的 37 项不在清单里（不得回流）", () => {
+  expect(REMOVED_WAVE4).toHaveLength(37);
+  const back = REMOVED_WAVE4.filter((k) => SETTINGS_LIST.includes(k));
   expect(back, `回流：${back.join(", ")}`).toEqual([]);
  });
 
  it("翻译表：键都在清单里、每个字典键中英非空", () => {
-  const known = new Set(SETTINGS_LIST);
-  const unknown = Object.keys(OPTION_LABELS).filter((k) => !known.has(k));
+  const unknown = Object.keys(OPTION_LABELS).filter((k) => SETTINGS_LIST_SET[k] !== true);
   expect(unknown, `不在清单里的键：${unknown.join(", ")}`).toEqual([]);
   for (const [key, map] of Object.entries(OPTION_LABELS)) {
    for (const [value, labelKey] of Object.entries(map)) {
@@ -104,20 +158,8 @@ describe("常用设置展示清单", () => {
  });
 
  it("标注与归位表：键都在清单里", () => {
-  const known = new Set(SETTINGS_LIST);
   for (const k of [...Object.keys(SETTING_NOTES), ...Object.keys(SETTING_SECTION_OVERRIDES)]) {
-   expect(known.has(k), `${k} 不在清单里`).toBe(true);
+   expect(SETTINGS_LIST_SET[k], `${k} 不在清单里`).toBe(true);
   }
- });
-
- it("runtimeChoiceValues：theme.* 用运行时列表、composer.shape 用内置八形态、其余 null", () => {
-  const themes = ["dark", "light", "dark-catppuccin"];
-  expect(runtimeChoiceValues("theme.dark", themes)).toEqual(themes);
-  expect(runtimeChoiceValues("theme.light", themes)).toEqual(themes);
-  expect(runtimeChoiceValues("composer.shape", [])).toEqual([...COMPOSER_SHAPES]);
-  expect(COMPOSER_SHAPES).toHaveLength(8);
-  // 普通 string 键（路径 / URL）没有运行时表
-  expect(runtimeChoiceValues("searxng.endpoint", themes)).toBeNull();
-  expect(runtimeChoiceValues("python.interpreter", themes)).toBeNull();
  });
 });

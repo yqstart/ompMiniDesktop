@@ -65,8 +65,6 @@ export const IPC = {
  // 写一个设置项 / 恢复默认（cwd 钉 agentDir，写 omp 全局配置）
  setOmpSetting: "set_omp_setting",
  resetOmpSetting: "reset_omp_setting",
- // omp 主题列表（「常用设置」深色 / 浅色主题下拉用）：内置注册表 ∪ <agentDir>/themes/*.json（只读）
- listOmpThemes: "list_omp_themes",
  // 自定义模型（设置 › 供应商）：omp `models.yml` 的读写——上游没有 CLI 写入口，写文件是唯一路径
  readModelsConfig: "read_models_config",
  writeModelsConfig: "write_models_config",

@@ -9,7 +9,7 @@ import type { SettingsTab } from "./settingsTabs";
 
 /**
  * 设置视图顶部搜索（v3）的数据层：**跨条目的纯前端过滤**——不引入后端全文索引，
- * 只过滤「本应用已加载的数据」（常用设置 117 项展示清单 / 模型目录 / 插件 / 技能 /
+ * 只过滤「本应用已加载的数据」（常用设置 80 项展示清单 / 模型目录 / 插件 / 技能 /
  * 记忆 / 归档会话）。目录数据与各面板各自的加载互不影响（这里另走一份**设置视图级缓存**，
  * 关闭设置视图时整体作废，见 `clearSettingsSearchCache`）。
  *
@@ -115,9 +115,9 @@ export function searchSettings(
  };
  const groups: SettingsSearchGroup[] = [];
 
- // 常用设置：展示清单（117 项）内做四档打分
+ // 常用设置：展示清单（80 项）内做四档打分
  if (sources.catalog) {
-  const items = sources.catalog.items.filter((item) => SETTINGS_LIST_SET.has(item.key));
+  const items = sources.catalog.items.filter((item) => SETTINGS_LIST_SET[item.key] === true);
   const ranked = filterCatalog(items, q, nameOf).slice(0, GENERAL_LIMIT);
   if (ranked.length > 0) {
    groups.push({

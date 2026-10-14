@@ -26,7 +26,7 @@ import { SETTINGS_LIST_SET, SETTING_NOTES, SETTING_SECTION_OVERRIDES } from "../
  * 设置 ›「常用设置」：omp 全局配置（`config.yml`）的**唯一设置面**——分组与六种类型的
  * 编辑器（开关 / 枚举 / 数字 / 文本 / 数组 / 记录）。数据来自后端 `get_omp_settings_catalog`
  * （`omp config list` 文本 + JSON 两路合并，见 `src-tauri/src/settings.rs`），再按
- * `lib/settingsList.ts` 的展示清单（117 项：原常用 42 项 + 精选剩余 75 项）过滤——
+ * `lib/settingsList.ts` 的展示清单（80 项：四稿按「桌面壳里有没有可观测差异」筛过）过滤——
  * **不铺上游全量**（519 项里内部 / 细调占大头，要浏览完整清单在终端里 `omp config list`）。
  * 写入走 `set_omp_setting` / `reset_omp_setting`（omp 全局配置、写完回读，与旧「常用设置」
  * 面板同一套命令）。
@@ -47,9 +47,7 @@ import { SETTINGS_LIST_SET, SETTING_NOTES, SETTING_SECTION_OVERRIDES } from "../
  *   「-1 = 默认」（temperature / compaction.thresholdPercent）；
  * - 分组默认展开（可见性优先，折叠是用户的选择）；
  * - 枚举下拉的选项 label 走 `OPTION_LABELS`（普通词翻界面语言、专有名词与档位名原样；多个键共享公共取值键）；
- *   **string 但取值有限的键**（`theme.dark` / `theme.light` / `composer.shape`，上游 `ui.options: "runtime"`）
- *   同样渲染下拉——主题列表来自后端 `list_omp_themes`（内置 102 个 ∪ `<agentDir>/themes` 自定义），
- *   形态表是壳侧内置八项；当前值不在表里时原样补一条，空表退化成文本输入框；
+ *   上游没有取值表（或非 enum）的键退化成文本输入框；
  * - array / record 走 JSON 文本编辑（**本地先解析校验**，不合法根本不发请求）——当前清单没有
  *   此类键，此路径是渲染器按上游 schema 类型分派的通用能力。
  */
@@ -64,8 +62,6 @@ export function GeneralSettingsPanel({
  const t = useText();
  const health = useApp((s) => s.health);
  const [catalog, setCatalog] = useState<OmpSettingsCatalog | null>(null);
- /** 主题下拉的运行时列表（后端 `list_omp_themes`：内置 ∪ `<agentDir>/themes`）；失败 = 空表。 */
- const [themeNames, setThemeNames] = useState<readonly string[]>([]);
  /** 首次读取失败（保持 null，不显示伪设置行）。 */
  const [loadError, setLoadError] = useState<string | null>(null);
  /** 刷新失败但有旧数据（保留快照，只提示结果可能过期）。 */
@@ -90,11 +86,6 @@ export function GeneralSettingsPanel({
  const handledSeq = useRef(0);
 
  const load = useCallback(() => {
-  // 主题下拉的运行时列表与目录并行拉；失败静默（那一行退化成「只有当前值」的下拉）
-  void api
-   .listOmpThemes()
-   .then(setThemeNames)
-   .catch(() => setThemeNames([]));
   return api
    .getOmpSettingsCatalog()
    .then((c) => {
@@ -257,7 +248,7 @@ export function GeneralSettingsPanel({
     ? {
      sections: catalog.sections,
      items: catalog.items
-      .filter((i) => SETTINGS_LIST_SET.has(i.key))
+      .filter((i) => SETTINGS_LIST_SET[i.key] === true)
       .map((i) => (SETTING_SECTION_OVERRIDES[i.key] ? { ...i, section: SETTING_SECTION_OVERRIDES[i.key] } : i)),
     }
     : null,
@@ -425,7 +416,6 @@ export function GeneralSettingsPanel({
              key={item.key}
              item={item}
              busy={busyKeys.has(item.key)}
-             themeNames={themeNames}
              draft={drafts[item.key]}
              jsonText={jsonDrafts[item.key]}
              jsonError={jsonErrors[item.key]}
@@ -457,7 +447,6 @@ export function GeneralSettingsPanel({
 function SettingRow({
  item,
  busy,
- themeNames,
  draft,
  jsonText,
  jsonError,
@@ -472,8 +461,6 @@ function SettingRow({
 }: {
  item: OmpCatalogItem;
  busy: boolean;
- /** 主题下拉的运行时列表（`theme.dark` / `theme.light` 用；其余行无关）。 */
- themeNames: readonly string[];
  draft: string | undefined;
  jsonText: string | undefined;
  jsonError: string | undefined;
@@ -494,7 +481,7 @@ function SettingRow({
  const note = SETTING_NOTES[item.key];
  const isJson = item.kind === "array" || item.kind === "record";
  const editingJson = jsonText !== undefined;
- const enumValues = choiceOptions(item, t, themeNames);
+ const enumValues = choiceOptions(item, t);
  /** schema 类型名走字典；未知类型（上游将来加的）原样显示上游值。 */
  const kindKey = SETTING_KIND_KEYS[item.kind];
  const kindLabel = kindKey ? t[kindKey] : item.kind;

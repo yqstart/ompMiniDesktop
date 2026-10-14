@@ -136,9 +136,14 @@ describe("设置页的编辑器辅助", () => {
   expect(choiceOptions(channel, zh).map((o) => o.label)).toEqual(["稳定版", "尝鲜版"]);
   expect(choiceOptions(channel, en).map((o) => o.label)).toEqual(["Stable", "Canary"]);
 
-  // 同一取值跨键共享（on / off / auto 这类公共词）
-  const notify = item({ key: "completion.notify", kind: "enum", options: ["on", "off"], value: "on" });
-  expect(choiceOptions(notify, zh).map((o) => o.label)).toEqual(["开启", "关闭"]);
+  // 同一取值跨键共享（off / auto 这类公共词）
+  const market = item({
+   key: "marketplace.autoUpdate",
+   kind: "enum",
+   options: ["off", "notify", "auto"],
+   value: "auto",
+  });
+  expect(choiceOptions(market, zh).map((o) => o.label)).toEqual(["关闭", "仅提醒", "自动"]);
 
   // 没配 label 的键（思考档——档位名原样，与常用设置页同一口径）原样显示上游取值
   const thinking = item({
@@ -159,39 +164,12 @@ describe("设置页的编辑器辅助", () => {
   expect(choiceOptions(mixed, zh).map((o) => o.label)).toEqual(["稳定版", "尝鲜版", "weird-new"]);
  });
 
- it("choiceOptions：string 但取值有限的键（theme.* / composer.shape）也给下拉", () => {
-  // theme.dark：列表来自运行时（后端主题列表），当前值在表里按列表顺序；主题名原样显示
-  const themeDark = item({ key: "theme.dark", kind: "string", value: "dark-catppuccin" });
-  const themes = ["dark", "light", "dark-catppuccin"];
-  expect(choiceOptions(themeDark, zh, themes).map((o) => o.value)).toEqual(themes);
-  expect(choiceOptions(themeDark, zh, themes).map((o) => o.label)).toEqual(themes);
-
-  // 当前值不在列表（自定义主题没扫到）→ 原样补一条
-  expect(choiceOptions({ ...themeDark, value: "my-theme" }, zh, ["dark"]).map((o) => o.value)).toEqual([
-   "dark",
-   "my-theme",
-  ]);
-  // 列表整个为空（`list_omp_themes` 失败）：与 enum 空表同口径——退化成文本输入框，不摆残废下拉
-  expect(choiceOptions({ ...themeDark, value: "my-theme" }, zh, [])).toEqual([]);
-
-  // composer.shape：内置八形态 + 翻译 label（中英）
-  const shape = item({ key: "composer.shape", kind: "string", value: "band" });
-  expect(choiceOptions(shape, zh, []).map((o) => o.value)).toEqual([
-   "band",
-   "box",
-   "claude",
-   "pi",
-   "borderless",
-   "rule",
-   "field",
-   "rail",
-  ]);
-  expect(choiceOptions(shape, zh, [])[0].label).toBe("状态带（默认）");
-  expect(choiceOptions(shape, en, [])[1].label).toBe("Rounded box");
-
-  // 普通 string 键（路径 / URL 类）没有表 → 空数组（调用方用文本输入框）
-  expect(choiceOptions(item({ key: "searxng.endpoint", kind: "string", value: "" }), zh, themes)).toEqual([]);
-  expect(choiceOptions(item({ key: "python.interpreter", kind: "string", value: "" }), zh, themes)).toEqual([]);
+ it("choiceOptions：string 键一律给空数组（调用方退化成文本输入框）", () => {
+  // 四稿筛掉 TUI 键后，清单里不再有「string 但取值有限」的运行时表（主题 / 输入框形态那类）：
+  // 普通 string 键（路径 / URL / 主题…）没有表 → 空数组，界面用文本输入框而不是残废下拉
+  expect(choiceOptions(item({ key: "theme.dark", kind: "string", value: "dark" }), zh)).toEqual([]);
+  expect(choiceOptions(item({ key: "searxng.endpoint", kind: "string", value: "" }), zh)).toEqual([]);
+  expect(choiceOptions(item({ key: "python.interpreter", kind: "string", value: "" }), zh)).toEqual([]);
  });
 
  it("parseNumberDraft：空 / 非有限数 → null，其余按十进制解析", () => {

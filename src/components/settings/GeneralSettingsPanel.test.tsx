@@ -13,7 +13,6 @@ actEnv.IS_REACT_ACT_ENVIRONMENT = true;
 vi.mock("@shared/api", () => ({
  api: {
   getOmpSettingsCatalog: vi.fn(),
-  listOmpThemes: vi.fn(),
   setOmpSetting: vi.fn(),
   resetOmpSetting: vi.fn(),
  },
@@ -32,7 +31,7 @@ const catalogItem = (over: Partial<OmpCatalogItem>): OmpCatalogItem => ({
 });
 const catalog = (items: OmpCatalogItem[]): OmpSettingsCatalog => ({ sections: ["tools"], items });
 
-/** 冲掉 mock promise 链（load 里 catalog 与主题列表两条链都要落地）。 */
+/** 冲掉 mock promise 链（load 里的目录读取要落地）。 */
 const flush = async () => {
  await act(async () => {
   await Promise.resolve();
@@ -46,7 +45,6 @@ let root: Root;
 
 beforeEach(() => {
  useApp.setState({ health: null, locale: "zh-CN" });
- vi.mocked(api.listOmpThemes).mockResolvedValue([]);
  container = document.createElement("div");
  document.body.append(container);
  root = createRoot(container);
@@ -109,6 +107,37 @@ describe("设置页读取与定位", () => {
   } finally {
    vi.useRealTimers();
   }
+ });
+});
+
+describe("展示清单与分组归位（四稿筛选）", () => {
+ it("清单外的键（TUI 键）不渲染；images.* 按归位并入「模型与重试」组", async () => {
+  vi.mocked(api.getOmpSettingsCatalog).mockResolvedValue({
+   sections: ["appearance", "model"],
+   items: [
+    catalogItem({ key: "theme.dark", kind: "string", value: "dark", section: "appearance" }),
+    catalogItem({ key: "images.autoResize", section: "appearance" }),
+    catalogItem({
+     key: "defaultThinkingLevel",
+     kind: "enum",
+     value: "medium",
+     options: ["medium", "max"],
+     section: "model",
+    }),
+   ],
+  });
+  act(() => {
+   root.render(<GeneralSettingsPanel />);
+  });
+  await flush();
+  // 四稿删掉的 TUI 键（主题之类）不渲染——即便上游目录里还在
+  expect(container.querySelector('[data-setting="theme.dark"]')).toBeNull();
+  // 外观整组只剩 images.* 两项，按主题并入「模型与重试」：外观组头不再出现
+  expect(container.textContent).not.toContain("外观");
+  expect(container.textContent).toContain("模型与重试");
+  // 归位后的两行都在（图片项与模型项同组渲染）
+  expect(container.querySelector('[data-setting="images.autoResize"]')).not.toBeNull();
+  expect(container.querySelector('[data-setting="defaultThinkingLevel"]')).not.toBeNull();
  });
 });
 

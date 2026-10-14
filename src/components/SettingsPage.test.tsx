@@ -18,7 +18,6 @@ actEnv.IS_REACT_ACT_ENVIRONMENT = true;
 vi.mock("@shared/api", () => ({
  api: {
   getOmpSettingsCatalog: vi.fn(),
-  listOmpThemes: vi.fn(),
   getModels: vi.fn(),
   refreshModels: vi.fn(),
   listPlugins: vi.fn(),
@@ -81,7 +80,6 @@ beforeEach(() => {
   settingsTabActive: true,
   settingsSearchOpen: false,
  });
- vi.mocked(api.listOmpThemes).mockResolvedValue([]);
  vi.mocked(api.getModels).mockResolvedValue({ models: [], fetchedAt: 0 });
  vi.mocked(api.listPlugins).mockResolvedValue({ cwd: "", npm: [], marketplace: [] });
  vi.mocked(api.listSkills).mockResolvedValue({ cwd: "", skills: [], disabled: [], warnings: [] });

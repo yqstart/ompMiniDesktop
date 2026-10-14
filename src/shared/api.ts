@@ -334,12 +334,6 @@ export const api = {
  /** 恢复该键的 schema 默认值（`omp config reset`，把默认值写回全局配置）。 */
  resetOmpSetting: (key: string) => call<OmpSetting>(IPC.resetOmpSetting, { key }),
  /**
-  * 本机 omp 的主题列表（「常用设置」的深色 / 浅色主题下拉用；**只读**）。
-  * 与 omp TUI 的 `availableThemes` 同口径：内置注册表（本机 18.4.4 = 102 个）∪
-  * `<agentDir>/themes/*.json`（去后缀），排序；目录不存在 = 只有内置。
-  */
- listOmpThemes: () => call<string[]>(IPC.listOmpThemes),
- /**
   * 自定义模型接入（设置 › 供应商）：读 / 写 `<agentDir>/models.yml`
   * ——omp 用户级自定义供应商 / 模型的唯一入口（上游没有 CLI 写入口，写文件是唯一路径）。
   * YAML 的保真编辑在前端做（`lib/customModels.ts`）；后端负责预校验（拿候选文本在临时

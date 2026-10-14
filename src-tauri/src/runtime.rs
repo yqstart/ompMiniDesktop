@@ -1542,6 +1542,8 @@ mod real_rpc_tests {
 
         let cwd = std::env::temp_dir().join(format!("omp-rpc-rc-{}", std::process::id()));
         std::fs::create_dir_all(&cwd).unwrap();
+        // 测试自己造出来的会话文件（真实 agentDir 下、临时 cwd 的 slug 目录）：收尾连目录一起清
+        let mut sfile_out = String::new();
 
         tauri::async_runtime::block_on(async {
             // send_message 的自动恢复走 `state.omp_path`（真实应用由健康检查落位），
@@ -1565,6 +1567,7 @@ mod real_rpc_tests {
             )
             .await
             .expect("握手失败");
+            sfile_out = sfile.clone();
             // 前端订阅的是**真实 sid** 的通道（拿到 sid 之后才订阅）
             let (evt_tx, mut evt_rx) = tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
             handle.listen(format!("omp-event://{sid}").as_str(), move |e| {
@@ -1645,6 +1648,13 @@ mod real_rpc_tests {
 
             kill_all(&map);
         });
+        // 清理测试自己造出来的会话文件（临时 cwd 的 slug 目录整个删——含隐藏的 .lock 文件；
+        // 不清的话每次跑慢测试都会在用户的「未归属会话」里留一行）
+        if !sfile_out.is_empty() {
+            if let Some(dir) = std::path::Path::new(&sfile_out).parent() {
+                let _ = std::fs::remove_dir_all(dir);
+            }
+        }
         let _ = std::fs::remove_dir_all(&cwd);
     }
 
