@@ -35,6 +35,11 @@ export function ApprovalCard({ m, sessionId }: { m: Extract<ViewMsg, { kind: "ap
     try {
       await api.approve(sessionId, m.uiId, d);
       setDecided(d);
+      // 「总是允许」在后端把本会话覆盖写成 yolo（`approve` 的 always 分支）——
+      // 输入卡上的档位显示读的就是这条真值，这里同步跟上，别让显示落后于实际生效档。
+      if (d === "always") {
+        set({ sessionApprovals: { ...useApp.getState().sessionApprovals, [sessionId]: "yolo" } });
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : t.approvalFailed);
     } finally {

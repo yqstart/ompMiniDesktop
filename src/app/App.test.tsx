@@ -64,6 +64,15 @@ vi.mock("@shared/api", () => ({
    error: null,
   })),
   syncTitlePrompt: vi.fn(async () => ({ path: "/tmp/TITLE_SYSTEM.md", action: "written" as const })),
+  // 启动水合执行模式真值（覆盖层的本会话覆盖 + omp 全局默认档）：App 一起手就会读
+  getOverlay: vi.fn(async () => ({
+   version: 1 as const,
+   projects: [],
+   archived: {},
+   notes: {},
+   session_approval: {},
+  })),
+  getGlobalApproval: vi.fn(async () => "yolo"),
  },
 }));
 vi.mock("@tauri-apps/api/event", () => ({

@@ -7,18 +7,14 @@ import { useApp } from "../../stores/app";
 import { DialogShell } from "../settings/DialogShell";
 import {
  disabledCredentialsToWarn,
- fmtAmount,
- fmtPercent,
  formatAgo,
  formatDuration,
  groupReports,
- hasBar,
  latestFetchedAt,
  levelOf,
+ limitReading,
  loadProviderUsage,
  providersWithoutUsage,
- remainingText,
- usedLimitText,
  useProviderUsage,
  windowNames,
  type ProviderGroup,
@@ -180,10 +176,9 @@ function ProviderCard({ group, now, locale }: { group: ProviderGroup; now: numbe
 /**
  * 一个窗口一行：窗口名 + 进度条 + 数值 + 重置倒计时。
  *
- * 数值与 commandcode 官方页面同口径——**有比例的窗口显示百分比**（金额细节进悬停提示：
- * `$0.31 / $14.00`）；纯余额窗口（没有上限）显示「N 剩余」；无比例也无上限的计数型窗口
- * （cursor 的 `gpt-4 requests`）显示「N requests」——percent 字段缺省是 0，拿它当读数
- * 等于编造「0.0%」。颜色旁边永远有文字读数。
+ * 数值口径在 `lib/providerUsage.ts` 的 `limitReading`（与输入卡浮层共用同一份）：有比例的
+ * 窗口显示百分比（金额细节进悬停提示 `$0.31 / $14.00`）、纯余额窗口显示「$X 剩余」、
+ * 计数型窗口显示数量原文——percent 字段缺省是 0，拿它当读数等于编造「0.0%」。
  */
 function LimitRow({
  limit,
@@ -197,21 +192,9 @@ function LimitRow({
  locale: Locale;
 }) {
  const t = useText();
- const level = levelOf(limit);
- const state = level === "danger" ? t.pusageStateDanger : level === "warn" ? t.pusageStateWarn : t.pusageStateOk;
+ const { bar, text: main, title, state } = limitReading(t, limit);
  const resets =
   limit.resetsAt !== null && now ? fmt(t.pusageResetsIn, formatDuration(limit.resetsAt - now, locale)) : "";
- const money = usedLimitText(limit);
- const remaining = remainingText(limit);
- const bar = hasBar(limit);
- const main = bar
-  ? fmtPercent(limit.percent)
-  : remaining !== null
-   ? fmt(t.pusageRemaining, remaining)
-   : limit.used !== null
-    ? fmtAmount(limit.unit, limit.used)
-    : fmtPercent(limit.percent);
- const title = bar && money !== null ? `${state} · ${money}` : state;
  return (
   <div className="py-1.5">
    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">

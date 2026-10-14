@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { api } from "@shared/api";
 import type { ProviderUsage, ProviderUsageDisabled, ProviderUsageReport, UsageLimit } from "@shared/types";
-import type { Locale, Text } from "./locale";
+import { fmt, type Locale, type Text } from "./locale";
 
 /**
  * 供应商用量（设置 ›「供应商用量」）的数据层：拉取（节流 + 单飞）、模块级快照订阅、
@@ -148,6 +148,30 @@ export function remainingText(l: UsageLimit): string | null {
 /** 该行要不要画进度条：百分比窗口（用 usedFraction）或带上限的金额窗口都画；纯余额不画。 */
 export function hasBar(l: UsageLimit): boolean {
  return l.unit === "percent" || (l.used !== null && l.limit !== null);
+}
+
+/**
+ * 一个窗口的读数（设置页卡片与输入卡浮层**共用这一条口径**，别各写一份）：
+ * 有比例的窗口 = 百分比；纯余额窗口（没有上限）=「$X 剩余」；无比例也无上限的计数型窗口 = 数量原文。
+ *
+ * `percent` 字段缺省是 0——**不能拿它当读数**（把 deepseek 的 api 余额窗口显示成
+ * 「Balance 0.0% + 空进度条」就是这么来的：percent 没意义、条也不该画）。真的一无所有时给 `—`。
+ * `title` = 状态词（有金额细节时带上 `$已用 / $上限`），悬停可见；颜色不作唯一信号。
+ */
+export function limitReading(t: Text, limit: UsageLimit): { bar: boolean; text: string; title: string; state: string } {
+ const level = levelOf(limit);
+ const state = level === "danger" ? t.pusageStateDanger : level === "warn" ? t.pusageStateWarn : t.pusageStateOk;
+ const money = usedLimitText(limit);
+ const remaining = remainingText(limit);
+ const bar = hasBar(limit);
+ const text = bar
+  ? fmtPercent(limit.percent)
+  : remaining !== null
+   ? fmt(t.pusageRemaining, remaining)
+   : limit.used !== null
+    ? fmtAmount(limit.unit, limit.used)
+    : "—";
+ return { bar, text, state, title: bar && money !== null ? `${state} · ${money}` : state };
 }
 
 /**

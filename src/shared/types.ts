@@ -1,24 +1,19 @@
 /** 前后端共享类型：覆盖层 / 视图 / 会话与消息流 / 提交任务 / 设置面（唯一真相在 Rust 侧结构体）。 */
 
-/** 覆盖层里允许的会话级权限档（V1 遗留字段，只为读旧覆盖层时形状完整）。 */
+/** 覆盖层里允许的会话级权限档。 */
 export type ApprovalMode = "always-ask" | "write" | "yolo";
 
-/** 覆盖层与视图共用的小类型集合。 */
-export type Project = {
- id: string;
- path: string;
- addedAt: number;
- lastModel: string | null;
- lastThinking: string | null;
-};
-
+/**
+ * 覆盖层（`get_overlay` 原样返回 Rust 的文件结构体，**wire 上是 snake_case** 的磁盘格式，
+ * 不另做 DTO 映射——2026-10-14 起前端只读 `session_approval` 与 `projects`）。
+ */
 export type Overlay = {
  version: 1;
- projects: Project[];
+ projects: { id: string; path: string; added_at: number; last_model: string | null; last_thinking: string | null; workspace_id?: string | null }[];
  archived: Record<string, boolean>;
  notes: Record<string, string>;
- sessionApproval: Record<string, ApprovalMode>;
- ompPath?: string | null;
+ session_approval: Record<string, ApprovalMode>;
+ omp_path?: string | null;
 };
 
 export type ProjectView = {

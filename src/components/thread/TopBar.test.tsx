@@ -11,7 +11,7 @@ import { TopBar } from "./TopBar";
  * - **回显当前显示名**再让用户改（用户口径：「重命名会话时，原来的内容应该先回显到输入框内」）——
  *   没有备注的会话此前开出来是空输入框，得对着上方看到的标题重打一遍；
  * - 原样回车 = 没改名：不写 omp（V40 起改名 = `set_session_name` 写 jsonl 真名）；
- * - 顶栏右端 = 供应商用量入口（2026-10-12 与输入框工具行的上下文容量环互换位置）。
+ * - 顶栏右端 = 只剩右面板开关（上下文容量环与供应商用量 2026-10-14 搬进输入卡工具行）。
  */
 
 /** `vi.mock` 的工厂会被提升：用 `vi.hoisted` 拿能在用例里改行为的 mock。 */
@@ -125,12 +125,15 @@ describe("聊天 TopBar 会话名编辑", () => {
   expect(mock.renameSession).toHaveBeenCalledWith("s1", "设置提示语改动");
  });
 
- it("顶栏右端 = 供应商用量入口，点开弹窗；上下文容量环已换到输入框工具行", () => {
+ it("顶栏右端只剩右面板开关：上下文容量环与供应商用量都在输入卡工具行", () => {
+  useApp.setState({ contextPanelOpen: false });
   render();
-  const gauge = container.querySelector<HTMLButtonElement>('header button[aria-label="供应商用量"]');
-  expect(gauge).not.toBeNull();
+  // 2026-10-14 起右上角不再有这两个入口（搬进 Composer 工具行，见 Composer.test.tsx）
+  expect(container.querySelector('header button[aria-label="供应商用量"]')).toBeNull();
   expect(container.querySelector('header button[aria-label^="上下文容量"]')).toBeNull();
-  act(() => gauge?.click());
-  expect(useApp.getState().providerUsageOpen).toBe(true);
+  const panel = container.querySelector<HTMLButtonElement>('header button[aria-label^="上下文面板"]');
+  expect(panel).not.toBeNull();
+  act(() => panel?.click());
+  expect(useApp.getState().contextPanelOpen).toBe(true);
  });
 });

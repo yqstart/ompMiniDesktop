@@ -8,11 +8,13 @@ import { TEXT } from "../../lib/locale";
 
 /**
  * Composer 三件事：
- * 1. 工具行的「上下文容量环」位置（2026-10-12 与顶栏右端的供应商用量键互换）；
+ * 1. 工具行的构成：`+` 菜单 / 执行模式 / 排队徽标 / 上下文容量环 / 供应商用量 / 模型·思考档 / 发送
+ *    （2026-10-14 容量环与用量从顶栏右端搬回输入卡，见 `docs/` 与 `design-system/MASTER.md`）；
  * 2. 发送语义（V39，对齐 omp 终端与 codex）：流式中 Enter = 插话（steer）、Tab / ⌘Ctrl+Enter = 排队
  *    （follow_up；运行中工具行的「排队」按钮 2026-10-13 按用户口径退场）；
- * 3. V40 增量：Shift+Tab 执行模式循环、Esc 中断还原队列、待发区 = 队列真值（撤回 / 编辑 / 提升）、
+ * 3. V40/V41 增量：Shift+Tab 执行模式循环、Esc 中断还原队列、待发区 = 队列真值（撤回 / 编辑 / 提升）、
  *    壳本地命令拦截（/goal /status …不进 omp）。
+ * 执行模式的真值口径（覆盖层水合 / 写全局默认 + 本会话覆盖）另见 `lib/sessionApproval.test.ts`。
  */
 
 /** 发送语义要断言 IPC 参数：spy 替身；其余命令给最小可用返回值。 */
@@ -29,8 +31,23 @@ const { apiMock } = vi.hoisted(() => ({
   promoteQueuedMessage: vi.fn(async () => ({ promoted: true })),
   abortAndRestoreQueue: vi.fn(async () => ({ steering: [] as { text: string }[], followUp: [] as { text: string }[] })),
   setSessionApproval: vi.fn(async (_id: string, _mode: string) => undefined),
+  setGlobalApproval: vi.fn(async (_mode: string) => undefined),
   getGlobalApproval: vi.fn(async () => "write"),
   restartSessionRuntime: vi.fn(async () => null),
+  // 供应商用量：入口侧按「全部已配置供应商」渲染（与当前模型无关），见下面的用例
+  getProviderUsage: vi.fn(async () => ({
+   generatedAt: 1,
+   reports: [
+    { provider: "aaa", planType: null, accountLabel: null, fetchedAt: 1, limits: [limit5h("aaa", 12)] },
+    { provider: "bbb", planType: null, accountLabel: null, fetchedAt: 1, limits: [balance("bbb", 54.77)] },
+    { provider: "ccc", planType: null, accountLabel: null, fetchedAt: 1, limits: [limit5h("ccc", 56)] },
+    { provider: "ddd", planType: null, accountLabel: null, fetchedAt: 1, limits: [limit5h("ddd", 78)] },
+   ],
+   accountsWithoutUsage: [],
+   disabledCredentials: [],
+   configuredProviders: ["aaa", "bbb", "ccc", "ddd"],
+   extraFailures: [],
+  })),
   goalCommand: vi.fn(async (_id: string, _op: string, _obj?: string) => ({ goal: null, state: null })),
   forkSession: vi.fn(async () => null),
   savePaste: vi.fn(async (_text: string) => ({ path: "/tmp/paste/paste-1.txt" })),
@@ -57,6 +74,42 @@ vi.mock("@tauri-apps/plugin-opener", () => openerMock);
 
 import { Composer } from "./Composer";
 import { pushHistory } from "../../lib/promptHistory";
+
+/** 造一个 api 余额窗口（没有上限 → 读数应是金额，不是百分比）。 */
+const balance = (id: string, remaining: number) => ({
+ id: `balance-${id}`,
+ label: "Balance",
+ windowId: "balance",
+ windowLabel: "Balance",
+ usedFraction: 0,
+ percent: 0,
+ status: "ok",
+ resetsAt: null,
+ durationMs: null,
+ notes: [],
+ used: null,
+ limit: null,
+ remaining,
+ unit: "usd",
+});
+
+/** 造一个 5 小时窗口（余额/百分比两种窗口都要能进浮层）。 */
+const limit5h = (id: string, percent: number) => ({
+ id: `rolling-5h-${id}`,
+ label: "5h",
+ windowId: "5h",
+ windowLabel: "5h",
+ usedFraction: percent / 100,
+ percent,
+ status: "ok",
+ resetsAt: null,
+ durationMs: null,
+ notes: [],
+ used: null,
+ limit: null,
+ remaining: null,
+ unit: "percent",
+});
 
 const actEnv = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
 actEnv.IS_REACT_ACT_ENVIRONMENT = true;
@@ -129,7 +182,7 @@ const press = async (el: HTMLElement | null, init: KeyboardEventInit) => {
 };
 
 describe("Composer 工具行（v2）", () => {
- it("卡底工具行 = + 菜单 + 执行模式菜单 + 模型·思考档 + 圆形发送键；容量环已移顶栏", async () => {
+ it("卡底工具行 = + 菜单 + 执行模式菜单 + 容量环 + 模型·思考档 + 圆形发送键", async () => {
   useApp.setState({
    sessions: [session()],
    activeSessionId: "s1",
@@ -142,31 +195,78 @@ describe("Composer 工具行（v2）", () => {
   });
   act(() => root.render(<Composer />));
   await act(async () => { });
-  // 上下文容量环随 v2 移到顶栏（TopBar），Composer 里不再有
-  expect(container.querySelector('button[aria-label^="上下文容量"]')).toBeNull();
-  // 「+」菜单（v2）：点开占用互斥槽，菜单里是「添加图片 / 引用工作区文件」
+  // 上下文容量环在输入卡工具行（2026-10-14 从顶栏右端搬回）
+  const meter = container.querySelector<HTMLButtonElement>('button[aria-label^="上下文容量"]');
+  expect(meter).not.toBeNull();
+  expect(meter?.textContent).toContain("13%");
+  // 「+」菜单（v2）：点开占用互斥槽，菜单行 = 标题 + 说明（说明不再挤在标题里）
   const plus = container.querySelector<HTMLButtonElement>('button[aria-label="添加上下文"]');
   expect(plus).not.toBeNull();
   act(() => plus?.click());
   expect(useApp.getState().composerMenu).toBe("plus");
-  expect(container.textContent).toContain(TEXT["zh-CN"].refPickComposerTitle);
+  expect(container.textContent).toContain(TEXT["zh-CN"].refPickTitle);
+  expect(container.textContent).toContain(TEXT["zh-CN"].plusAddRefHint);
   act(() => plus?.click());
   expect(useApp.getState().composerMenu).toBeNull();
-  // 执行模式菜单（v2）：行 = 名称 + 说明，覆盖原徽标入口
+  // 执行模式菜单（v2）：行 = 名称 + 说明；作用域说明是「本会话 + 新会话默认」，勾选跟生效档
   const perm = container.querySelector<HTMLButtonElement>('button[aria-label^="权限："]');
   expect(perm).not.toBeNull();
   act(() => perm?.click());
   expect(useApp.getState().composerMenu).toBe("approval");
   expect(container.textContent).toContain(TEXT["zh-CN"].permAlwaysAskDesc);
-  expect(container.textContent).toContain(TEXT["zh-CN"].permGlobal);
-  // 只有「全局」一个作用域：三档各一行，不再并列一份逐字重复的本会话覆盖清单
-  expect(perm?.parentElement?.querySelectorAll("button[aria-pressed]").length).toBe(3);
+  expect(container.textContent).toContain(TEXT["zh-CN"].permScopeNote);
+  // 三档各一行，勾选在生效档（本用例 globalApproval = "write"）
+  const rows = perm?.parentElement?.querySelectorAll("button[aria-pressed]") ?? [];
+  expect(rows.length).toBe(3);
+  expect([...rows].filter((b) => b.getAttribute("aria-pressed") === "true").length).toBe(1);
+  expect(perm?.textContent).toContain(TEXT["zh-CN"].permWrite);
   act(() => perm?.click());
   // 模型 · 思考档合并键（aria-label = 选择模型）与圆形发送键
   expect(container.querySelector('button[aria-label="选择模型"]')).not.toBeNull();
   const sendBtn = container.querySelector<HTMLButtonElement>('button[aria-label="发送"]');
   expect(sendBtn).not.toBeNull();
   expect(sendBtn?.className).toContain("rounded-full");
+ });
+
+ it("执行模式菜单选择：写全局默认（新会话档位）+ 本会话覆盖（idle 时立即重启换档）", async () => {
+  await mount(false);
+  const perm = container.querySelector<HTMLButtonElement>('button[aria-label^="权限："]');
+  act(() => perm?.click());
+  const rows = [...container.querySelectorAll<HTMLButtonElement>("button[aria-pressed]")];
+  const yolo = rows.find((r) => r.textContent?.includes(TEXT["zh-CN"].permYolo));
+  expect(yolo).toBeDefined();
+  await act(async () => {
+   yolo!.click();
+  });
+  expect(apiMock.setGlobalApproval).toHaveBeenCalledWith("yolo");
+  expect(apiMock.setSessionApproval).toHaveBeenCalledWith("s1", "yolo");
+  expect(apiMock.restartSessionRuntime).toHaveBeenCalledWith("s1");
+  // 选完即收浮层；触发键跟着真值走
+  expect(useApp.getState().composerMenu).toBeNull();
+  expect(perm?.textContent).toContain(TEXT["zh-CN"].permYolo);
+ });
+
+ it("供应商用量入口：收起态只一个图标，点开列**全部已配置供应商**（与当前模型无关）", async () => {
+  // 当前模型属于一个根本没配的供应商 zzz：老口径下这里会一家都不显示
+  useApp.setState({ currentModel: "zzz/some-model" });
+  await mount(false);
+  const usage = container.querySelector<HTMLButtonElement>('button[aria-label^="用量限额"]');
+  expect(usage).not.toBeNull();
+  // 收起态不铺读数（2026-10-14 用户口径）：工具行里没有家名 / 百分比 / 进度条
+  expect(usage!.querySelectorAll("span").length).toBe(0);
+  expect(usage!.textContent?.trim()).toBe("");
+  // 悬停提示（读屏同源）里带全部供应商的读数
+  expect(usage!.getAttribute("title")).toContain("aaa");
+  expect(usage!.getAttribute("title")).toContain("ddd");
+  // 点开：4 家全在（浮层按上游顺序列全量），第 4 家也在
+  await act(async () => {
+   usage!.click();
+  });
+  const pop = usage!.parentElement?.querySelector('div[class*="shadow-pop"]');
+  expect(pop).not.toBeNull();
+  for (const p of ["aaa", "bbb", "ccc", "ddd"]) expect(pop!.textContent).toContain(p);
+  // 余额型窗口（没有上限）显示金额，不显示 0.0% 假读数
+  expect(pop!.textContent).not.toContain("0.0%");
  });
 });
 

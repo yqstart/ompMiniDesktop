@@ -631,6 +631,8 @@ fn start_pump<R: tauri::Runtime>(
         let mut pending: std::collections::VecDeque<String> = Default::default();
         // 壳侧补标题的会话内状态（详见 [`AutoTitleState`] 与 [`maybe_auto_title`]）
         let mut auto_title = AutoTitleState::default();
+        // 运行中上下文回读的节流时钟（见 [`SyncClock`]）
+        let mut sync_clock = SyncClock::default();
         // 状态：idle 起
         emit_status(&app, &status, &activity, "idle", None);
         // 握手期间攒下的帧（命令面 / 单向宿主指令）按原序补发：
@@ -653,7 +655,7 @@ fn start_pump<R: tauri::Runtime>(
                 } else {
                     v
                 };
-                handle_frame(&app, &sid, &evt, &status, &full, &mut stdin, &activity, &mut auto_title, session_file.as_deref()).await;
+                handle_frame(&app, &sid, &evt, &status, &full, &mut stdin, &activity, &mut auto_title, &mut sync_clock, session_file.as_deref()).await;
             }
         }
         // resume 的旧会话（已有用户消息、还没有标题）在进程起来时就补一次标题——
@@ -697,7 +699,7 @@ fn start_pump<R: tauri::Runtime>(
                             } else {
                                 v
                             };
-                            handle_frame(&app, &sid, &evt, &status, &full, &mut stdin, &activity, &mut auto_title, session_file.as_deref()).await;
+                            handle_frame(&app, &sid, &evt, &status, &full, &mut stdin, &activity, &mut auto_title, &mut sync_clock, session_file.as_deref()).await;
                         }
                         _ => {
                             emit_status(&app, &status, &activity, "exited", Some("omp 进程已退出"));
@@ -712,6 +714,24 @@ fn start_pump<R: tauri::Runtime>(
 
 /// 状态回读回包的固定 id（pump 自发自收，不暴露给前端）。
 const STATE_SYNC_ID: &str = "sync-state";
+
+/// 运行中回读 `get_state` 的最小间隔：omp 只在 `get_state` 回包里给 `contextUsage`，
+/// 长任务里一轮能跑很多步——每步（assistant 消息收尾）都问一次会白烧 RPC，2s 一档
+/// 足够让输入卡上的占用百分比跟着涨（口径见 [`midrun_sync_due`]）。
+const CONTEXT_SYNC_MIN_MS: i64 = 2_000;
+
+/// 运行中的 `get_state` 回读节流时钟（pump 内状态，跨帧持续）。
+#[derive(Default)]
+struct SyncClock {
+    last_ms: i64,
+}
+
+/// 运行中要不要补一发 `get_state`（纯函数，单测锁着口径）：
+/// 只在「这一轮在跑」且距上次回读 ≥ [`CONTEXT_SYNC_MIN_MS`] 时才发——
+/// 等审批 / 空闲时没有新步数，回读没有增量；收尾那发由终态路径负责。
+fn midrun_sync_due(act: u8, now_ms: i64, last_ms: i64) -> bool {
+    act == ACT_RUNNING && now_ms - last_ms >= CONTEXT_SYNC_MIN_MS
+}
 
 /// 构造一行 JSONL 命令；`extra` 为对象时并入顶层字段。
 fn jsonl_line(id: &str, ty: &str, extra: serde_json::Value) -> Option<String> {
@@ -896,6 +916,7 @@ async fn handle_frame<R: tauri::Runtime>(
     stdin: &mut ChildStdin,
     activity: &SessionActivity,
     auto_title: &mut AutoTitleState,
+    sync_clock: &mut SyncClock,
     session_file: Option<&std::path::Path>,
 ) {
     // 壳侧补标题自己的回包（[`maybe_auto_title`] 注入的 `/rename`）：本地消化
@@ -980,6 +1001,18 @@ async fn handle_frame<R: tauri::Runtime>(
             };
             if let Some(p) = payload {
                 let _ = app.emit(&format!("omp-state://{key}"), p);
+            }
+        }
+        // 运行中跟住上下文占用：`message_end` = 一个 assistant 步收尾（工具循环的每一步），
+        // 按 [`CONTEXT_SYNC_MIN_MS`] 节流补一发 `get_state`——不回读的话输入卡上的占用
+        // 会一直停在「开轮那一刻」，长任务里百分比不动（收尾那发由终态路径负责）。
+        let now = now_ms();
+        if midrun_sync_due(activity.state(), now, sync_clock.last_ms) {
+            if let Some(line) = jsonl_line(STATE_SYNC_ID, "get_state", serde_json::Value::Null) {
+                if stdin.write_all(line.as_bytes()).await.is_ok() {
+                    let _ = stdin.flush().await;
+                    sync_clock.last_ms = now;
+                }
             }
         }
     }
@@ -1295,6 +1328,9 @@ mod real_rpc_tests {
         std::fs::create_dir_all(&cwd).unwrap();
         // 状态序列跨 block_on 收集（轮询里顺手抽干通道；终态断言在 kill 之后统一做）
         let mut sts: Vec<String> = vec![];
+        // 事件帧同理：等窗里边收边记（帧面也是收敛条件之一，见下面的 while）
+        let mut kinds: Vec<String> = vec![];
+        let mut streamed = false;
         // 测试自己造的会话文件路径（收尾自清，别在用户的 sessions 目录里留垃圾）
         let mut sfile_out = String::new();
 
@@ -1344,7 +1380,17 @@ mod real_rpc_tests {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
             let mut usage_seen = false;
             let mut idle_seen = false;
+            // 事件帧在等窗里边收边记（原来只在收尾一次性抽干）：帧面也是收敛条件的一部分——
+            // 主模型失败（如 429 配额）时 omp 会换 fallback 模型重试，首轮 message_end 就带着
+            // 用量与新上下文占用，若不等流式帧到场，收尾断言会跑在重试轮出流之前。
             while std::time::Instant::now() < deadline {
+                while let Ok(v) = evt_rx.try_recv() {
+                    let k = v.get("type").and_then(|t| t.as_str()).unwrap_or("").to_string();
+                    if k == "message_update" {
+                        streamed = true;
+                    }
+                    kinds.push(k);
+                }
                 // 状态面：omp-status 的终态 idle 由 pump 在 agent_end(isTerminal) 时推（帧本身不透传）
                 while let Ok(v) = st_rx.try_recv() {
                     let state = v.get("state").and_then(|s| s.as_str()).unwrap_or("").to_string();
@@ -1364,8 +1410,9 @@ mod real_rpc_tests {
                 if usage {
                     usage_seen = true;
                 }
-                // 1) message_end 的用量回写 + 2) agent_end 后 get_state 回读把 contextUsage 刷成新值
-                if usage_seen && idle_seen && ctx_tokens.is_some() && ctx_tokens != initial_ctx_tokens {
+                // 1) message_end 的用量回写 + 2) get_state 回读把 contextUsage 刷成新值（运行中每步也会回读，
+                //    见 handle_frame 的 mid-run 分支）+ 3) 帧面真的流式过（断言对象先到场再收尾）
+                if usage_seen && idle_seen && streamed && ctx_tokens.is_some() && ctx_tokens != initial_ctx_tokens {
                     break;
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(200)).await;
@@ -1377,7 +1424,7 @@ mod real_rpc_tests {
             kill_all(&map);
         });
 
-        let mut kinds: Vec<String> = vec![];
+        // 等窗结束后再把剩余帧收干净（等窗里已经收过一部分）
         while let Ok(v) = evt_rx.try_recv() {
             kinds.push(v.get("type").and_then(|t| t.as_str()).unwrap_or("").to_string());
         }
@@ -2046,6 +2093,19 @@ mod tests {
         // prompt 回包不触发回读
         let p = serde_json::json!({"id": "p-1", "type": "response", "command": "prompt", "success": true});
         assert_eq!(classify(&p), FrameAction::Forward(None));
+    }
+
+    #[test]
+    fn midrun_sync_throttles_to_running_sessions() {
+        // 跑着的会话：距上次回读不足 2s 不发，过了才发（长任务里每步收尾一帧）
+        assert!(!midrun_sync_due(ACT_RUNNING, 1_000, 0));
+        assert!(midrun_sync_due(ACT_RUNNING, CONTEXT_SYNC_MIN_MS, 0));
+        assert!(!midrun_sync_due(ACT_RUNNING, 3_000, CONTEXT_SYNC_MIN_MS));
+        assert!(midrun_sync_due(ACT_RUNNING, 5_000 + CONTEXT_SYNC_MIN_MS, CONTEXT_SYNC_MIN_MS));
+        // 等审批 / 等待后台 / 空闲 / 退出：没有新步数，不发（收尾那发归终态路径）
+        for act in [ACT_AWAITING, ACT_IDLE_AWAITING, ACT_IDLE, ACT_EXITED] {
+            assert!(!midrun_sync_due(act, 9_999_999, 0), "act={act} 不该回读");
+        }
     }
 
     #[test]

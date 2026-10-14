@@ -8,7 +8,7 @@ import { useText } from "../../lib/useText";
 import { useApp } from "../../stores/app";
 
 /**
- * 上下文容量（**输入框工具行**，2026-10-12 与顶栏右端的供应商用量键互换位置、搬回）：容量环 + 点开的分项面板。
+ * 上下文容量（**输入框工具行右端**，2026-10-14 从顶栏右端搬回输入卡）：容量环 + 点开的分项面板。
  *
  * 数据来自后端 `get_context_breakdown`（读一次会话文件 + 运行时的 `get_state` 真值），
  * 这里只做格式化与按比例画柱——**不自算 token**，分项与总量都由后端给。
@@ -17,7 +17,7 @@ import { useApp } from "../../stores/app";
  *
  * 触发按钮只画环与百分比，数据取自 `omp-state` 真值（关着也是活的，不用先点开）；
  * 面板内容按需拉取，切会话不会串数据（缓存按会话 id 归属）；面板朝**上**展开
- * （2026-10-10 至 10-12 挂在顶栏右端期间是朝下开的）。
+ * （输入卡在窗口底部，只往消息流那侧开）。
  */
 
 /** 分项透明度档：按行序递减，与栈式进度条一一对应（单强调色约束，不引第二色）。 */
@@ -65,7 +65,7 @@ function Ring({ pct, warn }: { pct: number; warn: boolean }) {
  );
 }
 
-export function ContextMeter({ align = "up" }: { align?: "up" | "down" } = {}) {
+export function ContextMeter() {
  const t = useText();
  const locale = useApp((s) => s.locale);
  const activeSessionId = useApp((s) => s.activeSessionId);
@@ -131,7 +131,7 @@ export function ContextMeter({ align = "up" }: { align?: "up" | "down" } = {}) {
    </button>
    {open && (
     <div
-     className={`absolute z-10 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-elevated p-3 shadow-pop ${align === "down" ? "top-full right-0 mt-1" : "bottom-full left-0 mb-1"}`}
+     className="absolute right-0 bottom-full z-10 mb-1 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-elevated p-3 shadow-pop"
      aria-label={t.ctxTitle}
     >
      <div className="flex items-baseline justify-between gap-2">

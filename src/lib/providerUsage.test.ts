@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderUsage, ProviderUsageReport, UsageLimit } from "@shared/types";
-import { TEXT } from "./locale";
+import { fmt, TEXT, type Text } from "./locale";
 import {
  disabledCredentialsToWarn,
  fmtAmount,
@@ -11,6 +11,7 @@ import {
  hasBar,
  latestFetchedAt,
  levelOf,
+ limitReading,
  providersWithoutUsage,
  remainingText,
  usedLimitText,
@@ -169,6 +170,31 @@ describe("金额窗口与余额窗口", () => {
   expect(usedLimitText(percent)).toBeNull();
   expect(remainingText(percent)).toBeNull();
   expect(hasBar(percent), "百分比窗口照旧画条").toBe(true);
+ });
+});
+
+describe("limitReading（输入卡浮层与设置页卡片共用的读数口径）", () => {
+ const t = TEXT["zh-CN"] as unknown as Text;
+ it("百分比窗口：读数 = 百分比 + 画条，悬停给「状态 · 已用/上限」", () => {
+  const r = limitReading(t, limit({ usedFraction: 0.9, percent: 90, status: "warning" }));
+  expect(r).toEqual({ bar: true, text: "90%", state: TEXT["zh-CN"].pusageStateWarn, title: TEXT["zh-CN"].pusageStateWarn });
+  const money = limitReading(t, limit({ used: 0.306, limit: 14, remaining: 13.69, unit: "usd", usedFraction: 0.0219, percent: 2.19 }));
+  expect(money.title).toBe(`${TEXT["zh-CN"].pusageStateOk} · $0.31 / $14.00`);
+ });
+
+ it("余额窗口（deepseek 的 api 余额那种）：读数 = 金额，不画条、不显示 0.0%", () => {
+  const r = limitReading(t, limit({ id: "balance", windowId: "balance", used: null, limit: null, remaining: 54.77, unit: "usd", usedFraction: 0, percent: 0 }));
+  expect(r.bar).toBe(false);
+  expect(r.text).toBe(fmt(TEXT["zh-CN"].pusageRemaining, "$54.77"));
+  expect(r.text).not.toContain("0.0%");
+ });
+
+ it("计数型窗口：给数量原文；一无所有时给「—」，绝不编造 0.0%", () => {
+  const count = limitReading(t, limit({ unit: "requests", used: 12, limit: null, remaining: null, usedFraction: 0, percent: 0 }));
+  expect(count.text).toBe("12 requests");
+  const nothing = limitReading(t, limit({ unit: "", used: null, limit: null, remaining: null, usedFraction: 0, percent: 0 }));
+  expect(nothing.bar).toBe(false);
+  expect(nothing.text).toBe("—");
  });
 });
 

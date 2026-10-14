@@ -148,8 +148,12 @@ type AppState = {
  /** 查询串所属会话（切会话后旧查询不生效——FindBar 按 `findQuerySid === activeSessionId` 取）。 */
  findQuerySid: string | null;
  setFindQuery: (q: string) => void;
- /** 全局执行模式档（omp `tools.approvalMode`；启动与切换时落 store，Shift+Tab 循环读它）。 */
- globalApproval: string;
+ /**
+  * omp 的全局执行模式档（`tools.approvalMode`；新会话的档位）。
+  * `null` = 还没读到真值——**不许拿某一档兜底**（兜底就是「显示的和 omp 实际用的不一致」，
+  * 2026-10-14 修掉的老毛病）：显示层按「未知」渲染，读取见 `lib/sessionApproval.ts`。
+  */
+ globalApproval: string | null;
  setGlobalApproval: (mode: string) => void;
  /** 会话统计弹窗显隐（`/status` 与上下文面板入口；V40）。 */
  statsOpen: boolean;
@@ -370,7 +374,7 @@ export const useApp = create<AppState>((set, get) => ({
  findOpen: false,
  findQuery: "",
  findQuerySid: null,
- globalApproval: "write",
+ globalApproval: null,
  statsOpen: false,
  diffPath: null,
  newChatError: null,

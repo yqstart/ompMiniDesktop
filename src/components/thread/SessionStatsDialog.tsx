@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "@shared/api";
 import type { SessionStats } from "@shared/types";
 import { fmt } from "../../lib/locale";
+import { approvalName } from "../../lib/sessionApproval";
 import { useText } from "../../lib/useText";
 import { useApp } from "../../stores/app";
 import { DialogShell } from "../settings/DialogShell";
@@ -21,6 +22,8 @@ export function SessionStatsDialog() {
  const setStatsOpen = useApp((s) => s.setStatsOpen);
  const currentModel = useApp((s) => s.currentModel);
  const thinkingLevel = useApp((s) => s.currentRuntime?.thinkingLevel ?? null);
+ // 生效档位 = 本会话覆盖优先，否则 omp 全局默认（都读 store 真值，见 `lib/sessionApproval.ts`）；
+ // 还没读到就显示「—」，不猜——显示层与 omp 实际生效的档位必须一致。
  const approval = useApp(
   (s) => (activeSessionId ? s.sessionApprovals[activeSessionId] : undefined) ?? s.globalApproval,
  );
@@ -101,7 +104,7 @@ export function SessionStatsDialog() {
      <section className="space-y-1">
       <Row label={t.statsModel} value={currentModel ?? "—"} />
       <Row label={t.statsThinking} value={thinkingLevel ?? "—"} />
-      <Row label={t.statsApproval} value={approval} />
+      <Row label={t.statsApproval} value={approval ? approvalName(t, approval) : "—"} />
      </section>
     </div>
    )}

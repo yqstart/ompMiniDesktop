@@ -17,6 +17,8 @@ import { openForkedSession, refreshTitleAfterFirstSend } from "../../lib/session
 import { useText } from "../../lib/useText";
 import { ProjectPicker } from "../pickers/ProjectPicker";
 import { BranchPicker } from "../pickers/BranchPicker";
+import { ContextMeter } from "../thread/ContextMeter";
+import { UsageLimits } from "./UsageLimits";
 import { CompactButton, QueueBadge } from "../thread/StatusBar";
 import { resolveContext } from "../../lib/context";
 import { useGitInfo } from "../../lib/useGitInfo";
@@ -34,8 +36,10 @@ const PASTE_FILE_MIN = 2000;
  * 会话输入卡（v2 §3 形态，对齐 Codex / ZCode 的输入卡）：
  * **卡顶行** = 项目 + 分支选择器内嵌（原外置的上下文条收缩进来）；
  * **输入区** = 附件条 + 提及芯片 + 待发区 + 自动增高输入框；
- * **卡底工具行** = 左「`+` 菜单（图片 / 引用文件）+ 执行模式菜单」，右「模型 · 思考档 ▾ + 圆形发送 / 停止」。
- * 上下文容量环与供应商用量入口在顶栏（`TopBar`）；提交 / 推送在右栏「变更」区块。
+ * **卡底工具行** = 左「`+` 菜单（图片 / 引用文件）+ 执行模式菜单」，右「压缩行动点 / 上下文容量环 /
+ * 供应商用量 + 模型 · 思考档 ▾ + 圆形发送 / 停止」。上下文与供应商用量 2026-10-14 从顶栏右端
+ * 搬进输入卡——它们在「我要不要再开一轮」的决策现场（剩余额度、上下文余量），不在窗口 chrome 上；
+ * 提交 / 推送在右栏「变更」区块。
  * 待发区（V40）：omp 的队列真值（`queue_update`）——可撤回 / 编辑 / 提升，Esc 中断还原
  * （「排队」按钮 2026-10-13 按用户口径退场，排队只走 Tab / ⌘Ctrl+Enter）。
  *
@@ -867,7 +871,9 @@ export function Composer() {
      className="no-focus-ring max-h-44 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-sm leading-6 outline-none placeholder:text-faint disabled:opacity-60"
     />
     <div className="flex flex-wrap items-center gap-0.5 gap-y-1 px-2 py-1.5">
-     {/* 卡底工具行（v2 §3）：左 = `+`（附件 / 引用文件 / 图片）+ 执行模式菜单；右 = 模型 · 思考档、发送 / 停止 */}
+     {/* 卡底工具行（v2 §3）：左 = `+`（附件 / 引用文件 / 图片）+ 执行模式菜单 + 排队徽标；
+         右 = 压缩行动点 / 上下文容量环 / 供应商用量（2026-10-14 从顶栏右端搬进输入卡）+
+         模型 · 思考档 + 发送 / 停止 */}
      <PlusMenu
       onPickImages={() => void pickImages()}
       onPickRef={() => {
@@ -877,8 +883,10 @@ export function Composer() {
      />
      <ApprovalModeMenu />
      <QueueBadge />
-     <CompactButton />
      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
+      <CompactButton />
+      <ContextMeter />
+      <UsageLimits />
       <ModelThinkingMenu />
       {/* 运行中 = 同一个圆形键变「停止」（v2：idle 圆形 ↑；running 停止 ■） */}
       {running ? (

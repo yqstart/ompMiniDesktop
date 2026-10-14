@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Archive, CheckListNotes, Export, Gauge, Menu, More2, PenLine, SidebarRight } from "reicon-react";
+import { Archive, CheckListNotes, Export, Menu, More2, PenLine, SidebarRight } from "reicon-react";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
@@ -9,11 +9,13 @@ import { useDropdown } from "../../lib/useDropdown";
 import { refreshSessionView } from "../../lib/sessionOpen";
 import { runSessionBatch } from "../../lib/sessionBatch";
 import { appendLocalNote } from "../../lib/localNote";
-import { ContextMeter } from "./ContextMeter";
 
 /**
- * 中列顶部标题栏（v2 §1.2 形态）：标题居中 + 左侧 `···` 菜单 + 右侧图标组
- * （上下文容量环 / 右面板开关 / 供应商用量）。高度走 `--h-chrome` 语义档。
+ * 中列顶部标题栏（v2 §1.2 形态）：标题居中 + 左侧 `···` 菜单 + 右侧面板开关。
+ * 高度走 `--h-chrome` 语义档。
+ *
+ * 右上角只剩「窗口 chrome」：上下文容量环与供应商用量 2026-10-14 搬进输入卡工具行
+ * （它们是「要不要再开一轮」的决策读数，跟输入框待在一起才有用）。
  *
  * - 标题点击仍是就地改名（v1 口径保留：点标题改名的肌肉记忆不该被 v2 打断）；
  * - `···` 菜单收会话级动作：重命名 / 会话统计 / 导出会话 / 归档会话
@@ -158,9 +160,8 @@ export function TopBar() {
      </button>
     )}
    </div>
-   {/* 右端图标组（v2）：上下文容量环 / 右面板开关 / 供应商用量 */}
+   {/* 右端图标组（v2）：右面板开关（上下文容量环 / 供应商用量在输入卡工具行） */}
    <div className="ml-auto flex items-center gap-0.5">
-    <ContextMeter align="down" />
     <button
      onClick={() => setContextPanelOpen(!contextPanelOpen)}
      className={`flex cursor-pointer items-center justify-center rounded-md p-1.5 transition-colors duration-100 ${contextPanelOpen ? "bg-active text-foreground" : "text-muted hover:bg-hover hover:text-foreground"}`}
@@ -169,14 +170,6 @@ export function TopBar() {
      title={t.panelToggleAria}
     >
      <SidebarRight size={16} aria-hidden />
-    </button>
-    <button
-     onClick={() => set({ providerUsageOpen: true })}
-     className="cursor-pointer rounded-md p-1.5 text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
-     aria-label={t.pusageTitle}
-     title={t.pusageTitle}
-    >
-     <Gauge size={16} aria-hidden />
     </button>
    </div>
   </header>
