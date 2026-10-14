@@ -78,9 +78,9 @@ export function ArchivedSessions() {
   }
  };
 
- /** 恢复并在终端里继续（V11）：取消归档 + 新终端 `omp --resume`；
-  *  V11 没有只读回放渲染器，归档会话的「继续」只能回到终端。 */
- const resumeInTerminal = async (s: SessionView) => {
+ /** 恢复会话（V11 的「在终端里继续」在 v1 收敛为打开聊天会话）：取消归档 + 进聊天视图
+  *  （`open_session` 起 / 聚焦长驻 RPC 并拉历史）。 */
+ const restoreSession = async (s: SessionView) => {
   setBusy(true);
   setError(null);
   try {
@@ -207,7 +207,7 @@ export function ArchivedSessions() {
           {b.rows.map((s) => (
            <div key={s.id} className="flex min-h-11 min-w-0 flex-wrap items-center gap-2 rounded-md px-2 py-2 transition-colors duration-100 hover:bg-hover">
             <button
-             onClick={() => void resumeInTerminal(s)}
+             onClick={() => void restoreSession(s)}
              className="flex min-w-0 basis-full cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 text-left @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0"
              aria-label={s.title}
              title={t.archivedOpenHint}

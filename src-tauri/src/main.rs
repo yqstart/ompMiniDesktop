@@ -10,10 +10,10 @@ mod models_config;
 mod omp_update;
 mod overlay;
 mod plugins;
+mod proc;
 mod project_files;
 mod provider_usage;
 mod providers;
-mod pty;
 mod runtime;
 mod session_scan;
 mod settings;
@@ -126,10 +126,6 @@ fn main() {
             skills::list_skills,
             skills::set_skill_enabled,
             skills::read_skill_file,
-            pty::pty_spawn,
-            pty::pty_write,
-            pty::pty_resize,
-            pty::pty_kill,
             providers::list_providers,
             providers::get_provider_login,
             providers::start_provider_login,
@@ -162,10 +158,9 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            // 正常退出路径：把全部终端 omp 进程收掉（崩溃残留接受为已知边界）。
+            // 正常退出路径：把全部会话进程收掉（崩溃残留接受为已知边界）。
             if let tauri::RunEvent::Exit = event {
                 let state = app.state::<AppState>();
-                pty::kill_all(&state.pty);
                 runtime::kill_all(&state.runtime);
                 git_commit::kill_all(&state.commit_tasks);
                 omp_update::kill_update(&state.omp_update_task);

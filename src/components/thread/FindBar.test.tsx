@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ViewMsg } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { fmt, TEXT } from "../../lib/locale";
-import { isMacKeyboard } from "../../lib/termInput";
+import { isMacKeyboard } from "../../lib/platform";
 import { FindBar } from "./FindBar";
 
 /**
@@ -102,7 +102,7 @@ beforeEach(() => {
  errors = [];
  scrolled.length = 0;
  const proto = Element.prototype as unknown as ScrollIntoViewHost; // jsdom 没实现 scrollIntoView，测试自补
- proto.scrollIntoView = function (this: Element) {
+ proto.scrollIntoView = function(this: Element) {
   scrolled.push(this);
  };
  container = document.createElement("div");

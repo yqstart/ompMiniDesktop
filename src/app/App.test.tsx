@@ -4,11 +4,12 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { useApp } from "../stores/app";
-import { isMacKeyboard } from "../lib/termInput";
+import { topDialog } from "../lib/useDropdown";
+import { isMacKeyboard } from "../lib/platform";
 import { TEXT } from "../lib/locale";
 import { api } from "@shared/api";
 import { IPC } from "@shared/ipc";
-import type { ModelInfo, TerminalView } from "@shared/types";
+import type { CheckoutView, ModelInfo, SessionView } from "@shared/types";
 
 /** 事件监听注册表（mock 的 `listen` 把回调存这里，测试直接触发）。 */
 const eventListeners = vi.hoisted(() => new Map<string, (e: { payload: unknown }) => void>());
@@ -24,13 +25,32 @@ vi.mock("@shared/api", () => ({
    modelsError: null,
    ok: true,
   })),
-  ptySpawn: vi.fn(async () => undefined),
-  ptyWrite: vi.fn(async () => undefined),
-  ptyResize: vi.fn(async () => undefined),
-  ptyKill: vi.fn(async () => undefined),
+  createSession: vi.fn(async () => ({
+   id: "new-1",
+   projectId: "p1",
+   title: "未命名会话",
+   cwd: "/a/main",
+   timestamp: 1,
+   archived: false,
+   corrupt: false,
+   note: null,
+   running: false,
+  })),
+  openSession: vi.fn(async () => ({
+   id: "s-1",
+   projectId: "p1",
+   title: "会话",
+   cwd: "/a",
+   timestamp: 1,
+   archived: false,
+   corrupt: false,
+   note: null,
+   running: false,
+  })),
   listProjects: vi.fn(async () => []),
   listCheckouts: vi.fn(async () => []),
   listWorkspaces: vi.fn(async () => []),
+  listSessions: vi.fn(async () => ({ sessions: [], totalFiles: 0, scannedFiles: 0 })),
   listProjectFiles: vi.fn(async () => []),
   getWorkspaceGitState: vi.fn(async () => []),
   syncTitlePrompt: vi.fn(async () => ({ path: "/tmp/TITLE_SYSTEM.md", action: "written" as const })),
@@ -42,22 +62,8 @@ vi.mock("@tauri-apps/api/event", () => ({
   return () => eventListeners.delete(event);
  }),
 }));
-vi.mock("../components/sidebar/WorkspaceSidebar", () => ({
- WorkspaceSidebar: ({ visible = true }: { visible?: boolean }) => (
-  <div data-testid="sidebar" data-visible={String(visible)}>
-   sidebar
-  </div>
- ),
-}));
 vi.mock("../components/sidebar/ChatSidebar", () => ({
- ChatSidebar: ({ visible = true }: { visible?: boolean }) => (
-  <div data-testid="chat-sidebar" data-visible={String(visible)}>
-   chat-sidebar
-  </div>
- ),
-}));
-vi.mock("../components/terminal/TerminalView", () => ({
- TerminalView: () => <div data-testid="terminals">terminals</div>,
+ ChatSidebar: () => <div data-testid="chat-sidebar">chat-sidebar</div>,
 }));
 vi.mock("../components/thread/ChatView", () => ({
  ChatView: ({ visible }: { visible?: boolean }) => (
@@ -65,6 +71,16 @@ vi.mock("../components/thread/ChatView", () => ({
    chat
   </div>
  ),
+}));
+vi.mock("../components/SettingsPage", () => ({
+ SettingsPage: ({ visible }: { visible?: boolean }) => (
+  <div data-testid="settings" data-visible={String(visible ?? true)}>
+   settings
+  </div>
+ ),
+}));
+vi.mock("../components/CommandPalette", () => ({
+ CommandPalette: () => <div data-testid="palette">palette</div>,
 }));
 vi.mock("../components/git/CommitTaskPanel", () => ({
  CommitTaskPanel: () => null,
@@ -82,13 +98,33 @@ function press(options: KeyboardEventInit) {
  });
 }
 
-const makeTerm = (id: string, cwd: string): TerminalView =>
- ({ id, projectId: null, cwd, label: id, title: id, state: "unknown", status: "running", exitCode: null, resume: null, collab: [], spawnSeq: 0, createdAt: 1 });
+const CHECKOUT: CheckoutView = {
+ projectId: "p1",
+ projectName: "Alpha",
+ path: "/a/main",
+ branch: "main",
+ head: null,
+ isMain: true,
+ missing: false,
+};
 
-/** 快捷键的修饰键按平台分叉（与 `useTerminalHotkeys` 的判定同源）。 */
+const SESSION: SessionView = {
+ id: "s-1",
+ projectId: "p1",
+ title: "会话",
+ cwd: "/a/main",
+ timestamp: 1,
+ archived: false,
+ corrupt: false,
+ note: null,
+ running: false,
+};
+
+/** 快捷键的修饰键按平台分叉（与 `useHotkeys` 的判定同源）。 */
 const mod = isMacKeyboard() ? { metaKey: true } : { ctrlKey: true };
 
 beforeEach(() => {
+ vi.clearAllMocks();
  Object.defineProperty(window, "matchMedia", {
   value: (query: string) => ({
    matches: query.includes("767") ? false : true,
@@ -102,20 +138,17 @@ beforeEach(() => {
   configurable: true,
  });
  useApp.setState({
-  terminals: [makeTerm("t-1", "/a")],
-  activeTerminalId: "t-1",
-  selection: { kind: "checkout", path: "/a" },
-  closingTerminalId: null,
+  checkouts: [CHECKOUT],
   settingsTabOpen: false,
   settingsTabActive: false,
   sidebarOpen: false,
-  quickSwitcherOpen: false,
+  providerUsageOpen: false,
   refPickerTarget: null,
-  terminalFocusSeq: 0,
+  paletteOpen: false,
+  activeSessionId: null,
+  sessions: [],
   localeMode: "system",
   locale: "zh-CN",
-  appMode: "terminal",
-  chatFormUsed: false,
  });
  container = document.createElement("div");
  document.body.append(container);
@@ -147,113 +180,95 @@ describe("会话标题语言同步", () => {
  });
 });
 
-describe("应用外壳快捷键与侧栏", () => {
- it("输入框聚焦时不切换后台终端，只阻断默认行为", () => {
-  const input = document.createElement("input");
-  document.body.append(input);
-  act(() => input.focus());
-  const before = useApp.getState().activeTerminalId;
-  press({ key: "1", metaKey: true });
-  expect(useApp.getState().activeTerminalId).toBe(before);
-  input.remove();
+describe("应用外壳：左栏、设置视图与快捷键", () => {
+ it("左栏常驻聊天侧栏（不再有形态切换）", () => {
+  expect(container.querySelectorAll('[data-testid="chat-sidebar"]').length).toBe(1);
+  expect(container.querySelector('[data-testid="chat"]')?.getAttribute("data-visible")).toBe("true");
  });
 
- it("桌面只挂载一份侧栏", () => {
-  expect(container.querySelectorAll('[data-testid="sidebar"]').length).toBe(1);
-  // 聊天侧栏懒挂载：纯终端形态下不挂（不白付聊天侧的读盘调用）
-  expect(container.querySelectorAll('[data-testid="chat-sidebar"]').length).toBe(0);
+ it("⌘W 关设置视图（返回聊天）；设置开着时主区仍保住聊天视图", () => {
+  act(() => useApp.getState().openSettingsTab());
+  expect(container.querySelector('[data-testid="settings"]')?.getAttribute("data-visible")).toBe("true");
+  expect(container.querySelector('[data-testid="chat"]')?.getAttribute("data-visible")).toBe("false");
+  press({ key: "w", ...mod });
+  expect(useApp.getState().settingsTabActive).toBe(false);
+  expect(useApp.getState().settingsTabOpen).toBe(false);
+  expect(container.querySelector('[data-testid="chat"]')?.getAttribute("data-visible")).toBe("true");
  });
 
- it("形态切换：左栏随形态互换（聊天侧栏首次用到才挂载，两栏都只切显隐）", () => {
-  act(() => useApp.getState().setAppMode("chat"));
-  expect(container.querySelector('[data-testid="sidebar"]')?.getAttribute("data-visible")).toBe("false");
-  expect(container.querySelector('[data-testid="chat-sidebar"]')?.getAttribute("data-visible")).toBe("true");
-  act(() => useApp.getState().setAppMode("terminal"));
-  expect(container.querySelector('[data-testid="sidebar"]')?.getAttribute("data-visible")).toBe("true");
-  expect(container.querySelector('[data-testid="chat-sidebar"]')?.getAttribute("data-visible")).toBe("false");
- });
-
- it("⌘1..9 只在当前选中范围的终端里编号", () => {
-  act(() => {
-   useApp.setState({
-    terminals: [makeTerm("t-a", "/a"), makeTerm("t-b1", "/b"), makeTerm("t-b2", "/b")],
-    activeTerminalId: "t-b1",
-    selection: { kind: "checkout", path: "/b" },
-   });
+ it("⌘T 在第一个可用主目录新建聊天", async () => {
+  press({ key: "t", ...mod });
+  await act(async () => {
+   await new Promise((resolve) => setTimeout(resolve, 0));
   });
-  // /b 的第一个标签是 t-b1（全局列表里的第一个是别的范围的 t-a）
-  press({ key: "1", ...mod });
-  expect(useApp.getState().activeTerminalId).toBe("t-b1");
-  press({ key: "2", ...mod });
-  expect(useApp.getState().activeTerminalId).toBe("t-b2");
+  expect(vi.mocked(api.createSession)).toHaveBeenCalledWith("/a/main");
+ });
+
+ it("⌘K 切换命令中心（再按一次收起）", () => {
+  press({ key: "k", ...mod });
+  expect(useApp.getState().paletteOpen).toBe(true);
+  expect(container.querySelector('[data-testid="palette"]')).not.toBeNull();
+  press({ key: "k", ...mod });
+  expect(useApp.getState().paletteOpen).toBe(false);
  });
 });
 
 describe("引用工作区文件快捷键（V22）", () => {
- it("⌘⇧P 在终端标签上打开引用浮层并快照目标终端", async () => {
+ it("⌘⇧P：目标 = 当前聊天会话（浮层注入 Composer 草稿）", async () => {
+  act(() => {
+   useApp.setState({ activeSessionId: "s-1", sessions: [SESSION] });
+  });
   press({ key: "p", ...mod, shiftKey: true });
   await act(async () => {
    await new Promise((resolve) => setTimeout(resolve, 0));
   });
-  expect(useApp.getState().refPickerTarget).toEqual({ kind: "terminal", id: "t-1" });
+  expect(useApp.getState().refPickerTarget).toEqual({ sessionId: "s-1" });
   expect(container.textContent).toContain(TEXT["zh-CN"].refPickTitle);
  });
 
- it("聊天形态 ⌘⇧P：目标 = 当前聊天会话（浮层注入 Composer 草稿）", async () => {
+ it("输入框聚焦时 ⌘⇧P 照常打开（typing 守卫放行引用键）", () => {
   act(() => {
-   useApp.setState({
-    appMode: "chat",
-    activeSessionId: "s-1",
-    sessions: [
-     { id: "s-1", projectId: "p1", title: "会话", cwd: "/a", timestamp: 1, archived: false, corrupt: false, note: null, running: false },
-    ],
-   });
-  });
-  press({ key: "p", ...mod, shiftKey: true });
-  expect(useApp.getState().refPickerTarget).toEqual({ kind: "chat", sessionId: "s-1" });
-  expect(container.textContent).toContain(TEXT["zh-CN"].refPickTitle);
- });
-
- it("聊天形态输入框聚焦时 ⌘⇧P 照常打开（typing 守卫放行引用键）", () => {
-  act(() => {
-   useApp.setState({
-    appMode: "chat",
-    activeSessionId: "s-1",
-    sessions: [
-     { id: "s-1", projectId: "p1", title: "会话", cwd: "/a", timestamp: 1, archived: false, corrupt: false, note: null, running: false },
-    ],
-    refPickerTarget: null,
-   });
+   useApp.setState({ activeSessionId: "s-1", sessions: [SESSION], refPickerTarget: null });
   });
   const ta = document.createElement("textarea");
   document.body.append(ta);
   act(() => ta.focus());
   expect(document.activeElement).toBe(ta);
   press({ key: "p", ...mod, shiftKey: true });
-  expect(useApp.getState().refPickerTarget).toEqual({ kind: "chat", sessionId: "s-1" });
+  expect(useApp.getState().refPickerTarget).toEqual({ sessionId: "s-1" });
   ta.remove();
  });
- it("设置标签激活时 ⌘⇧P 不触发", () => {
-  act(() => useApp.setState({ settingsTabActive: true }));
+
+ it("设置视图激活时 ⌘⇧P 不触发", () => {
+  act(() => {
+   useApp.setState({ activeSessionId: "s-1", sessions: [SESSION], settingsTabActive: true });
+  });
   press({ key: "p", ...mod, shiftKey: true });
   expect(useApp.getState().refPickerTarget).toBeNull();
  });
 
- it("⌘P（不带 shift）不触发引用浮层", () => {
+ it("没有打开会话时 ⌘⇧P 不触发；⌘P（不带 shift）不触发", () => {
+  act(() => useApp.setState({ activeSessionId: null }));
+  press({ key: "p", ...mod, shiftKey: true });
+  expect(useApp.getState().refPickerTarget).toBeNull();
+  act(() => useApp.setState({ activeSessionId: "s-1", sessions: [SESSION] }));
   press({ key: "p", ...mod });
   expect(useApp.getState().refPickerTarget).toBeNull();
  });
 
- it("浮层打开时 ⌘T / ⌘⇧P 被对话框守卫挡住（不新建终端、不叠加浮层）", async () => {
+ it("浮层打开时 ⌘T 被对话框守卫挡住（不新建会话、不叠加浮层）", async () => {
+  act(() => {
+   useApp.setState({ activeSessionId: "s-1", sessions: [SESSION] });
+  });
   press({ key: "p", ...mod, shiftKey: true });
   await act(async () => {
    await new Promise((resolve) => setTimeout(resolve, 0));
   });
-  const before = useApp.getState().terminals.length;
+  expect(topDialog(), "浮层应作为可见模态弹窗挂上").not.toBeNull();
   press({ key: "t", ...mod });
   press({ key: "p", ...mod, shiftKey: true });
-  expect(useApp.getState().terminals.length).toBe(before);
-  expect(useApp.getState().refPickerTarget).toEqual({ kind: "terminal", id: "t-1" });
+  expect(vi.mocked(api.createSession)).not.toHaveBeenCalled();
+  expect(useApp.getState().refPickerTarget).toEqual({ sessionId: "s-1" });
  });
 });
 

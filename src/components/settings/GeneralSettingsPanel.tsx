@@ -369,7 +369,7 @@ export function GeneralSettingsPanel() {
         onClick={() => setQuery("")}
         className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover"
        >
-        {t.quickSwitcherClear}
+        {t.clearSearch}
        </button>
       </div>
      ) : (

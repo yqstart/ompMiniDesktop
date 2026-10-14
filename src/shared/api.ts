@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
-import type { BtwRecord, ChangeSet, CheckoutView, CommitEvent, ContextBreakdown, FallbackChainsInfo, GitInfo, Goal, GoalState, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PtyEvent, PtySpawnOpts, SessionPage, SessionRuntime, SessionStats, SessionView, SkillFileContent, SkillsView, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
+import type { BtwRecord, ChangeSet, CheckoutView, CommitEvent, ContextBreakdown, FallbackChainsInfo, GitInfo, Goal, GoalState, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, SessionPage, SessionRuntime, SessionStats, SessionView, SkillFileContent, SkillsView, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -58,7 +58,7 @@ export const api = {
  /** 一次写全：改名 + 成员重设（被移出的项目回归未分组；不删项目、不动文件）。 */
  updateWorkspace: (id: string, name: string, projectIds: string[]) =>
   call<void>(IPC.updateWorkspace, { id, name, projectIds }),
- /** 删组：成员回归未分组（不删项目、不杀终端）。 */
+ /** 删组：成员回归未分组（不删项目 / 文件）。 */
  deleteWorkspace: (id: string) => call<void>(IPC.deleteWorkspace, { id }),
  /**
   * 左栏拖拽落地（V26）：把一个项目移动到目标工作区（`workspaceId = null` = 未分组）并同步全局顺序。
@@ -115,17 +115,6 @@ export const api = {
   */
  getWorkspaceGitState: (paths: string[]) =>
   call<WorkspaceGitState[]>(IPC.getWorkspaceGitState, { paths }),
- /**
-  * 终端 PTY（V11）：每个终端 = 一个 `omp` TUI 进程跑在 PTY 里。
-  * 输出经 **Channel** 直推（高频字节流不走事件系统）；输入 / 尺寸 / 关闭走一次命令。
-  */
- ptySpawn: (opts: PtySpawnOpts, onEvent: Channel<PtyEvent>) =>
-  call<void>(IPC.ptySpawn, { opts, onEvent }),
- ptyWrite: (id: string, data: string) => call<void>(IPC.ptyWrite, { id, data }),
- ptyResize: (id: string, cols: number, rows: number) =>
-  call<void>(IPC.ptyResize, { id, cols, rows }),
- /** 关闭终端：kill 子进程（SIGHUP），读线程 EOF 后自行收尾。 */
- ptyKill: (id: string) => call<void>(IPC.ptyKill, { id }),
 
  // ---------- 聊天形态（V32 恢复自 V1–V10）：RPC 会话命令面 ----------
 

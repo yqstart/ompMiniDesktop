@@ -191,7 +191,7 @@ export async function openSessionWithHistory(id: string, hint?: SessionHint): Pr
  if (hint && hint.id === id && !st0.sessions.some((s) => s.id === id)) {
   st0.set({ sessions: [hintRow(hint), ...st0.sessions] });
  }
- useApp.getState().set({ activeSessionId: id, sidebarOpen: false });
+ useApp.getState().set({ activeSessionId: id, sidebarOpen: false, settingsTabActive: false });
  // 切换即读底：新会话消息先落位，Thread 才有可滚内容
  scrollThreadToBottom();
  try {

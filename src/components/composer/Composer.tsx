@@ -43,7 +43,7 @@ export function Composer() {
  const { activeSessionId, draftOf, setDraft, statusBySession, sessions, attachmentsOf, addAttachments, removeAttachment, clearAttachments, queuedOf, currentModel, currentRuntime, models, composerFocusSeq } =
   useApp();
  const taRef = useRef<HTMLTextAreaElement | null>(null);
- /** 引用浮层注入草稿后回到输入框接着写（与终端的 `focusTerminal` 同一手法：序号信号）。 */
+ /** 引用浮层注入草稿后回到输入框接着写（序号信号：同一会话反复注入也能重新聚焦）。 */
  useEffect(() => {
   if (composerFocusSeq > 0) taRef.current?.focus();
  }, [composerFocusSeq]);
@@ -865,7 +865,7 @@ export function Composer() {
          omp 在 prompt 时展开成 fileMention——本项目文件直接在输入框用 `@` 补全即可 */}
      <button
       onClick={() => {
-       if (activeSessionId) useApp.getState().set({ refPickerTarget: { kind: "chat", sessionId: activeSessionId } });
+       if (activeSessionId) useApp.getState().set({ refPickerTarget: { sessionId: activeSessionId } });
       }}
       disabled={!activeSessionId || awaiting}
       className="cursor-pointer rounded-md p-1.5 text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-40"

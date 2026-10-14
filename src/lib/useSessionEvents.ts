@@ -790,14 +790,7 @@ export async function syncSubagents(sid: string): Promise<void> {
 }
 
 export function useSessionEvents() {
- const { activeSessionId, set, appMode } = useApp();
-
- // 切去终端形态：聊天不在用，非当前会话的历史一并清掉（保留当前会话，切回来不空白）。
- // 内存治理的兜底——LRU 只按「切会话」触发，切去终端用几小时的话那几份历史会一直挂着。
- useEffect(() => {
-  if (appMode !== "terminal") return;
-  trimSessionHistories(useApp.getState().activeSessionId, 1);
- }, [appMode]);
+ const { activeSessionId, set } = useApp();
 
  useEffect(() => {
   const sid = activeSessionId;

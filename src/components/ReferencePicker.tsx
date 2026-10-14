@@ -3,10 +3,9 @@ import { ChevronDown, ChevronRight, CodeFile, File, FileText, FileZip, Folder, F
 import type { IconComponent } from "reicon-react";
 import { api } from "@shared/api";
 import type { ProjectFiles } from "@shared/types";
-import { useApp } from "../../stores/app";
-import { useText } from "../../lib/useText";
-import { fmt } from "../../lib/locale";
-import { canInjectReference, insertFileReference } from "../../lib/termRef";
+import { useApp } from "../stores/app";
+import { useText } from "../lib/useText";
+import { fmt } from "../lib/locale";
 import {
  appendReference,
  buildRefItems,
@@ -19,8 +18,8 @@ import {
  referenceScope,
  type RefItem,
  type RefRow,
-} from "../../lib/workspaceFiles";
-import { DialogShell } from "../settings/DialogShell";
+} from "../lib/workspaceFiles";
+import { DialogShell } from "./settings/DialogShell";
 
 /** 每个项目的结果上限（文件基数可能上万，只渲染前这么多条；后端另有 5万/项目的硬上限）。 */
 const MAX_RESULTS = 200;
@@ -69,11 +68,8 @@ type Section = { key: string; name: string; count: number; rows: RefRow[] };
 /**
  * 引用工作区文件（V22）：⌘⇧P 打开；搜索**其他**成员项目的文件（当前项目不列——本项目文件在
  * 输入框里用 omp 原生 `@` 直接可补全）；Enter 把 `@<绝对路径> ` 注入**引用目标**：
- * - 终端形态（`refPickerTarget.kind === "terminal"`）：bracketed paste 进该终端输入框
- *   （**不回车、不发送**），只在 π = 等待输入时允许（否则给忙碌提示，与改名同一口径）；
- * - 聊天形态（`kind === "chat"`，V32 二次口径）：**追加进该会话的 Composer 草稿**并把焦点
- *   交还输入框——omp 在 prompt 时会把 `@<路径>` 展开成 fileMention 消息（含 cwd 之外的
- *   绝对路径，2026-10-09 真机实测），跨项目文件因此照样进上下文。
+ * 该会话的 Composer 草稿（追加进草稿并把焦点交还输入框——omp 在 prompt 时会把 `@<路径>`
+ * 展开成 fileMention 消息，含 cwd 之外的绝对路径，2026-10-09 真机实测），跨项目文件因此照样进上下文。
  * 结果按项目分组、以资源管理器式目录树展示（chevron 折叠 / 目录与文件类型图标 / 只走文件行的键盘导航）。
  *
  * 数据只在打开时拉一次（后端 60s 缓存）——输入不触发 IPC。
@@ -81,7 +77,6 @@ type Section = { key: string; name: string; count: number; rows: RefRow[] };
 export function ReferencePicker(): React.JSX.Element | null {
  const t = useText();
  const target = useApp((s) => s.refPickerTarget);
- const terminals = useApp((s) => s.terminals);
  const chatSessions = useApp((s) => s.sessions);
  const checkouts = useApp((s) => s.checkouts);
  const projects = useApp((s) => s.projects);
@@ -91,7 +86,6 @@ export function ReferencePicker(): React.JSX.Element | null {
  const [query, setQuery] = useState("");
  const terms = useMemo(() => refQueryTerms(query), [query]);
  const [cursor, setCursor] = useState(0);
- const [busy, setBusy] = useState(false);
  const [reloadSeq, setReloadSeq] = useState(0);
  const [loaded, setLoaded] = useState<{ key: string; groups: ProjectFiles[]; error: string | null } | null>(null);
  const [collapseState, setCollapseState] = useState<{ query: string; keys: ReadonlySet<string> }>({
@@ -99,10 +93,8 @@ export function ReferencePicker(): React.JSX.Element | null {
   keys: EMPTY_COLLAPSED,
  });
 
- const term = target?.kind === "terminal" ? terminals.find((x) => x.id === target.id) : undefined;
- const chatCwd = target?.kind === "chat" ? chatSessions.find((s) => s.id === target.sessionId)?.cwd ?? null : null;
- /** 引用来源目录：终端用它的 cwd，聊天用该会话的 cwd（两者都据此解析「当前项目」）。 */
- const cwd = term ? term.cwd : chatCwd;
+ /** 引用来源目录：该会话的 cwd（据此解析「当前项目」）。 */
+ const cwd = target ? chatSessions.find((s) => s.id === target.sessionId)?.cwd ?? null : null;
  const scope = useMemo(
   () => (cwd
    ? referenceScope(cwd, workspaceGroups, checkouts, projects)
@@ -144,7 +136,7 @@ export function ReferencePicker(): React.JSX.Element | null {
   [paths, loaded, loadKey],
  );
 
- // 引用目标没了（终端标签被关 / 聊天会话被删）：浮层没有目标，直接收掉。
+ // 引用目标没了（会话被删 / 被移除）：浮层没有目标，直接收掉。
  useEffect(() => {
   if (cwd === null) useApp.getState().set({ refPickerTarget: null });
  }, [cwd]);
@@ -193,29 +185,14 @@ export function ReferencePicker(): React.JSX.Element | null {
  const close = () => useApp.getState().set({ refPickerTarget: null });
  const choose = (item: RefItem) => {
   const s = useApp.getState();
-  if (target?.kind === "chat") {
-   // 聊天形态：追加进该会话的草稿（尾随空格让 omp 的提及解析立刻收口），焦点交还输入框
-   const sid = target.sessionId;
-   if (!s.sessions.some((x) => x.id === sid)) {
-    close();
-    return;
-   }
-   s.setDraft(sid, appendReference(s.draftOf(sid), item.abs));
-   s.set({ refPickerTarget: null, composerFocusSeq: s.composerFocusSeq + 1 });
-   return;
-  }
-  const live = s.terminals.find((x) => x.id === target?.id);
-  if (!live) {
+  const sid = target?.sessionId ?? null;
+  if (!sid || !s.sessions.some((x) => x.id === sid)) {
    close();
    return;
   }
-  if (!canInjectReference(live)) {
-   setBusy(true);
-   return;
-  }
-  insertFileReference(live.id, item.abs);
-  s.set({ refPickerTarget: null });
-  s.focusTerminal(live.id);
+  // 追加进该会话的草稿（尾随空格让 omp 的提及解析立刻收口），焦点交还输入框
+  s.setDraft(sid, appendReference(s.draftOf(sid), item.abs));
+  s.set({ refPickerTarget: null, composerFocusSeq: s.composerFocusSeq + 1 });
  };
 
  if (!target || cwd === null) return null;
@@ -234,7 +211,6 @@ export function ReferencePicker(): React.JSX.Element | null {
      onChange={(e) => {
       setQuery(e.target.value);
       setCursor(0);
-      setBusy(false);
      }}
      onKeyDown={(e) => {
       if (e.nativeEvent.isComposing) return;
@@ -259,11 +235,6 @@ export function ReferencePicker(): React.JSX.Element | null {
      aria-label={t.refPickSearchPlaceholder}
      className="h-9 w-full rounded-md border border-border bg-surface px-2.5 text-[13px] outline-none focus:border-accent"
     />
-    {busy && (
-     <p role="alert" className="rounded-md border border-warn/20 bg-warn/10 px-3 py-2 text-[12px] text-warn">
-      {t.refPickBusy}
-     </p>
-    )}
     {scope.primary === null && (
      <p className="py-6 text-center text-[13px] text-muted">{t.refPickNoProject}</p>
     )}

@@ -13,12 +13,12 @@ import { DiffDialog } from "./DiffDialog";
 import { SubAgentStrip } from "./SubAgentStrip";
 
 /**
- * 聊天形态主区（V32；V1–V10 形态的恢复）：顶栏 + 消息流 + 输入框。
+ * 聊天主区（v1 起唯一形态）：顶栏 + 消息流 + 输入框。
  *
- * - **常驻挂载、只切显隐**（与终端面板同一课）：切去终端形态 / 设置标签时只是 `hidden`，
- *   xterm 那套「卸载即 kill」的教训对聊天侧同样成立——切回来时要保住滚动位置与订阅；
+ * - **常驻挂载、只切显隐**：切去设置视图时只是 `hidden`——卸载会断事件订阅
+ *   （切走期间到达的帧就丢了）并丢掉滚动位置；
  * - 事件订阅（`useSessionEvents`）与完成通知（`useTaskNotifications`）挂在这里：
- *   它们跟随 `activeSessionId` 建立 / 释放，形态切走时订阅保持（后台会话继续收流）；
+ *   它们跟随 `activeSessionId` 建立 / 释放（后台会话继续收流）；
  * - `StatusBar` 本身是不可见的 aria-live 区域（状态已收敛进输入框内的状态胶囊），
  *   保留是为了读屏播报；
  * - V40 浮层与面板都挂在这里：查找条（⌘F）、旁问面板（/btw）、统计弹窗（/status）、

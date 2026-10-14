@@ -23,7 +23,7 @@ const read = (rel) => fs.readFileSync(path.join(root, rel), "utf8");
 const ipc = read("src/shared/ipc.ts");
 const api = read("src/shared/api.ts");
 const mainRs = read("src-tauri/src/main.rs");
-const rsFiles = ["commands/mod.rs", "providers.rs", "memories.rs", "usage.rs", "settings.rs", "pty.rs", "models_config.rs", "git_commit.rs", "git_ops.rs", "commit_msg.rs", "provider_usage.rs", "title_prompt.rs", "project_files.rs", "plugins.rs", "skills.rs", "omp_update.rs", "themes.rs", "context.rs"]
+const rsFiles = ["commands/mod.rs", "providers.rs", "memories.rs", "usage.rs", "settings.rs", "models_config.rs", "git_commit.rs", "git_ops.rs", "commit_msg.rs", "provider_usage.rs", "title_prompt.rs", "project_files.rs", "plugins.rs", "skills.rs", "omp_update.rs", "themes.rs", "context.rs"]
  .map((f) => read(`src-tauri/src/${f}`));
 const providersRs = rsFiles[1];
 
@@ -83,10 +83,4 @@ if (!commandsRs.includes(`MODELS_EVENT: &str = "${MODELS_EVENT}"`)) {
 for (const sub of ['"auth-broker", "login"', '"auth-broker", "logout"', '"auth-broker", "list"']) {
  if (!providersRs.includes(sub)) fail(`providers.rs 未按 auth-broker CLI 调 ${sub}`);
 }
-// 8) PTY 命令必须挂在 pty.rs（V11 终端工作区），不许漏注册
-for (const name of ["pty_spawn", "pty_write", "pty_resize", "pty_kill"]) {
- if (!registered.has(name)) fail(`main.rs 未注册 ${name}`);
- if (!rsFiles[5].includes(`fn ${name}`)) fail(`pty.rs 缺少 fn ${name}`);
-}
-
 console.log(`e2e:ipc 通过：${ipcCmds.size} 命令 × 双向一致（ipc.ts ↔ main.rs ↔ 实现）+ 事件 3 项`);

@@ -4,7 +4,7 @@ import type { ViewMsg } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
-import { isMacKeyboard } from "../../lib/termInput";
+import { isMacKeyboard } from "../../lib/platform";
 
 /**
  * 会话内查找（⌘F / Ctrl+F，对齐 zcode）：一条与消息列同宽的横条，输入即搜。

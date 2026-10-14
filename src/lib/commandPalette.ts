@@ -14,8 +14,7 @@ export type PaletteActionId =
  | "compact"
  | "approval"
  | "settings"
- | "usage"
- | "mode";
+ | "usage";
 
 export type PaletteAction = {
  id: PaletteActionId;
@@ -25,7 +24,7 @@ export type PaletteAction = {
  keywords: string;
 };
 
-/** 动作清单（顺序即默认展示序；聊天形态内全部可用）。 */
+/** 动作清单（顺序即默认展示序）。 */
 export const PALETTE_ACTIONS: PaletteAction[] = [
  { id: "new-chat", titleKey: "palNewChat", keywords: "new chat create session 新建 会话" },
  { id: "find", titleKey: "palFind", keywords: "find search conversation 查找 搜索" },
@@ -37,7 +36,6 @@ export const PALETTE_ACTIONS: PaletteAction[] = [
  { id: "archive", titleKey: "palArchive", keywords: "archive 归档" },
  { id: "settings", titleKey: "palSettings", keywords: "settings config 设置 配置" },
  { id: "usage", titleKey: "palUsage", keywords: "usage provider quota 用量 配额" },
- { id: "mode", titleKey: "palMode", keywords: "terminal mode switch 终端 形态" },
 ];
 
 /** 命令中心的一个条目（动作或会话）。 */

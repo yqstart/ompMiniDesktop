@@ -32,7 +32,7 @@ use tauri::State;
 
 use crate::commands::{cmd_err, discover_omp_path, AppState, CmdError};
 use crate::git_commit::{pump_child, strip_ansi, CancelToken, OutStream, RunSignals};
-use crate::pty::{force_kill_group, login_path};
+use crate::proc::{force_kill_group, login_path};
 use crate::providers::run_omp_capture;
 
 /// `omp update --check` 的硬超时：正常 0.2–2s（有 registry 缓存），网络差时兜底 30s。
@@ -174,7 +174,7 @@ pub struct UpdateTask {
 pub type UpdateSlot = Arc<Mutex<Option<UpdateTask>>>;
 
 /// 每次 spawn 的内部序号：收尾时用它确认「槽里还是我这一次任务」，
-/// 防止「取消后立刻重跑」时旧任务误清新任务的槽位（与 PTY / 提交任务同口径）。
+/// 防止「取消后立刻重跑」时旧任务误清新任务的槽位（与提交任务的 `TASK_SEQ` 同口径）。
 static UPDATE_SEQ: AtomicU64 = AtomicU64::new(1);
 
 fn acquire(slot: &UpdateSlot) -> Result<(u64, Arc<CancelToken>), CmdError> {

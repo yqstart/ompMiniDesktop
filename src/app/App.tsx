@@ -5,14 +5,9 @@ import { applyTheme } from "../lib/theme";
 import { useText } from "../lib/useText";
 import { api } from "@shared/api";
 import { IPC } from "@shared/ipc";
-import type { ModelCatalog, TermTabState } from "@shared/types";
-import { WorkspaceSidebar } from "../components/sidebar/WorkspaceSidebar";
+import type { ModelCatalog } from "@shared/types";
 import { ChatSidebar } from "../components/sidebar/ChatSidebar";
-import { TerminalView } from "../components/terminal/TerminalView";
-import { TerminalTabs } from "../components/terminal/TerminalTabs";
-import { QuickSwitcher } from "../components/terminal/QuickSwitcher";
-import { ReferencePicker } from "../components/terminal/ReferencePicker";
-import { ConfirmDialog } from "../components/ConfirmDialog";
+import { ReferencePicker } from "../components/ReferencePicker";
 import { CommandPalette } from "../components/CommandPalette";
 import { CommitTaskPanel } from "../components/git/CommitTaskPanel";
 import { HealthBanner } from "../components/HealthBanner";
@@ -21,16 +16,15 @@ import { ChatView } from "../components/thread/ChatView";
 import { UpdateDialog } from "../components/update/UpdateDialog";
 import { OmpUpdateDialog } from "../components/update/OmpUpdateDialog";
 import { ProviderUsageDialog } from "../components/usage/ProviderUsageDialog";
-import { newTerminalInSelection, newChatInSelection } from "../lib/checkouts";
-import { terminalsInScope } from "../lib/terminalScope";
-import { selectionScopePaths } from "../lib/workspaceGroups";
+import { newChatInDefaultCheckout } from "../lib/checkouts";
 import { openSessionWithHistory } from "../lib/sessionOpen";
-import { refreshWorkspaceGitState, scheduleWorkspaceGitRefresh, startWorkspaceGitPolling } from "../lib/commitTasks";
+import { refreshWorkspaceGitState, startWorkspaceGitPolling } from "../lib/commitTasks";
 import { autoCheckOnBoot } from "../lib/appUpdate";
 import { autoCheckOmpUpdate } from "../lib/ompUpdate";
 import { syncTitlePromptLanguage } from "../lib/titlePrompt";
 import { hasOpenDialog, useDialogFocus } from "../lib/useDropdown";
-import { isMacKeyboard } from "../lib/termInput";
+import { isMacKeyboard } from "../lib/platform";
+
 /** 皮肤落 class（浅色 token 是 `:root` 默认、深色挂在 `.dark`，见 src/index.css）。
  *  显式选深/浅时不听系统——系统偏好变了也不该动用户手动选的档。 */
 function useTheme() {
@@ -61,7 +55,7 @@ function useLocale() {
 /**
  * 会话标题语言（V18）：界面语言落定（含启动）后，把语言同步给 omp 的自动标题 prompt
  * （`<agentDir>/TITLE_SYSTEM.md`，见 `lib/titlePrompt.ts`）——omp 只在**会话启动**时读它，
- * 所以切语言对**新开的终端**生效，已开的会话保持原语言（上游口径，壳侧不代偿）。
+ * 所以切语言对**新开的会话**生效，已开的会话保持原语言（上游口径，壳侧不代偿）。
  * 等健康检查把 agentDir 解析出来再写：非默认 profile / `PI_CONFIG_DIR` 下两者路径不同。
  */
 function useTitlePromptSync() {
@@ -75,13 +69,11 @@ function useTitlePromptSync() {
 
 /**
  * 工作区 git 快照的刷新时机——启动 / 工作区清单变化 / 窗口转可见或重新获得焦点 /
- * 终端刚干完活（π 由工作态转就绪或等待确认，防抖 2s）/ **可见时 30s 兜底轮询**。
- * 任务结束后的单点刷新在 `lib/commitTasks.ts` 里；点按钮时的**后端预检**才是最终裁决。
+ * **可见时 30s 兜底轮询**。任务结束后的单点刷新在 `lib/commitTasks.ts` 里；
+ * 点按钮时的**后端预检**才是最终裁决。
  */
 function useWorkspaceGitRefresh() {
  const checkouts = useApp((s) => s.checkouts);
- const terminals = useApp((s) => s.terminals);
- const prevStates = useRef<Map<string, TermTabState>>(new Map());
 
  useEffect(() => {
   void refreshWorkspaceGitState(checkouts.map((w) => w.path));
@@ -100,111 +92,62 @@ function useWorkspaceGitRefresh() {
   };
  }, []);
 
- // 兜底轮询：终端里的 git 活动（agent 或手敲）不改变 π 状态，等不到「转就绪」那个时机
+ // 兜底轮询：会话里的 git 活动（agent 或手敲）不改变任何前端状态，等不到「转就绪」那个时机
  useEffect(() => startWorkspaceGitPolling(), []);
-
- useEffect(() => {
-  let woke = false;
-  const seen = new Set<string>();
-  for (const term of terminals) {
-   seen.add(term.id);
-   const prev = prevStates.current.get(term.id);
-   if (prev === "working" && (term.state === "ready" || term.state === "attention")) woke = true;
-   prevStates.current.set(term.id, term.state);
-  }
-  for (const id of [...prevStates.current.keys()]) {
-   if (!seen.has(id)) prevStates.current.delete(id);
-  }
-  if (woke) scheduleWorkspaceGitRefresh();
- }, [terminals]);
 }
 
 /**
- * 终端快捷键（V11）：⌘T 新建 / ⌘W 关闭当前 / ⌘1..9 切标签 / ⌘⇧K 快速切换 / ⌘⇧P 引用工作区文件（非 mac 平台用 Ctrl）。
- *
- * 聊天形态（V40/V41）另有：⌘T 新建聊天 / ⌘F 会话内查找 / ⌘K 命令中心 / ⌘[ ⌘] 会话导航栈前后一步；
- * 这些键只在聊天形态注册，终端形态的行为一字不动。
+ * 全局快捷键（v1 收敛版；非 mac 平台用 Ctrl）：⌘T 新建聊天 / ⌘W 关设置 /
+ * ⌘F 会话内查找 / ⌘K 命令中心 / ⌘[ ⌘] 会话导航 / ⌘⇧P 引用工作区文件。
  */
-function useTerminalHotkeys() {
+function useHotkeys() {
  useEffect(() => {
   const onKey = (e: KeyboardEvent) => {
    if (e.defaultPrevented || e.isComposing || e.altKey) return;
    const mod = isMacKeyboard() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
    if (!mod) return;
    const key = e.key.toLowerCase();
-   // V40 聊天形态专属：⌘F 会话内查找、⌘[ / ⌘] 会话导航。终端形态**不认**这几个键——
-   // 否则会把终端的默认行为（比如浏览器级查找）一起吞掉。
    const s = useApp.getState();
-   const chatKey = s.appMode === "chat" && (key === "f" || key === "[" || key === "]" || key === "k");
-   const owned = chatKey || key === "t" || key === "w" || key === "k" || key === "p" || /^[1-9]$/.test(key);
-   if (
-    !owned ||
-    ((key === "k" || key === "p") && !e.shiftKey && !chatKey) ||
-    (key !== "k" && key !== "p" && e.shiftKey)
-   )
-    return;
-   const el = document.activeElement;
-   const typing = el instanceof HTMLElement
-    && !el.closest(".xterm-helper-textarea")
-    && !!el.closest("input, textarea, select, [contenteditable='true']");
-   // ⌘⇧P 是两形态共用的引用浮层入口（V22/V32）：即使焦点在输入框里也要放行——
-   // 终端形态的 xterm helper textarea 本来就不算 typing，聊天形态的 Composer 是普通
-   // textarea（聊天常态就是在输入框里按这个键），被 typing 守卫吞掉等于入口断掉。
+   // ⌘F / ⌘K / ⌘[ / ⌘]（会话内动作）与 ⌘⇧P（引用浮层）即使焦点在输入框里也要生效——
+   // 聊天常态就是在 Composer 里打字，被 typing 守卫吞掉等于入口断掉；
+   // 其余组合键（⌘T / ⌘W）输入中只阻断不执行。
+   const chatKey = key === "f" || key === "[" || key === "]" || key === "k";
    const refPick = key === "p" && e.shiftKey;
-   // 识别到本应用组合键就先截获，避免浏览器默认或漏进 PTY；模态或输入中只阻断不执行。
+   const owned = chatKey || refPick || key === "t" || key === "w";
+   if (!owned) return;
+   const el = document.activeElement;
+   const typing = el instanceof HTMLElement && !!el.closest("input, textarea, select, [contenteditable='true']");
+   // 识别到本应用组合键就先截获，避免浏览器默认行为；模态或输入中只阻断不执行。
    e.preventDefault();
    e.stopPropagation();
-   // 聊天形态的 ⌘F / ⌘K / ⌘[ / ⌘] 在输入框里按也要生效（与 ⌘⇧P 同一个理由：聊天常态就是在
-   // Composer 里打字，被 typing 守卫吞掉等于入口断掉）；其余组合键输入中仍只阻断不执行。
    if (e.repeat || hasOpenDialog() || (typing && !refPick && !chatKey)) return;
-   // 聊天形态：只有「⌘W 关设置」「⌘T 新建聊天」「⌘F 会话内查找」「⌘K 命令中心」「⌘[ ⌘] 会话导航」
-   // 「⌘⇧P 引用工作区文件」有意义；其余终端快捷键不参与
-   if (s.appMode === "chat") {
-    if (key === "w" && s.settingsTabActive) s.closeSettingsTab();
-    else if (key === "t") newChatInSelection();
-    else if (chatKey) {
-     // 设置标签激活时不抢这几个键
-     if (s.settingsTabActive) return;
-     if (key === "f") {
-      // 会话内查找：没有会话时无处可查，不打开横条
-      if (s.activeSessionId) s.setFindOpen(true);
-     } else if (key === "k") {
-      // 命令中心（V41）：再按一次收起（toggle）
-      s.setPaletteOpen(!s.paletteOpen);
-     } else {
-      // 会话导航栈：空栈 / 到头由 `navStep` 返回 null（此时什么都不做）
-      const id = s.navStep(key === "[" ? -1 : 1);
-      if (id) void openSessionWithHistory(id);
-     }
-    } else if (key === "p") {
-     // ⌘⇧P 引用工作区文件（V22 浮层；聊天形态注入 Composer 草稿）：设置标签激活 / 没有会话时不触发
-     if (s.settingsTabActive || !s.activeSessionId) return;
-     s.set({ refPickerTarget: { kind: "chat", sessionId: s.activeSessionId } });
-    }
+   if (key === "w") {
+    // ⌘W 只关设置视图（v1 收敛口径；输入中由上面的 typing 守卫挡住）
+    if (s.settingsTabActive) s.closeSettingsTab();
     return;
    }
    if (key === "t") {
-    newTerminalInSelection();
+    newChatInDefaultCheckout();
+    return;
+   }
+   if (refPick) {
+    // 引用工作区文件（V22；注入 Composer 草稿）：设置视图激活 / 没有会话时不触发
+    if (s.settingsTabActive || !s.activeSessionId) return;
+    s.set({ refPickerTarget: { sessionId: s.activeSessionId } });
+    return;
+   }
+   // 会话内动作（⌘F / ⌘K / ⌘[ / ⌘]）：设置视图激活时不抢这几个键
+   if (s.settingsTabActive) return;
+   if (key === "f") {
+    // 会话内查找：没有会话时无处可查，不打开横条
+    if (s.activeSessionId) s.setFindOpen(true);
    } else if (key === "k") {
-    s.set({ quickSwitcherOpen: true });
-   } else if (key === "p") {
-    // ⌘⇧P 引用工作区文件（V22）：设置标签激活 / 没有终端时不触发
-    if (s.settingsTabActive || !s.activeTerminalId) return;
-    s.set({ refPickerTarget: { kind: "terminal", id: s.activeTerminalId } });
-   } else if (key === "w") {
-    // 设置标签激活时，⌘W 关的是设置标签（终端标签的关闭语义不变）
-    if (s.settingsTabActive) {
-     s.closeSettingsTab();
-     return;
-    }
-    if (!s.activeTerminalId) return;
-    s.requestCloseTerminal(s.activeTerminalId);
+    // 命令中心（V41）：再按一次收起（toggle）
+    s.setPaletteOpen(!s.paletteOpen);
    } else {
-    // ⌘1..9 的序号 = **当前选中范围**里的终端顺序（与右栏视图一致的过滤列表）
-    const scope = selectionScopePaths(s.selection, s.workspaceGroups, s.checkouts, s.projects);
-    const term = terminalsInScope(s.terminals, scope)[Number(key) - 1];
-    if (!term) return;
-    s.focusTerminal(term.id);
+    // 会话导航栈：空栈 / 到头由 `navStep` 返回 null（此时什么都不做）
+    const id = s.navStep(key === "[" ? -1 : 1);
+    if (id) void openSessionWithHistory(id);
    }
   };
   window.addEventListener("keydown", onKey, true);
@@ -268,7 +211,7 @@ function SidebarShell({
 
  return (
   <>
-   {/* 同一份侧栏子树：桌面用宽度容器，窗窗定位态态态组件重现挂载。 */}
+   {/* 同一份侧栏子树：桌面用宽度容器，窄窗定位态态态组件重现挂载。 */}
    <div
     ref={shellRef}
     role={narrow && sidebarOpen ? "dialog" : undefined}
@@ -323,11 +266,11 @@ function SidebarShell({
  );
 }
 export function App() {
- const { settingsTabOpen, settingsTabActive, closingTerminalId, set, sidebarWidth, setSidebarWidth, updateDialogOpen, ompUpdateDialogOpen, sidebarOpen, quickSwitcherOpen, providerUsageOpen, refPickerTarget, appMode, chatFormUsed, paletteOpen } = useApp();
+ const { settingsTabOpen, settingsTabActive, set, sidebarWidth, setSidebarWidth, updateDialogOpen, ompUpdateDialogOpen, sidebarOpen, providerUsageOpen, refPickerTarget, paletteOpen } = useApp();
  const t = useText();
  useTheme();
  useLocale();
- useTerminalHotkeys();
+ useHotkeys();
  useWorkspaceGitRefresh();
  useTitlePromptSync();
 
@@ -390,52 +333,21 @@ export function App() {
      if (w !== sidebarWidth) setSidebarWidth(w);
     }}
    >
-    {/* 左栏随形态切换（V32 二次口径）：终端形态 = 工作区树，聊天形态 = 会话侧栏
-        （V1–V10 的 Sidebar 骨架）。两栏**都常驻、只切显隐**——卸载会丢掉树的滚动位置与
-        列表状态，每次切形态还要重拉 `list_projects` + `git worktree list`（终端侧）与
-        重扫会话目录（聊天侧）；聊天侧首次用到才挂载（`chatFormUsed`，与 `ChatView` 同一门槛）。 */}
-    <WorkspaceSidebar visible={appMode === "terminal"} />
-    {chatFormUsed && <ChatSidebar visible={appMode === "chat"} />}
+    {/* 左栏 = 聊天侧栏（v1 起唯一形态；工作区标题行 + 搜索 + 按工作区分段 + 拖拽排序） */}
+    <ChatSidebar />
    </SidebarShell>
    <main inert={sidebarOpen ? true : undefined} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background md:my-2 md:mr-2 md:rounded-xl md:border md:border-border">
     <HealthBanner />
-    {/* 两种形态都**常驻挂载、只切显隐**（V32）：
-        - 终端面板卸载会连带 kill 全部 PTY（`TerminalPane` 的清理 effect）——那是「关标签」才该发生的；
-        - 聊天侧同理要保住订阅与滚动位置；
-        所以形态切换一律走 CSS，运行中的进程两侧都不中断，切回来原样还在。
-        终端形态内：标签栏常驻（设置标签是单例），终端区与设置页也按老规矩切显隐。 */}
-    <div className={appMode === "terminal"
-     ? settingsTabActive
-      // 设置标签激活：容器里只剩标签栏（终端区已 hidden）——不许再长高（flex-none），
-      // 否则它与设置页同为 flex-1、把 main 对半分，设置页被顶到下半屏（V32 遗留缺陷，用户实测）
-      ? "flex min-h-0 min-w-0 flex-none flex-col"
-      : "flex min-h-0 min-w-0 flex-1 flex-col"
-     : "hidden"}>
-     <TerminalTabs />
-     <TerminalView visible={appMode === "terminal" && !settingsTabActive} />
-    </div>
-    {/* 聊天形态**首次用到才挂载、之后常驻**（`chatFormUsed`）：纯终端用户不付聊天侧的启动调用
-        （挂载即触发 `get_global_approval` / `omp usage` 这类读取）；挂载后只切显隐——
-        卸载会断事件订阅，切走期间到达的帧就丢了。 */}
-    {chatFormUsed && <ChatView visible={appMode === "chat" && !settingsTabActive} />}
-    {settingsTabOpen && <SettingsPage visible={settingsTabActive} showClose={appMode === "chat"} />}
-    {/* 关闭确认常驻这层：设置标签激活时点终端标签的 × 也要弹得出来 */}
-    <ConfirmDialog
-     open={closingTerminalId !== null}
-     title={t.termCloseRunningTitle}
-     detail={t.termCloseRunningBody}
-     confirmLabel={t.termClose}
-     danger
-     onConfirm={() => useApp.getState().confirmCloseTerminal()}
-     onCancel={() => useApp.getState().cancelCloseTerminal()}
-    />
+    {/* 聊天主区**常驻挂载、只切显隐**：切去设置视图只是 CSS 隐藏——
+        卸载会断事件订阅（切走期间到达的帧就丢了），切回来还要重建滚动位置。 */}
+    <ChatView visible={!settingsTabActive} />
+    {settingsTabOpen && <SettingsPage visible={settingsTabActive} />}
    </main>
    <CommitTaskPanel />
    {updateDialogOpen && <UpdateDialog />}
    {ompUpdateDialogOpen && <OmpUpdateDialog />}
-   {/* 命令中心（⌘K，V41）：聊天形态的动作 + 会话搜索面板；打开才挂载、关闭即卸载 */}
+   {/* 命令中心（⌘K，V41）：聊天动作 + 会话搜索面板；打开才挂载、关闭即卸载 */}
    {paletteOpen && <CommandPalette />}
-   {quickSwitcherOpen && <QuickSwitcher />}
    {providerUsageOpen && <ProviderUsageDialog />}
    {refPickerTarget && <ReferencePicker />}
   </div>

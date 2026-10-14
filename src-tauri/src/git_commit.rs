@@ -31,7 +31,7 @@ use crate::commands::{cmd_err, AppState, CmdError};
 use crate::commit_msg;
 use crate::git_info::{dir_exists, git_bin, run_git};
 use crate::git_ops;
-use crate::pty::{force_kill_group, login_path};
+use crate::proc::{force_kill_group, login_path};
 
 // ---------- 任务表与取消 ----------
 
@@ -76,7 +76,7 @@ pub struct CommitTask {
 pub type CommitMap = Arc<Mutex<HashMap<String, CommitTask>>>;
 
 /// 每次 spawn 的内部序号：收尾时用它确认「表里的还是我这一次任务」，
-/// 防止「失败后立刻重跑」时旧任务误删新任务的槽位（与 PTY 的 `seq` 同口径）。
+/// 防止「失败后立刻重跑」时旧任务误删新任务的槽位（与更新任务的 `UPDATE_SEQ` 同口径）。
 static TASK_SEQ: AtomicU64 = AtomicU64::new(1);
 
 /// 首流 EOF 后等另一流的宽限：omp 的 stdout 收尾后 stderr 可能还差几行。

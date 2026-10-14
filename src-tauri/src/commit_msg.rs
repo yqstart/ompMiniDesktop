@@ -6,7 +6,7 @@
 //! - `omp -p`（打印模式）只加载配置 + 一次模型调用：本机实测**热启 2.28s**（冷启 5.36s），
 //!   且 `--no-session` 不落会话文件、stdout 只有助手文本（stderr 只有 `Working...` 进度行）。
 //!
-//! 参数（实测有效；分离 token 形式，与 `pty.rs` 的 `--cwd <dir>` 一致）：
+//! 参数（实测有效；分离 token 形式，与 `runtime.rs` 的 `--cwd <dir>` 一致）：
 //! `-p --no-session --no-tools --no-lsp --no-extensions --no-rules --max-time 2m --cwd <dir>`
 //! + `--model <m>` / `--thinking <l>`（来自 `modelRoles.commit`）。
 //!
@@ -193,7 +193,7 @@ pub(crate) async fn staged_diff(git: &str, cwd: &str) -> String {
 }
 
 /// spawn `omp -p …`：继承登录 shell 的 PATH（GUI .app 的 PATH 缺 Homebrew）、
-/// 新进程组（取消时打 `-pid` 覆盖子进程）、`kill_on_drop`——与 `pty.rs` / `git_commit.rs` 同口径。
+/// 新进程组（取消时打 `-pid` 覆盖子进程）、`kill_on_drop`——与 `git_commit.rs` 同口径。
 pub(crate) fn spawn_generate(
     bin: &str,
     args: &[String],
@@ -206,7 +206,7 @@ pub(crate) fn spawn_generate(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    if let Some(path) = crate::pty::login_path() {
+    if let Some(path) = crate::proc::login_path() {
         cmd.env("PATH", path);
     }
     #[cfg(unix)]

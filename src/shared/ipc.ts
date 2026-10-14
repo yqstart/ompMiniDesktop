@@ -36,11 +36,6 @@ export const IPC = {
  pushWorkspace: "push_workspace",
  cancelCommitTask: "cancel_commit_task",
  getWorkspaceGitState: "get_workspace_git_state",
- // 终端 PTY（V11）：per-终端 omp TUI 进程
- ptySpawn: "pty_spawn",
- ptyWrite: "pty_write",
- ptyResize: "pty_resize",
- ptyKill: "pty_kill",
  // 供应商（设置 › 供应商）：login / logout / modelRoles
  listProviders: "list_providers",
  getProviderLogin: "get_provider_login",
@@ -92,7 +87,7 @@ export const IPC = {
  checkOmpUpdate: "check_omp_update",
  startOmpUpdate: "start_omp_update",
  cancelOmpUpdate: "cancel_omp_update",
- // 聊天形态（V32 恢复自 V1–V10）：RPC 会话命令面（per-会话长驻 `omp --mode rpc-ui`）
+ // 会话命令面（per-会话长驻 `omp --mode rpc-ui`）
  createSession: "create_session",
  openSession: "open_session",
  renameSession: "rename_session",

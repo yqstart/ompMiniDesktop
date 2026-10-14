@@ -4,7 +4,7 @@ import { projectIdForPath } from "./workspaceGroups";
 /**
  * 引用浮层（V22）的纯逻辑：范围解析、候选构建、模糊排序、目录树构建、命中高亮、注入文本。
  *
- * 范围口径：当前终端 cwd 所属项目**不列**——本项目文件在输入框里用 omp 原生 `@`
+ * 范围口径：当前会话 cwd 所属项目**不列**——本项目文件在输入框里用 omp 原生 `@`
  * 直接可补全；浮层只解决「另一个项目」的挑选问题（工作区成员项目主目录，与自动
  * `--add-dir` 协作根一致）。
  */
@@ -301,7 +301,7 @@ export function referenceInsertText(absPath: string): string {
 }
 
 /**
- * 把引用追加到**聊天草稿**尾部（V32 二次口径：聊天形态走 Composer 草稿而不是 PTY）。
+ * 把引用追加到**聊天草稿**尾部（v1 起引用只有一个注入目标：Composer 草稿）。
  * 草稿末尾不是空白时先补一个空格——omp 的提及要求 `@` 在行首或紧跟在空白之后
  * （`lib/mentions.ts` 与上游 `extractFileMentions` 同一口径），否则那一行不会被展开
  * 成 fileMention（实测：`…是：@/tmp/x` 不算提及、`…是： @/tmp/x` 才算）。

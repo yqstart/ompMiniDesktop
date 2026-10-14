@@ -9,7 +9,7 @@ import { useText } from "../../lib/useText";
  * 点击打开 `OmpUpdateDialog`。右端与 `AppUpdateChip`（本应用版本）并排，对齐由字标行的
  * 右端容器负责（这里不再自带 `ml-auto`）。
  *
- * - 状态色与终端 π 同一套语义：有新版本 `accent`、已是最新 `ok`、检查失败 `warn`、
+ * - 状态色三档语义：有新版本 `accent`、已是最新 `ok`、检查失败 `warn`、
  *   还没查过 `faint`——**颜色不是唯一信号**，完整结论（版本 / 渠道 / 失败原因）在
  *   `title` 与弹窗里，`aria-label` 是同一条文案；
  * - omp 未找到时**整个不渲染**：那种情况由 `HealthBanner` 说明，这里是版本信息不是报错位；

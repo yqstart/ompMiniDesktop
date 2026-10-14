@@ -31,7 +31,7 @@ const TAB_GROUPS: { label: "settingsGroupOmp" | "settingsGroupApp"; tabs: Settin
  { label: "settingsGroupApp", tabs: ["usage", "archived"] },
 ];
 
-export function SettingsPage({ visible = true, showClose = false }: { visible?: boolean; showClose?: boolean }) {
+export function SettingsPage({ visible = true }: { visible?: boolean }) {
  const t = useText();
  const [tab, setTab] = useState<SettingsTab>("general");
  const pageRef = useRef<HTMLDivElement>(null);
@@ -59,7 +59,7 @@ export function SettingsPage({ visible = true, showClose = false }: { visible?: 
   target?.focus({ preventScroll: true });
  }, [visible]);
 
- // 设置标签面板：切到终端标签只隐藏（页签选择、滚动位置都保留），关闭标签才卸载
+ // 设置视图：切去聊天只隐藏（页签选择、滚动位置都保留），关闭视图才卸载
  return (
   <div
    ref={pageRef}
@@ -75,8 +75,8 @@ export function SettingsPage({ visible = true, showClose = false }: { visible?: 
    }
   >
    {/* 左栏：竖向菜单（无标题行，菜单从顶端开始），分「omp」与「本应用」两组——组标题在窄导航
-          （44px）下收进 sr-only，组间分隔线保留。设置是标签栏里的标签——关闭走标签栏的 × / ⌘W
-          （`closeSettingsTab`，回到上次的终端标签），页内不放第二个关闭入口。
+          （44px）下收进 sr-only，组间分隔线保留。v1 起设置是覆盖主区的独立视图：关闭走页内
+          「返回聊天」/ ⌘W / 左栏底部再点一次「设置」（`closeSettingsTab`，回到聊天视图）。
           omp 组：常用设置（omp 配置在本应用的唯一设置面——`lib/settingsList.ts` 的 117 项
           展示清单，按上游分组；三稿把原「更多设置」页并入）、模型（**omp 模型相关唯一管理面**：
           供应商 / 我的模型 / 模型角色（Ctrl+P 轮换自动取这里的配置）/ 失败转移）、插件（V23：`omp plugin` 的
@@ -87,18 +87,16 @@ export function SettingsPage({ visible = true, showClose = false }: { visible?: 
           重新检测 / 指定路径）在字标行 omp 版本 chip 的弹窗里（V31）；界面语言与皮肤是纯展示层
           偏好，入口在左栏底部「设置」行，这里不重复放。 */}
    <nav aria-label={t.title} className="flex w-11 shrink-0 flex-col border-r border-border-soft pr-2 @min-[640px]/settings:w-40 @min-[640px]/settings:pr-3">
-    {/* 聊天形态没有标签栏（设置不是标签），页内给一个返回入口；终端形态关闭走标签栏的 × / ⌘W */}
-    {showClose && (
-     <button
-      onClick={() => useApp.getState().closeSettingsTab()}
-      aria-label={t.backToChat}
-      title={t.backToChat}
-      className="mb-2 flex min-h-9 cursor-pointer items-center justify-center gap-2.5 rounded-md text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground @min-[640px]/settings:justify-start @min-[640px]/settings:px-3"
-     >
-      <ArrowLeft size={16} aria-hidden className="shrink-0" />
-      <span className="sr-only @min-[640px]/settings:not-sr-only">{t.backToChat}</span>
-     </button>
-    )}
+    {/* 设置是覆盖主区的视图（关闭即回聊天）：页内返回入口常驻 */}
+    <button
+     onClick={() => useApp.getState().closeSettingsTab()}
+     aria-label={t.backToChat}
+     title={t.backToChat}
+     className="mb-2 flex min-h-9 cursor-pointer items-center justify-center gap-2.5 rounded-md text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground @min-[640px]/settings:justify-start @min-[640px]/settings:px-3"
+    >
+     <ArrowLeft size={16} aria-hidden className="shrink-0" />
+     <span className="sr-only @min-[640px]/settings:not-sr-only">{t.backToChat}</span>
+    </button>
     <div
      role="tablist"
      aria-orientation="vertical"

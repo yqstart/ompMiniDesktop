@@ -35,12 +35,12 @@
 ### 2.2 字体
 
 - `--font-sans`：系统 UI 栈（含中文字族）——界面主体。
-- `--font-mono`：`JetBrains Mono / SF Mono / Menlo / OMP Nerd Icons / monospace`——代码、路径、键名、时间戳、token 数、快捷键之外的数字元数据；配 `font-variant-numeric: tabular-nums`（`.font-mono` 已带）。
+- `--font-mono`：`JetBrains Mono / SF Mono / Menlo / monospace`——代码、路径、键名、时间戳、token 数、快捷键之外的数字元数据；配 `font-variant-numeric: tabular-nums`（`.font-mono` 已带）。
 - **与 Codex 的偏离（有意）**：Codex 是 mono-forward 栈，本站面向中文会话，正文用 sans 保证中文可读性；「等宽感」通过 mono 用在所有**元数据与代码**来表达。
 - 字级（沿用 Tailwind 档）：正文 `text-sm`(14) 为主；次要元数据 `text-xs`(12)；面板标题 / 区块标题用 `text-xs font-medium` + `muted`，**不用页面级大标题排版**（设置页头例外，用 `text-base`）。
 - 层级优先用字重与颜色（foreground → muted → faint），再考虑放大；标题罕见。
 - `kbd` 一律 `--font-sans`（元素规则已钉，组件不许再挂 mono）。
-- 终端图标字体（OMP Nerd Icons）随终端形态在 v1 退场（`--font-mono` 里的挂载同步移除）。
+- 终端图标字体（OMP Nerd Icons）与终端形态一同在 v1 退场：字体资产、`@font-face` 与 `--font-mono` 里的挂载都已移除，不要再引回。
 
 ### 2.3 圆角 / 阴影 / 动效
 
@@ -159,5 +159,5 @@
 
 - 不引新 UI 库；不偏离参考产品的密度与结构。
 - 不做营销式落地页；不做嵌套卡片；不做纯装饰渐变 / 发光。
-- 不裸写 `z-*`；不在组件里写死终端色（终端已退场，此项随之作废）。
+- 不裸写 `z-*`；不在组件里写死色值（终端的 16 色 token 已随 v1 退场，一律用应用 token）。
 - 不删 `.thread-scroll` / 滚动条隐藏 / `kbd` 字体这三条血泪规则。

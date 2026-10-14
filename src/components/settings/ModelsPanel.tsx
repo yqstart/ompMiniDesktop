@@ -29,8 +29,8 @@ import { StarToggle } from "./StarToggle";
  * - 模型角色写 omp 全局配置（`omp config set modelRoles`，record 整表读写 + 回读），未配置的
  *   角色按 omp 自己的回退规则解析，本页不复制那套规则；角色值可带 `:思考档` 后缀，
  *   档位候选按该模型声明的档裁剪。
- * - **omp 侧改完切回来就该看到**：角色与转移链在挂载时拉一次、**每次设置标签重新激活时重读**
- *   （终端标签里的 omp 改过 `modelRoles` 后，点回设置标签即刷新）；模型目录不额外重拉——
+ * - **omp 侧改完切回来就该看到**：角色与转移链在挂载时拉一次、**每次设置视图重新激活时重读**
+ *   （在别处（omp TUI / CLI）改过 `modelRoles` 后，回到设置视图即刷新）；模型目录不额外重拉——
  *   `get_models` 后端有 5 分钟缓存，页头的「刷新」按钮才走 `refresh_models` 强制重拉。
  * - **Ctrl+P 快速切换环**（`cycleOrder`）没有手动编辑面（用户口径 2026-10-10）：环 = 模型
  *   角色的派生投影——后端 `sync_cycle_order` 按角色展示顺序取已配置模型、按模型基名保序
@@ -124,8 +124,8 @@ export function ModelsPanel() {
   ]);
  }, [set, syncCycle, t.modelsLoadFailed]);
 
- // 挂载时拉一次；**每次设置标签重新激活**（从终端标签切回来）都重读——omp 侧（TUI / CLI）
- // 改过的模型角色与转移链，切回设置页就该看到，不该要求用户先点「刷新」或重开设置标签。
+ // 挂载时拉一次；**每次设置视图重新激活**（从聊天切回来）都重读——omp 侧（TUI / CLI）
+ // 改过的模型角色与转移链，回到设置页就该看到，不该要求用户先点「刷新」或重开设置视图。
  // 模型目录走 `get_models` 的 5 分钟缓存（`models` 已在 store 里时不强制重拉），这轮重读很轻。
  useEffect(() => {
   if (!settingsTabActive) return;

@@ -80,41 +80,11 @@
 - 许可证：Apache-2.0 / MIT（reqwest）；Apache-2.0 / ISC / MIT（rustls）
 - 说明：「供应商用量」弹窗（入口在标签栏右上角；V15 交付时是设置页签）的**补充探针**——对 omp 没有用量探针、但上游提供「API key 可用」查询接口的供应商（commandcode / deepseek）做只读 GET；TLS 走 rustls + webpki-roots（纯 Rust，无系统依赖，四平台构建一致）。
 
-## 字体资源（随本应用分发）
-
-### Nerd Fonts —— Symbols Only（派生为 "OMP Nerd Icons"）
-- 仓库：https://github.com/ryanoasis/nerd-fonts
-- 许可证：MIT（Copyright (c) 2014 Ryan L McIntyre）；图标集各自的许可见下表
-- 说明：`public/fonts/omp-nerd-icons.woff2` 由上游 `NerdFontsSymbolsOnly` 包里的
-  `SymbolsNerdFontMono-Regular.ttf` **派生**（脚本：`scripts/build-nerd-icons-font.py`）：
-  所有字形轮廓与 advance 横向压缩到 0.6 em（= 终端等宽字体的字符宽度，Nerd Fonts 官方的
-  `Nerd Font Mono` 变体即此形态），纵向不变；name 表改名为 "OMP Nerd Icons"（copyright /
-  license 字段原样保留）。用途：终端里 omp 的 `symbolPreset: nerd` 图标（`index.css` 的
-  `--font-mono` 末尾、`main.tsx` 启动预热）。
-- 图标集许可（上游 README 同款清单，v3.5.1）：
-
-  | 图标集 | 上游 | 许可 |
-  |---|---|---|
-  | Codicons | microsoft/vscode-codicons | CC BY 4.0 |
-  | Devicons | devicons/devicon | MIT |
-  | extraglyphs | source-foundry/Hack | MIT |
-  | Font Awesome | FortAwesome/Font-Awesome | CC BY 4.0 |
-  | Font Awesome Extension | AndreLZGava/font-awesome-extension | MIT |
-  | Font Logos | lukas-w/font-logos | unlicensed |
-  | Material Design | Templarian/MaterialDesign-Font | Apache 2.0 |
-  | Octicons | primer/octicons | MIT |
-  | Seti and original | jesseweed/seti-ui | MIT |
-  | Pomicons | gabrielelana/pomicons | OFL 1.1 RFN |
-  | Powerline Extra | ryanoasis/powerline-extra-symbols | MIT |
-  | Powerline Symbols | powerline/powerline | MIT |
-  | Power Symbols IEC | jloughry/Unicode | MIT |
-  | Weather Icons | erikflowers/weather-icons | OFL 1.1 |
-
 ## 上游运行时（不随本仓库分发，需用户另行安装）
 
 ### oh-my-pi（omp）
 - 仓库：https://github.com/ldx/oh-my-pi
-- 本 app 在 PTY 里直接运行 `omp`（交互式 TUI，V11 起；工作区创建走 `omp worktree add`，
+- 本 app 以长驻 `omp --mode rpc-ui` 子进程驱动聊天会话（工作区创建走 `omp worktree add`，
   供应商登录 / 登出走 `omp auth-broker`，设置读写走 `omp config`，用量统计走 `omp usage`，
   补充探针的凭据经 `omp token` 只读取出、只在内存中传递）。
-  `docs/rpc-memo.md` 保留了 RPC 协议时代的实测备忘（历史存档）。
+  `docs/rpc-memo.md` 保留了协议实测备忘。

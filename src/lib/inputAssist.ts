@@ -8,7 +8,7 @@
  * 「输入英文字母总是提示我大写、横杠」）。
  *
  * 手段：给每个可编辑元素设置 WebKit 认的四个属性，并同时覆盖「现在就有」与「以后插入」
- * 的元素（MutationObserver；xterm 的隐藏 textarea 也走这条路）：
+ * 的元素（MutationObserver；设置页 / 弹层里后挂载的输入框也走这条路）：
  * - `spellcheck=false`：拼写检查（实测还能关掉 WKWebView 的智能引号替换，SO #31455617）；
  * - `autocorrect=off`：自动纠正 / 建议气泡（SO #63926407）；
  * - `autocapitalize=off`：句首自动大写；
@@ -26,7 +26,7 @@ const ASSIST_ATTRS: ReadonlyArray<readonly [string, string]> = [
  ["autocomplete", "off"],
 ];
 
-/** 需要装饰的元素：所有可编辑输入（含 xterm 的隐藏 textarea）。 */
+/** 需要装饰的元素：所有可编辑输入（输入框 / 文本域 / 富文本）。 */
 const EDITABLE_SELECTOR = "input, textarea, [contenteditable]";
 
 /** 逐个补齐四个属性；已是目标值就不动（不产生多余的 mutation 记录）。 */
@@ -45,7 +45,7 @@ function sweep(root: ParentNode): void {
 /**
  * 启动时调用一次；返回卸载函数（测试用）。
  * 除插入外还盯着四个属性本身被清掉的情况——`attributeFilter` 收窄到这四个，
- * 不拖累 xterm 的高频样式变更。
+ * 不拖累高频样式变更的元素。
  */
 export function installInputAssistOff(doc: Document = document): () => void {
  sweep(doc);

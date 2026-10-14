@@ -9,8 +9,8 @@ import { useApp } from "../../stores/app";
 import { ModelsPanel } from "./ModelsPanel";
 
 /**
- * 「omp 里改完，切回设置页就能看到」这条契约：设置标签重新激活（从终端标签切回来）时，
- * 模型角色要重新读一遍 omp 全局配置——此前只在组件挂载时读一次，切标签回来看到的还是旧值。
+ * 「omp 里改完，切回设置页就能看到」这条契约：设置视图重新激活（从聊天切回来）时，
+ * 模型角色要重新读一遍 omp 全局配置——此前只在组件挂载时读一次，切回来看到的还是旧值。
  */
 
 const CR = { slow: "y/gpt-5.6-astra:auto:medium" };
@@ -93,7 +93,7 @@ describe("ModelsPanel 的 omp 侧识别", () => {
   expect(h.roleCalls).toBe(1);
   expect(container.textContent).toContain("y/gpt-5.6-astra:auto");
 
-  // 模拟「在终端标签里的 omp 改了角色」：omp 侧的值变了，本组件不知情
+  // 模拟「在别处（omp TUI / CLI）改了角色」：omp 侧的值变了，本组件不知情
   h.roles = { slow: "opencode-go/deepseek-v4.1-flash:low" };
   act(() => useApp.setState({ settingsTabActive: false }));
   expect(h.roleCalls).toBe(1);

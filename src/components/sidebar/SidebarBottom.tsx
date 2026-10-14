@@ -5,12 +5,10 @@ import { LanguageToggle } from "../LanguageToggle";
 import { ThemeToggle } from "../ThemeToggle";
 
 /**
- * 左栏底栏（V32 二次口径）：两种形态共用——设置入口 + 语言 + 皮肤。
+ * 左栏底栏：设置入口 + 语言 + 皮肤。
  *
- * - 形态切换（`AppModeToggle`）已上移到顶栏的字标位，这一行回到「设置 / 语言 / 皮肤」三件
- *   （`SIDEBAR_MIN` 的 288px 临界宽度就是按这三件算的，见 `stores/app.ts`）；
- * - 「设置」是标签栏单例：终端形态 = 打开 / 聚焦设置标签；聊天形态没有标签栏，
- *   再点一次 = 返回聊天（`closeSettingsTab`）。
+ * 「设置」是覆盖主区的视图：打开即切过去；已经开着时再点一次 = 返回聊天
+ * （`closeSettingsTab`；页内「返回聊天」与 ⌘W 是同一动作的另外两个入口）。
  */
 export function SidebarBottom() {
  const t = useText();
@@ -19,8 +17,8 @@ export function SidebarBottom() {
    <button
     onClick={() => {
      const st = useApp.getState();
-     // 聊天形态：设置不是标签，再点一次「设置」= 返回聊天（终端形态保持「聚焦设置」不变）
-     if (st.appMode === "chat" && st.settingsTabActive) st.closeSettingsTab();
+     // 再点一次「设置」= 返回聊天
+     if (st.settingsTabActive) st.closeSettingsTab();
      else st.openSettingsTab();
      st.set({ sidebarOpen: false });
     }}

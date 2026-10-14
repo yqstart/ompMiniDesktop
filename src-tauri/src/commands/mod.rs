@@ -36,8 +36,6 @@ pub struct AppState {
     pub runtime: crate::runtime::RuntimeMap,
     /// 会话 id → 是否有长驻进程（列表行「运行中」标记；进程退出 / kill 时移除）。
     pub running: Mutex<HashMap<String, bool>>,
-    /// V11 终端工作区：per-终端 `omp` TUI 进程表（PTY，见 `pty.rs`）。
-    pub pty: crate::pty::PtyMap,
     /// V14 工作区「提交并推送」：cwd → 任务句柄（同一工作区拒绝重入，不同工作区可并行，
     /// 见 `git_commit.rs`）。
     pub commit_tasks: crate::git_commit::CommitMap,
@@ -2621,7 +2619,6 @@ pub fn load_state<R: tauri::Runtime>(app: &AppHandle<R>) -> AppState {
         extensions_edit: Mutex::new(()),
         runtime: std::sync::Arc::new(Mutex::new(HashMap::new())),
         running: Mutex::new(HashMap::new()),
-        pty: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
         commit_tasks: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
         omp_update_task: std::sync::Arc::new(std::sync::Mutex::new(None)),
     }

@@ -120,9 +120,6 @@ export function CommandPalette() {
    case "usage":
     st.set({ providerUsageOpen: true });
     break;
-   case "mode":
-    st.setAppMode("terminal");
-    break;
   }
  };
 

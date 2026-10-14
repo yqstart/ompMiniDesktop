@@ -1,4 +1,4 @@
-/** 前后端共享类型：overlay / 视图 / 终端（V11 已移除 RPC 会话面）。 */
+/** 前后端共享类型：覆盖层 / 视图 / 会话与消息流 / 提交任务 / 设置面（唯一真相在 Rust 侧结构体）。 */
 
 /** 覆盖层里允许的会话级权限档（V1 遗留字段，只为读旧覆盖层时形状完整）。 */
 export type ApprovalMode = "always-ask" | "write" | "yolo";
@@ -461,30 +461,19 @@ export type ProjectFiles = {
 };
 
 /**
- * 左栏选中项（V21）：右栏视图范围的**唯一真相**。
- * - `group`：工作区视图（`id: null` = 未分组区）——范围 = 组内全部项目的全部目录；
- * - `checkout`：目录视图——范围 = 该目录。
- * store 里为 `null` 时表示「一个可用目录都没有」，终端不过滤（与 V11 口径一致）。
+ * 引用工作区文件浮层的目标（V22；v1 收敛后只剩聊天形态）：
+ * 追加进该会话的 Composer 草稿（`@<绝对路径> `）并把焦点交还输入框。
+ * 从该会话的 cwd 解析「当前项目」，浮层只列**其他**工作区成员项目的文件。
  */
-export type SidebarSelection =
- | { kind: "group"; id: string | null }
- | { kind: "checkout"; path: string };
-
-/**
- * 引用工作区文件浮层的目标（V22；V32 二次口径起两种形态共用）：
- * - `terminal`：注入该终端的 PTY 输入框（bracketed paste）；
- * - `chat`：追加进该会话的 Composer 草稿（`@<绝对路径> `）并把焦点交还输入框。
- * 两种目标都从各自的 cwd 解析「当前项目」，浮层只列**其他**工作区成员项目的文件。
- */
-export type RefPickerTarget =
- | { kind: "terminal"; id: string }
- | { kind: "chat"; sessionId: string };
+export type RefPickerTarget = {
+ sessionId: string;
+};
 
 // ---------- 工作区提交 / 推送（V19） ----------
 
 /**
  * 工作区 git 快照（行徽章用）：`git status --porcelain -b` 的只读投影。
- * 刷新时机见 `lib/commitTasks.ts`（启动 / 任务结束 / 窗口可见或获得焦点 / 终端转就绪 / 30s 兜底轮询）；
+ * 刷新时机见 `lib/commitTasks.ts`（启动 / 任务结束 / 窗口可见或获得焦点 / 30s 兜底轮询）；
  * 点击提交面板里的按钮时，前端勾选与后端暂存校验才是最终裁决。
  */
 export type WorkspaceGitState = {
@@ -595,71 +584,6 @@ export type CommitTaskView = {
  error: string | null;
  hint: string | null;
  startedAt: number;
-};
-
-/** 终端进程状态：运行中 / 已退出（退出码供展示）。 */
-export type TerminalStatus = "running" | "exited";
-
-/**
- * 终端标签上 π 的展示状态（颜色由它决定）：
- * `working` / `attention` / `ready` 来自 omp 的 OSC 标题（见 `lib/termTitle.ts`），
- * `exited` / `failed` 是进程结局（正常退出 / 异常退出或启动失败），
- * `unknown` = 还没有可判断的信息（刚打开、`tui.titleState` 关掉等）。
- */
-export type TermTabState = "working" | "attention" | "ready" | "unknown" | "exited" | "failed";
-
-/**
- * 打开中的终端（前端模型）。PTY 进程本身在后端 `pty` 进程表里；
- * 这里只放低频元数据——高频字节流走 Channel 直推 xterm，不进 store。
- */
-export type TerminalView = {
- id: string;
- /** 归属项目；项目被移除后为 null（tab 保留，继续可用）。 */
- projectId: string | null;
- /** 工作目录（工作区目录：项目主目录或 worktree）。 */
- cwd: string;
- /** 工作区显示名（项目 · 分支）；会话标题到达前 tab 用它。 */
- label: string;
- /**
-  * tab 上显示的**会话标题**（OSC 标题 `π <状态> <会话名>` 解析；null = 还没有会话标题）。
-  * omp 在会话还没有标题时会把 cwd 的末段目录名当名字发出来（实测 18.2.x）——那是「项目名」
-  * 不是会话标题，store 识别后落 null（见 `lib/termTitle.ts` 的 `isWorkspaceNameFallback`）。
-  * 展示名 = `title ?? label`（`terminalDisplayName`）。
-  */
- title: string | null;
- /** 标签 π 的状态（标题状态 + 进程结局，见 `lib/termTitle.ts`）；π 的颜色由它决定。 */
- state: TermTabState;
- status: TerminalStatus;
- exitCode: number | null;
- /** 恢复的历史会话（spawn 时透传 `--resume <id>` 前缀）；null = 新会话。 */
- resume: string | null;
- /**
-  * 本终端**实际挂上**的工作区协作根（V21；同工作区其他成员项目的主目录，空 = 无）。
-  * spawn 时由 `lib/workspaceGroups.ts` 的 `collabContextFor` 算出并写回 store——
-  * tab 悬停提示展示的是「实际生效的参数」，不是「此刻应生效的参数」。
-  */
- collab: string[];
- /** 重启计数：每次点「重启」+1，TerminalPane 依赖它重新 spawn。 */
- spawnSeq: number;
- createdAt: number;
-};
-
-/** PTY → 前端事件（与 Rust `pty::PtyEvent` 同构，tag 为 `type`）。 */
-export type PtyEvent =
- | { type: "data"; data: string }
- | { type: "exit"; code: number | null };
-
-/** `pty_spawn` 的入参（camelCase，与 Rust `PtySpawnOpts` 对齐）。 */
-export type PtySpawnOpts = {
- id: string;
- cwd: string;
- cols: number;
- rows: number;
- resume?: string | null;
- /** 工作区协作根（V21）：同工作区其他成员项目的**主目录**，逐个 `--add-dir`。 */
- addDirs?: string[];
- /** 工作区拓扑说明（V21）：`--append-system-prompt=<文本>`；空 = 不注入。 */
- appendSystemPrompt?: string | null;
 };
 
 // ---------- 自定义模型配置（设置 › 供应商） ----------
@@ -791,7 +715,7 @@ export type SkillFileContent = {
  truncated: boolean;
 };
 
-// ==================== 聊天形态（V32 恢复自 V1–V10） ====================
+// ==================== 会话与消息流 ====================
 
 /** 消息里的一张图片：与 omp jsonl / prompt.images 的 image 内容块同构（base64，不带 data: 前缀）。 */
 export type ImageBlock = { mimeType: string; data: string };

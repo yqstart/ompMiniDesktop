@@ -43,7 +43,7 @@ export function TopBar() {
      onChange={(e) => setDraft((d) => (d ? { ...d, text: e.target.value } : d))}
      onBlur={() => setDraft(null)}
      onKeyDown={(e) => {
-      // IME 组字的回车只提交候选，不算改名确认（与终端标签改名的守卫同口径）
+      // IME 组字的回车只提交候选，不算改名确认
       if (e.nativeEvent.isComposing) return;
       if (e.key === "Enter") {
        // 改过才写：原样回车什么都不做。V40 起改名 = 写 omp 真名（`set_session_name` 落
@@ -74,7 +74,7 @@ export function TopBar() {
    )}
    <div className="ml-auto flex items-center">
     {/* 顶栏右端 = 供应商用量入口（2026-10-12 与输入框工具行的上下文容量环互换位置）：
-        与终端标签栏右上角是同一个「供应商用量」弹窗（`ProviderUsageDialog`） */}
+        打开「供应商用量」弹窗（`ProviderUsageDialog`） */}
     <button
      onClick={() => set({ providerUsageOpen: true })}
      className="cursor-pointer rounded-md p-1.5 text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"

@@ -18,6 +18,8 @@ const mock = vi.hoisted(() => ({
  deleteWorkspace: vi.fn(async () => undefined),
  deleteSessions: vi.fn(),
  archiveSessions: vi.fn(),
+ removeProject: vi.fn(async () => undefined),
+ moveProject: vi.fn(async () => [] as unknown[]),
 }));
 vi.mock("@shared/api", () => ({
  api: {
@@ -30,6 +32,8 @@ vi.mock("@shared/api", () => ({
   deleteWorkspace: mock.deleteWorkspace,
   deleteSessions: mock.deleteSessions,
   archiveSessions: mock.archiveSessions,
+  removeProject: mock.removeProject,
+  moveProject: mock.moveProject,
  },
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(async () => null) }));
@@ -84,6 +88,10 @@ beforeEach(() => {
  mock.deleteSessions.mockImplementation(async (ids: string[]) => ({ ok: ids.length, failed: [] }));
  mock.archiveSessions.mockReset();
  mock.archiveSessions.mockImplementation(async (ids: string[]) => ({ ok: ids.length, failed: [] }));
+ mock.removeProject.mockReset();
+ mock.removeProject.mockResolvedValue(undefined);
+ mock.moveProject.mockReset();
+ mock.moveProject.mockResolvedValue([]);
  useApp.setState({
   projects: [P1, P2],
   workspaceGroups: [{ id: "w1", name: "全栈", createdAt: 0, projectIds: ["p1", "p2"] }],
@@ -104,7 +112,7 @@ afterEach(() => {
 /** 渲染并等 `list_sessions` 那一趟落地。 */
 async function open(): Promise<void> {
  await act(async () => {
-  root.render(<ChatSidebar visible />);
+  root.render(<ChatSidebar />);
  });
  await act(async () => { });
 }
@@ -158,13 +166,28 @@ describe("聊天侧栏的工作区分段（V21 容器在聊天形态的投影）
 });
 
 describe("项目分组头的行内悬浮图标（V43）", () => {
- it("行内三键 = 新建会话 / 归档全部 / 删除全部；「提交」入口已移除", async () => {
+ it("行内四键 = 新建会话 / 移除项目 / 归档全部 / 删除全部；「提交」入口已移除", async () => {
   const t = TEXT["zh-CN"];
   await open();
   expect(container.querySelector(`button[aria-label="${t.gitCommitTitle}"]`), "提交入口应移除").toBeNull();
   expect(container.querySelector(`button[aria-label="${fmt(t.newSessionIn, "alpha")}"]`), "新建会话").not.toBeNull();
+  expect(container.querySelector(`button[aria-label="${t.projRemove}"]`), "移除项目").not.toBeNull();
   expect(container.querySelector(`button[aria-label="${fmt(t.archiveAllIn, "alpha")}"]`), "归档全部").not.toBeNull();
   expect(container.querySelector(`button[aria-label="${fmt(t.deleteAllIn, "alpha")}"]`), "删除全部").not.toBeNull();
+ });
+
+ it("点「移除项目」→ 二次确认 → remove_project（只解绑，不删文件）", async () => {
+  const t = TEXT["zh-CN"];
+  await open();
+  await click(container.querySelector<HTMLButtonElement>(`button[aria-label="${t.projRemove}"]`));
+  const dialog = document.querySelector('[role="dialog"]');
+  expect(dialog?.getAttribute("aria-label")).toBe(fmt(t.projRemoveTitle, "alpha"));
+  expect(dialog?.textContent).toContain(t.projRemoveBody);
+  const confirm = [...(dialog?.querySelectorAll("button") ?? [])].at(-1)!;
+  await act(async () => {
+   confirm.click();
+  });
+  expect(mock.removeProject).toHaveBeenCalledWith("p1");
  });
 
  it("点「归档全部」→ 归档该项目进行中的对话（已归档的除外）", async () => {
@@ -246,7 +269,7 @@ async function click(el: HTMLElement | null | undefined): Promise<void> {
  });
 }
 
-describe("聊天侧栏的工作区标题行（与终端形态同一排入口）", () => {
+describe("聊天侧栏的工作区标题行", () => {
  it("标题行给出「新建工作区」与「添加项目」两枚键", async () => {
   const t = TEXT["zh-CN"];
   await open();
@@ -356,5 +379,88 @@ describe("左栏行级悬浮图标（V43）", () => {
   const head = summaryFor(t.wsGroupUngrouped);
   expect(head.querySelector(`button[aria-label="${t.wsGroupDelete}"]`)).toBeNull();
   expect(head.querySelector(`button[aria-label="${fmt(t.wsGroupEditTitle, "未分组")}"]`)).toBeNull();
+ });
+});
+
+/** 指针事件：jsdom 里用 MouseEvent 补 `pointerId`（控制器只读 clientX/clientY/pointerId）。 */
+function pointer(type: string, x: number, y: number, pointerId = 1): Event {
+ const e = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 });
+ Object.defineProperty(e, "pointerId", { value: pointerId });
+ return e;
+}
+
+/** 给元素钉一份矩形（jsdom 没有布局：拖拽落点判定全靠 `getBoundingClientRect`）。 */
+function stubRect(el: Element, top: number, height: number): void {
+ (el as HTMLElement).getBoundingClientRect = () => ({
+  top, bottom: top + height, left: 0, right: 300, x: 0, y: top, width: 300, height,
+  toJSON: () => ({}),
+ }) as DOMRect;
+}
+
+describe("项目拖拽排序（V26 控制器，v1 自终端左栏迁移）", () => {
+ it("拖拽的 DOM 钩子齐备：项目块 = data-proj-row + data-project-drag；段容器 = data-group-drop", async () => {
+  await open();
+  const row = container.querySelector('[data-proj-row="p1"]');
+  expect(row, "项目块要带 data-proj-row（落点判定的行条目）").not.toBeNull();
+  expect(row?.querySelector("[data-project-drag]"), "项目名区要带 data-project-drag（拖拽手柄）").not.toBeNull();
+  expect(container.querySelector('[data-group-drop="w1"]'), "工作区段 = 容器落点").not.toBeNull();
+ });
+
+ it("平铺模式：整段是「未分组」容器；拖到另一行之前 → move_project（顺序 + 归属一次写）", async () => {
+  act(() => {
+   useApp.setState({ workspaceGroups: [], projects: [{ ...P1, workspaceId: null }, { ...P2, workspaceId: null }] });
+  });
+  mock.moveProject.mockResolvedValue([{ ...P2, workspaceId: null }, { ...P1, workspaceId: null }]);
+  await open();
+
+  const scroll = container.querySelector("aside div.overflow-y-auto");
+  const drop = container.querySelector('[data-group-drop=""]');
+  const p1 = container.querySelector('[data-proj-row="p1"]');
+  const p2 = container.querySelector('[data-proj-row="p2"]');
+  expect(scroll && drop && p1 && p2, "滚动容器、平铺容器与两个项目块都要在").toBeTruthy();
+  stubRect(scroll!, 100, 300);
+  stubRect(drop!, 100, 300);
+  stubRect(p1!, 120, 36);
+  stubRect(p2!, 160, 36);
+
+  const handle = p2!.querySelector("[data-project-drag]")!;
+  await act(async () => {
+   handle.dispatchEvent(pointer("pointerdown", 50, 178));
+  });
+  // 移动超过 4px 才进入拖拽态：幽灵卡出现在 body 的 portal 里
+  await act(async () => {
+   window.dispatchEvent(pointer("pointermove", 50, 140));
+  });
+  expect(document.querySelector("[data-drag-ghost]"), "拖拽中要有跟手幽灵卡").not.toBeNull();
+
+  // 落在 p1 上半段（中线之上）= 插到 p1 之前
+  await act(async () => {
+   window.dispatchEvent(pointer("pointerup", 50, 126));
+  });
+  expect(document.querySelector("[data-drag-ghost]"), "松手后幽灵卡要收掉").toBeNull();
+  expect(mock.moveProject).toHaveBeenCalledWith("p2", null, ["p2", "p1"]);
+ });
+
+ it("原地松开（顺序与归属都没变）不发请求", async () => {
+  act(() => {
+   useApp.setState({ workspaceGroups: [], projects: [{ ...P1, workspaceId: null }, { ...P2, workspaceId: null }] });
+  });
+  await open();
+  const scroll = container.querySelector("aside div.overflow-y-auto");
+  const drop = container.querySelector('[data-group-drop=""]');
+  const p1 = container.querySelector('[data-proj-row="p1"]');
+  const p2 = container.querySelector('[data-proj-row="p2"]');
+  stubRect(scroll!, 100, 300);
+  stubRect(drop!, 100, 300);
+  stubRect(p1!, 120, 36);
+  stubRect(p2!, 160, 36);
+
+  const handle = p2!.querySelector("[data-project-drag]")!;
+  await act(async () => {
+   handle.dispatchEvent(pointer("pointerdown", 50, 178));
+   window.dispatchEvent(pointer("pointermove", 50, 150));
+   window.dispatchEvent(pointer("pointerup", 50, 178));
+  });
+  expect(mock.moveProject).not.toHaveBeenCalled();
  });
 });
