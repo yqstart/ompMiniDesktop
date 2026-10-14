@@ -406,6 +406,37 @@ pub fn highest_effort(efforts: Option<&Vec<String>>) -> String {
     best.to_string()
 }
 
+/// 档位对某模型是否合法：在 `efforts` 内，或为 `off`（omp 的 efforts 从不列 `off`，但它恒定生效）。
+pub fn level_supported(efforts: Option<&Vec<String>>, level: &str) -> bool {
+    level == "off" || efforts.into_iter().flatten().any(|e| e == level)
+}
+
+/// 切模型成功后的思考档跟进决策（纯函数，单测锁着；`None` = 不注入档位、只回读真值）：
+///
+/// - 新模型不支持思考 → 不注入（omp 自己会丢掉档位，界面上的档位选择也不出现）；
+/// - 当前档对新模型仍然合法 → 不注入（与终端同一语义：omp 保留有效档，**不覆盖用户的选择**）；
+/// - 否则（档位缺失 / 对新模型非法）→ 下发 **omp 配置的默认档**（`defaultThinkingLevel`，
+///   夹到新模型支持集；配置没读到 / 不被该模型支持 → 退回该模型最高档）。
+///
+/// 实测（omp 18.10.3 rpc-ui）：切模型时 omp 保留仍然合法的档位；切到无思考模型丢档，
+/// 且之后切回来**不会**自动恢复——所以只有「缺档」这种局面才需要壳侧落一个默认值。
+pub fn auto_think_level(
+    efforts: Option<&Vec<String>>,
+    cur_level: Option<&str>,
+    default_level: Option<&str>,
+) -> Option<String> {
+    let e = efforts?;
+    if cur_level.is_some_and(|c| level_supported(Some(e), c)) {
+        return None;
+    }
+    let def = default_level.unwrap_or("");
+    Some(if level_supported(Some(e), def) {
+        def.to_string()
+    } else {
+        highest_effort(Some(e))
+    })
+}
+
 /// v2 大帧分片重组器（rpc_chunk）。V1 先实现校验 + 重组。
 #[derive(Default)]
 pub struct ChunkAsm {
@@ -856,6 +887,22 @@ fn update_meta<R: tauri::Runtime>(app: &AppHandle<R>, key: &str, f: impl FnOnce(
     }
 }
 
+/// `set_model` 的成功回包（切模型后要不要落思考档、落哪一档，只在这一帧上判定）。
+fn is_set_model_ok(v: &serde_json::Value) -> bool {
+    v.get("type").and_then(|t| t.as_str()) == Some("response")
+        && v.get("command").and_then(|c| c.as_str()) == Some("set_model")
+        && v.get("success").and_then(|s| s.as_bool()).unwrap_or(false)
+}
+
+/// 进程表里的**当前思考档真值**（切模型后的「档位是否仍然合法」判定用）。
+/// 快照被别的路径占着（`try_lock` 失败）时返回 `None`——那就会走「落默认档」分支，
+/// 与 omp 的静默忽略相比只是多设一次档，不出错。
+fn current_thinking_level<R: tauri::Runtime>(app: &AppHandle<R>, key: &str) -> Option<String> {
+    let map = app.state::<crate::commands::AppState>().runtime.clone();
+    let guard = map.try_lock().ok()?;
+    guard.get(key).and_then(|r| r.meta.thinking_level.clone())
+}
+
 /// 帧分类结果：状态回读 / 普通透传（附可选跟进命令）/ 本地消化。
 #[derive(Debug, PartialEq)]
 pub enum FrameAction {
@@ -870,10 +917,15 @@ pub enum FrameAction {
 
 /// 判断一帧要不要跟进命令（纯函数，便于单测）。
 ///
-/// 两条实测约束驱动此处逻辑（见 docs/rpc-memo.md §3）：
-/// 1. omp 切模型后**不会**自动修正思考档（切到无思考模型会直接丢掉档位）→ 自动重设为新模型最高档；
-/// 2. `set_thinking_level` 对非法档也回 `success:true`（静默归一/忽略）→ 只能靠 `get_state` 回读收敛 UI。
-pub fn classify(v: &serde_json::Value) -> FrameAction {
+/// 实测约束驱动此处逻辑（omp 18.10.3 rpc-ui）：
+/// 1. 切模型时 omp **保留仍然合法的档位**、切到无思考模型直接丢档且不恢复 → 只有「档位缺失 /
+///    对新模型非法」才由壳侧落**omp 配置的默认档**（见 [`auto_think_level`]），有效档不覆盖；
+/// 2. `set_thinking_level` 对非法档也回 `success:true`（静默忽略）→ 只能靠 `get_state` 回读收敛 UI。
+pub fn classify(
+    v: &serde_json::Value,
+    cur_level: Option<&str>,
+    default_level: Option<&str>,
+) -> FrameAction {
     if v.get("type").and_then(|t| t.as_str()) != Some("response") {
         return FrameAction::Forward(None);
     }
@@ -890,13 +942,17 @@ pub fn classify(v: &serde_json::Value) -> FrameAction {
         // 同上：ask 对话框开关（V40）由壳侧在 spawn 时打开，回执不进前端。
         "set_ask_dialog" => FrameAction::Swallow,
         "set_model" if ok => {
-            let efforts = v.get("data").and_then(efforts_of);
-            let level = highest_effort(efforts.as_ref());
-            FrameAction::Forward(jsonl_line(
-                "auto-think",
-                "set_thinking_level",
-                serde_json::json!({"level": level}),
-            ))
+            let efforts = v.get("data").filter(|d| d.get("provider").is_some()).and_then(efforts_of);
+            match auto_think_level(efforts.as_ref(), cur_level, default_level) {
+                // 缺档：落 omp 默认档（其回包会带回读，见下面的 `set_thinking_level` 分支）
+                Some(level) => FrameAction::Forward(jsonl_line(
+                    "auto-think",
+                    "set_thinking_level",
+                    serde_json::json!({"level": level}),
+                )),
+                // 档位保留 / 无需落档：回读一次真值（无思考模型丢档、omp 静默改档都靠它收敛）
+                None => FrameAction::Forward(jsonl_line(STATE_SYNC_ID, "get_state", serde_json::Value::Null)),
+            }
         }
         // 切换失败也回读：纠正前端乐观态
         "set_model" | "set_thinking_level" => {
@@ -935,7 +991,17 @@ async fn handle_frame<R: tauri::Runtime>(
         maybe_auto_title(session_file, stdin, auto_title).await;
     }
     if v.get("type").and_then(|t| t.as_str()) == Some("response") {
-        match classify(v) {
+        // 切模型成功 = 唯一要做「思考档兜底」判定的帧：取当前档真值（进程表）+ omp 配置的
+        // 默认档（一次 `omp config get`，只在切模型时发生，不进任何热路径）。
+        let (cur_level, default_level) = if is_set_model_ok(v) {
+            (
+                current_thinking_level(app, key),
+                crate::settings::read_default_thinking_level(&app.state::<crate::commands::AppState>()).await,
+            )
+        } else {
+            (None, None)
+        };
+        match classify(v, cur_level.as_deref(), default_level.as_deref()) {
             FrameAction::Swallow => return,
             FrameAction::StateSync => {
                 if v.get("success").and_then(|s| s.as_bool()).unwrap_or(false) {
@@ -2043,24 +2109,50 @@ mod tests {
     }
 
     #[test]
-    fn classify_set_model_success_switches_to_highest_effort() {
-        // 切模型成功 → 自动重设该模型最高档（此处 max）
+    fn auto_think_level_keeps_valid_level_and_falls_back_to_default() {
+        let opus_efforts = vec!["low".into(), "medium".into(), "high".into(), "xhigh".into(), "max".into()];
+        let gemini = vec!["low".into(), "medium".into(), "high".into()];
+        // 有效档保留（含 off：omp 不列它但恒定生效）——不覆盖用户已选的档
+        assert_eq!(auto_think_level(Some(&opus_efforts), Some("low"), Some("medium")), None);
+        assert_eq!(auto_think_level(Some(&opus_efforts), Some("off"), None), None);
+        // 缺档 → 落 omp 配置的默认档
+        assert_eq!(auto_think_level(Some(&opus_efforts), None, Some("medium")), Some("medium".into()));
+        // 配置默认档不被该模型支持（或没读到）→ 该模型最高档
+        assert_eq!(auto_think_level(Some(&gemini), None, Some("max")), Some("high".into()));
+        assert_eq!(auto_think_level(Some(&gemini), None, None), Some("high".into()));
+        // 当前档对新模型非法 → 落默认档
+        assert_eq!(auto_think_level(Some(&gemini), Some("max"), Some("low")), Some("low".into()));
+        // 新模型不支持思考 → 不落档（omp 自己丢档，回读收敛）
+        assert_eq!(auto_think_level(None, Some("high"), Some("max")), None);
+    }
+
+    #[test]
+    fn classify_set_model_applies_default_or_reads_back() {
         let frame = serde_json::json!({
             "id": "m-1", "type": "response", "command": "set_model", "success": true, "data": opus()
         });
-        let line = injected(classify(&frame)).unwrap();
-        let v: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+        // 缺档 + 配置默认档 → 下发配置里的那一档（不是最高档）
+        let v: serde_json::Value =
+            serde_json::from_str(injected(classify(&frame, None, Some("medium"))).unwrap().trim()).unwrap();
         assert_eq!(v["type"], "set_thinking_level");
-        assert_eq!(v["level"], "max");
+        assert_eq!(v["level"], "medium");
+        assert_eq!(v["id"], "auto-think");
 
-        // 无思考模型 → 归一到 off
+        // 当前档对新模型仍然合法 → 不落档，改回读真值（omp 会保留它）
+        let v2: serde_json::Value =
+            serde_json::from_str(injected(classify(&frame, Some("low"), Some("medium"))).unwrap().trim())
+                .unwrap();
+        assert_eq!(v2["id"], STATE_SYNC_ID);
+        assert_eq!(v2["type"], "get_state");
+
+        // 无思考模型 → 不落档（omp 丢档），回读把真值收敛成缺档
         let haiku = serde_json::json!({
             "id": "m-2", "type": "response", "command": "set_model", "success": true,
             "data": {"provider": "commandcode", "id": "claude-haiku-4-5-20251001", "reasoning": false}
         });
-        let v2: serde_json::Value =
-            serde_json::from_str(injected(classify(&haiku)).unwrap().trim()).unwrap();
-        assert_eq!(v2["level"], "off");
+        let v3: serde_json::Value =
+            serde_json::from_str(injected(classify(&haiku, Some("high"), Some("max"))).unwrap().trim()).unwrap();
+        assert_eq!(v3["type"], "get_state");
     }
 
     #[test]
@@ -2070,7 +2162,7 @@ mod tests {
             "id": "m-3", "type": "response", "command": "set_model", "success": false, "error": "Model not found"
         });
         let v: serde_json::Value =
-            serde_json::from_str(injected(classify(&frame)).unwrap().trim()).unwrap();
+            serde_json::from_str(injected(classify(&frame, None, None)).unwrap().trim()).unwrap();
         assert_eq!(v["id"], STATE_SYNC_ID);
         assert_eq!(v["type"], "get_state");
     }
@@ -2081,18 +2173,18 @@ mod tests {
             "id": "t-1", "type": "response", "command": "set_thinking_level", "success": true
         });
         let v: serde_json::Value =
-            serde_json::from_str(injected(classify(&frame)).unwrap().trim()).unwrap();
+            serde_json::from_str(injected(classify(&frame, None, None)).unwrap().trim()).unwrap();
         assert_eq!(v["type"], "get_state");
     }
 
     #[test]
     fn classify_passthrough_and_state_sync() {
         // 普通事件：透传、不注入
-        assert_eq!(classify(&serde_json::json!({"type": "agent_start"})), FrameAction::Forward(None));
-        assert_eq!(classify(&serde_json::json!({"type": "prompt_result"})), FrameAction::Forward(None));
+        assert_eq!(classify(&serde_json::json!({"type": "agent_start"}), None, None), FrameAction::Forward(None));
+        assert_eq!(classify(&serde_json::json!({"type": "prompt_result"}), None, None), FrameAction::Forward(None));
         // prompt 回包不触发回读
         let p = serde_json::json!({"id": "p-1", "type": "response", "command": "prompt", "success": true});
-        assert_eq!(classify(&p), FrameAction::Forward(None));
+        assert_eq!(classify(&p, None, None), FrameAction::Forward(None));
     }
 
     #[test]
@@ -2115,12 +2207,12 @@ mod tests {
             "id": "h-sub", "type": "response", "command": "set_subagent_subscription", "success": true,
             "data": {"level": "progress"}
         });
-        assert_eq!(classify(&ok), FrameAction::Swallow);
+        assert_eq!(classify(&ok, None, None), FrameAction::Swallow);
         let fail = serde_json::json!({
             "id": "h-sub", "type": "response", "command": "set_subagent_subscription", "success": false,
             "error": "Unknown command"
         });
-        assert_eq!(classify(&fail), FrameAction::Swallow);
+        assert_eq!(classify(&fail, None, None), FrameAction::Swallow);
     }
 
     #[test]
@@ -2156,7 +2248,7 @@ mod tests {
         assert!(!is_local_prompt_result(&failed));
         // 状态回读回包：自己消化，不回环（get_state 不再触发注入）
         let s = serde_json::json!({"id": STATE_SYNC_ID, "type": "response", "command": "get_state", "success": true});
-        assert_eq!(classify(&s), FrameAction::StateSync);
+        assert_eq!(classify(&s, None, None), FrameAction::StateSync);
     }
 
     // ---------- V34 闲置回收 ----------

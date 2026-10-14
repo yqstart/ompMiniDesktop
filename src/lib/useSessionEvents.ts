@@ -544,11 +544,12 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dic
 
 /**
  * 把 omp 回读的运行时真值落到 store：模型 + 思考档。
- * 档位非法/缺失（实测量产场景：切到无思考模型会丢掉档位）→ 归一到该模型最高档并下发纠正。
+ * 档位非法/缺失（实测场景：切到无思考模型会丢掉档位，且切回来不会自动恢复）→ 归一到
+ * **omp 配置的默认档**（`defaultThinkingLevel` 夹到支持集，见 `lib/thinkingDefault.ts`）并下发纠正。
  */
 function applyRuntime(sid: string, rt: SessionRuntime) {
  const efforts = rt.efforts ?? null;
- const { level, shouldSync } = resolveThinking(efforts, rt.thinkingLevel);
+ const { level, shouldSync } = resolveThinking(efforts, rt.thinkingLevel, useApp.getState().ompDefaultThinking);
  useApp.setState((s) => ({
   currentEfforts: efforts,
   currentRuntime: rt,

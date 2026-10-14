@@ -2559,6 +2559,15 @@ pub async fn get_global_approval(state: State<'_, AppState>) -> Result<String, C
     Ok(v.get("value").and_then(|x| x.as_str()).unwrap_or("write").to_string())
 }
 
+/// omp 全局「默认思考等级」（`defaultThinkingLevel`，读 omp 全局配置；cwd 钉 agentDir 与设置页同层）。
+/// 前端思考档选择器的默认显示与壳侧切模型兜底（`runtime::auto_think_level`）共用这一份配置。
+#[tauri::command]
+pub async fn get_default_thinking_level(
+    state: State<'_, AppState>,
+) -> Result<Option<String>, CmdError> {
+    Ok(crate::settings::read_default_thinking_level(&state).await)
+}
+
 /// 写全局权限档（`omp config set tools.approvalMode`）。
 #[tauri::command]
 pub async fn set_global_approval(state: State<'_, AppState>, mode: String) -> Result<(), CmdError> {

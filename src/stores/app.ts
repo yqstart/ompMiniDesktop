@@ -89,6 +89,12 @@ type AppState = {
  currentThinking: string | null;
  /** 当前模型可用思考档（omp 真值；null = 不支持思考）。驱动思考档下拉只列支持项。 */
  currentEfforts: string[] | null;
+ /**
+  * omp 全局「默认思考等级」（`defaultThinkingLevel`，启动 / 打开思考档菜单时读）：
+  * 档位真值不可用（缺档 / 对新模型非法）时显示与兜底就用它（夹到模型支持集）。
+  * `null` = 还没读到（配置未设置与读取失败同形，显示层退回最高档）。
+  */
+ ompDefaultThinking: string | null;
  /** 当前会话的运行时真值快照（上下文占用 / 本轮用量 / 耗时）：状态条纯透传的数据源。 */
  currentRuntime: SessionRuntime | null;
  /**
@@ -103,8 +109,8 @@ type AppState = {
  plansBySession: Record<string, TodoPhase[]>;
  /** 会话级权限覆盖（覆盖层 `sessionApproval` 的水合；徽标显示用）。 */
  sessionApprovals: Record<string, string>;
- /** 输入卡内的下拉互斥槽：同一时刻只开一个（model/approval/plus/project/branch/context/usage）。 */
- composerMenu: "model" | "approval" | "plus" | "project" | "branch" | "context" | "usage" | null;
+ /** 输入卡内的下拉互斥槽：同一时刻只开一个（model/thinking/approval/plus/project/branch/context/usage）。 */
+ composerMenu: "model" | "thinking" | "approval" | "plus" | "project" | "branch" | "context" | "usage" | null;
  /** 消息流「首屏增量」窗口：当前会话已渲染的消息条数（首屏 200 条）。 */
  threadLimitSid: string | null;
  threadLimit: number;
@@ -382,6 +388,7 @@ export const useApp = create<AppState>((set, get) => ({
  currentModel: null,
  currentThinking: null,
  currentEfforts: null,
+ ompDefaultThinking: null,
  currentRuntime: null,
  unreadBySession: {},
  markUnread: (sid) =>

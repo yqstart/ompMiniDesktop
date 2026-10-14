@@ -107,6 +107,8 @@ export const IPC = {
  setModel: "set_model",
  setThinking: "set_thinking",
  getSessionRuntime: "get_session_runtime",
+ /** omp 全局「默认思考等级」（`defaultThinkingLevel`）：思考档选择器的默认显示与兜底档。 */
+ getDefaultThinkingLevel: "get_default_thinking_level",
  getGlobalApproval: "get_global_approval",
  setGlobalApproval: "set_global_approval",
  setSessionApproval: "set_session_approval",

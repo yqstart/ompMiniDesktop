@@ -256,6 +256,19 @@ fn settings_cwd(dir: &Path) -> Option<&Path> {
     dir.is_dir().then_some(dir)
 }
 
+/// 读 omp 全局层的「默认思考等级」（`defaultThinkingLevel`）——壳侧所有**思考档兜底**的唯一来源：
+/// 会话里档位缺失 / 对新模型非法时落的就是它（`runtime.rs` 的 `auto_think_level` 夹到模型支持集），
+/// 输入卡上的思考档选择器在真值不可用时显示的也是它。
+///
+/// cwd 钉 agentDir（与设置页同层，读全局层的有效值）；omp 不在 / 未设置 / 读失败返回 `None`，
+/// 调用方自行兜底（最高档）——这里不猜、不硬编码默认值。
+pub async fn read_default_thinking_level(state: &AppState) -> Option<String> {
+    let bin = state.omp_path.lock().await.clone()?;
+    let dir = state.agent_dir.lock().await.clone();
+    let v = read_one(&dir, &bin, "defaultThinkingLevel").await.ok()?;
+    v.get("value").and_then(|x| x.as_str()).map(str::to_string)
+}
+
 /// 从 `omp config get` 的回包造一个视图项（写 / 恢复默认后回读用同一个口径）。
 fn item_from_get(key: &str, v: &serde_json::Value) -> SettingItem {
     SettingItem {

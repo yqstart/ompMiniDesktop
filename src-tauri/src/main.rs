@@ -106,6 +106,7 @@ fn main() {
             set_thinking,
             get_session_runtime,
             get_global_approval,
+            get_default_thinking_level,
             set_global_approval,
             set_session_approval,
             get_git_info,

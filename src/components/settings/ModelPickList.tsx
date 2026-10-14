@@ -67,7 +67,8 @@ export function ModelPickList({
    >
     <span className="min-w-0 flex-1">
      <span className="block truncate">{shortModelName(m)}</span>
-     <span className="block truncate font-mono text-[11px] text-faint">{m.id}</span>
+     {/* 第二行 = 完整 selector（provider/id）：同名模型来自多家时，只有它能说清是哪一个 */}
+     <span className="block truncate font-mono text-[11px] text-faint">{m.selector}</span>
     </span>
     <span className="ml-auto flex shrink-0 gap-1 font-mono text-xs text-muted">
      {m.contextWindow ? <span>{fmtContextWindow(m.contextWindow)}</span> : null}

@@ -73,6 +73,8 @@ vi.mock("@shared/api", () => ({
    session_approval: {},
   })),
   getGlobalApproval: vi.fn(async () => "yolo"),
+  // 启动就读 omp 默认思考档（思考档选择器的默认显示与兜底档）：同样一起手就读
+  getDefaultThinkingLevel: vi.fn(async () => "max"),
  },
 }));
 vi.mock("@tauri-apps/api/event", () => ({

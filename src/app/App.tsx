@@ -23,6 +23,7 @@ import { refreshWorkspaceGitState, startWorkspaceGitPolling } from "../lib/commi
 import { autoCheckOnBoot } from "../lib/appUpdate";
 import { autoCheckOmpUpdate } from "../lib/ompUpdate";
 import { loadApprovalState } from "../lib/sessionApproval";
+import { ensureOmpDefaultThinking } from "../lib/thinkingDefault";
 import { syncTitlePromptLanguage } from "../lib/titlePrompt";
 import { hasOpenDialog, useDialogFocus } from "../lib/useDropdown";
 import { isMacKeyboard } from "../lib/platform";
@@ -301,6 +302,12 @@ export function App() {
   // 启动就水合执行模式真值（覆盖层的本会话覆盖 + omp 全局默认档）：输入卡上的档位显示读它。
   // 读不到就停在「未知」——**不许拿某一档兜底**（兜底 = 显示与 omp 实际生效的不一致）。
   void loadApprovalState();
+ }, []);
+
+ useEffect(() => {
+  // 启动就读 omp 的默认思考档（`defaultThinkingLevel`）：思考档选择器的默认显示与兜底档读它
+  // （见 `lib/thinkingDefault.ts`）。读不到退回最高档兜底，打开思考档菜单时自然重试。
+  void ensureOmpDefaultThinking();
  }, []);
 
  useEffect(() => {

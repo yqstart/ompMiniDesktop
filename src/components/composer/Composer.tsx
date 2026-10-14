@@ -27,7 +27,8 @@ import { MentionList } from "./MentionList";
 import { SlashMenu } from "./SlashMenu";
 import { PlusMenu } from "./PlusMenu";
 import { ApprovalModeMenu } from "./ApprovalModeMenu";
-import { ModelThinkingMenu } from "./ModelThinkingMenu";
+import { ModelMenu } from "./ModelMenu";
+import { ThinkingMenu } from "./ThinkingMenu";
 
 /** 大段粘贴转文件引用的阈值（字符数；V41，zcode 同款——超过就存文件 + `@` 注入）。 */
 const PASTE_FILE_MIN = 2000;
@@ -873,7 +874,7 @@ export function Composer() {
     <div className="flex flex-wrap items-center gap-0.5 gap-y-1 px-2 py-1.5">
      {/* 卡底工具行（v2 §3）：左 = `+`（附件 / 引用文件 / 图片）+ 执行模式菜单 + 排队徽标；
          右 = 压缩行动点 / 上下文容量环 / 供应商用量（2026-10-14 从顶栏右端搬进输入卡）+
-         模型 · 思考档 + 发送 / 停止 */}
+         模型 / 思考档（两个独立选择器）+ 发送 / 停止 */}
      <PlusMenu
       onPickImages={() => void pickImages()}
       onPickRef={() => {
@@ -887,7 +888,9 @@ export function Composer() {
       <CompactButton />
       <ContextMeter />
       <UsageLimits />
-      <ModelThinkingMenu />
+      {/* 模型与思考档是两个独立选择器（2026-10-14 拆分）：模型名 ▾ 与 档位 ▾ 各开各的浮层 */}
+      <ModelMenu />
+      <ThinkingMenu />
       {/* 运行中 = 同一个圆形键变「停止」（v2：idle 圆形 ↑；running 停止 ■） */}
       {running ? (
        <button

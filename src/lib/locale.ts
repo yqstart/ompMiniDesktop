@@ -1220,10 +1220,9 @@ const ZH = {
 
  // 思考档选择器
  chooseThinkingAria: "选择思考等级",
- thinkingUnavailableTitle: "当前模型不支持思考等级",
  thinkingLevelsTitle: "可用档位：{0}",
  thinkingLevelAria: "思考等级 {0}",
- thinkingUnsupported: "当前模型不支持思考",
+ thinkingDefaultHint: "omp 默认：{0}",
 
  // 更新
  updateBellAvailable: "发现新版本 {0}，点击查看",
@@ -2503,10 +2502,9 @@ const EN: Record<TextKey, string> = {
  switchToProjectAria: "Switch to {0} and start a new chat there",
  noProjectsSidebar: "No projects yet — add one in the sidebar",
  chooseThinkingAria: "Choose thinking level",
- thinkingUnavailableTitle: "The current model does not support thinking levels",
  thinkingLevelsTitle: "Available: {0}",
  thinkingLevelAria: "Thinking level {0}",
- thinkingUnsupported: "The current model does not support thinking",
+ thinkingDefaultHint: "omp default: {0}",
  updateBellAvailable: "Version {0} is available — click for details",
  updateBellDownloading: "Downloading update…",
  updateBellReady: "Version {0} is ready",

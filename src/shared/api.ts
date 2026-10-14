@@ -172,6 +172,11 @@ export const api = {
  setThinking: (id: string, level: string) => call<void>(IPC.setThinking, { id, level }),
  getSessionRuntime: (id: string) => call<SessionRuntime | null>(IPC.getSessionRuntime, { id }),
  /**
+  * omp 全局「默认思考等级」（`defaultThinkingLevel`，读 omp 全局配置）——思考档的默认来源：
+  * 会话里档位缺失 / 对新模型非法时壳侧落的就是它（夹到模型支持集）；未设置返回 `null`。
+  */
+ getDefaultThinkingLevel: () => call<string | null>(IPC.getDefaultThinkingLevel),
+ /**
   * 上下文分项（输入框工具行的「上下文容量」面板）：已用 / 窗口 / 非消息是 omp 真值，
   * 非消息各档按字符量估算后缩放到真值。**只读**——不启动进程、不写任何东西。
   */
