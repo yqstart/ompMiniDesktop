@@ -19,6 +19,7 @@ import {
  frameToViewMsgs,
  latestBtwTurn,
  syncSessionRuntime,
+ todoPhasesOf,
  trimSessionHistories,
 } from "./useSessionEvents";
 
@@ -382,5 +383,37 @@ describe("流式帧：text_end / 消息内 id / 工具占位卡（V46）", () =>
    F({ type: "thinking_end", contentIndex: 0, content: "\n" }),
   ]);
   expect(events.filter((m) => m.kind === "thinking")).toMatchObject([{ complete: true }]);
+ });
+});
+
+/**
+ * 任务清单（V50）：todo 工具帧的 `details.phases` 是全量真值
+ * （`tool_execution_end` 与 `message_end{toolResult}` 两路同形，omp 18.10.4 实测）；
+ * `syncSessionRuntime` 的回读数组即覆盖——空数组 = 已清空（浮卡退场）。
+ */
+describe("任务清单：todo 帧解析与回读收敛", () => {
+ const PHASES = [{ name: "默认阶段", tasks: [{ content: "甲", status: "in_progress" }] }];
+
+ it("todoPhasesOf：两路帧同解，非 todo / 漂移形状返回 null", () => {
+  expect(todoPhasesOf({ type: "tool_execution_end", toolName: "todo", result: { details: { phases: PHASES } } })).toEqual(PHASES);
+  expect(
+   todoPhasesOf({ type: "message_end", message: { role: "toolResult", toolName: "todo", details: { phases: PHASES } } }),
+  ).toEqual(PHASES);
+  expect(todoPhasesOf({ type: "tool_execution_end", toolName: "bash", result: { details: { phases: PHASES } } })).toBeNull();
+  expect(todoPhasesOf({ type: "tool_execution_end", toolName: "todo", result: { details: { phases: "x" } } })).toBeNull();
+  // 提醒帧（未完成项）不是清单源：真实形状 `{todos, attempt, maxAttempts}` 没有 phases
+  expect(todoPhasesOf({ type: "todo_reminder", todos: [{ content: "甲" }], attempt: 1 })).toBeNull();
+ });
+
+ it("回读：数组即覆盖；空数组清空（数据与浮卡状态一起删）", async () => {
+  useApp.setState({ activeSessionId: "s1", plansBySession: {}, planCardBySession: {} });
+  vi.mocked(api.getSessionRuntime).mockResolvedValueOnce({ todoPhases: PHASES } as never);
+  await syncSessionRuntime("s1");
+  expect(useApp.getState().plansBySession["s1"]).toEqual(PHASES);
+  expect(useApp.getState().planCardBySession["s1"]).toBe("expanded");
+  vi.mocked(api.getSessionRuntime).mockResolvedValueOnce({ todoPhases: [] } as never);
+  await syncSessionRuntime("s1");
+  expect("s1" in useApp.getState().plansBySession).toBe(false);
+  expect("s1" in useApp.getState().planCardBySession).toBe(false);
  });
 });

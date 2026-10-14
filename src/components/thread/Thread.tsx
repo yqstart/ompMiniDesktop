@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, Bulb, CheckListSquare, ChevronRight, Sparkles } from "reicon-react";
+import { ArrowDown, Bulb, ChevronRight, Sparkles } from "reicon-react";
 import { THREAD_PAGE, useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
@@ -7,6 +7,7 @@ import { api } from "@shared/api";
 import { openBtwPanel } from "../../lib/btw";
 import { buildThreadLayout } from "../../lib/threadLayout";
 import type { ViewMsg } from "@shared/types";
+import { PlanCard } from "./PlanCard";
 import { ToolRow } from "./ToolRow";
 import { ToolRunRow } from "./ToolRunRow";
 import { TurnRow } from "./TurnRow";
@@ -319,6 +320,7 @@ export function Thread() {
       {workingVisible && <WorkingRow tight={isTrace(shown[shown.length - 1])} />}
      </div>
     </div>
+    <PlanCard />
     {awayFromBottom && (
      // 回到底部（V47）：离底（> NEAR_BOTTOM_PX）时浮在消息列视口底部中央，点击 = 恢复跟随并读底。
      // 任何离底都露面（不只流式——长会话回看历史同样需要一键回底）。
@@ -534,7 +536,6 @@ const ThreadRow = memo(function ThreadRow({
    {m.kind === "text" && <AssistantText text={m.text} complete={m.complete} />}
    {m.kind === "thinking" && <ThinkingBlock m={m} />}
    {m.kind === "tool" && <ToolRow m={m} cwd={cwd} />}
-   {m.kind === "plan" && <PlanCard m={m} />}
    {m.kind === "approval" && sessionId && <ApprovalCard m={m} sessionId={sessionId} />}
    {m.kind === "ui" && sessionId && <UiRequestCard m={m} sessionId={sessionId} />}
    {m.kind === "files" && <MentionChips m={m} cwd={cwd} />}
@@ -562,55 +563,6 @@ const ThreadRow = memo(function ThreadRow({
   </div>
  );
 });
-
-/**
- * 任务计划卡（只读）：`todoPhases` / `todo_reminder` 的阶段清单展示。
- * 状态「文字 + 颜色 + 符号」三信号（进行中 / 待办 / 完成），颜色不作唯一信号。
- */
-function PlanCard({ m }: { m: Extract<ViewMsg, { kind: "plan" }> }) {
- const t = useText();
- /** 状态符号的颜色：完成 ok / 进行中 accent / 待办 faint（与状态词、符号形状并行）。 */
- const tone = (status: string) =>
-  status === "completed" ? "text-ok" : status === "in_progress" ? "text-accent" : "text-faint";
- return (
-  <div
-   className="rounded-lg border border-border bg-surface px-3 py-2"
-   role="group"
-   aria-label={t.planTitle}
-  >
-   <div className="mb-1 flex items-center gap-1.5 text-[13px] font-medium text-muted">
-    <CheckListSquare size={13} className="shrink-0 text-accent" aria-hidden />
-    {t.planTitle}
-   </div>
-   <div className="space-y-1.5">
-    {m.phases.map((p) => (
-     <div key={p.id}>
-      <div className="text-[13px] font-medium">{p.name}</div>
-      <ul className="mt-0.5 space-y-0.5">
-       {p.tasks.map((task) => (
-        <li key={task.id} className="flex items-start gap-1.5 text-[13px] text-muted">
-         <span aria-hidden className={tone(task.status)}>
-          {task.status === "completed" ? "✓" : task.status === "in_progress" ? "◐" : "○"}
-         </span>
-         <span className={task.status === "in_progress" ? "text-foreground" : undefined}>
-          {task.content}
-          <span className="sr-only">
-           {task.status === "completed"
-            ? t.planDone
-            : task.status === "in_progress"
-             ? t.planInProgress
-             : t.planTodo}
-          </span>
-         </span>
-        </li>
-       ))}
-      </ul>
-     </div>
-    ))}
-   </div>
-  </div>
- );
-}
 
 export function SessionActions() {
  const { activeSessionId } = useApp();

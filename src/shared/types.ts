@@ -914,7 +914,7 @@ export type SessionRuntime = {
  /** slow 模式（`get_state.slowModeSupported/Enabled`；不支持时 supported=false）。 */
  slowModeSupported?: boolean | null;
  slowModeEnabled?: boolean | null;
- /** 任务计划（`get_state.todoPhases` 原样透传；只读展示）。 */
+ /** 任务清单（`get_state.todoPhases` 原样透传；空数组 = 无清单/已清空，见 store 的 `applyPlans`）。 */
  todoPhases?: TodoPhase[] | null;
  /** 可用命令（`available_commands_update` 缓存；`/` 补全的数据源）。 */
  commands?: AvailableCommand[] | null;
@@ -923,11 +923,14 @@ export type SessionRuntime = {
  status?: SessionStatus["state"] | null;
 };
 
-/** 任务计划的一条任务（`get_state.todoPhases` 原样透传）。 */
-export type TodoTask = { id: string; content: string; status: string };
+/** 任务清单的一条任务（omp `todoPhases` / todo 帧 `details.phases` 原样透传；上游无 id）。 */
+export type TodoTask = { content: string; status: string; blocker?: string };
 
-/** 任务计划的一个阶段。 */
-export type TodoPhase = { id: string; name: string; tasks: TodoTask[] };
+/** 任务清单的一个阶段（上游无 id）。 */
+export type TodoPhase = { name: string; tasks: TodoTask[] };
+
+/** 任务清单浮卡的 UI 状态（会话级；无记录 = 计划首次出现自动展开，见 store 的 `applyPlans`）。 */
+export type PlanCardState = "expanded" | "collapsed" | "hidden";
 
 /** 可用命令的一条子命令（omp `subcommands[]` 原样透传；本期只作行内说明，不做二级补全）。 */
 export type AvailableSubcommand = { name: string; description?: string; usage?: string };
@@ -1051,11 +1054,6 @@ type ViewMsgBase =
   * 渲染为灰字代码区，不触碰运行状态（状态机已由后端收敛到 idle）。
   */
  | { kind: "command"; id: string; output: string }
- /**
-  * 任务计划（`get_state.todoPhases` / `todo_reminder`）：长任务的阶段清单，
-  * 只读展示（改计划走 prompt 下指令），与 ToolCard 时间线互补。
-  */
- | { kind: "plan"; id: string; phases: TodoPhase[] }
  /**
   * 通用 UI 请求（非审批）：omp 的 `confirm` / `input` / `editor` 与非审批 `select`。
   * 回包语义各不相同（`{confirmed}` / `{value}` / `{cancelled}`），由后端 `respond_ui` 按 `method` 组装。

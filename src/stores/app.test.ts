@@ -81,3 +81,48 @@ describe("队列真值与 V40 聊天域动作", () => {
   useApp.getState().setStatsOpen(false);
  });
 });
+
+/**
+ * 任务清单（V50）：`applyPlans` 是 `plansBySession` 的唯一写入面（todo 工具帧
+ * `details.phases` + `get_state.todoPhases` 回读），`planCardBySession` 是浮卡 UI 状态。
+ */
+describe("任务清单：applyPlans / setPlanCard", () => {
+ const P1 = [{ name: "阶段一", tasks: [{ content: "甲", status: "in_progress" }] }];
+
+ it("首次写入自动展开；同值重写不换引用", () => {
+  useApp.setState({ plansBySession: {}, planCardBySession: {} });
+  useApp.getState().applyPlans("s1", P1);
+  expect(useApp.getState().plansBySession["s1"]).toEqual(P1);
+  expect(useApp.getState().planCardBySession["s1"]).toBe("expanded");
+  const before = useApp.getState().plansBySession;
+  useApp.getState().applyPlans("s1", P1);
+  // 同一个值再写（帧与回读会送两遍）：store 引用不动，不触发重渲
+  expect(useApp.getState().plansBySession).toBe(before);
+ });
+
+ it("用户收起 / 隐藏后，后续清单更新不覆盖开合状态", () => {
+  useApp.setState({ plansBySession: {}, planCardBySession: {} });
+  useApp.getState().applyPlans("s1", P1);
+  useApp.getState().setPlanCard("s1", "collapsed");
+  useApp.getState().applyPlans("s1", [{ name: "阶段一", tasks: [{ content: "甲", status: "completed" }] }]);
+  expect(useApp.getState().planCardBySession["s1"]).toBe("collapsed");
+ });
+
+ it("空数组 = 清空（数据与浮卡状态一起删；下次计划重新自动展开）", () => {
+  useApp.setState({ plansBySession: {}, planCardBySession: {} });
+  useApp.getState().applyPlans("s1", P1);
+  useApp.getState().applyPlans("s1", []);
+  expect("s1" in useApp.getState().plansBySession).toBe(false);
+  expect("s1" in useApp.getState().planCardBySession).toBe(false);
+  useApp.getState().applyPlans("s1", P1);
+  expect(useApp.getState().planCardBySession["s1"]).toBe("expanded");
+ });
+
+ it("setPlanCard：同值不写（引用稳定）", () => {
+  useApp.setState({ planCardBySession: {} });
+  useApp.getState().setPlanCard("s1", "collapsed");
+  const cards = useApp.getState().planCardBySession;
+  useApp.getState().setPlanCard("s1", "collapsed");
+  expect(useApp.getState().planCardBySession).toBe(cards);
+ });
+});

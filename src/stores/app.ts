@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { BtwRecord, CheckoutView, CommitOutcome, CommitTaskView, Goal, HealthInfo, ImageAttachment, ModelCatalog, OmpUpdate, OmpUpdateRun, ProjectView, QueuedMessages, RefPickerTarget, SessionRuntime, SessionStatus, SessionView, SubAgentInfo, TodoPhase, UpdateState, ViewMsg, WorkspaceGitState, WorkspaceView } from "@shared/types";
+import type { BtwRecord, CheckoutView, CommitOutcome, CommitTaskView, Goal, HealthInfo, ImageAttachment, ModelCatalog, OmpUpdate, OmpUpdateRun, PlanCardState, ProjectView, QueuedMessages, RefPickerTarget, SessionRuntime, SessionStatus, SessionView, SubAgentInfo, TodoPhase, UpdateState, ViewMsg, WorkspaceGitState, WorkspaceView } from "@shared/types";
 import type { Locale, LocaleMode } from "../lib/locale";
 import { loadLocaleMode, resolveLocale, saveLocaleMode, systemLang } from "../lib/locale";
 import { applyTheme, loadTheme, saveTheme, type ThemeMode } from "../lib/theme";
@@ -106,8 +106,10 @@ type AppState = {
  unreadBySession: Record<string, true>;
  markUnread: (sid: string) => void;
  clearUnread: (sid: string) => void;
- /** 任务计划（`todoPhases` 真值 + `todo_reminder` 事件合并，按会话隔离；只读展示）。 */
+ /** 任务清单真值（todo 帧 `details.phases` + `get_state.todoPhases` 回读；按会话隔离）。 */
  plansBySession: Record<string, TodoPhase[]>;
+ /** 任务清单浮卡的 UI 状态（会话级）：无记录 = 首次出现自动展开（见 `applyPlans`）。 */
+ planCardBySession: Record<string, PlanCardState>;
  /** 会话级权限覆盖（覆盖层 `sessionApproval` 的水合；徽标显示用）。 */
  sessionApprovals: Record<string, string>;
  /** 输入卡内的下拉互斥槽：同一时刻只开一个（model/thinking/approval/plus/project/branch/context/usage）。 */
@@ -125,6 +127,10 @@ type AppState = {
  queuedOf: (sid: string | null) => QueuedMessages;
  /** 队列快照写入（`queue_update` 帧 / 运行时回读的唯一入口）。 */
  applyQueue: (sid: string, q: QueuedMessages) => void;
+ /** 任务清单写入（唯一入口）：`details.phases` 帧 / `get_state` 回读；空数组 = 已清空（浮卡退场）。 */
+ applyPlans: (sid: string, phases: TodoPhase[]) => void;
+ /** 任务清单浮卡开合 / 隐藏（会话级）。 */
+ setPlanCard: (sid: string, state: PlanCardState) => void;
  goalOf: (sid: string | null) => Goal | null;
  /** goal 状态写入（`goal_updated` 帧 / 回读的唯一入口）。 */
  setGoal: (sid: string, goal: Goal | null) => void;
@@ -410,6 +416,7 @@ export const useApp = create<AppState>((set, get) => ({
    return { unreadBySession: next };
   }),
  plansBySession: {},
+ planCardBySession: {},
  sessionApprovals: {},
  composerMenu: null,
  threadLimitSid: null,
@@ -441,6 +448,32 @@ export const useApp = create<AppState>((set, get) => ({
  applyQueue: (sid, q) => set((s) => ({ queuedBySession: { ...s.queuedBySession, [sid]: q } })),
  goalOf: (sid) => (sid ? get().goalBySession[sid] ?? null : null),
  setGoal: (sid, goal) => set((s) => ({ goalBySession: { ...s.goalBySession, [sid]: goal } })),
+ applyPlans: (sid, phases) =>
+  set((s) => {
+   if (phases.length === 0) {
+    // 清单已清空（回读 `[]` / `todo_auto_clear` 帧）：数据与浮卡状态一起删——浮卡退场，
+    // 下一个计划出现重新走「首次自动展开」。
+    if (!(sid in s.plansBySession) && !(sid in s.planCardBySession)) return {};
+    const plans = { ...s.plansBySession };
+    const cards = { ...s.planCardBySession };
+    delete plans[sid];
+    delete cards[sid];
+    return { plansBySession: plans, planCardBySession: cards };
+   }
+   // 值没变不写（todo 工具帧与 `get_state` 回读会把同一份清单送两遍）
+   if (JSON.stringify(s.plansBySession[sid]) === JSON.stringify(phases)) return {};
+   return {
+    plansBySession: { ...s.plansBySession, [sid]: phases },
+    // 首次出现（无浮卡记录）：自动展开一次；用户之后的收起 / 隐藏不被覆盖
+    ...(s.planCardBySession[sid]
+     ? {}
+     : { planCardBySession: { ...s.planCardBySession, [sid]: "expanded" as PlanCardState } }),
+   };
+  }),
+ setPlanCard: (sid, state) =>
+  set((s) =>
+   s.planCardBySession[sid] === state ? {} : { planCardBySession: { ...s.planCardBySession, [sid]: state } },
+  ),
  subagentsOf: (sid) => (sid ? get().subagentsBySession[sid] ?? EMPTY_SUBAGENTS : EMPTY_SUBAGENTS),
  upsertSubagent: (sid, info) =>
   set((s) => {

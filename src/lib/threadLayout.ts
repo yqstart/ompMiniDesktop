@@ -3,8 +3,8 @@ import type { ViewMsg } from "@shared/types";
 /** 工具侧消息（聚合与时长行只看它）。 */
 type ToolMsg = Extract<ViewMsg, { kind: "tool" }>;
 
-/** 摘要式折叠行的两类（v2 §2.1）：命令批与编辑卡。 */
-export type ToolGroupKind = "commands" | "edits";
+/** 摘要式折叠行的三类（v2 §2.1）：命令批 / 编辑卡 / 任务清单批。 */
+export type ToolGroupKind = "commands" | "edits" | "plans";
 
 /** 轮时长的完整跨度（展开态显示起止时刻用）。 */
 export type TurnSpan = { ms: number; startAt: number; endAt: number };
@@ -18,11 +18,14 @@ export type LayoutItem =
 /**
  * 一条工具行是否属于某类聚合（不属 = null，保持单行渲染）：
  * - `commands`：bash 类调用（命令批 `Ran N commands`）；
- * - `edits`：写 / 改文件且带行数增量的调用（编辑卡 `Edited N files +X −Y`）。
+ * - `edits`：写 / 改文件且带行数增量的调用（编辑卡 `Edited N files +X −Y`）；
+ * - `plans`：todo 工具调用（任务清单批）——清单**当前状态**由消息列右上角浮卡承载，
+ *   这些行只是「动过清单」的痕迹，连成一段折叠。
  */
 function groupKindOf(m: ToolMsg): ToolGroupKind | null {
  if (m.name === "bash") return "commands";
  if ((m.name === "edit" || m.name === "write") && m.diffStat) return "edits";
+ if (m.name === "todo") return "plans";
  return null;
 }
 

@@ -47,6 +47,13 @@ describe("buildThreadLayout 聚合", () => {
   expect(out.map((i) => i.kind)).toEqual(["msg", "msg", "msg"]);
  });
 
+ it("相邻 ≥2 条 todo 聚合成任务清单批（单条不聚合）", () => {
+  const items = [tool("p1", { name: "todo" }), tool("p2", { name: "todo" }), text("t1")];
+  const out = buildThreadLayout(items, false);
+  expect(out.map((i) => i.kind)).toEqual(["run", "msg"]);
+  expect(out[0]).toMatchObject({ kind: "run", group: "plans" });
+ });
+
  it("无 diffStat 的 edit（拿不到行数）不参与聚合，保持单行", () => {
   const items = [tool("e1", { name: "edit" }), tool("e2", { name: "edit" })];
   const out = buildThreadLayout(items, false);

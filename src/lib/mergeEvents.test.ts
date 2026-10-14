@@ -397,17 +397,15 @@ describe("实时流：本地命令与计划事件", () => {
   expect(msgs).toHaveLength(0);
  });
 
- it("todo_reminder 落成 plan 卡（只读阶段清单）", () => {
+ it("todo_reminder / todo_auto_clear 不进消息流（任务清单走 store 的 plansBySession）", () => {
+  // 上游（omp 18.10.4 实测）`todo_reminder` 的真实形状是「未完成项提醒」：
+  // `{todos, attempt, maxAttempts}`——不带阶段清单。清单真值在 todo 工具帧的
+  // `details.phases`（实时）与 `get_state.todoPhases`（回读），由浮卡 / 右栏展示。
   const msgs = replay([
-   {
-    type: "todo_reminder",
-    phases: [{ id: "ph-1", name: "联调", tasks: [{ id: "t-1", content: "跑 e2e", status: "in_progress" }] }],
-   },
+   { type: "todo_reminder", todos: [{ content: "乙", status: "in_progress" }], attempt: 1, maxAttempts: 3 },
+   { type: "todo_auto_clear" },
   ]);
-  expect(msgs).toHaveLength(1);
-  expect(msgs[0]).toMatchObject({ kind: "plan" });
-  const plan = msgs[0] as Extract<ViewMsg, { kind: "plan" }>;
-  expect(plan.phases[0].tasks[0]).toMatchObject({ content: "跑 e2e", status: "in_progress" });
+  expect(msgs).toHaveLength(0);
  });
 
  it("压缩 / 重试帧落成分隔线（不进消息计数）", () => {

@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { IPC } from "@shared/ipc";
 import { api } from "@shared/api";
 import { useApp } from "../stores/app";
-import type { AskQuestion, BtwRecord, BtwTurn, Goal, SessionRuntime, SessionStatus, SubAgentInfo, ViewMsg } from "@shared/types";
+import type { AskQuestion, BtwRecord, BtwTurn, Goal, SessionRuntime, SessionStatus, SubAgentInfo, TodoPhase, ViewMsg } from "@shared/types";
 import { summarizeArgs, mentionFilesOf, diffStatOf, primaryPathOf, TOOL_OUTPUT_FULL_MAX } from "./viewmsg";
 import { fmt, TEXT, type Text } from "./locale";
 import { imagesFromContent } from "./attachments";
@@ -453,16 +453,10 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dic
  // 本地命令完成信号（`prompt_result{agentInvoked:false}`）：无输出就不渲染，
  // 状态机已由后端收敛，此处只消化帧、不告警。
  if (t === "prompt_result") return out;
- // 计划提醒（`todo_reminder`）：长任务的阶段清单，只读展示。
- if (t === "todo_reminder" || t === "todo_auto_clear") {
-  const phases = (frame as Record<string, unknown>).phases;
-  if (Array.isArray(phases) && phases.length > 0) {
-   out.push({ kind: "plan", id: `plan-${String((frame as Record<string, unknown>).id ?? Date.now())}`, phases: phases as never });
-  } else if (t === "todo_auto_clear") {
-   out.push({ kind: "divider", id: `td-${Date.now()}`, divider: "turn", text: dict.dividerPlanCleared });
-  }
-  return out;
- }
+ // 任务清单帧（`todo_reminder` 提醒 / `todo_auto_clear` 清理）：**不进消息流**——
+ // 真值由 handler 写 `plansBySession`（浮卡 / 右栏「进度」区块展示）。上游
+ // `todo_reminder` 是「未完成项提醒」（`{todos,attempt,maxAttempts}`），不带阶段清单。
+ if (t === "todo_reminder" || t === "todo_auto_clear") return out;
  // 单向通知：`notice` 给一行分隔线。
  if (t === "notice" || t === "irc_message") {
   const text = String((frame as Record<string, unknown>).message ?? "");
@@ -543,6 +537,29 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dic
 }
 
 /**
+ * todo 工具帧的全量清单（`details.phases`）：`tool_execution_end`（`result.details`）与
+ * `message_end{role:"toolResult"}`（`message.details`）两路同形（omp 18.10.4 实测）；
+ * 其余帧 / 形状漂移一律 null（宁可不动，也不拿半截数据覆盖既有清单）。
+ * 导出供单测回放真实帧形状。
+ */
+export function todoPhasesOf(p: Record<string, unknown>): TodoPhase[] | null {
+ const t = p.type;
+ let holder: Record<string, unknown> | undefined;
+ if (t === "tool_execution_end") {
+  if (String(p.toolName ?? "") !== "todo") return null;
+  holder = p.result as Record<string, unknown> | undefined;
+ } else if (t === "message_end") {
+  const m = p.message as Record<string, unknown> | undefined;
+  if (String(m?.toolName ?? "") !== "todo") return null;
+  holder = m;
+ } else {
+  return null;
+ }
+ const phases = (holder?.details as Record<string, unknown> | undefined)?.phases;
+ return Array.isArray(phases) ? (phases as TodoPhase[]) : null;
+}
+
+/**
  * 把 omp 回读的运行时真值落到 store：模型 + 思考档。
  * 档位非法/缺失（实测场景：切到无思考模型会丢掉档位，且切回来不会自动恢复）→ 归一到
  * **omp 配置的默认档**（`defaultThinkingLevel` 夹到支持集，见 `lib/thinkingDefault.ts`）并下发纠正。
@@ -559,10 +576,10 @@ function applyRuntime(sid: string, rt: SessionRuntime) {
   // 会话会显示成 idle：流式「思考中」指示不出现，输入框还会把下一句当新 prompt 发出去
   // （运行中应当走 follow_up / steer，普通 prompt 会打断进行中的轮次）。
   ...(rt.status ? { statusBySession: { ...s.statusBySession, [sid]: { state: rt.status } as SessionStatus } } : {}),
-  ...(Array.isArray(rt.todoPhases) && rt.todoPhases.length > 0
-   ? { plansBySession: { ...s.plansBySession, [sid]: rt.todoPhases } }
-   : {}),
  }));
+ // 任务清单真值（浮卡数据源）：数组即覆盖——空数组 = 已清空（浮卡退场）；
+ // `null` / 缺字段不动（帧路径已写的清单不被回读抹掉）。
+ if (Array.isArray(rt.todoPhases)) useApp.getState().applyPlans(sid, rt.todoPhases);
  if (shouldSync && useApp.getState().activeSessionId === sid) {
   void api.setThinking(sid, level).catch(() => undefined);
  }
@@ -661,6 +678,7 @@ export function forgetSession(sid: string): void {
   !(sid in st.eventsBySession) &&
   !(sid in st.statusBySession) &&
   !(sid in st.plansBySession) &&
+  !(sid in st.planCardBySession) &&
   !(sid in st.attachmentsBySession) &&
   !(sid in st.queuedBySession) &&
   !(sid in st.goalBySession) &&
@@ -671,6 +689,7 @@ export function forgetSession(sid: string): void {
  const events = { ...st.eventsBySession };
  const status = { ...st.statusBySession };
  const plans = { ...st.plansBySession };
+ const planCards = { ...st.planCardBySession };
  const atts = { ...st.attachmentsBySession };
  const queued = { ...st.queuedBySession };
  const goals = { ...st.goalBySession };
@@ -678,6 +697,7 @@ export function forgetSession(sid: string): void {
  delete events[sid];
  delete status[sid];
  delete plans[sid];
+ delete planCards[sid];
  delete atts[sid];
  delete queued[sid];
  delete goals[sid];
@@ -686,6 +706,7 @@ export function forgetSession(sid: string): void {
   eventsBySession: events,
   statusBySession: status,
   plansBySession: plans,
+  planCardBySession: planCards,
   attachmentsBySession: atts,
   queuedBySession: queued,
   goalBySession: goals,
@@ -867,6 +888,13 @@ export function useSessionEvents() {
      const info = subagentFromFrame(p.payload);
      if (info) useApp.getState().upsertSubagent(sid, info);
     }
+    // 任务清单真值（浮卡 / 右栏「进度」区块的数据源）：todo 工具结束帧与
+    // `message_end{toolResult}` 都带全量 `details.phases`（omp 18.10.4 实测）——
+    // 实时写入不等 `get_state` 回读节流；`todo_auto_clear`（清理）帧收到即清空。
+    const todoPhases = todoPhasesOf(p);
+    if (todoPhases) useApp.getState().applyPlans(sid, todoPhases);
+    else if (p?.type === "todo_auto_clear") useApp.getState().applyPlans(sid, []);
+
     // 语言按帧到达时刻取：切语言后新帧立刻用新语言，已渲染的旧分隔线要重开会话才换。
     // 同一批帧统一打到达时刻（v2 轮时长行的实时来源；历史回放的时间来自 jsonl timestamp）。
     const nowMs = Date.now();
