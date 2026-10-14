@@ -275,6 +275,8 @@ export function Thread() {
       if (hidden > 0 && el.scrollTop < 24) loadEarlier();
      }}
      onMouseUp={onMouseUp}
+     /* 正文测量宽走 `--measure-content`（中列 85%，两侧各留 7.5%）：输入卡 / 查找条同一档，
+        三者左缘对齐；`w-full` + `max-w` 得到的就是 85%（本元素外层无水平内边距，基准 = 中列）。 */
      className="thread-scroll mx-auto w-full max-w-(--measure-content) min-h-0 flex-1 px-5 py-5"
      role="log"
      aria-label={t.threadAria}

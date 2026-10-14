@@ -183,7 +183,9 @@ export function FindBar() {
   "shrink-0 cursor-pointer rounded-md border border-border p-1 text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-40";
 
  return (
-  <div className="flex shrink-0 justify-center px-5 pt-2">
+  <div className="flex shrink-0 justify-center pt-2">
+   {/* 宽度 = 中列 85%（`--measure-content`，与正文 / 输入卡同档）：外层不挂水平内边距，
+       否则 85% 的基准变成「中列 − 2×内边距」，比正文窄一截。 */}
    <div className="flex w-full max-w-(--measure-content) items-center gap-2 rounded-lg border border-border bg-elevated px-2 py-1.5 shadow-pop">
     <input
      ref={inputRef}

@@ -618,7 +618,7 @@ export function Composer() {
 
  if (archived) {
   return (
-   <div className="shrink-0 px-4 pb-4">
+   <div className="shrink-0 pb-4">
     <div className="mx-auto max-w-(--measure-content) rounded-xl border border-border bg-surface px-4 py-3 text-center text-sm text-muted">
      {t.archivedComposerHint}
     </div>
@@ -626,8 +626,10 @@ export function Composer() {
   );
  }
 
+ // 宽度口径：输入卡 = 中列 85%（`--measure-content`，与正文列 / 查找条同档、三者左缘对齐）。
+ // 外层**不挂水平内边距**——挂上 px-4 就把 85% 的基准缩成「中列 − 32」，卡比正文窄一截、看着错位。
  return (
-  <div className={`shrink-0 px-4 pb-4 ${empty ? "pb-[14vh]" : ""}`}>
+  <div className={`shrink-0 pb-4 ${empty ? "pb-[14vh]" : ""}`}>
    {/* 目标行（V40）：有 goal 时显示（目标 / 状态 / 暂停·继续·清除） */}
    <GoalRow />
    <div
