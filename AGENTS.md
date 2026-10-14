@@ -64,7 +64,7 @@ scripts/                     # e2e-ipc-selfcheck / generate-icons / changelog-no
   - 实时行 id = `${sid}:${msgSeq}:${contentIndex}`（contentIndex 每条消息从 0 重数，只用它会撞车）；重开实时流过的会话按「类别 + 全文」与历史配对，不许翻倍。
   - `text_end` 是文本块完结信号（消费它，行才收敛）；工具占位卡从 `partial` 取真名 / 真 id / 半截参数。
 - **消息列滚动**：`.thread-scroll` 必须保持 `overflow-y: auto`（`index.css`）——跟随 / 回看 / 加载更早全靠它（V32 曾漏恢复导致「输入框上方文字重叠」）。
-- **三栏布局（v2）**：左栏（`SidebarShell` + `ChatSidebar`）/ 中列（`ChatView`）/ 右栏（`ContextPanel`，装配在 `App` 主区内、`ChatView` 之侧）。右栏开关 = `store.contextPanelOpen`（持久化，⌘⇧G）；**宽屏（≥1280px）停靠为列、窄屏为右侧抽屉**（`useDocked` 媒体判定 + `useDialogFocus` 焦点圈定），两种形态共用同一份区块内容。
+- **三栏布局（v2）**：左栏（`SidebarShell` + `ChatSidebar`）/ 中列（`ChatView`）/ 右栏（`ContextPanel`，装配在 `App` 主区内、`ChatView` 之侧）。右栏开关 = `store.contextPanelOpen`（持久化、**默认收起**，⌘⇧G）；打开即停靠为第三栏（布局变三栏，会话列让位、不遮盖）。
 - **消息列布局（v2）**：`lib/threadLayout.ts` 的 `buildThreadLayout(shown, running)` 是渲染前的唯一布局派生——相邻同类工具行聚合成摘要行（命令批 / 编辑卡），每轮末尾追加轮时长行（`user.at` → 该轮最后一条消息的 `at`；running 时跳过流尾轮）。`ViewMsg.at` 来源：历史 = jsonl 行的 `timestamp`（`lib/viewmsg.ts` 的 `lineAtOf`），实时 = 帧到达时刻（`useSessionEvents` 统一打戳）。聚合/时长只在布局层做，不改 `mergeViewMsgs` 的合并口径。
 - **左栏未读完成标（v2）**：后台会话的起止只有 `list_sessions` 快照看得到——`ChatSidebar.reload` 对比上一份 running 快照，`running → 非 running` 且不在前台 → `store.markUnread`；打开会话（SessionRow 点击）`clearUnread`。运行期状态，不持久化。
 - **标题**：omp 对 `--mode rpc-ui` 强制关闭自动标题——壳侧两层补：pump 在「有用户消息且无标题」时注入一次 `/rename`（spawn 时 + 每次终态 `agent_end`，每进程至多一次）→ `session_info_update` 帧回灌；后端扫描 `first_user_text` 派生显示标题兜底。标题语言随壳界面语言（`TITLE_SYSTEM.md`，用户自写文件不覆盖）。

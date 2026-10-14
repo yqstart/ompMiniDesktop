@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { CheckListSquare, File, FileText, Layout, Sparkles, X } from "reicon-react";
 import { useApp } from "../../stores/app";
 import { useText } from "../../lib/useText";
-import { useDialogFocus, useDropdown } from "../../lib/useDropdown";
+import { useDropdown } from "../../lib/useDropdown";
 import { ChangesSection } from "./ChangesSection";
 import { ProgressSection } from "./ProgressSection";
 import { SubagentsSection } from "./SubagentsSection";
@@ -19,9 +19,9 @@ const SECTION_ANCHORS = {
 /**
  * 右栏上下文面板（v2 三栏的第三栏，对齐 Codex 的任务侧栏）：变更 / 进度 / 子代理 / 来源。
  *
- * - **宽屏停靠、窄屏浮层**（MASTER §3）：≥1280px 时是主区里的常驻列；更窄时渲染为
- *   右侧抽屉（遮罩 + Esc/点遮罩关闭 + 焦点圈定，走 `useDialogFocus`）——两种形态共用
- *   同一个开关（`contextPanelOpen`，localStorage 持久化）与同一份区块内容。
+ * - **始终停靠**（MASTER §3）：打开 = 主区布局变三栏（左栏 / 中列 / 右栏），会话列让位
+ *   而不是被遮盖；开关（`contextPanelOpen`，localStorage 持久化、**默认收起**）只控制
+ *   这一栏在不在。
  * - 区块内容以分隔线与行分组组织、不做嵌套卡片；没有数据的区块整块不渲染。
  * - 挂载在 `ChatView` 之外（`App` 主区的兄弟列）：设置视图打开时它仍属于聊天主区，
  *   随 `main` 的显隐一起切换。
@@ -31,13 +31,10 @@ export function ContextPanel() {
  const open = useApp((s) => s.contextPanelOpen);
  const setOpen = useApp((s) => s.setContextPanelOpen);
  const activeSessionId = useApp((s) => s.activeSessionId);
- const docked = useDocked();
- const panelRef = useRef<HTMLElement | null>(null);
  const navRef = useRef<HTMLDivElement | null>(null);
  const [navOpen, setNavOpen] = useState(false);
  useDropdown(navOpen, () => setNavOpen(false));
  const close = () => setOpen(false);
- useDialogFocus(panelRef, open && !docked, close);
  const SECTION_NAV = [
   { anchor: SECTION_ANCHORS.changes, icon: File, label: t.panelChanges },
   { anchor: SECTION_ANCHORS.progress, icon: CheckListSquare, label: t.panelProgress },
@@ -105,49 +102,13 @@ export function ContextPanel() {
   </div>
  );
 
- if (docked) {
-  return (
-   <aside
-    className="flex w-(--w-panel) shrink-0 flex-col overflow-hidden border-l border-border bg-sidebar"
-    aria-label={t.panelTitle}
-   >
-    {header}
-    {body}
-   </aside>
-  );
- }
  return (
-  <div className="fixed inset-0 z-20">
-   <div className="absolute inset-0 bg-black/40" onClick={close} aria-hidden />
-   <aside
-    ref={panelRef}
-    role="dialog"
-    aria-modal="true"
-    aria-label={t.panelTitle}
-    tabIndex={-1}
-    className="absolute inset-y-0 right-0 flex w-[min(320px,calc(100vw-32px))] flex-col overflow-hidden border-l border-border bg-sidebar shadow-dialog outline-none"
-   >
-    {header}
-    {body}
-   </aside>
-  </div>
+  <aside
+   className="flex w-(--w-panel) shrink-0 flex-col overflow-hidden border-l border-border bg-sidebar"
+   aria-label={t.panelTitle}
+  >
+   {header}
+   {body}
+  </aside>
  );
-}
-
-/**
- * 停靠 or 浮层的媒体判定（≥1280px 停靠）：订阅 `matchMedia`，
- * 窗口跨过断点时两种形态即时切换（与 App 的窄窗侧栏同一模式）。
- */
-function useDocked(): boolean {
- const [docked, setDocked] = useState(() =>
-  typeof window === "undefined" ? true : window.matchMedia("(min-width: 1280px)").matches,
- );
- useEffect(() => {
-  const query = window.matchMedia("(min-width: 1280px)");
-  const onChange = () => setDocked(query.matches);
-  onChange();
-  query.addEventListener("change", onChange);
-  return () => query.removeEventListener("change", onChange);
- }, []);
- return docked;
 }

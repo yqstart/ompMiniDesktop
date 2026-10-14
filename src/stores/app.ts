@@ -55,8 +55,8 @@ type AppState = {
  /** 左侧栏宽度（292–480，默认 292，持久化 localStorage）。 */
  sidebarWidth: number;
  setSidebarWidth: (w: number) => void;
- /** 右侧上下文面板是否展开（v2 三栏；localStorage 持久化，默认展开）。
-  *  宽屏停靠为列、窄屏（<1280px）渲染为右侧抽屉浮层，两种形态共用这一个开关。 */
+ /** 右侧上下文面板是否展开（v2 三栏；localStorage 持久化，**默认收起**——首启不自动展开）。
+  *  面板始终停靠为主区第三栏：打开 = 布局变三栏，会话列让位、不被遮盖。 */
  contextPanelOpen: boolean;
  setContextPanelOpen: (v: boolean) => void;
 
@@ -281,13 +281,13 @@ function loadSidebarWidth(): number {
  }
 }
 
-/** 右上下文面板的初始展开态（v2）：默认展开（三栏是聊天形态的默认布局），用户收起后记住。 */
+/** 右上下文面板的初始展开态（v2）：**默认收起**（首次启动不自动占位），用户展开后记住。 */
 function loadContextPanelOpen(): boolean {
  try {
-  if (typeof localStorage === "undefined") return true;
-  return localStorage.getItem("omp.contextPanel.v1") !== "0";
+  if (typeof localStorage === "undefined") return false;
+  return localStorage.getItem("omp.contextPanel.v1") === "1";
  } catch {
-  return true;
+  return false;
  }
 }
 
