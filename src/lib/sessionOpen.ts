@@ -161,12 +161,11 @@ export function isDefaultTitle(title: string | null | undefined): boolean {
 }
 
 /**
- * 分叉 / 复制会话后的统一打开（V40）：把新视图落 store、切选中、拉历史、滚底。
+ * 复制会话后的统一打开（V40 `/fork`）：把新视图落 store、切选中、拉历史、滚底。
  *
- * `view` = `fork_from_message` / `fork_session` 的返回值（新会话，进程已在跑）——
+ * `view` = `fork_session` 的返回值（新会话，进程已在跑）——
  * 与 `openSessionWithHistory` 的分工：那边负责「已有会话的打开」，这里负责「刚 fork
  * 出来的新会话的接管」（会话行先进列表，侧栏随 `activeSessionId` 变化自行防抖重拉）。
- * `draft` 非空时（编辑重发）把原消息文本载回输入框等用户改。
  */
 export async function openForkedSession(view: SessionView, opts: { draft?: string } = {}): Promise<void> {
  const st = useApp.getState();

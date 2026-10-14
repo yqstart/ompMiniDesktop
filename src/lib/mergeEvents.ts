@@ -1,4 +1,5 @@
 import type { ViewMsg } from "@shared/types";
+import { textHasContent } from "./viewmsg";
 
 /**
  * 实时事件与已有消息流的合并（纯函数，便于单测）。
@@ -81,6 +82,12 @@ export function mergeViewMsgs(cur: ViewMsg[], incoming: IncomingViewMsg[]): View
   }
   if (raw.__append && next.kind === "text") {
    const idx = out.findIndex((x) => x.kind === "text" && x.id === next.id);
+   // 无内容文本块（模型在思考与工具调用之间吐的孤立标点）：完结时**整行不生**，已经由
+   // 流式增量建出来的就地撤掉——否则消息列里留一格空白加一个「.」（判定见 `textHasContent`）。
+   if (next.complete && !textHasContent(next.text)) {
+    if (idx >= 0) out.splice(idx, 1);
+    continue;
+   }
    if (idx < 0) {
     out.push(next);
    } else {

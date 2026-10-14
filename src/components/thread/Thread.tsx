@@ -1,12 +1,10 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, BranchUp, Bulb, Check, CheckListSquare, ChevronRight, Copy, Loader, PenLine, Sparkles } from "reicon-react";
+import { ArrowDown, Bulb, CheckListSquare, ChevronRight, Sparkles } from "reicon-react";
 import { THREAD_PAGE, useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
 import { api } from "@shared/api";
-import { openForkedSession } from "../../lib/sessionOpen";
 import { openBtwPanel } from "../../lib/btw";
-import { nthMap } from "../../lib/viewmsg";
 import { buildThreadLayout } from "../../lib/threadLayout";
 import type { ViewMsg } from "@shared/types";
 import { ToolRow } from "./ToolRow";
@@ -37,7 +35,6 @@ export function Thread() {
   useApp();
  const t = useText();
  const cwd = sessions.find((s) => s.id === activeSessionId)?.cwd ?? "";
- const archived = sessions.find((s) => s.id === activeSessionId)?.archived ?? false;
  const scroller = useRef<HTMLDivElement>(null);
  // 划选浮条（V40）：划中正文后在选区上方浮出「引用到输入框 / 旁问」。
  // 位置在 mouseup 时算一次（fixed 定位），滚动 / Esc / 点别处 / 动作执行后即关。
@@ -46,23 +43,29 @@ export function Thread() {
  // 「贴着底」状态（V37，粘性语义）：贴底时**任何内容增长**都保持贴底——关键是流式文本
  // 原位追加（同一消息变高），此前只认「消息条数变化」，视口在文本流式期间完全不动，
  // 文字在屏外生长（用户实测「没有输出的爽感」：内容超出 480px 视口仍停在原地）。
- // 用户上翻超过阈值（80px）即释放，程序 / 手动滚回底部附近自动恢复。判定在 onScroll，
+ // 释放 / 恢复的判定只有一处实现（`userScrolledAway`），onScroll 与 `followBottom` 共用；
  // 跟随动作在 useLayoutEffect（paint 前补滚动，输出不先画在屏外再跳）。
  const stick = useRef(true);
  // 「加载更早」后要保住视口位置：记录加载前距底部的距离，插入后补回去
  const keepOffset = useRef<number | null>(null);
  /**
-  * 跟随动作（V37/V38）：贴底时把视口带到新底部。两道防线——
-  * 1. `stick`（onScroll 维护）：用户上翻即释放；
-  * 2. `lastH` 对账：**滚动事件与流式提交有同帧竞态**——用户刚滚开、scroll 事件还没派发，
-  *    提交里的贴底动作就会把这次滚动吞掉（浏览器核对实测）。距底距离超过「本次新增高度 +
-  *    8px」即认定用户已经滚开，当场释放；对任何输入方式（滚轮 / 键盘 / 触屏 / 程序化）都成立。
+  * 「用户滚开了」的唯一判定（V37/V38/V49，`onScroll` 与 `followBottom` 共用）。两个要素：
+  * 1. **位置真的往上挪了**（scrollTop 比基线更靠前，累计超出 8px 容差）——这是「用户动作」
+  *    的判据，对滚轮 / 键盘 / 触屏 / 拖滚动条都成立；基线只在补滚 / 往下滚时跟新，小幅上翻可累加；
+  * 2. **确实离底 ≥ 阈值**——视口变高会被浏览器夹掉一截 scrollTop（不是用户上翻）；
+  *    在阈值内本来就算「还在底部」，不必释放。
+  *
+  * 为什么不能按「距底距离」判（V37 旧口径，等价于 `上次高度 − scrollTop − clientHeight > 8`）：
+  * 它**完全不解释视口变矮**——输入框长高 / 查找条 / 健康横幅 / 窗口缩放都会让距底凭空多出
+  * 一截，于是被判成「用户滚开了」，跟随当场死亡；而且视口变矮**本身就会派发 scroll 事件**，
+  * `onScroll` 按同一距离口径再判一次，同样释放——之后既没有滚动也没有内容外的动作，
+  * 跟随再也回不来（真机实测：释放后所有后续 delta 都不再跟随，只有手动滚回或点回底按钮才恢复）。
   */
- const lastH = useRef(0);
+ const lastTop = useRef(0);
  /**
   * 「离底」渲染状态（V47）：`stick` 是 ref，翻转不触发渲染——而回底按钮要按渲染层面的
-  * 离底与否决定露面。与粘性判定同源同阈值，且只在值变化时写 state：滚动是高频道，
-  * 同值 setState 会让 React 白跑一轮（`onScroll` 每次都会调到这里）。
+  * 离底与否决定露面。**与释放状态同源**（`syncAway(!stick.current)`），且只在值变化时写
+  * state：滚动是高频道，同值 setState 会让 React 白跑一轮（`onScroll` 每次都会调到这里）。
   */
  const [awayFromBottom, setAwayFromBottom] = useState(false);
  const awayRef = useRef(false);
@@ -71,21 +74,36 @@ export function Thread() {
   awayRef.current = away;
   setAwayFromBottom(away);
  }, []);
+ const userScrolledAway = useCallback((el: HTMLDivElement): boolean => {
+  const up = lastTop.current - el.scrollTop;
+  // 基线只在「没往上走」时跟新（补滚 / 往下滚 / 不动）——连续的小幅上翻（拖滚动条、触屏惯性）
+  // 要能累加过容差；每次都把基线拉平，慢速上翻永远攒不够位移，跟随就一直把视口拽回底部。
+  if (up <= 0) lastTop.current = el.scrollTop;
+  return up > 8 && el.scrollHeight - el.scrollTop - el.clientHeight >= NEAR_BOTTOM_PX;
+ }, []);
  const followBottom = useCallback(() => {
   const el = scroller.current;
   if (!el) return;
   const h = el.scrollHeight;
-  const grew = Math.max(0, h - lastH.current);
-  lastH.current = h;
-  if (!stick.current) return;
-  if (h - el.scrollTop - el.clientHeight > grew + 8) {
+  const dist = h - el.scrollTop - el.clientHeight;
+  if (userScrolledAway(el)) {
    stick.current = false;
    syncAway(true);
    return;
   }
+  // 回到阈值内自动重新武装（滚回来 / 内容变矮 / 视口变高都会把视口带回底部附近）——
+  // 只靠 onScroll 恢复不了「没有滚动、只有高度变化」的那一半。
+  if (dist < NEAR_BOTTOM_PX) stick.current = true;
+  if (!stick.current) {
+   syncAway(true);
+   return;
+  }
   el.scrollTop = h;
+  // 读回夹过界（`scrollTop = scrollHeight` 会被浏览器夹到最大值）的真实位置：它是下次
+  // 「用户有没有上翻」比对的基线，差一截就会把程序化滚动误判成用户滚开。
+  lastTop.current = el.scrollTop;
   syncAway(false);
- }, [syncAway]);
+ }, [syncAway, userScrolledAway]);
  /**
   * 回到底部（V47）：恢复跟随 + 瞬时读底——与贴底跟随是同一个动作。
   * 不用平滑滚动：滚动途中每一帧都离底，会撞上 `followBottom` 的「用户已滚开」对账
@@ -95,8 +113,8 @@ export function Thread() {
   const el = scroller.current;
   if (!el) return;
   stick.current = true;
-  lastH.current = el.scrollHeight;
   el.scrollTop = el.scrollHeight;
+  lastTop.current = el.scrollTop;
   syncAway(false);
  }, [syncAway]);
  /**
@@ -131,12 +149,6 @@ export function Thread() {
  // 指示行**延迟露面**（V46）：文本段收尾与下一个块（工具 / 思考）之间往往只隔一两帧，
  // 立即挂出会「闪一下又消失」；持续的空窗（等首个 token / 等下一步）才值得说「在跑」。
  const workingVisible = useDelayedFlag(working, 300);
- // 分叉类动作只在稳定态可用（zcode 同口径）：运行中 / 待审批时转录还在落盘、定位不可靠；
- // 已归档会话只读。冻结原因分两种，作为按钮 title。
- const frozen = archived || status === "running" || status === "awaiting-approval";
- const frozenTitle = archived ? t.archivedComposerHint : t.msgForkBusyHint;
- // 分叉定位用的「同类同文本」序号表（见 `nthMap`）。
- const nthById = useMemo(() => nthMap(events), [events]);
  // 划选浮条：Esc / 点浮条外即关（浮条自身的 mousedown 被 preventDefault，不会清掉选区）
  useEffect(() => {
   if (!sel) return;
@@ -210,18 +222,24 @@ export function Thread() {
   const el = scroller.current;
   if (el && keepOffset.current != null) {
    el.scrollTop = el.scrollHeight - keepOffset.current;
+   // 这一跳是程序为了「加载更早」补的视口位置，不是用户滚的：不刷新基线，
+   // 下一次跟随会把这一跳误判成用户上翻。
+   lastTop.current = el.scrollTop;
    keepOffset.current = null;
   }
  });
  // 切会话即读底（并重置贴底状态）：新会话消息先落位再滚到底（双 rAF 等首帧绘制完成）
  useEffect(() => {
   stick.current = true;
-  lastH.current = 0;
+  lastTop.current = 0;
   syncAway(false);
   const raf = requestAnimationFrame(() => {
    requestAnimationFrame(() => {
     const el = scroller.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el) {
+     el.scrollTop = el.scrollHeight;
+     lastTop.current = el.scrollTop;
+    }
    });
   });
   return () => cancelAnimationFrame(raf);
@@ -247,12 +265,12 @@ export function Thread() {
       // 滚动即关浮条：位置是 mouseup 那一刻算的，滚走了就贴不住选区
       setSel(null);
       const el = e.currentTarget;
-      // 粘性判定（V37）：距底 < NEAR_BOTTOM_PX 视为「还在底部」（程序化滚动也会走到这里，
-      // 滚回底部附近自动恢复跟随）；上翻更远即释放，流式输出不再把视口拽下去。
-      // 同一判定喂给回底按钮（V47）：离底即露面，贴底即收起。
-      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
-      stick.current = nearBottom;
-      syncAway(!nearBottom);
+      // 粘性判定（V37/V49，与 `followBottom` 同一函数）：用户上翻（位置比上次观察更靠前，
+      // 且确实离底超过阈值）即释放，流式输出不再把视口拽下去；回到阈值内自动恢复跟随。
+      if (userScrolledAway(el)) stick.current = false;
+      else if (el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX) stick.current = true;
+      // 回底按钮（V47）与释放状态同源：释放即露面，恢复跟随即收起。
+      syncAway(!stick.current);
       // 滚到接近顶部时自动再放一页出来（配合下面的按钮，长会话不必手动点）
       if (hidden > 0 && el.scrollTop < 24) loadEarlier();
      }}
@@ -283,17 +301,16 @@ export function Thread() {
         return <TurnRow key={item.id} span={item.span} />;
        }
        const prev = layout[i - 1];
-       const prevMsg = prev?.kind === "msg" ? prev.m : undefined;
+       // 上一条是痕迹行（工具 / 思考）时收紧间距。聚合行（命令批 / 编辑卡）也是若干工具行
+       // 折起来的——不认它，紧跟其后的思考 / 工具行就会白吃一档 `mb-4`（截图里那种空隙）。
+       const prevTrace = prev?.kind === "run" ? true : prev?.kind === "msg" ? isTrace(prev.m) : false;
        return (
         <ThreadRow
          key={item.m.id}
          m={item.m}
          sessionId={activeSessionId}
          cwd={cwd}
-         tight={isTrace(item.m) && isTrace(prevMsg)}
-         nth={nthById.get(item.m.id) ?? 0}
-         frozen={frozen}
-         frozenTitle={frozenTitle}
+         tight={isTrace(item.m) && prevTrace}
         />
        );
       })}
@@ -477,27 +494,19 @@ const ThreadRow = memo(function ThreadRow({
  sessionId,
  cwd,
  tight,
- nth,
- frozen,
- frozenTitle,
 }: {
  m: ViewMsg;
  sessionId: string | null;
  cwd: string;
  /** 上一条也是执行痕迹：间距收紧，成串的工具行读成一段。 */
  tight?: boolean;
- /** 该消息在「同类同文本」里的出现序号（分叉定位用，见 `nthOfText`）。 */
- nth: number;
- /** 运行中 / 待审批 / 已归档：分叉类动作冻结（zcode 只在稳定完成后才允许）。 */
- frozen: boolean;
- frozenTitle: string;
 }) {
  const t = useText();
  return (
   // `data-msg-id`：会话内查找（⌘F）靠它把命中定位回消息行（另一并行任务消费）
   <div className={`text-sm leading-[1.7] ${tight ? "mb-1" : "mb-4"}`} data-msg-id={m.id}>
    {m.kind === "user" && (
-    <div className="group/user ml-auto w-fit max-w-[72%]">
+    <div className="ml-auto w-fit max-w-[72%]">
      {/* 用户气泡走 `--hover` 级中性填充（MASTER §4.4：右侧窄灰泡、圆角 lg）：一句「这是我说的」
          靠填充与右对齐就够；助手正文保持裸 Markdown 无底色，两者一眼分得开 */}
      <div className="rounded-lg rounded-br-sm bg-hover px-3.5 py-2">
@@ -518,43 +527,9 @@ const ThreadRow = memo(function ThreadRow({
        <div className="mt-1.5 text-[11px] text-faint">{fmt(t.imagesOmitted, m.imagesOmitted ?? 0)}</div>
       )}
      </div>
-     {m.text.trim() && (
-      <div className="mt-0.5 flex justify-end gap-0.5 opacity-0 transition-opacity duration-150 group-hover/user:opacity-100 focus-within:opacity-100">
-       <ForkAction
-        sessionId={sessionId}
-        role="user"
-        text={m.text}
-        nth={nth}
-        mode="edit"
-        label={t.msgEditAria}
-        disabled={frozen}
-        disabledTitle={frozenTitle}
-       />
-       <CopyAction text={m.text} label={t.copyQuestion} />
-      </div>
-     )}
     </div>
    )}
-   {m.kind === "text" && (
-    <div className="group/msg">
-     <AssistantText text={m.text} complete={m.complete} />
-     {m.complete && m.text.trim() && (
-      <div className="mt-0.5 flex gap-0.5 opacity-0 transition-opacity duration-150 group-hover/msg:opacity-100 focus-within:opacity-100">
-       <ForkAction
-        sessionId={sessionId}
-        role="assistant"
-        text={m.text}
-        nth={nth}
-        mode="branch"
-        label={t.msgBranchAria}
-        disabled={frozen}
-        disabledTitle={frozenTitle}
-       />
-       <CopyAction text={m.text} label={t.copyReply} />
-      </div>
-     )}
-    </div>
-   )}
+   {m.kind === "text" && <AssistantText text={m.text} complete={m.complete} />}
    {m.kind === "thinking" && <ThinkingBlock m={m} />}
    {m.kind === "tool" && <ToolRow m={m} cwd={cwd} />}
    {m.kind === "plan" && <PlanCard m={m} />}
@@ -632,104 +607,6 @@ function PlanCard({ m }: { m: Extract<ViewMsg, { kind: "plan" }> }) {
     ))}
    </div>
   </div>
- );
-}
-
-/**
- * 「编辑并重发」/「分叉」按钮（V40）：hover 才出现，视觉与复制按钮同款。
- * 定位靠 role + 文本 + 同类同文本的第 `nth` 次出现（后端在转录里据此找）；`edit` 把原文本
- * 回填成新会话草稿（改完再发），`branch` 直接开新会话。
- * 运行中 / 待审批 / 已归档时禁用：分叉要读落盘后稳定的转录（zcode 同口径）。
- * 失败不弹窗——落一条本地命令行到消息流尾，与 `/` 命令的回执同一读法。
- */
-function ForkAction({
- sessionId,
- role,
- text,
- nth,
- mode,
- label,
- disabled,
- disabledTitle,
-}: {
- sessionId: string | null;
- role: "user" | "assistant";
- text: string;
- nth: number;
- mode: "branch" | "edit";
- label: string;
- disabled: boolean;
- disabledTitle: string;
-}) {
- const t = useText();
- const [busy, setBusy] = useState(false);
- const run = async () => {
-  if (!sessionId || busy) return;
-  setBusy(true);
-  try {
-   const view = await api.forkFromMessage(sessionId, role, text, nth, mode);
-   if (mode === "edit") await openForkedSession(view, { draft: text });
-   else await openForkedSession(view);
-  } catch (e) {
-   const raw = e instanceof Error ? e.message : String(e);
-   // 后端的定位失败用中文说明原因，前端映射成完整句子（其余错误带上原文）
-   const line = raw.includes("第一条消息")
-    ? t.msgForkNoPrev
-    : raw.includes("没有定位到")
-     ? t.msgForkNotFound
-     : fmt(t.msgForkFailed, raw);
-   useApp.getState().appendEvents(sessionId, [{ kind: "command", id: "lc-" + Date.now(), output: line }]);
-  } finally {
-   setBusy(false);
-  }
- };
- return (
-  <button
-   onClick={() => void run()}
-   disabled={disabled || busy}
-   className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted"
-   aria-label={label}
-   title={disabled ? disabledTitle : label}
-  >
-   {busy ? (
-    <Loader size={11} aria-hidden className="animate-spin" />
-   ) : mode === "edit" ? (
-    <PenLine size={11} aria-hidden />
-   ) : (
-    <BranchUp size={11} aria-hidden />
-   )}
-   {label}
-  </button>
- );
-}
-
-/**
- * 单条消息的复制按钮（V2 M9）：hover 才出现，纯剪贴板、不碰 store/草稿。
- * 独立组件 + 自带 copied 状态，避免把状态提到 `ThreadRow` 里破坏行级 memo。
- */
-function CopyAction({ text, label }: { text: string; label: string }) {
- const t = useText();
- const [copied, setCopied] = useState(false);
- const copy = async () => {
-  try {
-   await navigator.clipboard.writeText(text);
-   setCopied(true);
-  } catch {
-   // 复制失败不打断阅读（与代码块复制同一策略）
-   setCopied(false);
-  }
-  setTimeout(() => setCopied(false), 1200);
- };
- return (
-  <button
-   onClick={() => void copy()}
-   className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
-   aria-label={label}
-   title={label}
-  >
-   {copied ? <Check size={11} aria-hidden /> : <Copy size={11} aria-hidden />}
-   {copied ? t.copied : t.copy}
-  </button>
  );
 }
 

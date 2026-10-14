@@ -1805,61 +1805,6 @@ pub async fn rename_session(
     open_session(app, state, id).await
 }
 
-/// 定位一条 message entry（纯函数，单测直接喂 jsonl 文本）。
-///
-/// 匹配口径与前端的显示模型对齐：`role=="user"` 时全部 text 块以 `\n` 拼接后等于 `text`；
-/// `role=="assistant"` 时任一 text 块等于 `text`（一条 assistant 行可能有多个文本块，
-/// 前端每个块渲染一条消息，这里按行匹配）。`nth` = 第几个匹配行（0-based，前端按同规则数）。
-/// 返回 `(该行 id, 它之前最近一条 message 行的 id)`——后者是「编辑重发」的分叉点。
-pub(crate) fn find_message_entry_in(
-    content: &str,
-    role: &str,
-    text: &str,
-    nth: usize,
-) -> Option<(String, Option<String>)> {
-    let mut count = 0usize;
-    let mut prev_msg: Option<String> = None;
-    for line in content.lines() {
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
-        if v.get("type").and_then(|t| t.as_str()) != Some("message") {
-            continue;
-        }
-        let Some(m) = v.get("message").filter(|m| m.is_object()) else { continue };
-        let r = m.get("role").and_then(|x| x.as_str()).unwrap_or("");
-        let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
-        if id.is_empty() {
-            continue;
-        }
-        let matched = if r == role {
-            let blocks: Vec<&str> = m
-                .get("content")
-                .and_then(|c| c.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
-                        .map(|b| b.get("text").and_then(|t| t.as_str()).unwrap_or(""))
-                        .collect()
-                })
-                .unwrap_or_default();
-            if role == "user" {
-                blocks.join("\n") == text
-            } else {
-                blocks.iter().any(|b| *b == text)
-            }
-        } else {
-            false
-        };
-        if matched {
-            if count == nth {
-                return Some((id, prev_msg));
-            }
-            count += 1;
-        }
-        prev_msg = Some(id);
-    }
-    None
-}
-
 /// 等锁版 kill（fork 收尾用，V40）：`kill_runtime` 的 `try_lock` 在锁被占时**会静默跳过移除**
 /// （归档等同步路径可接受：下次打开会 resume），fork 场景不行——旧 key 留在表里，
 /// 「同 id 接管」与状态收敛都会错位。语义与 `kill_runtime` 一致（哨兵 → stdin 关闭 → 进程退出）。
@@ -1870,7 +1815,7 @@ async fn kill_runtime_awaited(state: &State<'_, AppState>, id: &str) {
     }
 }
 
-/// fork 收尾（`fork_from_message` / `fork_session` 共用）：发起 fork → 拿新身份 →
+/// fork 收尾（`/fork` 的 `fork_session` 用）：发起 fork → 拿新身份 →
 /// kill 旧进程 → resume 新会话 → 返回新会话视图。
 ///
 /// 为什么 kill 旧进程：pump 的三通道名（`omp-event://<sid>` 等）在 `start_pump` 时与 sid
@@ -1911,46 +1856,6 @@ async fn fork_at<R: tauri::Runtime>(
     kill_runtime_awaited(state, id).await;
     let head = spawn_session_runtime(app, state, &new_sid).await?;
     Ok(build_session_view(state, &head.id, &head.title, head.first_user_text.as_deref(), head.cwd.clone(), head.timestamp).await)
-}
-
-/// 从某条消息分叉（V40）：`mode="branch"` 从该消息处（保留到它）、`mode="edit"` 从它**之前**
-/// （编辑重发：原消息不进新会话，文本由前端载回输入框）。定位走 jsonl 行（entryId 即行 id）。
-#[tauri::command]
-pub async fn fork_from_message(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    id: String,
-    role: String,
-    text: String,
-    nth: usize,
-    mode: String,
-) -> Result<SessionView, CmdError> {
-    if role != "user" && role != "assistant" {
-        return Err(cmd_err("BAD_ARG", "role 必须是 user 或 assistant".into(), None));
-    }
-    if mode != "branch" && mode != "edit" {
-        return Err(cmd_err("BAD_ARG", "mode 必须是 branch 或 edit".into(), None));
-    }
-    if text.trim().is_empty() {
-        return Err(cmd_err("BAD_ARG", "消息文本为空，无法定位".into(), None));
-    }
-    let agent = state.agent_dir.lock().await.clone();
-    let Some(path) = session_file_for(&agent, &id) else {
-        return Err(cmd_err("NOT_FOUND", "会话文件不存在，可能已被删除".into(), None));
-    };
-    let content = std::fs::read_to_string(&path).map_err(|_| cmd_err("CORRUPT", "会话文件已损坏，可删除".into(), None))?;
-    let Some((entry_id, prev_id)) = find_message_entry_in(&content, &role, &text, nth) else {
-        return Err(cmd_err("NOT_FOUND", "没有定位到这条消息（可能尚未落盘）".into(), None));
-    };
-    let fork_entry = if mode == "edit" {
-        match prev_id {
-            Some(p) => p,
-            None => return Err(cmd_err("NO_PREV", "这是第一条消息，没有可回退的分叉点".into(), None)),
-        }
-    } else {
-        entry_id
-    };
-    fork_at(&app, &state, &id, Some(fork_entry)).await
 }
 
 /// 全量复制当前会话另起一份（`/fork`）。
@@ -2655,7 +2560,7 @@ pub fn load_state<R: tauri::Runtime>(app: &AppHandle<R>) -> AppState {
 mod tests {
     use super::{
         apply_project_order, assign_members, catalog_fresh, clean_workspace_name, derived_title, display_title,
-        find_message_entry_in, kill_runtime, list_archived_in, load_cached, load_state, owner_project, rpc_request,
+        kill_runtime, list_archived_in, load_cached, load_state, owner_project, rpc_request,
         scan_window, session_file_for, spawn_session_runtime, AppState, MODELS_TTL_MS,
     };
     use crate::overlay::{Overlay, Project};
@@ -2993,78 +2898,6 @@ mod tests {
         assert_eq!(load_cached(&cache, &lock, true, 60_000, || fetch(calls.clone())).await.unwrap(), 7);
         assert_eq!(n(), 3);
     }
-
-    /// 落盘 message 行的最小构造器（与 jsonl 形状对齐：type/id/parentId/message）。
-    fn msg_line(id: &str, role: &str, blocks: &[(&str, &str)]) -> String {
-        let content: Vec<serde_json::Value> = blocks
-            .iter()
-            .map(|(t, v)| {
-                if *t == "text" {
-                    serde_json::json!({ "type": "text", "text": v })
-                } else {
-                    serde_json::json!({ "type": t, "id": v })
-                }
-            })
-            .collect();
-        serde_json::json!({
-            "type": "message",
-            "id": id,
-            "parentId": serde_json::Value::Null,
-            "message": { "role": role, "content": content }
-        })
-        .to_string()
-    }
-
-    /// V40 fork 定位器：user 按「全部 text 块 \n 拼接」匹配、nth 取第 n 次出现、
-    /// 返回该行前最近一条 message 行（编辑重发的分叉点）。
-    #[test]
-    fn find_message_entry_matches_user_full_text_and_prev() {
-        let content = format!(
-            "{}\n{}\n{}\n",
-            msg_line("a1", "user", &[("text", "你好")]),
-            msg_line("a2", "assistant", &[("text", "回复一")]),
-            msg_line("a3", "user", &[("text", "你好")]),
-        );
-        // 第二条同文本 user（nth=1）→ id a3、其前最近 message 行 = a2
-        assert_eq!(
-            find_message_entry_in(&content, "user", "你好", 1),
-            Some(("a3".to_string(), Some("a2".to_string())))
-        );
-        // 第一条（nth=0）之前没有 message 行（首条消息没有可回退的分叉点）
-        assert_eq!(find_message_entry_in(&content, "user", "你好", 0), Some(("a1".to_string(), None)));
-        // nth 越界 / 文本不存在 → None
-        assert_eq!(find_message_entry_in(&content, "user", "你好", 2), None);
-        assert_eq!(find_message_entry_in(&content, "user", "不存在", 0), None);
-    }
-
-    /// assistant 按「任一 text 块相等」匹配（一条行的多个块算一个匹配；与前端逐块渲染的口径对齐）。
-    #[test]
-    fn find_message_entry_matches_any_assistant_text_block() {
-        let content = format!(
-            "{}\n{}\n",
-            msg_line("a1", "user", &[("text", "问题")]),
-            msg_line("a2", "assistant", &[("text", "第一段"), ("toolCall", "t1"), ("text", "第二段")]),
-        );
-        assert_eq!(
-            find_message_entry_in(&content, "assistant", "第二段", 0),
-            Some(("a2".to_string(), Some("a1".to_string())))
-        );
-        assert_eq!(find_message_entry_in(&content, "assistant", "不存在", 0), None);
-    }
-
-    /// user 的文本口径 = 全部 text 块以 \n 拼接（与前端 `viewMsgsFromJsonlLines` 一致），
-    /// 非 message 行不参与 match 也不更新 prev。
-    #[test]
-    fn find_message_entry_joins_user_blocks_with_newline() {
-        let content = format!(
-            "{}\n{}\n",
-            r#"{"type":"model_change","id":"m1","parentId":null}"#,
-            msg_line("u1", "user", &[("text", "一"), ("image", "img"), ("text", "二")]),
-        );
-        assert_eq!(find_message_entry_in(&content, "user", "一\n二", 0), Some(("u1".to_string(), None)));
-        assert_eq!(find_message_entry_in(&content, "user", "一二", 0), None);
-    }
-
     /// 写一个可执行的 stub「omp」脚本（V40 的 rpc_request 测试用）。
     fn write_v40_stub(dir: &std::path::Path, script: &str) -> std::path::PathBuf {
         use std::os::unix::fs::PermissionsExt;

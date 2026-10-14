@@ -12,6 +12,16 @@ const nid = (p: string) => `${p}-${Date.now().toString(36)}-${seq++}`;
  */
 export const TOOL_OUTPUT_FULL_MAX = 100_000;
 
+/**
+ * 文本块算不算「有内容的正文」：只有空白 / 标点、没有任何实义字符（字母 / 数字 / 符号）的块
+ * 一律不落行。
+ *
+ * 为什么要有：omp 的模型偶尔在思考与工具调用之间吐一个孤立的标点块——本机 12 个会话里
+ * `{"type":"text","text":"."}` 出现 375 次，其中 247 次正是 `[thinking, text("."), toolCall]`
+ * 这个形状。它在消息列里只剩「一整行空白 + 一个点」，是纯噪声；历史回放与实时合流共用本判定。
+ */
+export const textHasContent = (s: string): boolean => /[\p{L}\p{N}\p{S}]/u.test(s);
+
 function truncate(text: string, limit = 2000): { out: string; full?: string } {
  if (text.length <= limit) return { out: text };
  return { out: text.slice(0, limit), full: text.length <= TOOL_OUTPUT_FULL_MAX ? text : undefined };
@@ -88,30 +98,6 @@ export function primaryPathOf(name: string, args: Record<string, unknown>): stri
   return s(args.file_path) ?? s(args.filePath) ?? s(args.path);
  }
  return undefined;
-}
-
-/**
- * 「同类同文本」出现序号表（V40 分叉定位）：`forkFromMessage` 按 role + 文本 + 第 n 次出现
- * 定位消息，而转录里同一句话可能出现多次（重发 / 引用 / 复述），前端必须给出 0 基序号。
- * user 比 `kind` + `text`；assistant 正文比 `kind === "text"` + `text`（思考 / 工具卡不参与）。
- * 一次遍历产出全表供渲染复用：逐行调用是 O(n²)，而流式每帧都会重算整列。
- */
-export function nthMap(events: ViewMsg[]): Map<string, number> {
- const out = new Map<string, number>();
- const seen = new Map<string, number>();
- for (const m of events) {
-  const key = m.kind === "user" ? `u\u0000${m.text}` : m.kind === "text" ? `a\u0000${m.text}` : null;
-  if (key === null) continue;
-  const n = seen.get(key) ?? 0;
-  out.set(m.id, n);
-  seen.set(key, n + 1);
- }
- return out;
-}
-
-/** 目标消息在「同类同文本」里的 0 基序号（见 `nthMap`）；找不到或不参与分叉时为 0。 */
-export function nthOfText(events: ViewMsg[], id: string): number {
- return nthMap(events).get(id) ?? 0;
 }
 
 /**
@@ -373,7 +359,8 @@ export function viewMsgsFromJsonlLines(lines: unknown[], t: Text): ViewMsg[] {
     if (!b || typeof b !== "object") return;
     if (b.type === "text") {
      const t = String(b.text ?? "");
-     if (!t) return;
+     // 无内容块（空白 / 孤立标点）不落正文行，见 `textHasContent`
+     if (!textHasContent(t)) return;
      out.push({ kind: "text", id: `t:${lid}:${bi}`, seq: bi, text: t, complete: true, ...(at != null ? { at } : {}) });
     } else if (b.type === "thinking") {
      out.push({
@@ -453,16 +440,12 @@ export function viewMsgFromJsonlLine(line: unknown, t: Text): ViewMsg[] {
   const out: ViewMsg[] = [];
   for (const b of m.content as Record<string, unknown>[]) {
    if (b.type === "text") {
+    const text = String(b.text ?? "");
     if (m.role === "user") {
-     out.push({ kind: "user", id: nid("u"), text: String(b.text ?? ""), mentions: [] });
-    } else {
-     out.push({
-      kind: "text",
-      id: nid("t"),
-      seq: seq++,
-      text: String(b.text ?? ""),
-      complete: true,
-     });
+     out.push({ kind: "user", id: nid("u"), text, mentions: [] });
+    } else if (textHasContent(text)) {
+     // 无内容块（空白 / 孤立标点）不落正文行，见 `textHasContent`
+     out.push({ kind: "text", id: nid("t"), seq: seq++, text, complete: true });
     }
    } else if (b.type === "thinking") {
     out.push({ kind: "thinking", id: nid("th"), text: String(b.thinking ?? ""), seconds: 0, complete: true });

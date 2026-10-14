@@ -78,7 +78,6 @@ fn main() {
             remove_queued_message,
             promote_queued_message,
             abort_and_restore_queue,
-            fork_from_message,
             fork_session,
             goal_command,
             get_session_stats,

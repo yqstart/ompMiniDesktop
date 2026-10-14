@@ -585,3 +585,31 @@ describe("流式帧合并缓冲（V37）", () => {
   }
  });
 });
+
+/**
+ * 无内容文本块（孤立标点）不落正文行：omp 的模型偶尔在思考与工具调用之间吐一个
+ * `{"type":"text","text":"."}`（本机 12 个会话里 375 次，其中 247 次正是这个形状）。
+ * 流式增量会先把这一行建出来，`text_end` 一到必须整行撤掉——否则消息列里留一格空白加一个「.」。
+ */
+describe("无内容文本块（孤立标点）不落行", () => {
+ const frames = (text: string): Record<string, unknown>[] => [
+  { type: "message_start", message: { role: "assistant", content: [] } },
+  { type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 0 } },
+  { type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: text } },
+  { type: "message_update", assistantMessageEvent: { type: "text_end", contentIndex: 0, content: text } },
+ ];
+
+ it("`text_delta('.')` + `text_end('.')` → 消息流里没有正文行", () => {
+  expect(replay(frames(".")).filter((m) => m.kind === "text")).toEqual([]);
+ });
+
+ it("增量先建了行、收尾是空白 → 这一行也撤掉", () => {
+  expect(replay(frames(" \n")).filter((m) => m.kind === "text")).toEqual([]);
+ });
+
+ it("有实义字符的块照旧保留（收尾内容为准）", () => {
+  expect(replay(frames("改好了：")).filter((m) => m.kind === "text")).toMatchObject([
+   { text: "改好了：", complete: true },
+  ]);
+ });
+});

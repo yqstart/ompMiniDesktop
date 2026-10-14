@@ -206,17 +206,6 @@ export const api = {
    imagesDropped?: boolean;
    truncated?: boolean;
   }>(IPC.abortAndRestoreQueue, { id }),
- /**
-  * 从某条消息分叉（V40）：`mode:"branch"` 从该消息处（保留到它）、`mode:"edit"` 从它**之前**
-  * （编辑重发）。后端按 role+文本在第 `nth` 次出现处定位；返回新会话视图（新进程由调用方 open）。
-  */
- forkFromMessage: (
-  id: string,
-  role: "user" | "assistant",
-  text: string,
-  nth: number,
-  mode: "branch" | "edit",
- ) => call<SessionView>(IPC.forkFromMessage, { id, role, text, nth, mode }),
  /** 全量复制当前会话（`/fork`）。 */
  forkSession: (id: string) => call<SessionView>(IPC.forkSession, { id }),
  /** goal 目标模式（get / create / resume / pause / drop）。 */

@@ -12,23 +12,18 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import type { ViewMsg } from "@shared/types";
 import { THREAD_PAGE, useApp } from "../../stores/app";
-import { nthOfText, viewMsgsFromJsonlLines } from "../../lib/viewmsg";
+import { viewMsgsFromJsonlLines } from "../../lib/viewmsg";
 import { TEXT } from "../../lib/locale";
 import { Thread } from "./Thread";
 
 /**
- * 分叉链路要断言 IPC 参数与「打开新会话」的参数，所以两者都用替身：
- * `forkFromMessage` 走 @shared/api（Proxy 兜底其余命令），`openForkedSession` 走 lib。
+ * 渲染树的任何 IPC 调用都不该真发命令：`@shared/api` 一律换成兜底替身
+ * （未登记的键返回 null，够组件走完渲染分支）。
  */
-const { apiMock, openForkedSessionMock, NEW_VIEW } = vi.hoisted(() => ({
- apiMock: { forkFromMessage: vi.fn() },
- openForkedSessionMock: vi.fn(async () => undefined),
- NEW_VIEW: { id: "s-new", projectId: "p1", title: "分叉", cwd: "/tmp", timestamp: 0, archived: false, corrupt: false, note: null, running: false },
-}));
+const { apiMock } = vi.hoisted(() => ({ apiMock: {} as Record<string, unknown> }));
 vi.mock("@shared/api", () => ({
  api: new Proxy(apiMock, { get: (t, k) => (k in t ? (t as Record<string, unknown>)[k as string] : async () => null) }),
 }));
-vi.mock("../../lib/sessionOpen", () => ({ openForkedSession: openForkedSessionMock }));
 
 // 让 React 的 act(...) 在 jsdom 下进入"测试环境"模式（消除 "not configured" 警告）
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -166,58 +161,23 @@ describe("流式「思考中…」指示", () => {
  });
 });
 
-/** 消息流里的 user / assistant 正文（分叉定位只认这两类）。 */
-const userMsg = (id: string, text: string): ViewMsg => ({ kind: "user", id, text, mentions: [] });
-const textMsg = (id: string, text: string): ViewMsg => ({ kind: "text", id, seq: 0, text, complete: true });
-
-describe("nthOfText（分叉定位序号）", () => {
- it("同类同文本按出现次序给 0 基序号，跨类不干扰", () => {
-  const events = [
-   userMsg("u1", "同样的话"),
-   textMsg("a1", "同样的话"),
-   textMsg("a2", "别的"),
-   userMsg("u2", "同样的话"),
-   textMsg("a3", "同样的话"),
-  ];
-  expect(nthOfText(events, "u1")).toBe(0);
-  expect(nthOfText(events, "u2")).toBe(1);
-  expect(nthOfText(events, "a1")).toBe(0);
-  expect(nthOfText(events, "a3")).toBe(1);
- });
-
- it("思考 / 工具卡这类非目标消息不参与计数；找不到时退化为 0", () => {
-  const events: ViewMsg[] = [
-   { kind: "thinking", id: "t1", text: "同样的话", seconds: 1, complete: true },
-   textMsg("a1", "同样的话"),
-  ];
-  expect(nthOfText(events, "a1")).toBe(0);
-  expect(nthOfText(events, "missing")).toBe(0);
- });
-});
-
 /**
- * V40 分叉入口：user 消息 hover 出「编辑并重发」，assistant 正文 hover 出「分叉」；
- * 定位靠 role + 文本 + 同类同文本序号，编辑模式把原文本回填成新会话草稿。
- * 失败不弹窗——落一条本地命令行到消息流尾，文案走字典。
+ * 消息行锚点（⌘F 会话内查找靠它把命中定位回消息行）。
  */
-describe("消息 hover 分叉动作", () => {
- const SID = "s-fork";
- const t = () => TEXT[useApp.getState().locale];
+describe("消息行 data-msg-id", () => {
+ const SID = "s-msgid";
 
- const byLabel = (container: HTMLElement, label: string) => container.querySelector(`button[aria-label="${label}"]`);
-
- const mount = async (msgs: ViewMsg[], opts: { state?: "running" | "idle"; archived?: boolean; draft?: string } = {}) => {
+ const mountMsgIds = async (msgs: ViewMsg[]) => {
   useApp.setState({
    eventsBySession: { [SID]: msgs },
    activeSessionId: SID,
-   statusBySession: opts.state ? { [SID]: { state: opts.state } } : {},
+   statusBySession: {},
    sessions: [
-    { id: SID, projectId: "p1", title: "t", cwd: "/tmp", updatedAt: 0, archived: opts.archived ?? false, missing: false } as never,
+    { id: SID, projectId: "p1", title: "t", cwd: "/tmp", updatedAt: 0, archived: false, missing: false } as never,
    ],
    projects: [{ id: "p1", name: "p", path: "/tmp" } as never],
    threadLimitSid: SID,
    threadLimit: THREAD_PAGE,
-   drafts: { [SID]: opts.draft ?? "" },
   });
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -228,101 +188,21 @@ describe("消息 hover 分叉动作", () => {
   return { container, root };
  };
 
- const click = async (el: Element | null) => {
-  expect(el).not.toBeNull();
-  await act(async () => {
-   el?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-  });
- };
-
  it("每条消息行带 data-msg-id（⌘F 定位挂钩）", async () => {
-  const { container, root } = await mount([userMsg("m1", "你好"), textMsg("a1", "答")]);
+  const { container, root } = await mountMsgIds([
+   { kind: "user", id: "m1", text: "你好", mentions: [] },
+   { kind: "text", id: "a1", seq: 0, text: "答", complete: true },
+  ]);
   expect(container.querySelector('[data-msg-id="m1"]')).not.toBeNull();
   expect(container.querySelector('[data-msg-id="a1"]')).not.toBeNull();
   await act(async () => {
    root.unmount();
   });
  });
-
- it("user 消息「编辑并重发」→ forkFromMessage(user, 文本, nth, edit) + 草稿回填", async () => {
-  apiMock.forkFromMessage.mockReset();
-  apiMock.forkFromMessage.mockResolvedValue(NEW_VIEW);
-  openForkedSessionMock.mockClear();
-  // 同一句话出现两次：第二次的序号必须是 1（后端按 role+文本+序号定位）
-  const { container, root } = await mount([userMsg("m1", "重发我"), textMsg("a1", "答"), userMsg("m2", "重发我")]);
-  await click(byLabel(container, t().msgEditAria));
-  // 第一条也是这个按钮，取到的是 m1 → 序号 0
-  expect(apiMock.forkFromMessage).toHaveBeenCalledWith(SID, "user", "重发我", 0, "edit");
-  expect(openForkedSessionMock).toHaveBeenCalledWith(NEW_VIEW, { draft: "重发我" });
-  await act(async () => {
-   root.unmount();
-  });
- });
-
- it("第二条同文本 user 消息的 nth = 1", async () => {
-  apiMock.forkFromMessage.mockReset();
-  apiMock.forkFromMessage.mockResolvedValue(NEW_VIEW);
-  openForkedSessionMock.mockClear();
-  const { container, root } = await mount([userMsg("m1", "重发我"), textMsg("a1", "答"), userMsg("m2", "重发我")]);
-  await click(container.querySelector('[data-msg-id="m2"] button[aria-label]'));
-  expect(apiMock.forkFromMessage).toHaveBeenCalledWith(SID, "user", "重发我", 1, "edit");
-  await act(async () => {
-   root.unmount();
-  });
- });
-
- it("assistant 正文「分叉」→ forkFromMessage(assistant, 文本, nth, branch)，不回填草稿", async () => {
-  apiMock.forkFromMessage.mockReset();
-  apiMock.forkFromMessage.mockResolvedValue(NEW_VIEW);
-  openForkedSessionMock.mockClear();
-  const { container, root } = await mount([userMsg("m1", "问"), textMsg("a1", "答案")]);
-  await click(byLabel(container, t().msgBranchAria));
-  expect(apiMock.forkFromMessage).toHaveBeenCalledWith(SID, "assistant", "答案", 0, "branch");
-  expect(openForkedSessionMock).toHaveBeenCalledWith(NEW_VIEW);
-  await act(async () => {
-   root.unmount();
-  });
- });
-
- it("分叉失败 → 消息流尾出现 command 行，文案走字典（含「没有定位到」映射）", async () => {
-  apiMock.forkFromMessage.mockReset();
-  apiMock.forkFromMessage.mockRejectedValue(new Error("没有定位到这条消息"));
-  openForkedSessionMock.mockClear();
-  const { container, root } = await mount([userMsg("m1", "问"), textMsg("a1", "答案")]);
-  await click(byLabel(container, t().msgBranchAria));
-  expect(openForkedSessionMock).not.toHaveBeenCalled();
-  const events = useApp.getState().eventsBySession[SID];
-  const last = events[events.length - 1];
-  expect(last.kind).toBe("command");
-  expect(last.kind === "command" && last.output).toBe(t().msgForkNotFound);
-  expect(container.innerHTML).toContain(t().msgForkNotFound);
-  // 清掉这条本地回执，别污染后面的用例
-  await act(async () => {
-   useApp.setState({ eventsBySession: { [SID]: [userMsg("m1", "问"), textMsg("a1", "答案")] } });
-  });
-  await act(async () => {
-   root.unmount();
-  });
- });
-
- it("运行中 / 已归档：分叉按钮禁用并给出原因", async () => {
-  const running = await mount([userMsg("m1", "问"), textMsg("a1", "答案")], { state: "running" });
-  const disabled = running.container.querySelector(`button[aria-label="${t().msgEditAria}"]`) as HTMLButtonElement;
-  expect(disabled.disabled).toBe(true);
-  expect(disabled.title).toBe(t().msgForkBusyHint);
-  await act(async () => {
-   running.root.unmount();
-  });
-
-  const archived = await mount([userMsg("m1", "问"), textMsg("a1", "答案")], { archived: true });
-  const ro = archived.container.querySelector(`button[aria-label="${t().msgBranchAria}"]`) as HTMLButtonElement;
-  expect(ro.disabled).toBe(true);
-  expect(ro.title).toBe(t().archivedComposerHint);
-  await act(async () => {
-   archived.root.unmount();
-  });
- });
 });
+
+/** 一条 user 正文行（划选用例的最小消息）。 */
+const userMsg = (id: string, text: string): ViewMsg => ({ kind: "user", id, text, mentions: [] });
 
 /**
  * V40 划选浮条：划中消息列里的正文 → 选区上方浮出「引用到输入框 / 旁问」。
@@ -488,12 +368,13 @@ describe("Thread 摘要式表达（v2）", () => {
 });
 
 /**
- * V47 回底按钮：消息列滚离底部（> NEAR_BOTTOM_PX）时，在视口底部中央浮出向下箭头；
- * 点击 = 瞬时读底 + 恢复跟随（按钮收起）；切会话重置离底状态。
+ * V47 回底按钮 / V49 贴底判定：消息列滚离底部（> NEAR_BOTTOM_PX）时，在视口底部中央浮出
+ * 向下箭头；点击 = 瞬时读底 + 恢复跟随（按钮收起）；切会话重置离底状态。
  * jsdom 没有真实布局：`scrollHeight` / `clientHeight` / `scrollTop` 用 defineProperty 摆成
- * 可控值（scrollTop 的 setter 按浏览器口径钳到底），滚动位置靠手工派发的 scroll 事件驱动。
+ * 可控值（scrollTop 的 setter 按浏览器口径钳到底），滚动位置靠手工派发的 scroll 事件驱动；
+ * 三个高度都可继续改（`grow` / `shrinkView`）——「内容长高」与「视口变矮」是两回事。
  */
-describe("回到底部按钮（V47）", () => {
+describe("回到底部按钮与贴底跟随（V47 / V49）", () => {
  const SID = "s-bottom";
  /** 视口 / 内容高（测试里的假布局）：贴底线 = scrollTop 600，离底 80px = scrollTop 520。 */
  const VIEW = 400;
@@ -520,17 +401,43 @@ describe("回到底部按钮（V47）", () => {
    root.render(createElement(Thread));
   });
   const scroller = container.querySelector(".thread-scroll") as HTMLElement;
+  let high = CONTENT;
+  let view = VIEW;
   let top = CONTENT - VIEW;
-  Object.defineProperty(scroller, "clientHeight", { value: VIEW, configurable: true });
-  Object.defineProperty(scroller, "scrollHeight", { value: CONTENT, configurable: true });
+  Object.defineProperty(scroller, "clientHeight", { configurable: true, get: () => view });
+  Object.defineProperty(scroller, "scrollHeight", { configurable: true, get: () => high });
   Object.defineProperty(scroller, "scrollTop", {
    configurable: true,
    get: () => top,
    set: (v: number) => {
-    top = Math.max(0, Math.min(v, CONTENT - VIEW));
+    top = Math.max(0, Math.min(v, high - view));
    },
   });
-  return { container, root, scroller };
+  // 摆好假布局后先对齐一次真实基线：开会话本来就滚到底（挂载时的双 rAF 读底用的是
+  // jsdom 的真实 0 值，不补这一下，后面的「用户上翻」会比在一个陈旧基线之上）。
+  scroller.scrollTop = CONTENT - VIEW;
+  await act(async () => {
+   scroller.dispatchEvent(new Event("scroll"));
+  });
+  return {
+   container,
+   root,
+   scroller,
+   /** 内容长高（流式追加 / 新行落下）：scrollTop 不动，距底随之变大。 */
+   grow: (by: number) => {
+    high += by;
+   },
+   /** 视口变矮（输入框长高 / 查找条 / 健康横幅 / 窗口缩放）：**不派发 scroll 事件**（与浏览器一致）。 */
+   shrinkView: (by: number) => {
+    view -= by;
+   },
+  };
+ };
+ /** 追加一条消息（与真实帧落 store 同路径：`events` 换引用 → 跟随 effect 跑一次）。 */
+ const append = async (id: string) => {
+  await act(async () => {
+   useApp.getState().appendEvents(SID, [{ kind: "text", id, seq: 0, text: "继续输出", complete: false }]);
+  });
  };
 
  const byLabel = (container: HTMLElement, label: string) => container.querySelector(`button[aria-label="${label}"]`);
@@ -558,6 +465,43 @@ describe("回到底部按钮（V47）", () => {
   expect(scroller.scrollTop).toBe(CONTENT - VIEW); // 读到底
   expect(byLabel(container, label)).toBeNull(); // 贴底即收起
 
+  await act(async () => {
+   root.unmount();
+  });
+ });
+
+ it("视口变矮（输入框长高 / 查找条 / 窗口缩放）不释放跟随（V49）", async () => {
+  const { container, root, scroller, shrinkView } = await mount();
+  const label = TEXT[useApp.getState().locale].scrollToBottom;
+  // 先在贴底状态下走一帧（真实会话里基线总被上一条消息 / RO 对上）
+  await append("a-warm");
+  expect(scroller.scrollTop).toBe(CONTENT - VIEW);
+  expect(byLabel(container, label)).toBeNull();
+
+  // 视口变矮 100px：旧口径按「距底 > 本次长高 + 8px」对账，这里距底凭空多出 100px 就被判成
+  // 「用户滚开了」，跟随当场死亡；且视口变矮不派发 scroll 事件，onScroll 也救不回来。
+  shrinkView(100);
+  await append("a-more");
+
+  expect(scroller.scrollTop).toBe(CONTENT - (VIEW - 100)); // 仍贴底
+  expect(byLabel(container, label)).toBeNull();
+  await act(async () => {
+   root.unmount();
+  });
+ });
+
+ it("用户上翻后内容继续长高，不把视口拽回底部（释放仍然成立）", async () => {
+  const { container, root, scroller, grow } = await mount();
+  const label = TEXT[useApp.getState().locale].scrollToBottom;
+  await scrollTo(scroller, CONTENT - VIEW - 300);
+  const parked = scroller.scrollTop;
+  expect(byLabel(container, label)).not.toBeNull();
+
+  grow(400);
+  await append("a-more");
+
+  expect(scroller.scrollTop).toBe(parked); // 停在用户看的位置
+  expect(byLabel(container, label)).not.toBeNull();
   await act(async () => {
    root.unmount();
   });

@@ -326,3 +326,48 @@ describe("viewMsgsFromJsonlLines：会话初始配置不渲染分隔线", () => 
   expect(dividers).toEqual(["思考等级已设为 high", "已切换模型"]);
  });
 });
+
+/**
+ * 无内容文本块不落正文行：omp 的模型偶尔在思考与工具调用之间吐一个孤立标点
+ * （本机 12 个会话里 `{"type":"text","text":"."}` 出现 375 次，其中 247 次正是这个形状）。
+ * 落成正文行就是「一整行空白 + 一个点」，纯噪声。
+ */
+describe("无内容文本块（孤立标点）不落行", () => {
+ const dotLine = (id: string) => ({
+  type: "message",
+  id,
+  message: {
+   role: "assistant",
+   content: [
+    { type: "thinking", thinking: "先看一眼现状" },
+    { type: "text", text: "." },
+    { type: "toolCall", id: "call_1", name: "bash", arguments: { command: "ls" }, streamIndex: 2 },
+   ],
+  },
+ });
+
+ it("批量归一：`[思考, text(\".\"), 工具]` 只出思考与工具两行", () => {
+  const msgs = viewMsgsFromJsonlLines([dotLine("a1")], zh);
+  expect(msgs.map((m) => m.kind)).toEqual(["thinking", "tool"]);
+ });
+
+ it("单行归一：同上（打开实时流过的那条消息不翻出正文行）", () => {
+  const msgs = viewMsgFromJsonlLine(dotLine("a1"), zh);
+  expect(msgs.map((m) => m.kind)).toEqual(["thinking", "tool"]);
+ });
+
+ it("空白块同样不落行；有实义字符的块照旧", () => {
+  const onlySpace = {
+   type: "message",
+   id: "a2",
+   message: { role: "assistant", content: [{ type: "text", text: "   \n" }, { type: "text", text: "好" }] },
+  };
+  expect(viewMsgFromJsonlLine(onlySpace, zh).map((m) => m.kind)).toEqual(["text"]);
+  const punct = {
+   type: "message",
+   id: "a3",
+   message: { role: "assistant", content: [{ type: "text", text: "？" }] },
+  };
+  expect(viewMsgFromJsonlLine(punct, zh)).toEqual([]);
+ });
+});
