@@ -1,0 +1,153 @@
+import { useEffect, useRef, useState } from "react";
+import { CheckListSquare, File, FileText, Layout, Sparkles, X } from "reicon-react";
+import { useApp } from "../../stores/app";
+import { useText } from "../../lib/useText";
+import { useDialogFocus, useDropdown } from "../../lib/useDropdown";
+import { ChangesSection } from "./ChangesSection";
+import { ProgressSection } from "./ProgressSection";
+import { SubagentsSection } from "./SubagentsSection";
+import { SourcesSection } from "./SourcesSection";
+
+/** 区块锚点（`PanelSection` 的 `anchor`）与导航浮层的条目一一对应。 */
+const SECTION_ANCHORS = {
+ changes: "panel-changes",
+ progress: "panel-progress",
+ subagents: "panel-subagents",
+ sources: "panel-sources",
+} as const;
+
+/**
+ * 右栏上下文面板（v2 三栏的第三栏，对齐 Codex 的任务侧栏）：变更 / 进度 / 子代理 / 来源。
+ *
+ * - **宽屏停靠、窄屏浮层**（MASTER §3）：≥1280px 时是主区里的常驻列；更窄时渲染为
+ *   右侧抽屉（遮罩 + Esc/点遮罩关闭 + 焦点圈定，走 `useDialogFocus`）——两种形态共用
+ *   同一个开关（`contextPanelOpen`，localStorage 持久化）与同一份区块内容。
+ * - 区块内容以分隔线与行分组组织、不做嵌套卡片；没有数据的区块整块不渲染。
+ * - 挂载在 `ChatView` 之外（`App` 主区的兄弟列）：设置视图打开时它仍属于聊天主区，
+ *   随 `main` 的显隐一起切换。
+ */
+export function ContextPanel() {
+ const t = useText();
+ const open = useApp((s) => s.contextPanelOpen);
+ const setOpen = useApp((s) => s.setContextPanelOpen);
+ const activeSessionId = useApp((s) => s.activeSessionId);
+ const docked = useDocked();
+ const panelRef = useRef<HTMLElement | null>(null);
+ const navRef = useRef<HTMLDivElement | null>(null);
+ const [navOpen, setNavOpen] = useState(false);
+ useDropdown(navOpen, () => setNavOpen(false));
+ const close = () => setOpen(false);
+ useDialogFocus(panelRef, open && !docked, close);
+ const SECTION_NAV = [
+  { anchor: SECTION_ANCHORS.changes, icon: File, label: t.panelChanges },
+  { anchor: SECTION_ANCHORS.progress, icon: CheckListSquare, label: t.panelProgress },
+  { anchor: SECTION_ANCHORS.subagents, icon: Sparkles, label: t.panelSubagents },
+  { anchor: SECTION_ANCHORS.sources, icon: FileText, label: t.panelSources },
+ ];
+ if (!open) return null;
+
+ const header = (
+  <header className="flex h-(--h-chrome) shrink-0 items-center gap-1 border-b border-border px-3">
+   <span className="min-w-0 flex-1 truncate text-[12px] font-medium tracking-wide text-muted">{t.panelTitle}</span>
+   {/* 区块导航浮层（v2 §1.3，对齐 Codex 的工具切换浮层）：图标 + 名称的行钮列表，
+       点击滚动定位到该区块；某区块当前没渲染时点它静默无动作（不造空跳） */}
+   <div className="relative" ref={navRef}>
+    <button
+     onClick={() => setNavOpen((v) => !v)}
+     className={`flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors duration-100 ${navOpen ? "bg-active text-foreground" : "text-muted hover:bg-hover hover:text-foreground"}`}
+     aria-label={t.panelSectionsAria}
+     aria-expanded={navOpen}
+     title={t.panelSectionsAria}
+    >
+     <Layout size={13} aria-hidden />
+    </button>
+    {navOpen && (
+     <div className="absolute top-full right-0 z-10 mt-1 w-44 rounded-lg border border-border bg-elevated p-1 shadow-pop">
+      {SECTION_NAV.map((s) => (
+       <button
+        key={s.anchor}
+        onClick={() => {
+         setNavOpen(false);
+         document.getElementById(s.anchor)?.scrollIntoView({ block: "start", behavior: "smooth" });
+        }}
+        className="flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+       >
+        <s.icon size={12} aria-hidden className="shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{s.label}</span>
+       </button>
+      ))}
+     </div>
+    )}
+   </div>
+   <button
+    onClick={close}
+    className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+    aria-label={t.panelCloseAria}
+    title={t.panelCloseAria}
+   >
+    <X size={13} aria-hidden />
+   </button>
+  </header>
+ );
+
+ const body = (
+  <div className="min-h-0 flex-1 overflow-y-auto">
+   {activeSessionId ? (
+    <>
+     <ChangesSection />
+     <ProgressSection />
+     <SubagentsSection />
+     <SourcesSection />
+    </>
+   ) : (
+    <p className="px-3.5 py-4 text-[12px] text-faint">{t.panelEmpty}</p>
+   )}
+  </div>
+ );
+
+ if (docked) {
+  return (
+   <aside
+    className="flex w-(--w-panel) shrink-0 flex-col overflow-hidden border-l border-border bg-sidebar"
+    aria-label={t.panelTitle}
+   >
+    {header}
+    {body}
+   </aside>
+  );
+ }
+ return (
+  <div className="fixed inset-0 z-20">
+   <div className="absolute inset-0 bg-black/40" onClick={close} aria-hidden />
+   <aside
+    ref={panelRef}
+    role="dialog"
+    aria-modal="true"
+    aria-label={t.panelTitle}
+    tabIndex={-1}
+    className="absolute inset-y-0 right-0 flex w-[min(320px,calc(100vw-32px))] flex-col overflow-hidden border-l border-border bg-sidebar shadow-dialog outline-none"
+   >
+    {header}
+    {body}
+   </aside>
+  </div>
+ );
+}
+
+/**
+ * 停靠 or 浮层的媒体判定（≥1280px 停靠）：订阅 `matchMedia`，
+ * 窗口跨过断点时两种形态即时切换（与 App 的窄窗侧栏同一模式）。
+ */
+function useDocked(): boolean {
+ const [docked, setDocked] = useState(() =>
+  typeof window === "undefined" ? true : window.matchMedia("(min-width: 1280px)").matches,
+ );
+ useEffect(() => {
+  const query = window.matchMedia("(min-width: 1280px)");
+  const onChange = () => setDocked(query.matches);
+  onChange();
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+ }, []);
+ return docked;
+}

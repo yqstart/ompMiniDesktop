@@ -59,7 +59,7 @@ afterEach(() => {
  vi.mocked(api.setOmpSetting).mockReset();
 });
 
-describe("设置页读取状态", () => {
+describe("设置页读取与定位", () => {
  it("首次失败不显示伪设置行，可重试恢复", async () => {
   vi.mocked(api.getOmpSettingsCatalog)
    .mockRejectedValueOnce(new Error("boom"))
@@ -80,35 +80,35 @@ describe("设置页读取状态", () => {
   expect(container.textContent).toContain("任务清单");
  });
 
- it("搜索过滤、清空后恢复", async () => {
-  vi.mocked(api.getOmpSettingsCatalog).mockResolvedValue(
-   catalog([
-    catalogItem({ key: "todo.enabled" }),
-    catalogItem({ key: "bash.enabled", section: "shell" }),
-   ]),
-  );
-  act(() => {
-   root.render(<GeneralSettingsPanel />);
-  });
-  await flush();
-  expect(container.textContent).toContain("任务清单");
-  expect(container.textContent).toContain("终端命令");
-
-  const input = container.querySelector("input")!;
-  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
-  act(() => {
-   setter?.call(input, "todo");
-   input.dispatchEvent(new Event("change", { bubbles: true }));
-  });
-  expect(container.textContent).toContain("任务清单");
-  expect(container.textContent).not.toContain("终端命令");
-
-  act(() => {
-   setter?.call(input, "");
-   input.dispatchEvent(new Event("change", { bubbles: true }));
-  });
-  expect(container.textContent).toContain("任务清单");
-  expect(container.textContent).toContain("终端命令");
+ it("搜索定位：focusRequest 滚动到行并闪烁，消费后回调", async () => {
+  // 页内搜索框在 v3 已上移为设置视图顶部的跨条目搜索（`SettingsSearch` / `lib/settingsSearch`），
+  // 本页只消费它的定位请求（`focusRequest` → 展开分组 + 滚动 + 一次性闪烁）。
+  vi.useFakeTimers();
+  try {
+   const scrollIntoView = vi.fn();
+   Element.prototype.scrollIntoView = scrollIntoView;
+   vi.mocked(api.getOmpSettingsCatalog).mockResolvedValue(catalog([catalogItem({ key: "todo.enabled" })]));
+   const onFocusDone = vi.fn();
+   act(() => {
+    root.render(<GeneralSettingsPanel />);
+   });
+   await flush();
+   act(() => {
+    root.render(
+     <GeneralSettingsPanel focusRequest={{ key: "todo.enabled", seq: 1 }} onFocusDone={onFocusDone} />,
+    );
+   });
+   await flush();
+   act(() => {
+    vi.advanceTimersByTime(120);
+   });
+   const row = container.querySelector('[data-setting="todo.enabled"]');
+   expect(row?.classList.contains("setting-flash")).toBe(true);
+   expect(scrollIntoView).toHaveBeenCalled();
+   expect(onFocusDone).toHaveBeenCalled();
+  } finally {
+   vi.useRealTimers();
+  }
  });
 });
 

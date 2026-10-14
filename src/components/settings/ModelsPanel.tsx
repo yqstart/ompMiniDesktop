@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader, Refresh, Sliders, Star } from "reicon-react";
+import { Loader, Refresh } from "reicon-react";
 import { api } from "@shared/api";
 import type { FallbackChainsInfo, ModelInfo, ModelRolesInfo } from "@shared/types";
 import { useApp } from "../../stores/app";
@@ -184,25 +184,21 @@ export function ModelsPanel() {
 
  return (
   <>
-   <div className="shrink-0">
-    <div className="flex flex-wrap items-center gap-2">
-     <h2 className="text-[20px] font-semibold tracking-tight">{t.tabModels}</h2>
-     {/* 页级唯一刷新：角色 / 环 / 转移 / 目录 / 供应商（经 modelsRefreshed 广播）都靠它 */}
-     <button
-      onClick={() => void refreshAll()}
-      disabled={busy}
-      className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
-      aria-label={t.modelsRefresh}
-      title={t.modelsRefresh}
-     >
-      {busy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
-      {t.refresh}
-     </button>
-    </div>
-    <p className="mt-1 text-[13px] text-muted">{t.tabModelsHint}</p>
+   <div className="flex flex-wrap items-start gap-2">
+    <p className="min-w-0 flex-1 text-xs leading-5 text-muted">{t.tabModelsHint}</p>
+    {/* 页级唯一刷新：角色 / 环 / 转移 / 目录 / 供应商（经 modelsRefreshed 广播）都靠它 */}
+    <button
+     onClick={() => void refreshAll()}
+     disabled={busy}
+     className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
+     aria-label={t.modelsRefresh}
+     title={t.modelsRefresh}
+    >
+     {busy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
+    </button>
    </div>
    {err && (
-    <p role="alert" className="rounded border border-danger/40 bg-danger/5 px-3 py-2 text-[13px] text-danger">
+    <p role="alert" className="mt-3 rounded border border-danger/40 bg-danger/5 px-3 py-2 text-[13px] text-danger">
      {err}
     </p>
    )}
@@ -211,33 +207,32 @@ export function ModelsPanel() {
    <ProvidersSection />
 
    {/* 我的模型：本应用偏好；挑过之后下面角色 / 转移的候选只列这些 */}
-   <section aria-label={t.myModelsSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
+   <section aria-label={t.myModelsSection} className="mt-6 shrink-0">
     <div className="flex flex-wrap items-center gap-2">
-     <Star size={16} aria-hidden className="text-muted" />
-     <h2 className="text-sm font-semibold">{t.myModelsSection}</h2>
+     <h3 className="text-xs font-medium text-muted">{t.myModelsSection}</h3>
      {entries.length > 0 && (
-      <span className="text-[13px] text-muted">{fmt(t.myModelsCount, String(entries.length))}</span>
+      <span className="font-mono text-[11px] text-faint">{fmt(t.myModelsCount, String(entries.length))}</span>
      )}
      {entries.length > 0 && (
       <button
        onClick={() => setMyModels([])}
-       className="ml-auto min-h-8 cursor-pointer rounded-md bg-background px-3 py-1.5 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+       className="ml-auto flex h-7 cursor-pointer items-center rounded-md px-2 text-[12px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
       >
        {t.myModelsClear}
       </button>
      )}
     </div>
     {catalogError && (
-     <p role="alert" className="mt-1.5 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
+     <p role="alert" className="mt-2 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
       {catalogError}
      </p>
     )}
-    <div className="mt-4">
+    <div className="mt-1 divide-y divide-border-soft">
      {entries.length === 0 ? (
       <p className="py-2 text-[13px] text-muted">{t.myModelsEmpty}</p>
      ) : (
       entries.map(({ selector, model }) => (
-       <div key={selector} className="flex flex-wrap items-center gap-2 border-t border-border-soft py-3 first:border-t-0">
+       <div key={selector} className="flex min-h-11 flex-wrap items-center gap-2 py-2.5">
         <StarToggle on name={model?.name ?? selector} onClick={() => setMyModels(toggleMyModel(myModels, selector))} />
         <span className="min-w-0 flex-1 truncate text-[13px]">{model?.name ?? selector}</span>
         {model && <span className="min-w-0 basis-full pl-9 font-mono text-[11px] break-all text-faint @min-[600px]/panel:ml-auto @min-[600px]/panel:basis-auto @min-[600px]/panel:pl-0">{selector}</span>}
@@ -253,28 +248,27 @@ export function ModelsPanel() {
    </section>
 
    {/* 模型角色：角色行 = 选模型 / 档位；Ctrl+P 轮换序自动取这里的已配置模型（行序即轮换序） */}
-   <section aria-label={t.rolesSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
+   <section aria-label={t.rolesSection} className="mt-6 shrink-0">
     <div className="flex flex-wrap items-center gap-2">
-     <Sliders size={16} aria-hidden className="text-muted" />
-     <h2 className="text-sm font-semibold">{t.rolesSection}</h2>
+     <h3 className="text-xs font-medium text-muted">{t.rolesSection}</h3>
      <kbd className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted">Ctrl+P</kbd>
     </div>
     {roles?.storage === "project" && (
-     <p className="mt-1.5 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
+     <p className="mt-2 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
       {t.roleStorageProject}
      </p>
     )}
     {rolesError && roles !== null && (
-     <p role="alert" className="mt-1.5 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
+     <p role="alert" className="mt-2 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
       {t.ompSettingsStale}：{rolesError}
      </p>
     )}
     {cycleError && (
-     <p role="alert" className="mt-1.5 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
+     <p role="alert" className="mt-2 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
       {cycleError}
      </p>
     )}
-    <div className="mt-4">
+    <div className="mt-1 divide-y divide-border-soft">
      {roles === null ? (
       rolesError ? (
        <div className="flex flex-col items-start gap-2 py-2">
@@ -387,8 +381,8 @@ function RoleRow({
  };
 
  return (
-  <div className="border-t border-border-soft py-4 first:border-t-0">
-   <div className="flex flex-wrap items-center gap-2">
+  <div className="py-2.5">
+   <div className="flex min-h-11 flex-wrap items-center gap-2">
     <div className="min-w-0 basis-full @min-[600px]/panel:w-32 @min-[600px]/panel:basis-auto">
      <div className="truncate text-sm">{label}</div>
      {label !== role && <div className="font-mono text-xs text-muted">{role}</div>}
@@ -440,7 +434,7 @@ function RoleRow({
    {/* 思考档：行内芯片排（设置页是可滚动容器，浮层会被裁掉）；
        「默认」= 不写后缀，交给 omp 自己的 defaultThinkingLevel */}
    {levelOpen && (
-    <div ref={lvRef} className="mt-2 flex flex-wrap gap-1 rounded-md border border-border bg-background p-2">
+    <div ref={lvRef} className="mt-2 flex flex-wrap gap-1 rounded-md bg-surface p-2">
      <button
       onClick={() => void setLevel(null)}
       aria-pressed={level === null}

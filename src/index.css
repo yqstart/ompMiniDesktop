@@ -48,6 +48,29 @@
  --active: rgb(255 255 255 / 11%);
 }
 
+/* ---- 语义层 token（MASTER §2.4，v2 落地）----
+   跨组件的布局决策进这里（禁止组件里散落魔数）；都是尺寸、与配色无关，深浅两套共用。
+   新增 token 的判据是「表达可复用决策」——只在一处用到的数值放组件局部。 */
+:root {
+ --h-chrome: 44px;
+ /* 顶栏 / 左栏顶行（现 Header 的 h-11 档） */
+ --h-row: 28px;
+ /* 菜单行 / 紧凑动作行 */
+ --h-row-lg: 32px;
+ /* 列表行（会话行 / 结果行） */
+ --w-sidebar: 292px;
+ /* 左栏默认宽（与 stores/app 的 SIDEBAR_DEFAULT 同步；可拖 292–480） */
+ --w-panel: 320px;
+ /* 右上下文面板宽（v2 新增） */
+ --measure-content: 46rem;
+ /* 消息流内容测量宽（中列正文行宽上限，收紧阅读行宽） */
+ --w-menu-sm: 14rem;
+ --w-menu-md: 18rem;
+ /* 菜单宽两档（行钮浮层用） */
+ --w-settings-nav: 176px;
+ /* 设置左导航宽（v3 设置重构：文字档；图标档 44px 由组件内的容器查询切换） */
+}
+
 @theme inline {
  --color-background: var(--background);
  --color-sidebar: var(--sidebar);
@@ -223,6 +246,25 @@ summary::-webkit-details-marker {
 
  50% {
   opacity: 0.25;
+ }
+}
+
+/* ---- 设置搜索定位（v3）----
+   从搜索结果跳到某个设置行时闪一下底（一次性，结束时回到透明；reduced-motion 由全局规则收敛）。 */
+.setting-flash {
+ border-radius: var(--radius-sm);
+ animation: setting-flash 1.6s ease-out 1;
+}
+
+@keyframes setting-flash {
+
+ 0%,
+ 35% {
+  background-color: color-mix(in srgb, var(--accent) 12%, transparent);
+ }
+
+ 100% {
+  background-color: transparent;
  }
 }
 

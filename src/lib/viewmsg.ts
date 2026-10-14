@@ -138,6 +138,23 @@ export function diffStatOf(name: string, args: Record<string, unknown>): DiffSta
 }
 
 /**
+ * jsonl 行时间（epoch 毫秒）：顶层 `timestamp`（RFC3339，如 `2026-10-14T03:02:45.968Z`）优先，
+ * 其次消息体内的 `timestamp`（omp 写的是毫秒数）。解析不出返回 undefined——
+ * 时长行（`lib/threadLayout.ts`）对没时间戳的消息不显示，不假装有。
+ */
+function lineAtOf(o: Record<string, unknown>): number | undefined {
+ const ts = o.timestamp;
+ if (typeof ts === "string") {
+  const ms = Date.parse(ts);
+  if (Number.isFinite(ms)) return ms;
+ } else if (typeof ts === "number" && Number.isFinite(ts)) {
+  return ts;
+ }
+ const inner = (o.message as { timestamp?: unknown } | undefined)?.timestamp;
+ return typeof inner === "number" && Number.isFinite(inner) ? inner : undefined;
+}
+
+/**
  * 把 jsonl 文件的多行批量归一为 ViewMsg（历史回放入口）。
  *
  * 单行归一（viewMsgFromJsonlLine）无法跨行关联，是截图里
@@ -254,7 +271,7 @@ export function viewMsgsFromJsonlLines(lines: unknown[], t: Text): ViewMsg[] {
  // 第二遍：按文件顺序发射，一个 toolCallId 只出一卡（位置在首次调用处）
  const out: ViewMsg[] = [];
  const emittedTools = new Set<string>();
- const emitTool = (toolCallId: string) => {
+ const emitTool = (toolCallId: string, at?: number) => {
   if (!toolCallId || emittedTools.has(toolCallId)) return;
   emittedTools.add(toolCallId);
   const call = calls.get(toolCallId);
@@ -275,6 +292,7 @@ export function viewMsgsFromJsonlLines(lines: unknown[], t: Text): ViewMsg[] {
    streamIndex: call?.streamIndex ?? 0,
    ...(diffStat ? { diffStat } : {}),
    ...(path ? { path } : {}),
+   ...(at != null ? { at } : {}),
   });
  };
 
@@ -287,6 +305,8 @@ export function viewMsgsFromJsonlLines(lines: unknown[], t: Text): ViewMsg[] {
   if (!line || typeof line !== "object") return;
   const o = line as Record<string, unknown>;
   const lid = lineIdOf(line, `n${li}`);
+  // 本行的时间（v2 轮时长行用）：随消息归一一起带上，缺省即不产时长
+  const at = lineAtOf(o);
   if (o.type === "message") {
    const m = o.message as { role?: string; content?: unknown[] } | undefined;
    if (!m) return;
@@ -308,19 +328,20 @@ export function viewMsgsFromJsonlLines(lines: unknown[], t: Text): ViewMsg[] {
      mentions: [],
      ...(images.length > 0 ? { images } : {}),
      ...(omitted > 0 ? { imagesOmitted: omitted } : {}),
+     ...(at != null ? { at } : {}),
     });
     return;
    }
    if (m.role === "fileMention") {
     // @文件 提及（V2 M6b）：omp 把命中的文件读进上下文时落的一条消息，渲染成文件芯片
     const files = mentionFilesOf(m as Record<string, unknown>);
-    if (files.length > 0) out.push({ kind: "files", id: `fm:${lid}`, files });
+    if (files.length > 0) out.push({ kind: "files", id: `fm:${lid}`, files, ...(at != null ? { at } : {}) });
     return;
    }
    if (m.role === "toolResult") {
     // 结果已合并进调用处的卡；孤儿结果（调用行被截断时）才在此处补一卡
     const id = String((m as Record<string, unknown>).toolCallId ?? "");
-    if (id && !emittedTools.has(id) && !calls.has(id)) emitTool(id);
+    if (id && !emittedTools.has(id) && !calls.has(id)) emitTool(id, at);
     return;
    }
    if (!Array.isArray(m.content)) return;
@@ -329,7 +350,7 @@ export function viewMsgsFromJsonlLines(lines: unknown[], t: Text): ViewMsg[] {
     if (b.type === "text") {
      const t = String(b.text ?? "");
      if (!t) return;
-     out.push({ kind: "text", id: `t:${lid}:${bi}`, seq: bi, text: t, complete: true });
+     out.push({ kind: "text", id: `t:${lid}:${bi}`, seq: bi, text: t, complete: true, ...(at != null ? { at } : {}) });
     } else if (b.type === "thinking") {
      out.push({
       kind: "thinking",
@@ -337,10 +358,11 @@ export function viewMsgsFromJsonlLines(lines: unknown[], t: Text): ViewMsg[] {
       text: String(b.thinking ?? ""),
       seconds: 0,
       complete: true,
+      ...(at != null ? { at } : {}),
      });
     } else if (b.type === "toolCall") {
      const id = String(b.id ?? "");
-     if (id) emitTool(id);
+     if (id) emitTool(id, at);
     }
    });
    return;
@@ -350,7 +372,7 @@ export function viewMsgsFromJsonlLines(lines: unknown[], t: Text): ViewMsg[] {
    if (o.customType === "tool_execution_start" || o.customType === "tool_execution_end") {
     const data = o.data as Record<string, unknown> | undefined;
     const id = String(data?.toolCallId ?? "");
-    if (id && !emittedTools.has(id) && !calls.has(id)) emitTool(id);
+    if (id && !emittedTools.has(id) && !calls.has(id)) emitTool(id, at);
    }
    return;
   }
@@ -367,6 +389,7 @@ export function viewMsgsFromJsonlLines(lines: unknown[], t: Text): ViewMsg[] {
     id: `d:${lid}`,
     divider: o.type === "model_change" ? "model" : o.type === "thinking_level_change" ? "thinking" : "title",
     text: label,
+    ...(at != null ? { at } : {}),
    });
    return;
   }

@@ -4,12 +4,12 @@
 
 把 omp 的编码代理会话带进一个专注的桌面聊天界面——项目与会话管理、流式对话、工具与审批、队列与插话、归档与统计，全部在聊天形态内完成。**不做终端仿真**。
 
-> **仓库状态（2026-10-14）**：当前版本 **0.1.0**，三个方向的重构进行中：
+> **状态（2026-10-14）**：首个版本 **v0.1.0** 已发布，三部分一体交付：
 > 1. **只保留聊天形态**——终端形态（PTY / xterm / 工作区树）整体退场；
 > 2. **聊天形态对标 Codex Desktop、Zcode Desktop**——样式、布局、流式对话、聊天框；
 > 3. **设置重构**——功能全量保留，操作方式与展现形式重新设计。
 >
-> 规划见 [`docs/roadmap.md`](docs/roadmap.md)。
+> 变更记录见 [`CHANGELOG.md`](CHANGELOG.md) 的 `0.1.0` 节；规划见 [`docs/roadmap.md`](docs/roadmap.md)。
 
 ## 它长什么样
 
@@ -52,16 +52,16 @@ pnpm tauri:build      # 本机发布构建（产物见 src-tauri/target/release/
 pnpm icon             # 从 design-system/icon/omp-mini-icon.svg 重生成应用图标
 ```
 
-发布：更新 `CHANGELOG.md` 并升三处版本号（`package.json` / `src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml`）→ 打 `v*` tag 推送 → GitHub Actions 四平台打包并生成 `latest.json`（应用内更新的数据源）。macOS 签名证书见 `scripts/make-signing-cert.sh`。
+发布：更新 `CHANGELOG.md` 并升四处版本号（`package.json` / `src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml` / `Cargo.lock`）→ 打 `v*` tag 推送 → GitHub Actions 四平台打包并生成 `latest.json`（应用内更新的数据源）。macOS 签名证书见 `scripts/make-signing-cert.sh`。
 
 ## 文档
 
 | 文档 | 内容 |
 |---|---|
 | [`docs/roadmap.md`](docs/roadmap.md) | 版本规划总纲 |
-| [`docs/v1-schedule.md`](docs/v1-schedule.md) | 0.1.0 形态收敛（终端形态下线）|
-| [`docs/v2-schedule.md`](docs/v2-schedule.md) | 0.2.0 聊天对标（Codex / ZCode）|
-| [`docs/v3-schedule.md`](docs/v3-schedule.md) | 0.3.0 设置重构 |
+| [`docs/v1-schedule.md`](docs/v1-schedule.md) | 排期 1：形态收敛（终端形态下线）|
+| [`docs/v2-schedule.md`](docs/v2-schedule.md) | 排期 2：聊天对标（Codex / ZCode）|
+| [`docs/v3-schedule.md`](docs/v3-schedule.md) | 排期 3：设置重构 |
 | [`docs/benchmark-codex-desktop.md`](docs/benchmark-codex-desktop.md) / [`benchmark-zcode-desktop.md`](docs/benchmark-zcode-desktop.md) | 对标调研 |
 | [`design-system/MASTER.md`](design-system/MASTER.md) | 设计系统 |
 

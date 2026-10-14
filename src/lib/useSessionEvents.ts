@@ -496,7 +496,7 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dic
       ? fmt(dict.dividerSubagentFailed, agent)
       : fmt(dict.dividerSubagentAborted, agent);
   // id 带 status：同一次 spawn 的 started / completed 是两条独立消息（mergeViewMsgs 按 id 去重）
-  out.push({ kind: "divider", id: `sub-${String(p.id ?? "")}-${status || "unknown"}`, divider: "turn", text });
+  out.push({ kind: "divider", id: `sub-${String(p.id ?? "")}-${status || "unknown"}`, divider: "subagent", text });
   return out;
  }
  if (t === "subagent_progress" || t === "subagent_event") return out;
@@ -850,8 +850,12 @@ export function useSessionEvents() {
      const info = subagentFromFrame(p.payload);
      if (info) useApp.getState().upsertSubagent(sid, info);
     }
-    // 语言按帧到达时刻取：切语言后新帧立刻用新语言，已渲染的旧分隔线要重开会话才换
-    const msgs = frameToViewMsgs(sid, p, TEXT[useApp.getState().locale]) as IncomingViewMsg[];
+    // 语言按帧到达时刻取：切语言后新帧立刻用新语言，已渲染的旧分隔线要重开会话才换。
+    // 同一批帧统一打到达时刻（v2 轮时长行的实时来源；历史回放的时间来自 jsonl timestamp）。
+    const nowMs = Date.now();
+    const msgs = frameToViewMsgs(sid, p, TEXT[useApp.getState().locale]).map((m) =>
+     m.at != null ? m : { ...m, at: nowMs },
+    ) as IncomingViewMsg[];
     // 统一走合并管线：帧先入缓冲（同 id 折叠），flush 时再经 mergeViewMsgs 落 store
     // （text 流式同 id 覆盖、工具卡同 id 原位合并，避免一次调用渲染成多张卡）。
     buffer.push(msgs);

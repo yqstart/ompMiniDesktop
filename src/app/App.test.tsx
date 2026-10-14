@@ -53,6 +53,16 @@ vi.mock("@shared/api", () => ({
   listSessions: vi.fn(async () => ({ sessions: [], totalFiles: 0, scannedFiles: 0 })),
   listProjectFiles: vi.fn(async () => []),
   getWorkspaceGitState: vi.fn(async () => []),
+  getGitInfo: vi.fn(async () => ({
+   isRepo: false,
+   branch: null,
+   detached: false,
+   branches: [],
+   dirty: null,
+   added: null,
+   removed: null,
+   error: null,
+  })),
   syncTitlePrompt: vi.fn(async () => ({ path: "/tmp/TITLE_SYSTEM.md", action: "written" as const })),
  },
 }));
@@ -141,6 +151,7 @@ beforeEach(() => {
   checkouts: [CHECKOUT],
   settingsTabOpen: false,
   settingsTabActive: false,
+  settingsSearchOpen: false,
   sidebarOpen: false,
   providerUsageOpen: false,
   refPickerTarget: null,
@@ -194,6 +205,39 @@ describe("应用外壳：左栏、设置视图与快捷键", () => {
   expect(useApp.getState().settingsTabActive).toBe(false);
   expect(useApp.getState().settingsTabOpen).toBe(false);
   expect(container.querySelector('[data-testid="chat"]')?.getAttribute("data-visible")).toBe("true");
+ });
+
+ it("设置视图激活时聊天列整体退场（两个 flex-1 兄弟会平分主区，顶部凭空留白）", () => {
+  const chatColumn = () =>
+   (container.querySelector('[data-testid="chat"]') as HTMLElement).parentElement as HTMLElement;
+  expect(chatColumn().className).toContain("flex-1");
+  act(() => useApp.getState().openSettingsTab());
+  expect(chatColumn().className).toContain("hidden");
+  expect(chatColumn().className).not.toContain("flex-1");
+  act(() => useApp.getState().closeSettingsTab());
+  expect(chatColumn().className).toContain("flex-1");
+  expect(chatColumn().className).not.toContain("hidden");
+ });
+
+ it("⌘, 打开设置视图并复位搜索；设置内 ⌘F 展开设置搜索、⌘W 关闭时一并复位", () => {
+  press({ key: ",", ...mod });
+  expect(useApp.getState().settingsTabOpen).toBe(true);
+  expect(useApp.getState().settingsTabActive).toBe(true);
+  press({ key: "f", ...mod });
+  expect(useApp.getState().settingsSearchOpen).toBe(true);
+  // 已打开时再按 ⌘, 不发生 toggle（只切过去，与系统惯例一致）
+  press({ key: ",", ...mod });
+  expect(useApp.getState().settingsTabActive).toBe(true);
+  press({ key: "w", ...mod });
+  expect(useApp.getState().settingsTabActive).toBe(false);
+  expect(useApp.getState().settingsSearchOpen).toBe(false);
+ });
+
+ it("聊天视图 ⌘F 打开会话内查找（设置搜索不展开）", () => {
+  useApp.setState({ activeSessionId: "s-1", sessions: [SESSION] });
+  press({ key: "f", ...mod });
+  expect(useApp.getState().findOpen).toBe(true);
+  expect(useApp.getState().settingsSearchOpen).toBe(false);
  });
 
  it("⌘T 在第一个可用主目录新建聊天", async () => {

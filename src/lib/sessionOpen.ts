@@ -136,7 +136,7 @@ export function fallbackTitleFromText(text: string): string | null {
 export async function refreshTitleAfterFirstSend(id: string, text: string): Promise<void> {
  const cur = useApp.getState().sessions.find((s) => s.id === id);
  // 已有备注 / 已有真标题的不碰：回退只服务「未命名」会话
- if (cur?.note?.trim() || (cur?.title && !cur.title.startsWith("未命名会话") && !cur.title.startsWith("Untitled"))) return;
+ if (cur?.note?.trim() || (cur?.title && !isDefaultTitle(cur.title))) return;
  const fallback = fallbackTitleFromText(text);
  if (fallback) {
   const st = useApp.getState();
@@ -145,9 +145,18 @@ export async function refreshTitleAfterFirstSend(id: string, text: string): Prom
  // 回读 omp 真值：补标题还没完成时保持回退（后端派生的同口径标题也在这里落位）
  await refreshSessionView(id);
  const latest = useApp.getState().sessions.find((s) => s.id === id);
- if (fallback && latest && (latest.title.startsWith("未命名会话") || latest.title.startsWith("Untitled"))) {
+ if (fallback && latest && isDefaultTitle(latest.title)) {
   useApp.getState().set({ sessions: useApp.getState().sessions.map((s) => (s.id === id ? { ...s, title: fallback } : s)) });
  }
+}
+
+/**
+ * 默认标题的判定（会话还没起过轮次 / 还没改过名）：后端派生的兜底标题与本地回退都认这两种写法，
+ * 两处判定（首条发送后的回退、新建会话时的「空会话」识别）共用一份，避免各写一半。
+ */
+export function isDefaultTitle(title: string | null | undefined): boolean {
+ const s = title?.trim() ?? "";
+ return s.length === 0 || s.startsWith("未命名会话") || s.startsWith("Untitled");
 }
 
 /**

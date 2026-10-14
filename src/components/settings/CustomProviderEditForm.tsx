@@ -150,7 +150,7 @@ export function CustomProviderEditForm({
      const invalidContext = !isValidModelLimit(m.contextWindow);
      const invalidMaxTokens = !isValidModelLimit(m.maxTokens);
      return (
-      <div key={i} className="mt-3 rounded-lg border border-border-soft bg-background p-3 sm:p-4">
+      <div key={i} className="mt-3 rounded-md bg-background p-3 sm:p-4">
        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
         <input
          value={m.id}

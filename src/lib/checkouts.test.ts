@@ -1,12 +1,39 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import type { CheckoutView } from "@shared/types";
+import type { CheckoutView, SessionView, ViewMsg } from "@shared/types";
 import { api } from "@shared/api";
-import { loadCheckouts, resolveNewChatCheckout } from "./checkouts";
+import { loadCheckouts, newChatInDefaultCheckout, resolveNewChatCheckout } from "./checkouts";
+import { TEXT } from "./locale";
 import { useApp } from "../stores/app";
 
 vi.mock("@shared/api", () => ({
- api: { listCheckouts: vi.fn(async () => []), listWorkspaces: vi.fn(async () => []) },
+ api: {
+  listCheckouts: vi.fn(async () => []),
+  listWorkspaces: vi.fn(async () => []),
+  createSession: vi.fn(async () => ({
+   id: "new-1",
+   projectId: "a",
+   title: "未命名会话",
+   cwd: "/a/main",
+   timestamp: 1,
+   archived: false,
+   corrupt: false,
+   note: null,
+   running: false,
+  })),
+  openSession: vi.fn(async () => ({
+   id: "new-1",
+   projectId: "a",
+   title: "未命名会话",
+   cwd: "/a/main",
+   timestamp: 1,
+   archived: false,
+   corrupt: false,
+   note: null,
+   running: false,
+  })),
+  getHistory: vi.fn(async () => ({ lines: [], truncated: false })),
+ },
 }));
 
 const base: CheckoutView[] = [
@@ -24,6 +51,89 @@ describe("新建聊天的目标选择（⌘T）", () => {
   // 全部目录缺失 → 没有可开的目标
   expect(resolveNewChatCheckout(base.map((w) => ({ ...w, missing: true })))).toBeNull();
   expect(resolveNewChatCheckout([])).toBeNull();
+ });
+});
+
+describe("新建会话（左栏主命令 / ⌘T）", () => {
+ const session = (over: Partial<SessionView> = {}): SessionView => ({
+  id: "s1",
+  projectId: "a",
+  title: "聊过的会话",
+  cwd: "/a/main",
+  timestamp: 1,
+  archived: false,
+  corrupt: false,
+  note: null,
+  running: false,
+  ...over,
+ });
+
+ const USER_MSG: ViewMsg = { kind: "user", id: "u1", text: "你好", mentions: [] };
+
+ /** 基线状态（各用例按需覆盖）：一个项目 + 一个已经聊过内容的当前会话。 */
+ const baseState = {
+  checkouts: base,
+  locale: "zh-CN" as const,
+  projects: [{ id: "a", path: "/a/main", name: "Alpha", missing: false, sessionCount: 1, workspaceId: null }],
+  activeSessionId: "s1",
+  sessions: [session()],
+  eventsBySession: { s1: [USER_MSG] },
+  drafts: {},
+ };
+
+ it("当前会话所在目录里已有对话 → 仍然新建（旧实现这里静默不做事）", async () => {
+  useApp.setState(baseState);
+  vi.mocked(api.createSession).mockClear();
+  const res = await newChatInDefaultCheckout();
+  expect(api.createSession).toHaveBeenCalledWith("/a/main");
+  expect(res).toEqual({ ok: true, id: "new-1" });
+ });
+
+ it("目标 = 当前会话的目录（不是第一个项目）；没有当前会话时才退回第一个可用主目录", async () => {
+  useApp.setState({ ...baseState, sessions: [session({ cwd: "/b/main" })], eventsBySession: { s1: [USER_MSG] } });
+  vi.mocked(api.createSession).mockClear();
+  await newChatInDefaultCheckout();
+  expect(api.createSession).toHaveBeenCalledWith("/b/main");
+  // 没有当前会话：退回第一个可用主目录（空态语义）
+  useApp.setState({ ...baseState, activeSessionId: null, sessions: [], eventsBySession: {} });
+  vi.mocked(api.createSession).mockClear();
+  await newChatInDefaultCheckout();
+  expect(api.createSession).toHaveBeenCalledWith("/a/main");
+ });
+
+ it("当前会话就是该目录里的空会话 → 复用，不叠第二个空的", async () => {
+  useApp.setState({ ...baseState, sessions: [session({ title: "未命名会话" })], eventsBySession: {} });
+  vi.mocked(api.createSession).mockClear();
+  const res = await newChatInDefaultCheckout();
+  expect(api.createSession).not.toHaveBeenCalled();
+  expect(res).toEqual({ ok: true, id: "s1" });
+ });
+
+ it("空会话里已敲了草稿 → 不再当成空会话，照常新建", async () => {
+  useApp.setState({
+   ...baseState,
+   sessions: [session({ title: "未命名会话" })],
+   eventsBySession: {},
+   drafts: { s1: "半句话" },
+  });
+  vi.mocked(api.createSession).mockClear();
+  await newChatInDefaultCheckout();
+  expect(api.createSession).toHaveBeenCalledWith("/a/main");
+ });
+
+ it("没有可用目录 → 带回文案（不静默、也不留一个点不动的按钮）", async () => {
+  useApp.setState({
+   ...baseState,
+   checkouts: base.map((w) => ({ ...w, missing: true })),
+   activeSessionId: null,
+   sessions: [],
+   eventsBySession: {},
+  });
+  vi.mocked(api.createSession).mockClear();
+  const res = await newChatInDefaultCheckout();
+  expect(res.ok).toBe(false);
+  expect(res.ok === false && res.message).toBe(TEXT["zh-CN"].newChatNoProject);
+  expect(api.createSession).not.toHaveBeenCalled();
  });
 });
 

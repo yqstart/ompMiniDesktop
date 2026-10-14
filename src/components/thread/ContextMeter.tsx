@@ -65,7 +65,7 @@ function Ring({ pct, warn }: { pct: number; warn: boolean }) {
  );
 }
 
-export function ContextMeter() {
+export function ContextMeter({ align = "up" }: { align?: "up" | "down" } = {}) {
  const t = useText();
  const locale = useApp((s) => s.locale);
  const activeSessionId = useApp((s) => s.activeSessionId);
@@ -131,7 +131,7 @@ export function ContextMeter() {
    </button>
    {open && (
     <div
-     className="absolute bottom-full left-0 z-10 mb-1 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-elevated p-3 shadow-pop"
+     className={`absolute z-10 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-elevated p-3 shadow-pop ${align === "down" ? "top-full right-0 mt-1" : "bottom-full left-0 mb-1"}`}
      aria-label={t.ctxTitle}
     >
      <div className="flex items-baseline justify-between gap-2">

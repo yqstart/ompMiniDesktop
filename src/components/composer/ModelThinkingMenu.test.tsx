@@ -6,12 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@shared/api";
 import type { ModelInfo } from "@shared/types";
 import { useApp } from "../../stores/app";
-import { ModelPicker } from "./ModelPicker";
+import { ModelThinkingMenu } from "./ModelThinkingMenu";
 
 /**
- * 聊天下拉的选单分区（与设置页模型弹窗同一份口径，`lib/myModels.ts` 的 `splitStarredModels`）：
- * **我的模型**置顶成组、星标项不在供应商组里重复出现；每行行首的星标可即时加 / 摘
- * （只改分区、不收窄候选）。此前的实现只把星标项排到各自供应商组的前面，没有置顶组。
+ * 模型 · 思考档合并菜单（v2）的选单分区（与设置页模型弹窗同一份口径，
+ * `lib/myModels.ts` 的 `splitStarredModels`）：**我的模型**置顶成组、星标项不在供应商组里重复出现；
+ * 每行行首的星标可即时加 / 摘（只改分区、不收窄候选）；思考档段只列支持档。
  */
 
 const m = (provider: string, id: string): ModelInfo => ({
@@ -30,9 +30,11 @@ const CATALOG = [m("demo", "plain"), m("demo", "reason"), m("other", "flash")];
 
 vi.mock("@shared/api", () => ({
  api: {
-  getModels: vi.fn(async () => ({ models: [], fetchedAt: 0 })),
-  refreshModels: vi.fn(async () => ({ models: [], fetchedAt: 0 })),
+  getModels: vi.fn(async () => ({ models: CATALOG, fetchedAt: 0 })),
+  refreshModels: vi.fn(async () => ({ models: CATALOG, fetchedAt: 0 })),
   setModel: vi.fn(async () => { }),
+  setThinking: vi.fn(async () => { }),
+  getGlobalApproval: vi.fn(async () => "write"),
  },
 }));
 
@@ -66,11 +68,11 @@ afterEach(() => {
 const headers = () => [...container.querySelectorAll("div.px-1.pt-2")].map((el) => el.textContent);
 const rows = () => [...container.querySelectorAll('button[aria-label^="使用模型"]')].map((el) => el.getAttribute("aria-label"));
 
-describe("聊天下拉的模型选单", () => {
+describe("模型 · 思考档合并菜单", () => {
  it("我的模型置顶成组、星标项不在供应商组里重复出现；行首星标即时加 / 摘", () => {
   useApp.setState({ myModels: ["other/flash"] });
   act(() => {
-   root.render(<ModelPicker />);
+   root.render(<ModelThinkingMenu />);
   });
   // 我的模型（按挑选顺序）在前，其余按供应商分组、目录原序；flash 不在 other 组里重复出现
   // （other 只有这一个模型，全被星标后该组直接消失）
@@ -89,7 +91,7 @@ describe("聊天下拉的模型选单", () => {
 
  it("没有星标时只列供应商组（不出现空的「我的模型」段）", () => {
   act(() => {
-   root.render(<ModelPicker />);
+   root.render(<ModelThinkingMenu />);
   });
   expect(headers()).toEqual(["demo", "other"]);
   expect(rows()).toEqual(["使用模型 plain", "使用模型 reason", "使用模型 flash"]);
@@ -98,7 +100,7 @@ describe("聊天下拉的模型选单", () => {
  it("搜索过滤同样按分区排（星标命中在前），点选行按 provider/id 走 IPC", async () => {
   useApp.setState({ myModels: ["other/flash"], activeSessionId: "s1" });
   act(() => {
-   root.render(<ModelPicker />);
+   root.render(<ModelThinkingMenu />);
   });
   const input = container.querySelector("#model-search") as HTMLInputElement;
   // React 受控输入的 value 要走原型 setter，再派发 input 事件才会进 onChange
@@ -113,6 +115,28 @@ describe("聊天下拉的模型选单", () => {
   act(() => (container.querySelector('[aria-label="使用模型 plain"]') as HTMLButtonElement).click());
   await act(async () => { await delay(0); });
   expect(vi.mocked(api.setModel)).toHaveBeenCalledWith("s1", "demo", "plain");
+  expect(useApp.getState().composerMenu).toBeNull();
+ });
+
+ it("思考档段：只列当前模型支持的档位，点击下发 set_thinking_level 并标记当前档", async () => {
+  useApp.setState({
+   activeSessionId: "s1",
+   currentModel: "demo/reason",
+   currentEfforts: ["low", "high"],
+   currentThinking: "high",
+  });
+  act(() => {
+   root.render(<ModelThinkingMenu />);
+  });
+  const levelBtns = [...container.querySelectorAll<HTMLButtonElement>('button[aria-label^="思考等级"]')];
+  expect(levelBtns.map((b) => b.textContent)).toEqual(["off", "low", "high"]);
+  // 当前档（high）打勾：aria-pressed 表达选中
+  expect(levelBtns[2].getAttribute("aria-pressed")).toBe("true");
+
+  act(() => levelBtns[1].click());
+  await act(async () => { await delay(0); });
+  expect(vi.mocked(api.setThinking)).toHaveBeenCalledWith("s1", "low");
+  expect(useApp.getState().currentThinking).toBe("low");
   expect(useApp.getState().composerMenu).toBeNull();
  });
 });

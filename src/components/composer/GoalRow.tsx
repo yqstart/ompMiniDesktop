@@ -33,7 +33,7 @@ export function GoalRow() {
 
  return (
   <div
-   className="mx-auto mb-1 flex max-w-3xl items-center gap-1.5 rounded-md border border-accent/30 bg-accent/5 px-2.5 py-1 text-[12px] text-muted"
+   className="mx-auto mb-1 flex max-w-(--measure-content) items-center gap-1.5 rounded-md border border-accent/30 bg-accent/5 px-2.5 py-1 text-[12px] text-muted"
    aria-label={fmt(t.goalRowAria, goal.objective, paused ? t.goalPaused : t.goalInProgress)}
   >
    <Target size={13} className="shrink-0 text-accent" aria-hidden />

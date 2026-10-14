@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { ArrowUp, FileText, Files, Hourglass, ImagePlus, PenLine, Timer, TriangleWarning, X } from "reicon-react";
+import { ArrowUp, FileText, Hourglass, PenLine, Timer, TriangleWarning, X } from "reicon-react";
 import type { AvailableCommand, Goal, ViewMsg } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { api } from "@shared/api";
@@ -15,28 +15,32 @@ import { openBtwPanel, askBtw } from "../../lib/btw";
 import { commandInsert, filterCommands, isCompleteCommand, normalizeCommands, type SlashCandidate } from "../../lib/slashCommands";
 import { openForkedSession, refreshTitleAfterFirstSend } from "../../lib/sessionOpen";
 import { useText } from "../../lib/useText";
-import { ModelPicker } from "../pickers/ModelPicker";
-import { ThinkingPicker } from "../pickers/ThinkingPicker";
-import { PermissionBadge } from "../pickers/PermissionBadge";
+import { ProjectPicker } from "../pickers/ProjectPicker";
+import { BranchPicker } from "../pickers/BranchPicker";
 import { CompactButton, QueueBadge } from "../thread/StatusBar";
-import { ContextMeter } from "../thread/ContextMeter";
-import { ContextBar } from "./ContextBar";
+import { resolveContext } from "../../lib/context";
+import { useGitInfo } from "../../lib/useGitInfo";
 import { GoalRow } from "./GoalRow";
 import { MentionList } from "./MentionList";
 import { SlashMenu } from "./SlashMenu";
+import { PlusMenu } from "./PlusMenu";
+import { ApprovalModeMenu } from "./ApprovalModeMenu";
+import { ModelThinkingMenu } from "./ModelThinkingMenu";
 
 /** 大段粘贴转文件引用的阈值（字符数；V41，zcode 同款——超过就存文件 + `@` 注入）。 */
 const PASTE_FILE_MIN = 2000;
 
 /**
- * 会话输入框：随心输入 + 底部工具行（截图布局）。
- * 上：上下文条（项目 / git 分支 / 提交）+ 附件条 + 多行输入；下左：图片 / 引用 / 权限 / 排队徽标 / 压缩 / 上下文容量环；
- * 下右：模型 / 思考档 / 发送（就绪）· 停止（运行中；「排队」按钮 2026-10-13 按用户口径退场，排队只走 Tab / ⌘Ctrl+Enter）。
- * 模型·思考档·权限只放这里（顶栏右端 = 供应商用量入口，2026-10-12 与容量环互换位置）。
+ * 会话输入卡（v2 §3 形态，对齐 Codex / ZCode 的输入卡）：
+ * **卡顶行** = 项目 + 分支选择器内嵌（原外置的上下文条收缩进来）；
+ * **输入区** = 附件条 + 提及芯片 + 待发区 + 自动增高输入框；
+ * **卡底工具行** = 左「`+` 菜单（图片 / 引用文件）+ 执行模式菜单」，右「模型 · 思考档 ▾ + 圆形发送 / 停止」。
+ * 上下文容量环与供应商用量入口在顶栏（`TopBar`）；提交 / 推送在右栏「变更」区块。
+ * 待发区（V40）：omp 的队列真值（`queue_update`）——可撤回 / 编辑 / 提升，Esc 中断还原
+ * （「排队」按钮 2026-10-13 按用户口径退场，排队只走 Tab / ⌘Ctrl+Enter）。
  *
- * 图片附件（V2 M6）：粘贴 / 拖拽 / 点回形针三条入口，全部读成 base64 存在内存里，
+ * 图片附件（V2 M6）：粘贴 / 拖拽 / `+` 菜单三条入口，全部读成 base64 存在内存里，
  * 发送时随 `prompt.images` 一次性交给 omp——应用不落盘、不写覆盖层。
- * 待发区（V40）：omp 的队列真值（`queue_update`）——可撤回 / 编辑 / 提升，Esc 中断还原。
  */
 export function Composer() {
  const t = useText();
@@ -71,6 +75,12 @@ export function Composer() {
  const archived = sessions.find((s) => s.id === activeSessionId)?.archived;
  // @文件 提及（V2 M6b）：展开由 omp 做，这里只把草稿里的提及显示成芯片并问一次「路径存在吗」
  const cwd = sessions.find((s) => s.id === activeSessionId)?.cwd ?? "";
+ // 卡顶行（v2 §3）：项目 + 分支选择器内嵌（原 `ContextBar` 收缩进来）；git 查询与右栏共用 `useGitInfo`
+ const projects = useApp((s) => s.projects);
+ const { project } = resolveContext(projects, sessions, activeSessionId);
+ const { info: git, loading: gitLoading, reload: reloadGit } = useGitInfo(cwd);
+ // 空态（v2 §4）：本会话还没有任何消息 → 输入卡上移，与问候语一起构成居中的「问候 + 输入卡」
+ const empty = useApp((s) => (s.activeSessionId ? (s.eventsBySession[s.activeSessionId]?.length ?? 0) === 0 : false));
  const mentions = useMemo(() => extractMentions(draft), [draft]);
  const mentionKey = `${cwd}\u0000${mentions.join("\u0000")}`;
  const [checks, setChecks] = useState<{ key: string; exists: Record<string, boolean> }>({ key: "", exists: {} });
@@ -574,7 +584,7 @@ export function Composer() {
  if (archived) {
   return (
    <div className="shrink-0 px-4 pb-4">
-    <div className="mx-auto max-w-3xl rounded-xl border border-border bg-surface px-4 py-3 text-center text-sm text-muted">
+    <div className="mx-auto max-w-(--measure-content) rounded-xl border border-border bg-surface px-4 py-3 text-center text-sm text-muted">
      {t.archivedComposerHint}
     </div>
    </div>
@@ -582,9 +592,7 @@ export function Composer() {
  }
 
  return (
-  <div className="shrink-0 px-4 pb-4">
-   {/* 上下文条在卡片外、上方：项目 + git 分支（无项目时自身不渲染） */}
-   <ContextBar />
+  <div className={`shrink-0 px-4 pb-4 ${empty ? "pb-[14vh]" : ""}`}>
    {/* 目标行（V40）：有 goal 时显示（目标 / 状态 / 暂停·继续·清除） */}
    <GoalRow />
    <div
@@ -600,9 +608,14 @@ export function Composer() {
      setDragging(false);
      void addFiles(Array.from(e.dataTransfer.files));
     }}
-    className={`mx-auto max-w-3xl rounded-xl border bg-surface transition-colors duration-100 ${dragging ? "border-accent bg-accent/5" : awaiting ? "border-warn/60" : "border-border focus-within:border-accent/70"
+    className={`mx-auto max-w-(--measure-content) rounded-xl border bg-surface transition-colors duration-100 ${dragging ? "border-accent bg-accent/5" : awaiting ? "border-warn/60" : "border-border focus-within:border-accent/70"
      }`}
    >
+    {/* 卡顶行（v2 §3，对齐 ZCode）：项目 + 分支选择器内嵌；与「+」菜单等共用 composerMenu 互斥槽 */}
+    <div className="flex items-center gap-0.5 px-2 pt-2">
+     <ProjectPicker project={project} />
+     {git?.isRepo ? <BranchPicker git={git} loading={gitLoading} onReload={reloadGit} /> : null}
+    </div>
     {awaiting && <div className="px-4 pt-2.5 text-[13px] text-warn">{t.resolveApprovalFirst}</div>}
     {attachments.length > 0 && (
      <div className="flex flex-wrap gap-2 px-3 pt-3">
@@ -847,56 +860,41 @@ export function Composer() {
         ? t.placeholderDragging
         : running
          ? t.placeholderRunning
-         : t.placeholderIdle
+         : empty
+          ? t.placeholderNew
+          : t.placeholderIdle
      }
      className="no-focus-ring max-h-44 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-sm leading-6 outline-none placeholder:text-faint disabled:opacity-60"
     />
     <div className="flex flex-wrap items-center gap-0.5 gap-y-1 px-2 py-1.5">
-     <button
-      onClick={() => void pickImages()}
-      disabled={awaiting}
-      className="cursor-pointer rounded-md p-1.5 text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-40"
-      aria-label={t.attachAddAria}
-      title={t.attachAddTitle}
-     >
-      <ImagePlus size={16} aria-hidden />
-     </button>
-     {/* 引用**其他**工作区成员项目的文件（V22 浮层；与 ⌘⇧P 同一入口）：注入草稿 `@<绝对路径>`，
-         omp 在 prompt 时展开成 fileMention——本项目文件直接在输入框用 `@` 补全即可 */}
-     <button
-      onClick={() => {
+     {/* 卡底工具行（v2 §3）：左 = `+`（附件 / 引用文件 / 图片）+ 执行模式菜单；右 = 模型 · 思考档、发送 / 停止 */}
+     <PlusMenu
+      onPickImages={() => void pickImages()}
+      onPickRef={() => {
        if (activeSessionId) useApp.getState().set({ refPickerTarget: { sessionId: activeSessionId } });
       }}
       disabled={!activeSessionId || awaiting}
-      className="cursor-pointer rounded-md p-1.5 text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-40"
-      aria-label={t.refPickTitle}
-      title={t.refPickComposerTitle}
-     >
-      <Files size={16} aria-hidden />
-     </button>
-     <PermissionBadge compact align="left" />
+     />
+     <ApprovalModeMenu />
      <QueueBadge />
      <CompactButton />
-     {/* 上下文容量环（2026-10-12 与顶栏右端的供应商用量键互换、搬回工具行）：环 + 点开的分项面板 */}
-     <ContextMeter />
      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
-      <ModelPicker compact />
-      <ThinkingPicker compact />
-      {/* 运行中 = 只有「停止」：「排队」按钮 2026-10-13 按用户口径退场（排队只走 Tab / ⌘Ctrl+Enter） */}
+      <ModelThinkingMenu />
+      {/* 运行中 = 同一个圆形键变「停止」（v2：idle 圆形 ↑；running 停止 ■） */}
       {running ? (
        <button
         onClick={() => activeSessionId && void abortAndRestore(activeSessionId)}
-        className="ml-1 flex cursor-pointer items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground transition-opacity duration-150 hover:opacity-90"
+        className="ml-1 flex h-7 w-7 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity duration-150 hover:opacity-90"
         aria-label={t.stop}
+        title={t.stop}
        >
-        <span className="h-2 w-2 rounded-[2px] bg-white" aria-hidden />
-        {t.stop}
+        <span className="h-2 w-2 rounded-[2px] bg-primary-foreground" aria-hidden />
        </button>
       ) : (
        <button
         onClick={() => void send()}
         disabled={(!draft.trim() && attachments.length === 0) || awaiting}
-        className="ml-1 flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-primary text-primary-foreground transition-opacity duration-150 hover:opacity-90 disabled:cursor-default disabled:opacity-30"
+        className="ml-1 flex h-7 w-7 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity duration-150 hover:opacity-90 disabled:cursor-default disabled:opacity-30"
         aria-label={t.sendAria}
        >
         <ArrowUp size={15} aria-hidden />

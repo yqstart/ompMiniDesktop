@@ -1,18 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Loader, Refresh, Settings2, Undo } from "reicon-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, Loader, Refresh, Undo } from "reicon-react";
 import { api } from "@shared/api";
 import type { OmpCatalogItem, OmpSetting, OmpSettingsCatalog } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { useText } from "../../lib/useText";
 import { OMP_SETTING_NAMES } from "../../lib/ompSettingNames";
 import { fmt } from "../../lib/locale";
+import type { SettingsFocusRequest } from "../../lib/settingsTabs";
 import { EnumSelect } from "./EnumSelect";
 import { Switch } from "./Switch";
 import {
  SECTION_LABEL_KEYS,
  SETTING_KIND_KEYS,
  choiceOptions,
- filterCatalog,
  groupCatalog,
  jsonDraftFrom,
  jsonPreview,
@@ -23,13 +23,18 @@ import {
 import { SETTINGS_LIST_SET, SETTING_NOTES, SETTING_SECTION_OVERRIDES } from "../../lib/settingsList";
 
 /**
- * 设置 ›「常用设置」：omp 全局配置（`config.yml`）的**唯一设置面**——分组、搜索与六种类型的
+ * 设置 ›「常用设置」：omp 全局配置（`config.yml`）的**唯一设置面**——分组与六种类型的
  * 编辑器（开关 / 枚举 / 数字 / 文本 / 数组 / 记录）。数据来自后端 `get_omp_settings_catalog`
  * （`omp config list` 文本 + JSON 两路合并，见 `src-tauri/src/settings.rs`），再按
  * `lib/settingsList.ts` 的展示清单（117 项：原常用 42 项 + 精选剩余 75 项）过滤——
  * **不铺上游全量**（519 项里内部 / 细调占大头，要浏览完整清单在终端里 `omp config list`）。
  * 写入走 `set_omp_setting` / `reset_omp_setting`（omp 全局配置、写完回读，与旧「常用设置」
  * 面板同一套命令）。
+ *
+ * v3（设置重构）：本页自己的搜索框与页头卡片已退场——搜索上移为**设置视图顶部的跨条目搜索**
+ * （`SettingsSearch`，四档打分与命中高亮都在那里）；本页只消费它的**定位请求**
+ * （`focusRequest`：展开分组 → 滚动到行 → 闪烁），行直接铺在页面背景上（区块标题 + 分隔线，
+ * 不做嵌套卡片）。
  *
  * 界面上守住的几条：
  * - **不摆假值**：拿不到读数就显示错误条，不画一个默认态；
@@ -40,7 +45,7 @@ import { SETTINGS_LIST_SET, SETTING_NOTES, SETTING_SECTION_OVERRIDES } from "../
  *   （当前清单里已无脱敏键，此路径为防御性保留）；
  * - **行内标注**（`SETTING_NOTES`）：`仅 TUI 生效`（plan / goal 功能总闸）/ 值为 `-1` 时的
  *   「-1 = 默认」（temperature / compaction.thresholdPercent）；
- * - 分组默认展开（可见性优先，折叠是用户的选择）；搜索时忽略折叠态、按匹配度重排分组；
+ * - 分组默认展开（可见性优先，折叠是用户的选择）；
  * - 枚举下拉的选项 label 走 `OPTION_LABELS`（普通词翻界面语言、专有名词与档位名原样；多个键共享公共取值键）；
  *   **string 但取值有限的键**（`theme.dark` / `theme.light` / `composer.shape`，上游 `ui.options: "runtime"`）
  *   同样渲染下拉——主题列表来自后端 `list_omp_themes`（内置 102 个 ∪ `<agentDir>/themes` 自定义），
@@ -48,9 +53,15 @@ import { SETTINGS_LIST_SET, SETTING_NOTES, SETTING_SECTION_OVERRIDES } from "../
  * - array / record 走 JSON 文本编辑（**本地先解析校验**，不合法根本不发请求）——当前清单没有
  *   此类键，此路径是渲染器按上游 schema 类型分派的通用能力。
  */
-export function GeneralSettingsPanel() {
+export function GeneralSettingsPanel({
+ focusRequest,
+ onFocusDone,
+}: {
+ /** 搜索结果的定位请求（seq 去重；消费后回调清除，见 lib/settingsTabs）。 */
+ focusRequest?: SettingsFocusRequest | null;
+ onFocusDone?: () => void;
+}) {
  const t = useText();
- const locale = useApp((s) => s.locale);
  const health = useApp((s) => s.health);
  const [catalog, setCatalog] = useState<OmpSettingsCatalog | null>(null);
  /** 主题下拉的运行时列表（后端 `list_omp_themes`：内置 ∪ `<agentDir>/themes`）；失败 = 空表。 */
@@ -64,8 +75,6 @@ export function GeneralSettingsPanel() {
  const [refreshing, setRefreshing] = useState(false);
  /** 正在写入 / 恢复默认的键：那一行的控件在落地前不接第二次点击（同键连点会竞态）。 */
  const [busyKeys, setBusyKeys] = useState<ReadonlySet<string>>(new Set());
- /** 搜索（键 / 上游说明；不扩张配置范围）。 */
- const [query, setQuery] = useState("");
  /** 折叠的分组（**默认全部展开**——与常用设置同款：可见性优先，折叠是用户的选择）。 */
  const [closedSections, setClosedSections] = useState<ReadonlySet<string>>(new Set());
  /** 行内输入框的编辑草稿（数字 / 文本；提交前不写 omp）。 */
@@ -74,6 +83,11 @@ export function GeneralSettingsPanel() {
  const [jsonDrafts, setJsonDrafts] = useState<Record<string, string>>({});
  /** JSON 编辑器的本地校验错误：key → 文案（不发请求）。 */
  const [jsonErrors, setJsonErrors] = useState<Record<string, string>>({});
+ /** 根元素（定位请求从这里 `querySelector` 找目标行）。 */
+ const rootRef = useRef<HTMLElement>(null);
+ /** 闪烁清除定时器 / 已消费的定位请求序号（防父子重渲染重放）。 */
+ const flashTimer = useRef<number | null>(null);
+ const handledSeq = useRef(0);
 
  const load = useCallback(() => {
   // 主题下拉的运行时列表与目录并行拉；失败静默（那一行退化成「只有当前值」的下拉）
@@ -250,27 +264,60 @@ export function GeneralSettingsPanel() {
   [catalog],
  );
  const groups = useMemo(() => (picked ? groupCatalog(picked) : []), [picked]);
- const cleanedQuery = query.trim();
- const searching = cleanedQuery.length > 0;
-
- /** 搜索态：按匹配度全局排序，再按分组切开（组的先后 = 最佳匹配的先后）。 */
- const searchGroups = useMemo(() => {
-  if (!picked || !searching) return null;
-  const ranked = filterCatalog(picked.items, cleanedQuery, (key) => {
-   const pair = OMP_SETTING_NAMES[key];
-   return pair ? pair[locale === "zh-CN" ? 0 : 1] : null;
-  });
-  const bySection = new Map<string, OmpCatalogItem[]>();
-  for (const item of ranked) {
-   const list = bySection.get(item.section);
-   if (list) list.push(item);
-   else bySection.set(item.section, [item]);
-  }
-  return [...bySection.entries()].map(([section, items]) => ({ section, items }));
- }, [picked, searching, cleanedQuery, locale]);
-
- const shown = searchGroups ?? groups;
  const total = picked?.items.length ?? 0;
+
+ // 搜索结果定位（v3）：展开所在分组 → 滚动到行 → 一次性闪烁，消费后通知页面清空请求。
+ // `handledSeq` 防重放（父子重渲染 / picked 变化都不重复闪）；展开（setState）与定位
+ // （DOM 操作）拆成两级宏任务——effect body 里不直接改 React 状态，也等 React 提交完再找行。
+ // 闪烁 class 直接操作 DOM（先移除、强制 reflow 再挂上，连点同一行也能重新触发动画）。
+ // 目录未就绪时不消费请求，等 `picked` 到齐后 effect 依赖变化重跑。
+ useEffect(() => {
+  const req = focusRequest;
+  if (!req || req.seq === handledSeq.current || !picked) return;
+  const item = picked.items.find((i) => i.key === req.key);
+  if (!item) {
+   onFocusDone?.();
+   return;
+  }
+  handledSeq.current = req.seq;
+  const needsOpen = closedSections.has(item.section);
+  const section = item.section;
+  let focusTimer: number | null = null;
+  const openTimer = window.setTimeout(() => {
+   if (needsOpen) {
+    setClosedSections((prev) => {
+     if (!prev.has(section)) return prev;
+     const next = new Set(prev);
+     next.delete(section);
+     return next;
+    });
+   }
+   focusTimer = window.setTimeout(() => {
+    const el = rootRef.current?.querySelector<HTMLElement>(`[data-setting="${req.key}"]`);
+    if (el) {
+     el.classList.remove("setting-flash");
+     void el.offsetWidth;
+     el.classList.add("setting-flash");
+     el.scrollIntoView({ block: "center", behavior: "smooth" });
+     if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
+     flashTimer.current = window.setTimeout(() => el.classList.remove("setting-flash"), 1700);
+    }
+    onFocusDone?.();
+   }, needsOpen ? 50 : 0);
+  }, 0);
+  return () => {
+   window.clearTimeout(openTimer);
+   if (focusTimer !== null) window.clearTimeout(focusTimer);
+  };
+ }, [focusRequest, picked, closedSections, onFocusDone]);
+
+ // 卸载时清掉闪烁定时器（行元素随卸载消失，定时器没必要再跑）
+ useEffect(
+  () => () => {
+   if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
+  },
+  [],
+ );
 
  const toggleSection = (section: string) =>
   setClosedSections((prev) => {
@@ -283,62 +330,51 @@ export function GeneralSettingsPanel() {
  const missingOmp = health?.ok === false;
 
  return (
-  <section
-   aria-label={t.tabGeneral}
-   className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5"
-  >
-   <div className="flex flex-wrap items-center gap-2">
-    <Settings2 size={16} aria-hidden className="text-muted" />
-    <h2 className="text-sm font-semibold">{t.tabGeneral}</h2>
-    {catalog && (
-     <span className="font-mono text-[11px] text-faint">{fmt(t.allSettingsCount, total)}</span>
-    )}
-    <div className="ml-auto flex items-center gap-1.5">
+  <section ref={rootRef} aria-label={t.tabGeneral} className="shrink-0">
+   <div className="flex flex-wrap items-start gap-2">
+    <p className="min-w-0 flex-1 text-xs leading-5 text-muted">
+     {t.allSettingsHint}
+     {catalog && (
+      <span className="ml-2 font-mono text-[11px] text-faint">{fmt(t.allSettingsCount, total)}</span>
+     )}
+    </p>
+    <div className="flex shrink-0 items-center gap-0.5">
      <button
       onClick={() => setClosedSections(new Set())}
       disabled={closedSections.size === 0}
-      className="flex min-h-8 cursor-pointer items-center rounded-md bg-background px-2.5 py-1.5 text-[12px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
       title={t.allSettingsExpandAll}
+      className="flex h-7 cursor-pointer items-center rounded-md px-2 text-[12px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
      >
       {t.allSettingsExpandAll}
      </button>
      <button
       onClick={() => setClosedSections(new Set(groups.map((g) => g.section)))}
       disabled={groups.length > 0 && closedSections.size >= groups.length}
-      className="flex min-h-8 cursor-pointer items-center rounded-md bg-background px-2.5 py-1.5 text-[12px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
       title={t.allSettingsCollapseAll}
+      className="flex h-7 cursor-pointer items-center rounded-md px-2 text-[12px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
      >
       {t.allSettingsCollapseAll}
      </button>
      <button
       onClick={refresh}
       disabled={refreshing || catalog === null}
-      className="flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+      className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
       aria-label={t.ompSettingsRefresh}
       title={t.ompSettingsRefresh}
      >
       {refreshing ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
-      {t.refresh}
      </button>
     </div>
    </div>
-   <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.allSettingsHint}</p>
-   <input
-    value={query}
-    onChange={(e) => setQuery(e.target.value)}
-    placeholder={t.allSettingsSearch}
-    aria-label={t.allSettingsSearch}
-    className="mt-3 h-9 w-full rounded-md border border-border bg-background px-2.5 text-[13px] outline-none focus:border-accent"
-   />
-   {missingOmp && <p className="mt-2 text-[13px] text-warn">{t.ompSettingsMissing}</p>}
+   {missingOmp && <p className="mt-3 text-[13px] text-warn">{t.ompSettingsMissing}</p>}
    {err && (
-    <p role="alert" className="mt-2 rounded border border-danger/40 bg-danger/5 px-3 py-2 text-[13px] text-danger">
+    <p role="alert" className="mt-3 rounded border border-danger/40 bg-danger/5 px-3 py-2 text-[13px] text-danger">
      {err}
     </p>
    )}
    {catalog === null ? (
     loadError ? (
-     <div className="mt-5 flex flex-col items-start gap-2">
+     <div className="mt-4 flex flex-col items-start gap-2">
       <p role="alert" className="rounded border border-danger/40 bg-danger/5 px-3 py-2 text-[13px] text-danger">
        {loadError}
       </p>
@@ -351,74 +387,66 @@ export function GeneralSettingsPanel() {
       </button>
      </div>
     ) : (
-     <p role="status" className="mt-5 text-[13px] text-muted">{t.archivedLoading}</p>
+     <p role="status" className="mt-4 text-[13px] text-muted">{t.archivedLoading}</p>
     )
    ) : total === 0 ? (
-    <p role="status" className="mt-5 text-[13px] text-muted">{t.allSettingsEmpty}</p>
+    <p role="status" className="mt-4 text-[13px] text-muted">{t.allSettingsEmpty}</p>
    ) : (
     <>
      {staleError && (
-      <p role="alert" className="mt-2 rounded border border-warn/40 bg-warn/5 px-3 py-2 text-[13px] text-warn">
+      <p role="alert" className="mt-3 rounded border border-warn/40 bg-warn/5 px-3 py-2 text-[13px] text-warn">
        {t.ompSettingsStale}：{staleError}
       </p>
      )}
-     {searching && shown.length === 0 ? (
-      <div className="mt-5 flex flex-col items-start gap-2">
-       <p className="text-[13px] text-muted">{t.ompSettingsNoMatch}</p>
-       <button
-        onClick={() => setQuery("")}
-        className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover"
-       >
-        {t.clearSearch}
-       </button>
-      </div>
-     ) : (
-      <div className="mt-5 space-y-4">
-       {shown.map(({ section, items }) => {
-        const labelKey = SECTION_LABEL_KEYS[section];
-        const label = section === "" ? t.allSettingsUngrouped : labelKey ? t[labelKey] : section;
-        const isOpen = searching || !closedSections.has(section);
-        return (
-         <div key={section || "__ungrouped"}>
-          <button
-           onClick={() => toggleSection(section)}
-           aria-expanded={isOpen}
-           className="flex min-h-10 w-full cursor-pointer items-center gap-2 rounded-md bg-background px-3 py-2 text-left transition-colors duration-100 hover:bg-hover"
-          >
-           {isOpen ? <ChevronDown size={12} aria-hidden /> : <ChevronRight size={12} aria-hidden />}
-           <span className="text-[13px] font-medium">{label}</span>
-           <span className="font-mono text-[11px] text-faint">{items.length}</span>
-          </button>
-          {isOpen && (
-           <div className="mt-1 divide-y divide-border-soft">
-            {items.map((item) => (
-             <SettingRow
-              key={item.key}
-              item={item}
-              busy={busyKeys.has(item.key)}
-              themeNames={themeNames}
-              draft={drafts[item.key]}
-              jsonText={jsonDrafts[item.key]}
-              jsonError={jsonErrors[item.key]}
-              onDraft={(v) => setDrafts((prev) => ({ ...prev, [item.key]: v }))}
-              onCommit={() => commitDraft(item)}
-              onSave={(key, value) => void save(key, value)}
-              onReset={reset}
-              onOpenJson={openJson}
-              onJsonChange={(text) =>
-               setJsonDrafts((prev) => ({ ...prev, [item.key]: text }))
-              }
-              onJsonSave={saveJson}
-              onJsonClose={closeJson}
-             />
-            ))}
-           </div>
+     <div className="mt-4 space-y-4">
+      {groups.map(({ section, items }) => {
+       const labelKey = SECTION_LABEL_KEYS[section];
+       const label = section === "" ? t.allSettingsUngrouped : labelKey ? t[labelKey] : section;
+       const isOpen = !closedSections.has(section);
+       return (
+        <div key={section || "__ungrouped"}>
+         <button
+          onClick={() => toggleSection(section)}
+          aria-expanded={isOpen}
+          className="flex min-h-8 w-full cursor-pointer items-center gap-1.5 rounded-md px-1 text-left transition-colors duration-100 hover:bg-hover"
+         >
+          {isOpen ? (
+           <ChevronDown size={12} aria-hidden className="shrink-0 text-faint" />
+          ) : (
+           <ChevronRight size={12} aria-hidden className="shrink-0 text-faint" />
           )}
-         </div>
-        );
-       })}
-      </div>
-     )}
+          <span className="text-xs font-medium text-muted">{label}</span>
+          <span className="font-mono text-[11px] text-faint">{items.length}</span>
+         </button>
+         {isOpen && (
+          <div className="divide-y divide-border-soft">
+           {items.map((item) => (
+            <SettingRow
+             key={item.key}
+             item={item}
+             busy={busyKeys.has(item.key)}
+             themeNames={themeNames}
+             draft={drafts[item.key]}
+             jsonText={jsonDrafts[item.key]}
+             jsonError={jsonErrors[item.key]}
+             onDraft={(v) => setDrafts((prev) => ({ ...prev, [item.key]: v }))}
+             onCommit={() => commitDraft(item)}
+             onSave={(key, value) => void save(key, value)}
+             onReset={reset}
+             onOpenJson={openJson}
+             onJsonChange={(text) =>
+              setJsonDrafts((prev) => ({ ...prev, [item.key]: text }))
+             }
+             onJsonSave={saveJson}
+             onJsonClose={closeJson}
+            />
+           ))}
+          </div>
+         )}
+        </div>
+       );
+      })}
+     </div>
     </>
    )}
   </section>
@@ -484,7 +512,7 @@ function SettingRow({
    : null;
 
  return (
-  <div className="px-1 py-3">
+  <div data-setting={item.key} className="min-h-11 px-1 py-2.5">
    <div className="flex flex-wrap items-center gap-2">
     <div className="min-w-0 basis-full @min-[480px]/panel:flex-1 @min-[480px]/panel:basis-0" title={hint}>
      <div className={name ? "text-[13px] leading-5" : "font-mono text-[12px] leading-5 break-all"}>

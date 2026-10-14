@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Loader, Plug, Plus, Refresh, Stethoscope, Trash2 } from "reicon-react";
+import { Check, Loader, Plus, Refresh, Stethoscope, Trash2 } from "reicon-react";
 import { api } from "@shared/api";
 import type { MarketPluginItem, PluginDoctorFinding, PluginItem, PluginsView } from "@shared/types";
 import { useApp } from "../../stores/app";
@@ -251,40 +251,26 @@ export function PluginsPanel() {
  );
 
  return (
-  <section
-   aria-label={t.tabPlugins}
-   className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5"
-  >
-   <div className="flex flex-wrap items-center gap-2">
-    <Plug size={16} aria-hidden className="text-muted" />
-    <h2 className="text-sm font-semibold">{t.tabPlugins}</h2>
-    {data !== null && <span className="font-mono text-xs text-muted">{fmt(t.pluginsCount, total)}</span>}
-    <div className="ml-auto flex flex-wrap items-center gap-2">
-     <EnumSelect
-      label={t.pluginsScope}
-      value={scopeValue(options, activeScope)}
-      choices={options.map((o) => ({ value: o.value, label: o.label }))}
-      busy={refreshing}
-      disabled={lock}
-      onPick={(value) => {
-       setRefreshing(true);
-       setScopePath(options.find((o) => o.value === value)?.path ?? null);
-      }}
-     />
+  <section aria-label={t.tabPlugins} className="shrink-0">
+   <div className="flex flex-wrap items-start gap-2">
+    <p className="min-w-0 flex-1 text-xs leading-5 text-muted">
+     {t.tabPluginsHint}
+     {data !== null && <span className="ml-2 font-mono text-[11px] text-faint">{fmt(t.pluginsCount, total)}</span>}
+    </p>
+    <div className="flex shrink-0 items-center gap-0.5">
      <button
       onClick={() => void doDoctor(false)}
       disabled={doctorBusy || lock}
-      className="flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+      className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
       aria-label={t.pluginsDoctor}
       title={t.pluginsDoctor}
      >
       {doctorBusy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Stethoscope size={12} aria-hidden />}
-      {t.pluginsDoctor}
      </button>
      <button
       onClick={openInstall}
       disabled={lock}
-      className="flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[13px] text-primary-foreground transition-colors duration-100 hover:opacity-90 disabled:opacity-50"
+      className="flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 text-[12px] font-medium transition-colors duration-100 hover:bg-hover disabled:opacity-40"
       aria-label={t.pluginsInstall}
      >
       <Plus size={12} aria-hidden />
@@ -296,17 +282,30 @@ export function PluginsPanel() {
        setReloadKey((k) => k + 1);
       }}
       disabled={busy || refreshing}
-      className="flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+      className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
       aria-label={t.refresh}
       title={t.refresh}
      >
       {refreshing ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
-      {t.refresh}
      </button>
     </div>
    </div>
-   <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.tabPluginsHint}</p>
-   <p className="mt-1 text-[12px] leading-relaxed text-faint">
+
+   {/* 可见范围（项目 package.json 依赖与项目级市场安装由 omp 按目录发现；全局 = 只看用户级） */}
+   <div className="mt-3 flex flex-wrap items-center gap-2">
+    <EnumSelect
+     label={t.pluginsScope}
+     value={scopeValue(options, activeScope)}
+     choices={options.map((o) => ({ value: o.value, label: o.label }))}
+     busy={refreshing}
+     disabled={lock}
+     onPick={(value) => {
+      setRefreshing(true);
+      setScopePath(options.find((o) => o.value === value)?.path ?? null);
+     }}
+    />
+   </div>
+   <p className="mt-1 text-xs leading-5 text-faint">
     {t.pluginsScopeHint}
     {data && <span className="ml-1 font-mono">{data.cwd}</span>}
    </p>
@@ -324,33 +323,35 @@ export function PluginsPanel() {
    )}
 
    {doctor && summary && (
-    <div className="mt-3 rounded-lg border border-border-soft bg-background p-3">
+    <section aria-label={t.pluginsDoctorResult} className="mt-6 shrink-0">
      <div className="flex flex-wrap items-center gap-2">
-      <span className="text-[13px] font-semibold">{t.pluginsDoctorResult}</span>
+      <h3 className="text-xs font-medium text-muted">{t.pluginsDoctorResult}</h3>
       <span className="font-mono text-[11px] text-ok">{fmt(t.pluginsDoctorOk, summary.ok)}</span>
       {summary.warning > 0 && <span className="font-mono text-[11px] text-warn">{fmt(t.pluginsDoctorWarning, summary.warning)}</span>}
       {summary.error > 0 && <span className="font-mono text-[11px] text-danger">{fmt(t.pluginsDoctorError, summary.error)}</span>}
       {summary.fixed > 0 && <span className="font-mono text-[11px] text-muted">{fmt(t.pluginsDoctorFixed, summary.fixed)}</span>}
-      {summary.error > 0 && (
+      <div className="ml-auto flex shrink-0 items-center gap-1">
+       {summary.error > 0 && (
+        <button
+         onClick={() => void doDoctor(true)}
+         disabled={doctorBusy || lock}
+         className="cursor-pointer rounded-md border border-border px-2 py-0.5 text-[12px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+        >
+         {t.pluginsDoctorFix}
+        </button>
+       )}
        <button
-        onClick={() => void doDoctor(true)}
-        disabled={doctorBusy || lock}
-        className="cursor-pointer rounded-md border border-border px-2 py-0.5 text-[12px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+        onClick={() => setDoctor(null)}
+        disabled={doctorBusy}
+        className="cursor-pointer rounded-md px-2 py-0.5 text-[12px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
        >
-        {t.pluginsDoctorFix}
+        {t.close}
        </button>
-      )}
-      <button
-       onClick={() => setDoctor(null)}
-       disabled={doctorBusy}
-       className="ml-auto cursor-pointer rounded-md px-2 py-0.5 text-[12px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
-      >
-       {t.close}
-      </button>
+      </div>
      </div>
-     <ul className="mt-2 space-y-1">
+     <ul className="mt-1.5 divide-y divide-border-soft">
       {doctor.map((f, i) => (
-       <li key={`${f.name}-${i}`} className="flex flex-wrap items-baseline gap-x-2 text-[12px]">
+       <li key={`${f.name}-${i}`} className="flex flex-wrap items-baseline gap-x-2 py-2 text-[12px]">
         <span
          className={`shrink-0 font-mono ${f.status === "ok" ? "text-ok" : f.status === "error" ? "text-danger" : "text-warn"}`}
         >
@@ -362,7 +363,7 @@ export function PluginsPanel() {
        </li>
       ))}
      </ul>
-    </div>
+    </section>
    )}
 
    {data === null ? (
@@ -385,24 +386,19 @@ export function PluginsPanel() {
      </p>
     )
    ) : total === 0 ? (
-    <p className="mt-4 rounded-lg bg-background px-4 py-8 text-center text-[13px] leading-relaxed text-muted">
+    <p className="mt-4 rounded-md bg-surface px-4 py-8 text-center text-[13px] leading-relaxed text-muted">
      {t.pluginsEmpty}
      <br />
      <span className="text-faint">{t.pluginsEmptyHint}</span>
     </p>
    ) : (
-    <div className="mt-4 space-y-5">
+    <>
      {npm.length > 0 && (
-      <div>
-       <h3 className="border-b border-border-soft pb-2 text-[13px] font-semibold text-muted">
-        {fmt(t.pluginsNpmSection, npm.length)}
-       </h3>
-       <div>
+      <section aria-label={fmt(t.pluginsNpmSection, npm.length)} className="mt-6 shrink-0">
+       <h3 className="text-xs font-medium text-muted">{fmt(t.pluginsNpmSection, npm.length)}</h3>
+       <div className="mt-1.5 divide-y divide-border-soft">
         {npm.map((item) => (
-         <div
-          key={item.name}
-          className="flex flex-wrap items-start gap-2 border-b border-border-soft py-3 last:border-b-0"
-         >
+         <div key={item.name} className="flex min-h-11 flex-wrap items-center gap-2 py-2.5">
           <div className="min-w-0 basis-full @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0">
            <div className="flex flex-wrap items-center gap-2">
             <span className="min-w-0 truncate text-sm font-medium">{item.name}</span>
@@ -445,20 +441,15 @@ export function PluginsPanel() {
          </div>
         ))}
        </div>
-      </div>
+      </section>
      )}
 
      {market.length > 0 && (
-      <div>
-       <h3 className="border-b border-border-soft pb-2 text-[13px] font-semibold text-muted">
-        {fmt(t.pluginsMarketSection, market.length)}
-       </h3>
-       <div>
+      <section aria-label={fmt(t.pluginsMarketSection, market.length)} className="mt-6 shrink-0">
+       <h3 className="text-xs font-medium text-muted">{fmt(t.pluginsMarketSection, market.length)}</h3>
+       <div className="mt-1.5 divide-y divide-border-soft">
         {market.map((item) => (
-         <div
-          key={item.id}
-          className="flex flex-wrap items-start gap-2 border-b border-border-soft py-3 last:border-b-0"
-         >
+         <div key={item.id} className="flex min-h-11 flex-wrap items-center gap-2 py-2.5">
           <div className="min-w-0 basis-full @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0">
            <div className="flex flex-wrap items-center gap-2">
             <span className="min-w-0 truncate font-mono text-[13px]">{item.id}</span>
@@ -496,9 +487,9 @@ export function PluginsPanel() {
          </div>
         ))}
        </div>
-      </div>
+      </section>
      )}
-    </div>
+    </>
    )}
 
    <ConfirmDialog

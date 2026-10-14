@@ -28,7 +28,7 @@ export function hasOpenDialog(): boolean {
  return topDialog() !== null;
 }
 export function useDialogFocus(
- dialogRef: RefObject<HTMLDivElement | null>,
+ dialogRef: RefObject<HTMLElement | null>,
  open: boolean,
  onClose: () => void,
  initialFocusRef?: RefObject<HTMLElement | null>,

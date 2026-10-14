@@ -46,14 +46,14 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 ## 贡献方向
 
-- 按版本规划推进（见 [`docs/roadmap.md`](docs/roadmap.md)）：0.1.0 形态收敛 → 0.2.0 聊天对标 → 0.3.0 设置重构
-- 当前主战场：对照 [`docs/v1-schedule.md`](docs/v1-schedule.md) 的删除 / 迁移清单做形态收敛
+- 按排期推进（见 [`docs/roadmap.md`](docs/roadmap.md)）：排期 1 形态收敛 / 排期 2 聊天对标 / 排期 3 设置重构（三者已随 0.1.0 交付）
+- 当前主战场：聊天形态的体验打磨（消息流、输入卡、右栏上下文面板、设置视图）与四平台产物验证
 - Windows / Linux 打包验证
 - 文档与翻译
 
 明确不做（请勿提交）：编辑器 / 文件树 / 内置浏览器 / SSH / 移动端 / PR 集成、
 分屏与多窗口、worktree 生命周期管理、云同步 / 定时任务、终端形态的新功能
-（终端形态按 0.1.0 规划退场）。
+（终端形态已随排期 1 退场）。
 
 ## 提交约定
 

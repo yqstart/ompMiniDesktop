@@ -395,3 +395,94 @@ describe("划选浮条", () => {
   });
  });
 });
+
+/**
+ * 摘要式表达（v2 §2.1）的端到端：`jsonl → ViewMsg → buildThreadLayout → 渲染`。
+ * 单测（`lib/threadLayout.test.ts`）覆盖纯函数，这里盖「真的进了 DOM」这一段。
+ */
+describe("Thread 摘要式表达（v2）", () => {
+ const SID2 = "s-v2";
+
+ const mountV2 = async (lines: unknown[]) => {
+  const msgs = viewMsgsFromJsonlLines(lines, TEXT["zh-CN"]);
+  useApp.setState({
+   locale: "zh-CN",
+   eventsBySession: { [SID2]: msgs },
+   activeSessionId: SID2,
+   statusBySession: {},
+   sessions: [{ id: SID2, projectId: "p1", title: "t", cwd: "/tmp", timestamp: 0, archived: false, corrupt: false, note: null, running: false }],
+   projects: [{ id: "p1", name: "p", path: "/tmp" } as never],
+   threadLimitSid: SID2,
+   threadLimit: THREAD_PAGE,
+  });
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  await act(async () => {
+   root.render(createElement(Thread));
+  });
+  return { container, root };
+ };
+
+ const BASH_ROUND = [
+  { type: "message", id: "u1", timestamp: "2026-10-14T03:00:00.000Z", message: { role: "user", content: [{ type: "text", text: "跑两条命令" }] } },
+  { type: "message", id: "m1", timestamp: "2026-10-14T03:00:05.000Z", message: { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "bash", arguments: { command: "ls" } }] } },
+  { type: "message", id: "r1", timestamp: "2026-10-14T03:00:06.000Z", message: { role: "toolResult", toolCallId: "c1", toolName: "bash", content: [{ type: "text", text: "a.txt" }] } },
+  { type: "message", id: "m2", timestamp: "2026-10-14T03:00:07.000Z", message: { role: "assistant", content: [{ type: "toolCall", id: "c2", name: "bash", arguments: { command: "pwd" } }] } },
+  { type: "message", id: "r2", timestamp: "2026-10-14T03:00:08.000Z", message: { role: "toolResult", toolCallId: "c2", toolName: "bash", content: [{ type: "text", text: "/tmp" }] } },
+  { type: "message", id: "m3", timestamp: "2026-10-14T03:02:00.000Z", message: { role: "assistant", content: [{ type: "text", text: "跑完了" }] } },
+ ];
+
+ it("相邻两条 bash 折叠成「运行了 2 条命令」，展开才逐条显示；轮时长行收在轮末", async () => {
+  const { container, root } = await mountV2(BASH_ROUND);
+  // 折叠行在：摘要文案出现
+  expect(container.textContent).toContain("运行了 2 条命令");
+  // 折叠态不出现逐条命令
+  expect(container.textContent).not.toContain("ls");
+  expect(container.textContent).not.toContain("pwd");
+  // 轮时长行（03:00:00 → 03:02:00 = 120s）
+  expect(container.textContent).toContain("用时 2:00");
+
+  const runBtn = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("运行了 2 条命令"));
+  expect(runBtn?.getAttribute("aria-expanded")).toBe("false");
+  await act(async () => {
+   runBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  // 展开后逐条工具行出现
+  expect(container.textContent).toContain("ls");
+  expect(container.textContent).toContain("pwd");
+  await act(async () => {
+   root.unmount();
+  });
+ });
+
+ it("相邻两条写 / 改折叠成编辑卡：文件行 + 行级增量", async () => {
+  const { container, root } = await mountV2([
+   { type: "message", id: "u1", timestamp: "2026-10-14T03:00:00.000Z", message: { role: "user", content: [{ type: "text", text: "改两个文件" }] } },
+   { type: "message", id: "m1", timestamp: "2026-10-14T03:00:01.000Z", message: { role: "assistant", content: [{ type: "toolCall", id: "w1", name: "write", arguments: { path: "/tmp/a.ts", content: "1\n2\n3" } }] } },
+   { type: "message", id: "m2", timestamp: "2026-10-14T03:00:02.000Z", message: { role: "assistant", content: [{ type: "toolCall", id: "e1", name: "edit", arguments: { path: "/tmp/b.ts", old_string: "x", new_string: "y\nz" } }] } },
+  ]);
+  expect(container.textContent).toContain("编辑了 2 个文件");
+  expect(container.textContent).toContain("a.ts");
+  expect(container.textContent).toContain("b.ts");
+  // 行级增量：write 3 行 + edit 2 行 = +5；edit 移除 1 行
+  expect(container.textContent).toContain("+5");
+  expect(container.textContent).toContain("−1");
+  await act(async () => {
+   root.unmount();
+  });
+ });
+
+ it("单条 bash 不聚合（避免「运行了 1 条命令」的假摘要），保持原样一行", async () => {
+  const { container, root } = await mountV2([
+   { type: "message", id: "u1", timestamp: "2026-10-14T03:00:00.000Z", message: { role: "user", content: [{ type: "text", text: "跑一条" }] } },
+   { type: "message", id: "m1", timestamp: "2026-10-14T03:00:01.000Z", message: { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "bash", arguments: { command: "ls -la" } }] } },
+   { type: "message", id: "r1", timestamp: "2026-10-14T03:00:02.000Z", message: { role: "toolResult", toolCallId: "c1", toolName: "bash", content: [{ type: "text", text: "ok" }] } },
+  ]);
+  expect(container.textContent).not.toContain("运行了 1 条命令");
+  expect(container.textContent).toContain("ls -la");
+  await act(async () => {
+   root.unmount();
+  });
+ });
+});

@@ -8,10 +8,10 @@ oh-my-pi（`omp`）的桌面端：**聊天形态的 omp 工作台**（Tauri v2 +
 
 | 文档 | 说明 |
 |---|---|
-| `docs/roadmap.md` | 版本规划总纲（0.1.0 形态收敛 → 0.2.0 聊天对标 → 0.3.0 设置重构）|
-| `docs/v1-schedule.md` | 0.1.0：终端形态删除清单 / 迁移清单 / 验收（**已实施**，2026-10-14）|
-| `docs/v2-schedule.md` | 0.2.0：布局 / 流式 / 聊天框对标 Codex、ZCode |
-| `docs/v3-schedule.md` | 0.3.0：设置重构（功能保留、形态重做）|
+| `docs/roadmap.md` | 版本规划总纲（首个版本 0.1.0 = 形态收敛 + 聊天对标 + 设置重构）|
+| `docs/v1-schedule.md` | 排期 1：终端形态删除清单 / 迁移清单 / 验收（**已实施**，2026-10-14）|
+| `docs/v2-schedule.md` | 排期 2：布局 / 流式 / 聊天框对标 Codex、ZCode |
+| `docs/v3-schedule.md` | 排期 3：设置重构（功能保留、形态重做）|
 | `docs/benchmark-codex-desktop.md` | Codex Desktop 对标调研（含截图证据与设计语言合约）|
 | `docs/benchmark-zcode-desktop.md` | Zcode Desktop 对标调研 |
 | `design-system/MASTER.md` | 设计系统（颜色 / 布局 / 组件 / 层级真相；改 UI 先读）|
@@ -28,17 +28,18 @@ oh-my-pi（`omp`）的桌面端：**聊天形态的 omp 工作台**（Tauri v2 +
 
 ```
 src/
-  app/App.tsx                # 顶层装配（左栏 + 聊天主区 + 设置视图 + 全局浮层与快捷键）
-  components/sidebar/        # 左栏：ChatSidebar（含项目拖拽排序控制器）/ SidebarTop / SidebarBottom / WorkspaceGroupDialog / RowAction / DropLine / OmpUpdateChip / AppUpdateChip
-  components/thread/         # 消息列：ChatView / TopBar / Thread / AssistantText / ToolRow / ApprovalCard / UiRequestCard / ChatEmptyState / FindBar / BtwPanel / SessionStatsDialog / DiffDialog / SubAgentStrip…
-  components/composer/       # 输入区：Composer / GoalRow / ContextBar / MentionList / SlashMenu / UsageLimits
-  components/pickers/        # 选择器：ModelPicker / ThinkingPicker / PermissionBadge / ProjectPicker / BranchPicker
-  components/settings/       # GeneralSettingsPanel / ModelsPanel / PluginsPanel / SkillsPanel / ProvidersSection / MemoryPanel / UsagePanel…
+  app/App.tsx                # 顶层装配（左栏 + 中列 + 右栏上下文面板 + 设置视图 + 全局浮层与快捷键）
+  components/sidebar/        # 左栏：ChatSidebar（常驻命令行 + 会话树 + 项目拖拽排序控制器）/ SidebarTop / SidebarBottom / WorkspaceGroupDialog / RowAction / DropLine / OmpUpdateChip / AppUpdateChip
+  components/panel/          # 右栏上下文面板（v2）：ContextPanel（停靠/抽屉 + 区块导航）/ PanelSection / ChangesSection / ProgressSection / SubagentsSection / SourcesSection
+  components/thread/         # 消息列：ChatView / TopBar / Thread / AssistantText / ToolRow / ToolRunRow / TurnRow / ApprovalCard / UiRequestCard / ChatEmptyState / FindBar / BtwPanel / SessionStatsDialog / DiffDialog…
+  components/composer/       # 输入卡（v2）：Composer（卡顶行项目/分支 + 卡底工具行）/ ApprovalModeMenu / ModelThinkingMenu / PlusMenu / GoalRow / MentionList / SlashMenu / UsageLimits
+  components/pickers/        # 选择器：ProjectPicker / BranchPicker（内嵌输入卡顶行）
+  components/settings/       # GeneralSettingsPanel / ModelsPanel / PluginsPanel / SkillsPanel / ProvidersSection / MemoryPanel / UsagePanel / SettingsSearch（v3 顶部搜索）/ Highlight（命中高亮）…
   components/usage/ update/ git/   # 供应商用量 / 更新弹窗 / 提交面板
   components/CommandPalette.tsx / SettingsPage.tsx / ReferencePicker.tsx / HealthBanner.tsx …
-  lib/                       # viewmsg / mergeEvents / useSessionEvents / sessionOpen / streamReveal / mdBlocks / streamCaret / promptHistory / commandPalette / btw / checkouts / workspaceGroups / projectDrag / useElapsed / useText / locale / theme / platform / …
+  lib/                       # viewmsg / mergeEvents / threadLayout / panelSources / useSessionEvents / sessionOpen / streamReveal / mdBlocks / streamCaret / useGitInfo / localNote / promptHistory / commandPalette / btw / checkouts / workspaceGroups / projectDrag / useElapsed / useText / locale / theme / platform / settingsTabs / settingsSearch / useSettingsSearchSources / …
   shared/                    # api（invoke 唯一入口）/ ipc（命令与事件常量唯一清单）/ types
-  stores/app.ts              # Zustand 全局状态（会话 / 消息流 / 队列 / 引用浮层 / 设置视图 / 更新 / 提交任务 / 工作区）
+  stores/app.ts              # Zustand 全局状态（会话 / 消息流 / 队列 / 未读标 / 右栏开关 / 引用浮层 / 设置视图 / 更新 / 提交任务 / 工作区）
 src-tauri/src/
   runtime.rs                 # 会话的 RPC 运行时（spawn 握手 → pump → kill_all；事件面泛型）
   proc.rs                    # 进程与环境工具（登录 shell PATH 探测 / 进程组强杀；git_commit / commit_msg / omp_update 复用）
@@ -63,11 +64,15 @@ scripts/                     # e2e-ipc-selfcheck / generate-icons / changelog-no
   - 实时行 id = `${sid}:${msgSeq}:${contentIndex}`（contentIndex 每条消息从 0 重数，只用它会撞车）；重开实时流过的会话按「类别 + 全文」与历史配对，不许翻倍。
   - `text_end` 是文本块完结信号（消费它，行才收敛）；工具占位卡从 `partial` 取真名 / 真 id / 半截参数。
 - **消息列滚动**：`.thread-scroll` 必须保持 `overflow-y: auto`（`index.css`）——跟随 / 回看 / 加载更早全靠它（V32 曾漏恢复导致「输入框上方文字重叠」）。
+- **三栏布局（v2）**：左栏（`SidebarShell` + `ChatSidebar`）/ 中列（`ChatView`）/ 右栏（`ContextPanel`，装配在 `App` 主区内、`ChatView` 之侧）。右栏开关 = `store.contextPanelOpen`（持久化，⌘⇧G）；**宽屏（≥1280px）停靠为列、窄屏为右侧抽屉**（`useDocked` 媒体判定 + `useDialogFocus` 焦点圈定），两种形态共用同一份区块内容。
+- **消息列布局（v2）**：`lib/threadLayout.ts` 的 `buildThreadLayout(shown, running)` 是渲染前的唯一布局派生——相邻同类工具行聚合成摘要行（命令批 / 编辑卡），每轮末尾追加轮时长行（`user.at` → 该轮最后一条消息的 `at`；running 时跳过流尾轮）。`ViewMsg.at` 来源：历史 = jsonl 行的 `timestamp`（`lib/viewmsg.ts` 的 `lineAtOf`），实时 = 帧到达时刻（`useSessionEvents` 统一打戳）。聚合/时长只在布局层做，不改 `mergeViewMsgs` 的合并口径。
+- **左栏未读完成标（v2）**：后台会话的起止只有 `list_sessions` 快照看得到——`ChatSidebar.reload` 对比上一份 running 快照，`running → 非 running` 且不在前台 → `store.markUnread`；打开会话（SessionRow 点击）`clearUnread`。运行期状态，不持久化。
 - **标题**：omp 对 `--mode rpc-ui` 强制关闭自动标题——壳侧两层补：pump 在「有用户消息且无标题」时注入一次 `/rename`（spawn 时 + 每次终态 `agent_end`，每进程至多一次）→ `session_info_update` 帧回灌；后端扫描 `first_user_text` 派生显示标题兜底。标题语言随壳界面语言（`TITLE_SYSTEM.md`，用户自写文件不覆盖）。
 - **内存治理**：每 60s 一轮闲置回收（idle 30 分钟且已落盘 → kill；重新打开 / 发消息自动 resume）；`eventsBySession` 只留最近 3 个会话（切会话时触发 LRU 裁剪）；工具全量输出封顶 100K 字符。
 - **模型目录**（`omp models --json`，2–10s）：单飞 + 5 分钟缓存 + 过期后台刷新（`omp-models://catalog` 广播）；`omp config list --json` 一次读全部配置键。
 - **设置写入口径**：omp 侧只经 `omp` CLI（`config set/reset`、`auth-broker`…）；**唯一例外**：`models.yml` 直接写文件（hash 乐观锁 + 预校验 + 备份 + 原子写）。本应用偏好不写 omp 配置。
-- **提交 / 推送**：两轨（快速 = 一次 `omp -p` 生成信息 + `git commit/push`；完整 = `omp commit`）；按 cwd 建任务表（并行 + BUSY + 取消 + 超时）；入口 = `ContextBar` 提交键与任务徽章。
+- **设置视图（v3 设置重构）**：`SettingsPage` 覆盖主区（`store.settingsTabOpen/settingsTabActive`；打开 = 左栏「设置」/ `⌘,`，关闭 = 顶部返回 / `⌘W` / 再点一次）——顶部条（返回 + 当前条目名 + 搜索钮）+ 左导航**四组七条目**（通用 / 模型 / 扩展 / 数据；窄窗 44px 图标档，容器查询）+ 内容区唯一滚动。搜索 = `store.settingsSearchOpen`（`⌘F`），数据源走 `lib/settingsSearch.ts`（模块级缓存 + 懒加载，设置视图卸载即清；参数 = 常用设置目录 / 模型目录 / 插件 / 技能 / 记忆 / 归档），四档打分复用 `filterCatalog`；结果点击经 `navigateTo` 跳条目，常用设置项带 `SettingsFocusRequest{key,seq}` 定位（通用页展开分组 → 滚动到行 → 一次闪烁；seq 防重放、消费后回调清空）。
+- **提交 / 推送**：两轨（快速 = 一次 `omp -p` 生成信息 + `git commit/push`；完整 = `omp commit`）；按 cwd 建任务表（并行 + BUSY + 取消 + 超时）；入口 = 右栏「变更」区块的提交键与左栏任务徽章。
 - **更新链路两条独立**：本应用（Tauri updater，`latest.json`）与 omp 运行时（`omp update`）互不相干；入口 = 左栏顶栏两枚 chip。
 
 ## 工程约定
@@ -105,6 +110,6 @@ pnpm icon                   # 从 design-system/icon/omp-mini-icon.svg 重生成
 
 ## 范围边界
 
-- **做**：聊天唯一形态（v1 已实施）、Codex / ZCode 对标（v2）、设置重构（v3）。
+- **做**：聊天唯一形态（v1 已实施）、Codex / ZCode 对标（v2 已实施）、设置重构（v3 已实施）。
 - **不做**：编辑器 / 文件树 / 内置浏览器 / SSH / 移动端 / PR 集成；分屏 / 多窗口；worktree 生命周期管理；云同步 / 定时任务。
 - 终端形态的一切概念（PTY / xterm / π 标题 / 目录行 / 标签栏）**不许再出现在任何新代码里**（`docs/v1-schedule.md` §1 已把它们全部删除）。

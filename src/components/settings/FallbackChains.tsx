@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, DiagramTree, Loader, X } from "reicon-react";
+import { ArrowDown, ArrowUp, Loader, X } from "reicon-react";
 import { api } from "@shared/api";
 import type { FallbackChainsInfo, ModelInfo } from "@shared/types";
 import { fmt, type Text } from "../../lib/locale";
@@ -95,22 +95,21 @@ export function FallbackChainsSection({
  };
 
  return (
-  <section aria-label={t.fallbackSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
+  <section aria-label={t.fallbackSection} className="mt-6 shrink-0">
    <div className="flex flex-wrap items-center gap-2">
-    <DiagramTree size={16} aria-hidden className="text-muted" />
-    <h2 className="text-sm font-semibold">{t.fallbackSection}</h2>
+    <h3 className="text-xs font-medium text-muted">{t.fallbackSection}</h3>
    </div>
 
    {
     err && (
-     <p role="alert" className="mt-1.5 rounded border border-danger/40 bg-danger/5 px-2 py-1.5 text-[13px] text-danger">
+     <p role="alert" className="mt-2 rounded border border-danger/40 bg-danger/5 px-2 py-1.5 text-[13px] text-danger">
       {err}
      </p>
     )
    }
    {
     loadError && info !== null && (
-     <p role="alert" className="mt-1.5 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
+     <p role="alert" className="mt-2 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
       {t.ompSettingsStale}：{loadError}
      </p>
     )
@@ -135,7 +134,7 @@ export function FallbackChainsSection({
     ) : (
      <>
       {/* 总开关 + 回归策略：链配得再好，总开关关了也不生效，所以两者同屏 */}
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      <div className="mt-2 flex flex-wrap items-center gap-2">
        <button
         type="button"
         role="switch"
@@ -161,7 +160,7 @@ export function FallbackChainsSection({
          role="radiogroup"
          aria-label={t.fallbackRevertLabel}
          title={t.fallbackRevertHint}
-         className="flex min-w-0 flex-wrap items-center gap-1 rounded-md bg-background p-1"
+         className="flex min-w-0 flex-wrap items-center gap-1 rounded-md bg-surface p-1"
         >
          {(
           [
@@ -198,12 +197,12 @@ export function FallbackChainsSection({
       {!enabled && <p className="mt-1.5 text-[13px] text-warn">{t.fallbackDisabledHint}</p>}
 
       {/* 链列表 */}
-      <div className="mt-2">
+      <div className="mt-1 divide-y divide-border-soft">
        {chains.length === 0 && editing !== "" ? (
         <p className="py-2 text-[13px] text-muted">{t.fallbackEmpty}</p>
        ) : (
         chains.map(([key, targets]) => (
-         <div key={key} className="border-t border-border-soft py-2 first:border-t-0">
+         <div key={key} className="py-2.5">
           <div className="flex flex-wrap items-center gap-2">
            <span className="shrink-0 rounded border border-border px-1.5 py-0.5 text-xs text-muted">
             {kindLabel(chainKind(key), t)}
@@ -388,7 +387,7 @@ function ChainEditor({
  };
 
  return (
-  <div className="mt-2 rounded-md border border-border bg-background p-2">
+  <div className="mt-2 rounded-md bg-surface p-2">
    <fieldset disabled={writing} className="min-w-0">
     {/* 生效对象：新建时可选类型；编辑时固定显示（换对象 = 删掉重建） */}
     <div className="flex flex-wrap items-center gap-2">

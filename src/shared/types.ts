@@ -967,6 +967,10 @@ export type GitInfo = {
  branches: string[];
  /** 有未提交的已跟踪文件改动；null = 未检测 / 超时。 */
  dirty: boolean | null;
+ /** 未提交改动的行级统计（`git diff HEAD --numstat` 汇总；v2 右栏「变更」区块的 `+X −Y`）。
+  *  null = 未检测 / 超时 / 首次提交前无 HEAD。 */
+ added: number | null;
+ removed: number | null;
  /** 降级原因（tooltip 与日志用）。 */
  error: string | null;
 };
@@ -998,8 +1002,8 @@ export type UiMethod = "select" | "confirm" | "input" | "editor" | "ask";
  */
 export type DiffStat = { added: number; removed: number };
 
-/** ViewMsg：RPC delta 与 jsonl 文件块的统一渲染模型。 */
-export type ViewMsg =
+/** ViewMsg 的判别联合本体（对外叠加 `at` 时间戳，见文件下方）。 */
+type ViewMsgBase =
  | {
   kind: "user";
   id: string;
@@ -1040,7 +1044,8 @@ export type ViewMsg =
  | {
   kind: "divider";
   id: string;
-  divider: "model" | "thinking" | "title" | "exit" | "turn";
+  /** `subagent` = 子代理生命周期行（v2 §2.1 的紧凑行，不带分隔线）。 */
+  divider: "model" | "thinking" | "title" | "exit" | "turn" | "subagent";
   text: string;
  }
  /**
@@ -1082,6 +1087,14 @@ export type ViewMsg =
  | { kind: "ui-cancel"; id: string; uiId: string }
  /** `@文件` 提及被 omp 读进上下文（`fileMention` 消息）：渲染成一排文件芯片。 */
  | { kind: "files"; id: string; files: MentionFile[] };
+
+/**
+ * ViewMsg：RPC delta 与 jsonl 文件块的统一渲染模型。
+ * `at` = 该消息的时间（epoch 毫秒）：历史回放从 jsonl 行的 `timestamp`（RFC3339）或
+ * `message.timestamp`（毫秒）归一，实时流为帧到达时刻——轮时长行（`lib/threadLayout.ts`）
+ * 靠它计算；缺省（老数据 / 解析不出）即不显示该轮时长，不假装有。
+ */
+export type ViewMsg = ViewMsgBase & { at?: number };
 
 export type SessionStatus =
  | { state: "running" }

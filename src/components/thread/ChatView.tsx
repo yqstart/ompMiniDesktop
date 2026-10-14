@@ -10,10 +10,9 @@ import { FindBar } from "./FindBar";
 import { BtwPanel } from "./BtwPanel";
 import { SessionStatsDialog } from "./SessionStatsDialog";
 import { DiffDialog } from "./DiffDialog";
-import { SubAgentStrip } from "./SubAgentStrip";
 
 /**
- * 聊天主区（v1 起唯一形态）：顶栏 + 消息流 + 输入框。
+ * 聊天主区（中列；v2 起为三栏布局的中间列）：顶栏 + 消息流 + 输入框。
  *
  * - **常驻挂载、只切显隐**：切去设置视图时只是 `hidden`——卸载会断事件订阅
  *   （切走期间到达的帧就丢了）并丢掉滚动位置；
@@ -22,7 +21,9 @@ import { SubAgentStrip } from "./SubAgentStrip";
  * - `StatusBar` 本身是不可见的 aria-live 区域（状态已收敛进输入框内的状态胶囊），
  *   保留是为了读屏播报；
  * - V40 浮层与面板都挂在这里：查找条（⌘F）、旁问面板（/btw）、统计弹窗（/status）、
- *   改动弹窗（工具卡「查看改动」）——各自按 store 开关自渲染，不占常驻布局。
+ *   改动弹窗（工具卡「查看改动」）——各自按 store 开关自渲染，不占常驻布局；
+ * - 右栏上下文面板（v2）不是这一列的兄弟，装配在 `App` 主区（`ChatView` 之侧）：
+ *   窄屏时它是 fixed 抽屉，不该被这一列的 `overflow-hidden` 语义影响。
  */
 export function ChatView({ visible = true }: { visible?: boolean }) {
  useSessionEvents();
@@ -40,8 +41,6 @@ export function ChatView({ visible = true }: { visible?: boolean }) {
    <FindBar />
    <Thread />
    <StatusBar />
-   {/* 子代理状态条（V41）：有运行中的子代理时才露面（贴在输入区上方） */}
-   <SubAgentStrip />
    <Composer />
    <BtwPanel />
    <SessionStatsDialog />

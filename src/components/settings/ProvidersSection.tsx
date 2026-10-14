@@ -342,10 +342,17 @@ export function ProvidersSection() {
     </p>
    )}
 
-   <section aria-label={t.providersSection} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
+   <section aria-label={t.providersSection} className="mt-6 shrink-0">
     <div className="flex flex-wrap items-center gap-2">
-     <Key size={16} aria-hidden className="text-muted" />
-     <h2 className="text-sm font-semibold">{t.providersSection}</h2>
+     <h3 className="text-xs font-medium text-muted">{t.providersSection}</h3>
+     <button
+      onClick={openAdd}
+      disabled={providers === null || !file || !!parsed.error || busy || closing}
+      className="ml-auto flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 text-[12px] font-medium transition-colors duration-100 hover:bg-hover disabled:opacity-40"
+     >
+      <Plus size={12} aria-hidden />
+      {t.providersAdd}
+     </button>
     </div>
 
     {parsed.error && (
@@ -354,7 +361,7 @@ export function ProvidersSection() {
      </p>
     )}
 
-    <div className="mt-4">
+    <div className="mt-1.5 divide-y divide-border-soft">
      {providers === null ? (
       <div className="py-2 text-[13px] text-muted">{t.archivedLoading}</div>
      ) : (
@@ -366,37 +373,35 @@ export function ProvidersSection() {
         <div className="py-2 text-[13px] text-muted">{t.providersEmptyAll}</div>
        )}
        {configured.map((p) => (
-        <div key={p.id} className="border-t border-border-soft first:border-t-0">
-         <div className="flex flex-wrap items-center gap-2 py-3">
-          <div className="min-w-0 basis-full @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0">
-           <div className="truncate text-sm">{p.name}</div>
-           <div className="mt-0.5 break-all font-mono text-[11px] text-faint">{p.id}</div>
-          </div>
-          <span className="shrink-0 text-[13px] text-ok">{t.providerConfigured}</span>
-          <button
-           onClick={() => setPicking(p)}
-           disabled={busy || closing}
-           className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover"
-          >
-           {t.providersPick}
-          </button>
-          <button
-           onClick={() => relogin(p.id)}
-           disabled={busy || closing}
-           className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover"
-           aria-label={fmt(t.providerLogin + " {0}", p.id)}
-          >
-           {t.providerLogin}
-          </button>
-          <button
-           onClick={() => setPendingLogout(p)}
-           disabled={busy || closing}
-           className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
-           aria-label={fmt(t.providerLogout + " {0}", p.id)}
-          >
-           {t.providerLogout}
-          </button>
+        <div key={p.id} className="flex min-h-11 flex-wrap items-center gap-2 py-2.5">
+         <div className="min-w-0 basis-full @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0">
+          <div className="truncate text-sm">{p.name}</div>
+          <div className="mt-0.5 break-all font-mono text-[11px] text-faint">{p.id}</div>
          </div>
+         <span className="shrink-0 text-[13px] text-ok">{t.providerConfigured}</span>
+         <button
+          onClick={() => setPicking(p)}
+          disabled={busy || closing}
+          className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover"
+         >
+          {t.providersPick}
+         </button>
+         <button
+          onClick={() => relogin(p.id)}
+          disabled={busy || closing}
+          className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover"
+          aria-label={fmt(t.providerLogin + " {0}", p.id)}
+         >
+          {t.providerLogin}
+         </button>
+         <button
+          onClick={() => setPendingLogout(p)}
+          disabled={busy || closing}
+          className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+          aria-label={fmt(t.providerLogout + " {0}", p.id)}
+         >
+          {t.providerLogout}
+         </button>
         </div>
        ))}
        {parsed.providers.map((v) => (
@@ -427,15 +432,6 @@ export function ProvidersSection() {
       {!file.exists && ` · ${t.customFileMissing}`}
      </p>
     )}
-
-    <button
-     onClick={openAdd}
-     disabled={providers === null || !file || !!parsed.error || busy || closing}
-     className="mt-4 flex min-h-9 cursor-pointer items-center gap-2 rounded-md bg-active px-3 py-2 text-[13px] font-medium text-accent transition-colors duration-100 hover:bg-hover disabled:opacity-50"
-    >
-     <Plus size={12} aria-hidden />
-     {t.providersAdd}
-    </button>
    </section>
 
    {/* 挑选模型：该供应商在目录里的全部模型（搜索 + 星标）——fixed 弹窗，数据多也能过滤 */}
@@ -543,7 +539,7 @@ function CustomRow({
  const t = useText();
  const kindLabel = view.kind === "custom" ? t.customKindCustom : t.customKindOverride;
  return (
-  <div className="flex flex-wrap items-center gap-2 border-t border-border-soft py-3 first:border-t-0">
+  <div className="flex min-h-11 flex-wrap items-center gap-2 py-2.5">
    <div className="min-w-0 basis-full @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0">
     <div className="flex flex-wrap items-center gap-1.5">
      <span className="truncate font-mono text-sm">{view.id}</span>
@@ -690,7 +686,7 @@ function LoginFlow({
     : t.loginFailed;
 
  return (
-  <div className="rounded-lg border border-border-soft bg-background p-3 sm:p-4">
+  <div className="rounded-md bg-background p-3 sm:p-4">
    <div className="flex flex-wrap items-center gap-2 text-sm">
     {running ? (
      <Loader size={14} className="shrink-0 animate-spin text-accent" aria-hidden />

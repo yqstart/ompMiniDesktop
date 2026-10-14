@@ -119,6 +119,10 @@ pub struct GitInfo {
     pub branches: Vec<String>,
     /// 工作区是否有已跟踪文件的改动；null = 未检测 / 超时。
     pub dirty: Option<bool>,
+    /// 未提交改动的行级统计（`git diff HEAD --numstat` 汇总，v2 右栏「变更」区块用）。
+    /// null = 未检测 / 超时 / 首次提交前无 HEAD。
+    pub added: Option<u64>,
+    pub removed: Option<u64>,
     /// 非仓库 / 命令失败的原因（只用于 tooltip 与日志，不弹窗）。
     pub error: Option<String>,
 }
@@ -126,7 +130,16 @@ pub struct GitInfo {
 impl GitInfo {
     /// 降级值：非仓库、目录缺失、找不到 git 都走这里。
     pub fn not_repo(error: Option<String>) -> Self {
-        Self { is_repo: false, branch: None, detached: false, branches: vec![], dirty: None, error }
+        Self {
+            is_repo: false,
+            branch: None,
+            detached: false,
+            branches: vec![],
+            dirty: None,
+            added: None,
+            removed: None,
+            error,
+        }
     }
 }
 
@@ -176,6 +189,20 @@ pub fn parse_short_sha(out: &str) -> Option<String> {
     }
 }
 
+/// 解析 `git diff HEAD --numstat`：`<added>\t<removed>\t<path>` 逐行累加。
+/// 二进制文件的数字段是 `-`（跳过）；路径含改名时是 `old => new`，不解析路径本身。
+pub fn parse_numstat(out: &str) -> (u64, u64) {
+    let mut added = 0u64;
+    let mut removed = 0u64;
+    for line in out.lines() {
+        let mut parts = line.split('\t');
+        let (Some(a), Some(r)) = (parts.next(), parts.next()) else { continue };
+        added += a.trim().parse::<u64>().unwrap_or(0);
+        removed += r.trim().parse::<u64>().unwrap_or(0);
+    }
+    (added, removed)
+}
+
 /// 读取一个目录的 git 上下文。目录不存在 / 非仓库 / git 不可用都返回降级值，不抛错。
 pub async fn read_git_info(git: &str, dir: &str) -> GitInfo {
     // 1) 是不是工作区：`rev-parse --is-inside-work-tree` 输出 true 才算
@@ -211,7 +238,16 @@ pub async fn read_git_info(git: &str, dir: &str) -> GitInfo {
         .await
         .ok()
         .map(|out| parse_dirty(&out));
-    GitInfo { is_repo: true, branch, detached, branches, dirty, error: None }
+    // 6) 未提交改动的行级统计（v2 右栏「变更」区块的 `+X −Y`）：
+    //    与 dirty 同口径只看已跟踪文件；首次提交前没有 HEAD，失败即降级为 null。
+    let (added, removed) = match run_git(git, dir, &["diff", "HEAD", "--numstat"]).await {
+        Ok(out) => {
+            let (a, r) = parse_numstat(&out);
+            (Some(a), Some(r))
+        }
+        Err(_) => (None, None),
+    };
+    GitInfo { is_repo: true, branch, detached, branches, dirty, added, removed, error: None }
 }
 
 /// 一个 git worktree（`git worktree list --porcelain` 的解析结果）。
@@ -315,6 +351,14 @@ prunable gitdir file points to non-existent location
         assert_eq!(list[1].head.as_deref(), Some("5e6f7a8b"));
         assert_eq!(parse_worktrees(""), vec![]);
         assert_eq!(parse_worktrees("garbage line\n").len(), 0, "没有 worktree 块就不产出行");
+    }
+
+    #[test]
+    fn parse_numstat_sums_lines() {
+        let out = "12\t3\tsrc/a.ts\n0\t7\tsrc/b.ts\n-\t-\tassets/logo.png\n";
+        assert_eq!(parse_numstat(out), (12, 10), "二进制行跳过、其余按列累加");
+        assert_eq!(parse_numstat(""), (0, 0));
+        assert_eq!(parse_numstat("garbage\n"), (0, 0), "非法行不 panic、不计入");
     }
 
     /// 真实仓库：`git worktree add` 后 list 能同时看到主目录与新增 worktree。

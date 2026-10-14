@@ -147,7 +147,7 @@ export function MemoryPanel() {
   const open = preview?.key === key;
   return (
    <div key={f.path}>
-    <div className="flex min-h-11 min-w-0 items-start gap-2 rounded-md px-2 py-2 transition-colors duration-100 hover:bg-hover">
+    <div className="flex min-h-11 flex-wrap items-center gap-2 rounded-md py-2.5 transition-colors duration-100 hover:bg-hover">
      <button
       onClick={() => void togglePreview(group.dir, f.path)}
       aria-expanded={open}
@@ -183,7 +183,7 @@ export function MemoryPanel() {
      </button>
     </div>
     {open && (
-     <div className="mt-1 mb-3 rounded-lg border border-border-soft bg-background p-3">
+     <div className="mt-1 mb-3 rounded-md bg-surface p-3">
       {preview && preview.state === "loading" && (
        <p className="text-[13px] text-muted">{t.memoryLoading}</p>
       )}
@@ -218,24 +218,23 @@ export function MemoryPanel() {
  };
 
  return (
-  <section aria-label={t.tabMemories} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
-   <div className="flex flex-wrap items-center gap-2">
-    <Notebook size={16} aria-hidden className="text-muted" />
-    <h2 className="text-sm font-semibold">{t.tabMemories}</h2>
-    {rows !== null && <span className="font-mono text-xs text-muted">{fmt(t.memoryProjectCount, total)}</span>}
+  <section aria-label={t.tabMemories} className="shrink-0">
+   {/* 页头：本条目没有 `tabMemoriesHint` 键，页头只放计数与刷新钮；页级说明留在下面一行 */}
+   <div className="flex flex-wrap items-center justify-end gap-2">
+    {rows !== null && <span className="shrink-0 font-mono text-[11px] text-faint">{fmt(t.memoryProjectCount, total)}</span>}
     <button
      onClick={() => setReloadKey((k) => k + 1)}
      disabled={busy}
-     className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+     className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
      aria-label={t.memoryRefresh}
+     title={t.memoryRefresh}
     >
      {busy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
-     {t.memoryRefresh}
     </button>
    </div>
-   <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.memoryHint}</p>
+   <p className="mt-2 text-xs leading-5 text-muted">{t.memoryHint}</p>
    {error && (
-    <p role="alert" className="mt-1.5 text-[13px] text-danger">
+    <p role="alert" className="mt-2 text-[13px] text-danger">
      {error}
     </p>
    )}
@@ -256,21 +255,21 @@ export function MemoryPanel() {
      <p role="status" className="mt-3 text-[13px] text-muted">{t.memoryLoading}</p>
     )
    ) : total === 0 ? (
-    <p className="mt-4 rounded-lg bg-background px-4 py-8 text-center text-[13px] leading-relaxed text-muted">
+    <p className="mt-6 rounded-md bg-surface px-4 py-8 text-center text-[13px] leading-relaxed text-muted">
      {t.memoryEmpty}
     </p>
    ) : (
-    <div className="mt-5 space-y-5">
+    <div className="mt-6 space-y-6">
      {rows.map((g) => {
       const folded = collapsed[g.dir] === true;
       return (
        <div key={g.dir}>
-        <div className="flex flex-wrap items-center gap-2 border-b border-border-soft pb-3">
+        <div className="flex flex-wrap items-center gap-2">
          <button
           onClick={() => setCollapsed((m) => ({ ...m, [g.dir]: !m[g.dir] }))}
           aria-expanded={!folded}
           aria-label={g.name}
-          className="flex min-h-8 min-w-0 basis-full cursor-pointer items-center gap-2 rounded-md text-left @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0"
+          className="flex min-h-8 min-w-0 basis-full cursor-pointer items-center gap-1.5 rounded-md text-left transition-colors duration-100 hover:bg-hover @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0"
          >
           <ChevronRight
            size={12}
@@ -282,12 +281,12 @@ export function MemoryPanel() {
           ) : (
            <Notebook size={12} aria-hidden className="shrink-0 text-faint" />
           )}
-          <span className="min-w-0 shrink-0 max-w-[40%] truncate text-[13px] font-semibold">{g.name}</span>
+          <span className="min-w-0 shrink-0 max-w-[40%] truncate text-xs font-medium text-muted">{g.name}</span>
           <span className={`min-w-0 flex-1 truncate font-mono text-[11px] ${g.path === null ? "text-warn" : "text-faint"}`}>
            {g.path ?? t.memoryOrphanPath}
           </span>
          </button>
-         <span className="shrink-0 font-mono text-[11px] text-muted">
+         <span className="shrink-0 font-mono text-[11px] text-faint">
           {fmt(t.memoryFileCount, g.files.length)} · {fmtBytes(g.totalBytes)}
          </span>
          <button
@@ -311,9 +310,9 @@ export function MemoryPanel() {
         </div>
         {!folded &&
          (g.files.length === 0 ? (
-          <p className="mt-1 px-2 text-[12px] text-faint">{t.memoryDirEmpty}</p>
+          <p className="mt-1.5 text-[12px] text-faint">{t.memoryDirEmpty}</p>
          ) : (
-          <div className="mt-0.5 space-y-px">{g.files.map((f) => renderFile(g, f))}</div>
+          <div className="mt-1.5 divide-y divide-border-soft">{g.files.map((f) => renderFile(g, f))}</div>
          ))}
        </div>
       );

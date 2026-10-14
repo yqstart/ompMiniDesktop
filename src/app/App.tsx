@@ -13,6 +13,7 @@ import { CommitTaskPanel } from "../components/git/CommitTaskPanel";
 import { HealthBanner } from "../components/HealthBanner";
 import { SettingsPage } from "../components/SettingsPage";
 import { ChatView } from "../components/thread/ChatView";
+import { ContextPanel } from "../components/panel/ContextPanel";
 import { UpdateDialog } from "../components/update/UpdateDialog";
 import { OmpUpdateDialog } from "../components/update/OmpUpdateDialog";
 import { ProviderUsageDialog } from "../components/usage/ProviderUsageDialog";
@@ -97,8 +98,9 @@ function useWorkspaceGitRefresh() {
 }
 
 /**
- * 全局快捷键（v1 收敛版；非 mac 平台用 Ctrl）：⌘T 新建聊天 / ⌘W 关设置 /
- * ⌘F 会话内查找 / ⌘K 命令中心 / ⌘[ ⌘] 会话导航 / ⌘⇧P 引用工作区文件。
+ * 全局快捷键（v2；非 mac 平台用 Ctrl）：⌘, 打开设置 / ⌘T 新建聊天 / ⌘W 关设置 /
+ * ⌘F 会话内查找（设置视图内 = 聚焦设置搜索）/ ⌘K 命令中心 / ⌘⇧G 上下文面板 /
+ * ⌘[ ⌘] 会话导航 / ⌘⇧P 引用工作区文件。
  */
 function useHotkeys() {
  useEffect(() => {
@@ -108,26 +110,34 @@ function useHotkeys() {
    if (!mod) return;
    const key = e.key.toLowerCase();
    const s = useApp.getState();
-   // ⌘F / ⌘K / ⌘[ / ⌘]（会话内动作）与 ⌘⇧P（引用浮层）即使焦点在输入框里也要生效——
+   // ⌘F / ⌘K / ⌘[ / ⌘]（会话内动作）、⌘⇧P（引用浮层）与 ⌘,（打开设置）即使焦点在输入框里也要生效——
    // 聊天常态就是在 Composer 里打字，被 typing 守卫吞掉等于入口断掉；
    // 其余组合键（⌘T / ⌘W）输入中只阻断不执行。
-   const chatKey = key === "f" || key === "[" || key === "]" || key === "k";
+   const chatKey = key === "f" || key === "[" || key === "]" || key === "k" || (key === "g" && e.shiftKey);
    const refPick = key === "p" && e.shiftKey;
-   const owned = chatKey || refPick || key === "t" || key === "w";
+   const openSettings = key === ",";
+   const owned = chatKey || refPick || openSettings || key === "t" || key === "w";
    if (!owned) return;
    const el = document.activeElement;
    const typing = el instanceof HTMLElement && !!el.closest("input, textarea, select, [contenteditable='true']");
    // 识别到本应用组合键就先截获，避免浏览器默认行为；模态或输入中只阻断不执行。
    e.preventDefault();
    e.stopPropagation();
-   if (e.repeat || hasOpenDialog() || (typing && !refPick && !chatKey)) return;
+   if (e.repeat || hasOpenDialog() || (typing && !refPick && !chatKey && !openSettings)) return;
+   if (openSettings) {
+    // ⌘, 打开设置（Codex 口径；已打开则只切过去——与系统惯例一致，不做 toggle）
+    if (!s.settingsTabActive) s.openSettingsTab();
+    return;
+   }
    if (key === "w") {
     // ⌘W 只关设置视图（v1 收敛口径；输入中由上面的 typing 守卫挡住）
     if (s.settingsTabActive) s.closeSettingsTab();
     return;
    }
    if (key === "t") {
-    newChatInDefaultCheckout();
+    // 新建会话（v2）：目标 = 当前会话所在目录，没有当前会话时用第一个可用项目主目录；
+    // 失败进左栏内联错误条（与左栏同名入口共用一处），不再「点了没反应」
+    void newChatInDefaultCheckout().then((r) => useApp.getState().setNewChatError(r.ok ? null : r.message));
     return;
    }
    if (refPick) {
@@ -136,14 +146,20 @@ function useHotkeys() {
     s.set({ refPickerTarget: { sessionId: s.activeSessionId } });
     return;
    }
-   // 会话内动作（⌘F / ⌘K / ⌘[ / ⌘]）：设置视图激活时不抢这几个键
-   if (s.settingsTabActive) return;
+   // 设置视图内（v3）：⌘F = 展开并聚焦设置搜索；⌘K / ⌘[ / ⌘] 等会话内动作不抢这几个键
+   if (s.settingsTabActive) {
+    if (key === "f") s.set({ settingsSearchOpen: true });
+    return;
+   }
    if (key === "f") {
     // 会话内查找：没有会话时无处可查，不打开横条
     if (s.activeSessionId) s.setFindOpen(true);
    } else if (key === "k") {
     // 命令中心（V41）：再按一次收起（toggle）
     s.setPaletteOpen(!s.paletteOpen);
+   } else if (key === "g" && e.shiftKey) {
+    // 右上下文面板开关（v2 §5）：宽屏停靠 / 窄屏浮层由面板自己按宽度判定
+    s.setContextPanelOpen(!s.contextPanelOpen);
    } else {
     // 会话导航栈：空栈 / 到头由 `navStep` 返回 null（此时什么都不做）
     const id = s.navStep(key === "[" ? -1 : 1);
@@ -339,8 +355,14 @@ export function App() {
    <main inert={sidebarOpen ? true : undefined} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background md:my-2 md:mr-2 md:rounded-xl md:border md:border-border">
     <HealthBanner />
     {/* 聊天主区**常驻挂载、只切显隐**：切去设置视图只是 CSS 隐藏——
-        卸载会断事件订阅（切走期间到达的帧就丢了），切回来还要重建滚动位置。 */}
-    <ChatView visible={!settingsTabActive} />
+        卸载会断事件订阅（切走期间到达的帧就丢了），切回来还要重建滚动位置。
+        设置视图激活时这个兄弟列也要一起收起：它自带 flex-1，留着会跟设置视图平分
+        main 的高度（顶部凭空多出半屏空白）。 */}
+    <div className={settingsTabActive ? "hidden" : "flex min-h-0 min-w-0 flex-1"}>
+     <ChatView visible={!settingsTabActive} />
+     {/* 右栏上下文面板（v2 三栏）：设置视图打开时整栏退场；宽屏停靠 / 窄屏浮层由它自己判定 */}
+     {!settingsTabActive && <ContextPanel />}
+    </div>
     {settingsTabOpen && <SettingsPage visible={settingsTabActive} />}
    </main>
    <CommitTaskPanel />

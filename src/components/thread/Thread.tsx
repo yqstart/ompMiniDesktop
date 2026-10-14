@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { BranchUp, Bulb, Check, CheckListSquare, ChevronRight, Copy, Loader, PenLine } from "reicon-react";
+import { BranchUp, Bulb, Check, CheckListSquare, ChevronRight, Copy, Loader, PenLine, Sparkles } from "reicon-react";
 import { THREAD_PAGE, useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
@@ -7,8 +7,11 @@ import { api } from "@shared/api";
 import { openForkedSession } from "../../lib/sessionOpen";
 import { openBtwPanel } from "../../lib/btw";
 import { nthMap } from "../../lib/viewmsg";
+import { buildThreadLayout } from "../../lib/threadLayout";
 import type { ViewMsg } from "@shared/types";
 import { ToolRow } from "./ToolRow";
+import { ToolRunRow } from "./ToolRunRow";
+import { TurnRow } from "./TurnRow";
 import { ApprovalCard } from "./ApprovalCard";
 import { UiRequestCard } from "./UiRequestCard";
 import { MentionChips } from "./MentionChips";
@@ -123,6 +126,9 @@ export function Thread() {
  const limit = threadLimitSid === activeSessionId ? threadLimit : THREAD_PAGE;
  const hidden = Math.max(0, events.length - limit);
  const shown = hidden > 0 ? events.slice(-limit) : events;
+ // 消息列布局（v2 §2.1）：相邻同类工具行聚合成摘要行 + 每轮末尾的时长行；
+ // running 时跳过压在流尾的进行中轮次（没有时长可报）
+ const layout = useMemo(() => buildThreadLayout(shown, status === "running"), [shown, status]);
  const loadEarlier = () => {
   const el = scroller.current;
   if (el) keepOffset.current = el.scrollHeight - el.scrollTop;
@@ -211,7 +217,7 @@ export function Thread() {
      if (hidden > 0 && el.scrollTop < 24) loadEarlier();
     }}
     onMouseUp={onMouseUp}
-    className="thread-scroll mx-auto w-full max-w-3xl min-h-0 flex-1 px-5 py-5"
+    className="thread-scroll mx-auto w-full max-w-(--measure-content) min-h-0 flex-1 px-5 py-5"
     role="log"
     aria-label={t.threadAria}
    >
@@ -227,18 +233,30 @@ export function Thread() {
        </button>
       </div>
      )}
-     {shown.map((m, i) => (
-      <ThreadRow
-       key={m.id}
-       m={m}
-       sessionId={activeSessionId}
-       cwd={cwd}
-       tight={isTrace(m) && isTrace(shown[i - 1])}
-       nth={nthById.get(m.id) ?? 0}
-       frozen={frozen}
-       frozenTitle={frozenTitle}
-      />
-     ))}
+     {layout.map((item, i) => {
+      if (item.kind === "run") {
+       // 聚合折叠行（v2）：命令批 / 编辑卡——展开仍是逐条 ToolRow
+       return <ToolRunRow key={item.id} group={item.group} items={item.items} cwd={cwd} />;
+      }
+      if (item.kind === "turn") {
+       // 轮时长行（v2）：收在该轮内容之后
+       return <TurnRow key={item.id} span={item.span} />;
+      }
+      const prev = layout[i - 1];
+      const prevMsg = prev?.kind === "msg" ? prev.m : undefined;
+      return (
+       <ThreadRow
+        key={item.m.id}
+        m={item.m}
+        sessionId={activeSessionId}
+        cwd={cwd}
+        tight={isTrace(item.m) && isTrace(prevMsg)}
+        nth={nthById.get(item.m.id) ?? 0}
+        frozen={frozen}
+        frozenTitle={frozenTitle}
+       />
+      );
+     })}
      {workingVisible && <WorkingRow tight={isTrace(shown[shown.length - 1])} />}
     </div>
    </div>
@@ -426,10 +444,10 @@ const ThreadRow = memo(function ThreadRow({
   // `data-msg-id`：会话内查找（⌘F）靠它把命中定位回消息行（另一并行任务消费）
   <div className={`text-sm leading-[1.7] ${tight ? "mb-1" : "mb-4"}`} data-msg-id={m.id}>
    {m.kind === "user" && (
-    <div className="group/user ml-auto w-fit max-w-[85%]">
-     {/* 用户气泡走中性 surface 底（对齐 Codex / ChatGPT 的灰气泡语言）：一句「这是我说的」
-         靠底色与右对齐就够，不必读文字才知道；助手正文保持裸 Markdown 无底色，两者一眼分得开 */}
-     <div className="rounded-lg rounded-br-sm border border-border-soft bg-surface px-3.5 py-2">
+    <div className="group/user ml-auto w-fit max-w-[72%]">
+     {/* 用户气泡走 `--hover` 级中性填充（MASTER §4.4：右侧窄灰泡、圆角 lg）：一句「这是我说的」
+         靠填充与右对齐就够；助手正文保持裸 Markdown 无底色，两者一眼分得开 */}
+     <div className="rounded-lg rounded-br-sm bg-hover px-3.5 py-2">
       {m.text && <div className="whitespace-pre-wrap">{m.text}</div>}
       {(m.images?.length ?? 0) > 0 && (
        <div className={`flex flex-wrap gap-2 ${m.text ? "mt-2" : ""}`}>
@@ -498,13 +516,19 @@ const ThreadRow = memo(function ThreadRow({
      {m.output}
     </div>
    )}
-   {m.kind === "divider" && (
+   {m.kind === "divider" && (m.divider === "subagent" ? (
+    // 子代理行（v2 §2.1）：`创建 / 完成 子代理 X` 紧凑行（图标 + 文本），不画分隔线
+    <div className="flex items-center gap-1.5 px-1.5 py-[3px] text-[12px] text-muted" role="status">
+     <Sparkles size={12} className="shrink-0 text-accent" aria-hidden />
+     <span className="min-w-0 truncate">{m.text}</span>
+    </div>
+   ) : (
     <div className="flex items-center gap-3 py-1">
      <span className="h-px flex-1 bg-border-soft" aria-hidden />
      <span className="text-[11px] text-faint">{m.text}</span>
      <span className="h-px flex-1 bg-border-soft" aria-hidden />
     </div>
-   )}
+   ))}
   </div>
  );
 });

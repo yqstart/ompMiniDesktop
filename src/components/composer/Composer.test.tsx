@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionView } from "@shared/types";
 import { useApp } from "../../stores/app";
+import { TEXT } from "../../lib/locale";
 
 /**
  * Composer 三件事：
@@ -127,8 +128,8 @@ const press = async (el: HTMLElement | null, init: KeyboardEventInit) => {
  });
 };
 
-describe("Composer 工具行", () => {
- it("渲染上下文容量环并可点开分项面板；供应商用量键已换到顶栏", async () => {
+describe("Composer 工具行（v2）", () => {
+ it("卡底工具行 = + 菜单 + 执行模式菜单 + 模型·思考档 + 圆形发送键；容量环已移顶栏", async () => {
   useApp.setState({
    sessions: [session()],
    activeSessionId: "s1",
@@ -141,12 +142,31 @@ describe("Composer 工具行", () => {
   });
   act(() => root.render(<Composer />));
   await act(async () => { });
-  const meter = container.querySelector<HTMLButtonElement>('button[aria-label^="上下文容量"]');
-  expect(meter?.textContent).toBe("13%");
-  expect(container.querySelector('button[aria-label="供应商用量"]')).toBeNull();
-  act(() => meter?.click());
-  expect(useApp.getState().composerMenu).toBe("context");
-  await act(async () => { });
+  // 上下文容量环随 v2 移到顶栏（TopBar），Composer 里不再有
+  expect(container.querySelector('button[aria-label^="上下文容量"]')).toBeNull();
+  // 「+」菜单（v2）：点开占用互斥槽，菜单里是「添加图片 / 引用工作区文件」
+  const plus = container.querySelector<HTMLButtonElement>('button[aria-label="添加上下文"]');
+  expect(plus).not.toBeNull();
+  act(() => plus?.click());
+  expect(useApp.getState().composerMenu).toBe("plus");
+  expect(container.textContent).toContain(TEXT["zh-CN"].refPickComposerTitle);
+  act(() => plus?.click());
+  expect(useApp.getState().composerMenu).toBeNull();
+  // 执行模式菜单（v2）：行 = 名称 + 说明，覆盖原徽标入口
+  const perm = container.querySelector<HTMLButtonElement>('button[aria-label^="权限："]');
+  expect(perm).not.toBeNull();
+  act(() => perm?.click());
+  expect(useApp.getState().composerMenu).toBe("approval");
+  expect(container.textContent).toContain(TEXT["zh-CN"].permAlwaysAskDesc);
+  expect(container.textContent).toContain(TEXT["zh-CN"].permGlobal);
+  // 只有「全局」一个作用域：三档各一行，不再并列一份逐字重复的本会话覆盖清单
+  expect(perm?.parentElement?.querySelectorAll("button[aria-pressed]").length).toBe(3);
+  act(() => perm?.click());
+  // 模型 · 思考档合并键（aria-label = 选择模型）与圆形发送键
+  expect(container.querySelector('button[aria-label="选择模型"]')).not.toBeNull();
+  const sendBtn = container.querySelector<HTMLButtonElement>('button[aria-label="发送"]');
+  expect(sendBtn).not.toBeNull();
+  expect(sendBtn?.className).toContain("rounded-full");
  });
 });
 

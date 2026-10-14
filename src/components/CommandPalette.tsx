@@ -8,14 +8,16 @@ import { cycleSessionApproval } from "../lib/sessionApproval";
 import { openBtwPanel } from "../lib/btw";
 import { createChatIn, openForkedSession, openSessionWithHistory } from "../lib/sessionOpen";
 import { forgetSession } from "../lib/useSessionEvents";
+import { isMacKeyboard } from "../lib/platform";
 import { useText } from "../lib/useText";
 
 /**
- * 命令中心（⌘K，V41；对齐 zcode 的 command center）：一个浮层里做「动作 + 会话搜索」。
+ * 命令中心（⌘K，V41 起；v2 §5 对齐 Codex 的 `Search chats`）：一个浮层里做「会话搜索 + 动作」。
  *
+ * - **会话置顶**（v2）：条目 = 标题 + 项目名 + `⌃1..⌃9` 编号快捷键（前 9 条可直接切）；
  * - 动作 = `lib/commandPalette.ts` 的固定清单（执行映射在本组件）；
  * - 会话 = 打开时 `list_sessions` 拉一次（失败退回 store 已会话缓存），Enter 切过去；
- * - 键盘：↑↓ 选择、Enter 执行、Esc 关闭；点击遮罩关闭（卡片内不冒泡）。
+ * - 键盘：↑↓ 选择、Enter 执行、`⌃/⌘+1..9` 直达会话、Esc 关闭；点击遮罩关闭（卡片内不冒泡）。
  *
  * 挂载由 App 负责（`paletteOpen && <CommandPalette />`）——打开才挂载、关闭即卸载：
  * 本地状态（查询 / 高亮 / 会话快照）随之清掉，每次打开都是干净一栏。
@@ -45,6 +47,7 @@ export function CommandPalette() {
   };
  }, []);
 
+ const projects = useApp((s) => s.projects);
  const entries: PaletteEntry[] = useMemo(() => {
   const dict = t as unknown as Record<string, string>;
   const acts: PaletteEntry[] = PALETTE_ACTIONS.map((a) => ({
@@ -58,14 +61,26 @@ export function CommandPalette() {
     kind: "session",
     sid: s.id,
     title: s.title?.trim() || t.unnamedChat,
-    hint: s.cwd,
+    // 行尾元数据 = 项目名（对齐 Codex 的 `Search chats`：标题 + 项目名），
+    // 未归属会话退回目录基名
+    hint: projects.find((p) => p.id === s.projectId)?.name ?? (s.cwd.split("/").filter(Boolean).pop() || s.cwd),
     running: s.running,
    }));
-  return [...acts, ...sess];
- }, [sessions, t]);
+  // 会话置顶（v2 §5，对齐 Codex `Search chats`）：搜索切会话是这里最高频的动作
+  return [...sess, ...acts];
+ }, [sessions, projects, t]);
 
  const filtered = useMemo(() => filterPalette(entries, query), [entries, query]);
  const cur = filtered.length === 0 ? -1 : Math.min(idx, filtered.length - 1);
+ /** 会话在过滤结果里的序号（0 基）：前 9 条带 `⌃1..⌃9` 编号快捷键。 */
+ const sessionOrder = useMemo(() => {
+  const m = new Map<string, number>();
+  let n = 0;
+  for (const e of filtered) {
+   if (e.kind === "session") m.set(e.sid, n++);
+  }
+  return m;
+ }, [filtered]);
 
  const close = () => setPaletteOpen(false);
 
@@ -133,6 +148,16 @@ export function CommandPalette() {
  };
 
  const onKeyDown = (e: React.KeyboardEvent) => {
+  // 编号快捷键（v2 §5，对齐 Codex `Ctrl+1..9`）：修饰键 + 数字直接切到对应会话
+  if ((e.ctrlKey || e.metaKey) && /^[1-9]$/.test(e.key)) {
+   const target = [...sessionOrder.entries()].find(([, n]) => n === Number(e.key) - 1)?.[0];
+   const entry = target ? filtered.find((x) => x.kind === "session" && x.sid === target) : undefined;
+   if (entry) {
+    e.preventDefault();
+    runEntry(entry);
+   }
+   return;
+  }
   if (e.key === "ArrowDown") {
    e.preventDefault();
    if (filtered.length > 0) setIdx((i) => (i + 1) % filtered.length);
@@ -182,15 +207,15 @@ export function CommandPalette() {
      {filtered.length === 0 && <div className="px-3 py-2 text-[13px] text-muted">{t.palEmpty}</div>}
      {filtered.map((e, i) => (
       <Fragment key={e.kind === "action" ? `a-${e.id}` : `s-${e.sid}`}>
-       {/* 组标题只在组首条前出现；查询过滤后仍按「动作 → 会话」的相对顺序分组展示 */}
-       {e.kind === "action" && (i === 0 || filtered[i - 1].kind !== "action") && (
-        <div role="presentation" className="px-3 pt-2 pb-1 text-[11px] font-medium text-faint">
-         {t.palActionsGroup}
-        </div>
-       )}
+       {/* 组标题只在组首条前出现；过滤后仍按「会话 → 动作」的相对顺序分组（会话置顶） */}
        {e.kind === "session" && (i === 0 || filtered[i - 1].kind !== "session") && (
         <div role="presentation" className="px-3 pt-2 pb-1 text-[11px] font-medium text-faint">
          {t.palSessionsGroup}
+        </div>
+       )}
+       {e.kind === "action" && (i === 0 || filtered[i - 1].kind !== "action") && (
+        <div role="presentation" className="px-3 pt-2 pb-1 text-[11px] font-medium text-faint">
+         {t.palActionsGroup}
         </div>
        )}
        <button
@@ -208,7 +233,13 @@ export function CommandPalette() {
          </span>
         )}
         {e.kind === "session" && e.running && (
-         <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ok" aria-hidden />
+         <span className="size-1.5 shrink-0 rounded-full bg-ok" aria-hidden />
+        )}
+        {/* 编号快捷键（v2 §5）：前 9 条会话可 `⌃1..⌃9` 直达 */}
+        {e.kind === "session" && (sessionOrder.get(e.sid) ?? 99) < 9 && (
+         <kbd className="shrink-0 rounded-sm border border-border-soft px-1 font-mono text-[10px] text-faint">
+          {isMacKeyboard() ? `⌃${(sessionOrder.get(e.sid) ?? 0) + 1}` : `Ctrl+${(sessionOrder.get(e.sid) ?? 0) + 1}`}
+         </kbd>
         )}
        </button>
       </Fragment>

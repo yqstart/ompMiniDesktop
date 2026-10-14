@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChartBar, Loader, Refresh } from "reicon-react";
+import { Loader, Refresh } from "reicon-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
@@ -33,7 +33,7 @@ function fmtPercent(x: number): string {
 /** 一张总览卡：标签（11px faint）+ 数值（mono）+ 可选副行（过长换行，不截断关键数字）。 */
 function Tile({ label, value, sub }: { label: string; value: string; sub?: ReactNode }) {
  return (
-  <div className="min-w-0 rounded-lg bg-background p-4">
+  <div className="min-w-0 rounded-md bg-surface p-4">
    <div className="text-[11px] leading-4 text-faint">{label}</div>
    <div className="mt-2 truncate font-mono text-[18px] font-medium tabular-nums" title={value}>
     {value}
@@ -95,10 +95,10 @@ function Heatmap({ cells, numLocale }: { cells: UsageHeatRow[]; numLocale: strin
    ref={cardRef}
    aria-label={t.usageHeatTitle}
    onMouseLeave={() => setHover(null)}
-   className="relative mt-6 rounded-lg border border-border-soft p-3"
+   className="relative mt-6 rounded-md bg-surface p-3"
   >
    <div className="flex flex-wrap items-center gap-2">
-    <h3 className="text-[13px] font-medium">{t.usageHeatTitle}</h3>
+    <h3 className="text-xs font-medium text-muted">{t.usageHeatTitle}</h3>
     <div role="radiogroup" aria-label={t.usageHeatModeAria} className="ml-auto flex gap-1 rounded-md bg-background p-1">
      {HEAT_MODES.map((m) => (
       <button
@@ -249,44 +249,45 @@ export function UsagePanel() {
  const totals = data?.totals;
 
  return (
-  <section aria-label={t.tabUsage} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
-   <div className="flex flex-wrap items-center gap-2">
-    <ChartBar size={16} aria-hidden className="text-muted" />
-    <h2 className="text-sm font-semibold">{t.tabUsage}</h2>
-    <div role="radiogroup" aria-label={t.usageRangeAria} className="order-last flex basis-full flex-wrap gap-1 rounded-md bg-background p-1 @min-[600px]/panel:order-none @min-[600px]/panel:basis-auto">
-     {RANGES.map((r) => (
-      <button
-       key={r.key}
-       role="radio"
-       aria-checked={range === r.key}
-       onClick={() => setRange(r.key)}
-       className={`min-h-8 cursor-pointer rounded-md px-2.5 py-1 text-[12px] transition-colors duration-100 ${range === r.key
-        ? "bg-active font-medium text-accent"
-        : "text-muted hover:bg-hover hover:text-foreground"
-        }`}
-      >
-       {rangeLabel(r.key)}
-      </button>
-     ))}
+  <section aria-label={t.tabUsage} className="shrink-0">
+   {/* 页头：口径提示 + 右侧「范围切换 + 刷新」；窄窗整组换行，不挤压提示文字 */}
+   <div className="flex flex-wrap items-start gap-2">
+    <p className="min-w-0 grow basis-3/5 text-xs leading-5 text-muted">{t.usageHint}</p>
+    <div className="flex shrink-0 flex-wrap items-center gap-0.5">
+     <div role="radiogroup" aria-label={t.usageRangeAria} className="flex flex-wrap gap-1 rounded-md bg-surface p-1">
+      {RANGES.map((r) => (
+       <button
+        key={r.key}
+        role="radio"
+        aria-checked={range === r.key}
+        onClick={() => setRange(r.key)}
+        className={`min-h-7 cursor-pointer rounded-md px-2.5 py-1 text-[12px] transition-colors duration-100 ${range === r.key
+         ? "bg-active font-medium text-accent"
+         : "text-muted hover:bg-hover hover:text-foreground"
+         }`}
+       >
+        {rangeLabel(r.key)}
+       </button>
+      ))}
+     </div>
+     <button
+      onClick={() => setReloadKey((k) => k + 1)}
+      disabled={busy}
+      className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
+      aria-label={t.refresh}
+      title={t.refresh}
+     >
+      {busy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
+     </button>
     </div>
-    <button
-     onClick={() => setReloadKey((k) => k + 1)}
-     disabled={busy}
-     className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
-     aria-label={t.refresh}
-    >
-     {busy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
-     {t.refresh}
-    </button>
    </div>
-   <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.usageHint}</p>
    {error && (
-    <p role="alert" className="mt-1.5 text-[13px] text-danger">
+    <p role="alert" className="mt-2 text-[13px] text-danger">
      {error}
     </p>
    )}
    {data?.truncated && (
-    <p className="mt-1.5 text-[13px] text-warn">{fmt(t.usageTruncated, data.scannedFiles)}</p>
+    <p className="mt-2 text-[13px] text-warn">{fmt(t.usageTruncated, data.scannedFiles)}</p>
    )}
 
    {data === null ? (
@@ -294,12 +295,12 @@ export function UsagePanel() {
    ) : (
     <>
      {!totals || totals.calls === 0 ? (
-      <p className="mt-4 rounded-lg bg-background px-4 py-8 text-center text-[13px] leading-relaxed text-muted">
+      <p className="mt-3 rounded-md bg-surface px-4 py-8 text-center text-[13px] leading-relaxed text-muted">
        {t.usageEmpty}
       </p>
      ) : (
       /* 总览三张卡：tokens 用量（含未缓存输入 / 输出 / 缓存读·写）/ Cache 命中率 / 活跃天数 */
-      <div className="mt-5 grid grid-cols-1 gap-3 @min-[360px]/panel:grid-cols-2 @min-[640px]/panel:grid-cols-3">
+      <div className="mt-6 grid grid-cols-1 gap-3 @min-[360px]/panel:grid-cols-2 @min-[640px]/panel:grid-cols-3">
        <Tile
         label={t.usageTokens}
         value={fmtTokens(totals.total, numLocale)}

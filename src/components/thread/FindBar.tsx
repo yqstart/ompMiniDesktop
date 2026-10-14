@@ -184,7 +184,7 @@ export function FindBar() {
 
  return (
   <div className="flex shrink-0 justify-center px-5 pt-2">
-   <div className="flex w-full max-w-3xl items-center gap-2 rounded-lg border border-border bg-elevated px-2 py-1.5 shadow-pop">
+   <div className="flex w-full max-w-(--measure-content) items-center gap-2 rounded-lg border border-border bg-elevated px-2 py-1.5 shadow-pop">
     <input
      ref={inputRef}
      value={query}

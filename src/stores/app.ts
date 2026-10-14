@@ -19,9 +19,11 @@ type AppState = {
  settingsTabOpen: boolean;
  /** 主区当前显示的是设置视图（聊天视图保持挂载，只切显隐）。 */
  settingsTabActive: boolean;
- /** 打开设置视图（已打开则只切过去）。 */
+ /** 设置视图内搜索是否展开（v3：顶部搜索 / ⌘F；关闭设置视图时复位）。 */
+ settingsSearchOpen: boolean;
+ /** 打开设置视图（已打开则只切过去；搜索复位到折叠态）。 */
  openSettingsTab: () => void;
- /** 关闭设置视图：主区回到聊天视图。 */
+ /** 关闭设置视图：主区回到聊天视图（搜索一并复位）。 */
  closeSettingsTab: () => void;
  sidebarOpen: boolean;
  update: UpdateState;
@@ -53,6 +55,10 @@ type AppState = {
  /** 左侧栏宽度（292–480，默认 292，持久化 localStorage）。 */
  sidebarWidth: number;
  setSidebarWidth: (w: number) => void;
+ /** 右侧上下文面板是否展开（v2 三栏；localStorage 持久化，默认展开）。
+  *  宽屏停靠为列、窄屏（<1280px）渲染为右侧抽屉浮层，两种形态共用这一个开关。 */
+ contextPanelOpen: boolean;
+ setContextPanelOpen: (v: boolean) => void;
 
  // ---------- 聊天形态（v1 起唯一形态） ----------
 
@@ -85,12 +91,20 @@ type AppState = {
  currentEfforts: string[] | null;
  /** 当前会话的运行时真值快照（上下文占用 / 本轮用量 / 耗时）：状态条纯透传的数据源。 */
  currentRuntime: SessionRuntime | null;
+ /**
+  * 完成未读标记（v2 左栏状态标）：会话在**后台跑完一轮**、用户还没打开过它。
+  * 由左栏列表刷新时对比 running 快照产生（前后台状态真值只有列表里有），打开会话即清。
+  * 运行期状态，不持久化（重启后「未读」没有意义）。
+  */
+ unreadBySession: Record<string, true>;
+ markUnread: (sid: string) => void;
+ clearUnread: (sid: string) => void;
  /** 任务计划（`todoPhases` 真值 + `todo_reminder` 事件合并，按会话隔离；只读展示）。 */
  plansBySession: Record<string, TodoPhase[]>;
  /** 会话级权限覆盖（覆盖层 `sessionApproval` 的水合；徽标显示用）。 */
  sessionApprovals: Record<string, string>;
- /** 输入框工具行与上方上下文条的下拉互斥：同一时刻只开一个（model/thinking/permission/project/branch/context/usage）。 */
- composerMenu: "model" | "thinking" | "permission" | "project" | "branch" | "context" | "usage" | null;
+ /** 输入卡内的下拉互斥槽：同一时刻只开一个（model/approval/plus/project/branch/context/usage）。 */
+ composerMenu: "model" | "approval" | "plus" | "project" | "branch" | "context" | "usage" | null;
  /** 消息流「首屏增量」窗口：当前会话已渲染的消息条数（首屏 200 条）。 */
  threadLimitSid: string | null;
  threadLimit: number;
@@ -143,6 +157,10 @@ type AppState = {
  /** 文件改动弹窗的目标路径（工具卡「查看改动」按钮；null = 关闭；V40）。 */
  diffPath: string | null;
  setDiffPath: (path: string | null) => void;
+ /** 新建会话（左栏主命令 / ⌘T）的最新失败文案：两处入口共用左栏内联错误条这一个渲染面，
+  *  免得「点了没反应」（`null` = 无提示；成功或用户关掉即清）。 */
+ newChatError: string | null;
+ setNewChatError: (message: string | null) => void;
  /** 命令中心（⌘K，V41）：聊天形态的全局动作面板开关。 */
  paletteOpen: boolean;
  setPaletteOpen: (v: boolean) => void;
@@ -263,6 +281,16 @@ function loadSidebarWidth(): number {
  }
 }
 
+/** 右上下文面板的初始展开态（v2）：默认展开（三栏是聊天形态的默认布局），用户收起后记住。 */
+function loadContextPanelOpen(): boolean {
+ try {
+  if (typeof localStorage === "undefined") return true;
+  return localStorage.getItem("omp.contextPanel.v1") !== "0";
+ } catch {
+  return true;
+ }
+}
+
 export const useApp = create<AppState>((set, get) => ({
  health: null,
  projects: [],
@@ -274,8 +302,9 @@ export const useApp = create<AppState>((set, get) => ({
  },
  settingsTabOpen: false,
  settingsTabActive: false,
- openSettingsTab: () => set({ settingsTabOpen: true, settingsTabActive: true }),
- closeSettingsTab: () => set({ settingsTabOpen: false, settingsTabActive: false }),
+ settingsSearchOpen: false,
+ openSettingsTab: () => set({ settingsTabOpen: true, settingsTabActive: true, settingsSearchOpen: false }),
+ closeSettingsTab: () => set({ settingsTabOpen: false, settingsTabActive: false, settingsSearchOpen: false }),
  sidebarOpen: false,
  update: { status: "idle" },
  updateDismissedVersion: null,
@@ -313,6 +342,15 @@ export const useApp = create<AppState>((set, get) => ({
   }
   set({ sidebarWidth: v });
  },
+ contextPanelOpen: loadContextPanelOpen(),
+ setContextPanelOpen: (v) => {
+  try {
+   localStorage.setItem("omp.contextPanel.v1", v ? "1" : "0");
+  } catch {
+   // 持久化失败不阻断本次切换
+  }
+  set({ contextPanelOpen: v });
+ },
 
  // ---------- 聊天形态（v1 起唯一形态） ----------
 
@@ -335,11 +373,22 @@ export const useApp = create<AppState>((set, get) => ({
  globalApproval: "write",
  statsOpen: false,
  diffPath: null,
+ newChatError: null,
  paletteOpen: false,
  currentModel: null,
  currentThinking: null,
  currentEfforts: null,
  currentRuntime: null,
+ unreadBySession: {},
+ markUnread: (sid) =>
+  set((s) => (s.unreadBySession[sid] ? {} : { unreadBySession: { ...s.unreadBySession, [sid]: true } })),
+ clearUnread: (sid) =>
+  set((s) => {
+   if (!s.unreadBySession[sid]) return {};
+   const next = { ...s.unreadBySession };
+   delete next[sid];
+   return { unreadBySession: next };
+  }),
  plansBySession: {},
  sessionApprovals: {},
  composerMenu: null,
@@ -415,6 +464,7 @@ export const useApp = create<AppState>((set, get) => ({
  setGlobalApproval: (mode) => set({ globalApproval: mode }),
  setStatsOpen: (v) => set({ statsOpen: v }),
  setDiffPath: (path) => set({ diffPath: path }),
+ setNewChatError: (message) => set({ newChatError: message }),
  setPaletteOpen: (v) => set({ paletteOpen: v }),
  appendEvents: (sid, msgs) =>
   set((s) => ({ eventsBySession: { ...s.eventsBySession, [sid]: [...(s.eventsBySession[sid] ?? []), ...msgs] } })),

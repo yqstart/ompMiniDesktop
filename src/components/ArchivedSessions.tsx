@@ -112,24 +112,24 @@ export function ArchivedSessions() {
  ];
 
  return (
-  <section aria-label={t.tabArchived} className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5">
-   <div className="flex flex-wrap items-center gap-2">
-    <Archive size={16} aria-hidden className="text-muted" />
-    <h2 className="text-sm font-semibold">{t.tabArchived}</h2>
-    <span className="font-mono text-xs text-muted">{total}</span>
-    <button
-     onClick={() => setReloadKey((k) => k + 1)}
-     disabled={busy || rows === null}
-     className="ml-auto flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
-     aria-label={t.archivedRefresh}
-    >
-     {busy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
-     {t.archivedRefresh}
-    </button>
+  <section aria-label={t.tabArchived} className="shrink-0">
+   <div className="flex flex-wrap items-start gap-2">
+    <p className="min-w-0 flex-1 text-xs leading-5 text-muted">{t.archivedHint}</p>
+    <div className="flex shrink-0 items-center gap-2">
+     {rows !== null && <span className="font-mono text-[11px] text-faint">{total}</span>}
+     <button
+      onClick={() => setReloadKey((k) => k + 1)}
+      disabled={busy || rows === null}
+      className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
+      aria-label={t.archivedRefresh}
+      title={t.archivedRefresh}
+     >
+      {busy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
+     </button>
+    </div>
    </div>
-   <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.archivedHint}</p>
    {error && (
-    <p role="alert" className="mt-1.5 text-[13px] text-danger">
+    <p role="alert" className="mt-3 text-[13px] text-danger">
      {error}
     </p>
    )}
@@ -150,19 +150,19 @@ export function ArchivedSessions() {
      <p role="status" className="mt-3 text-[13px] text-muted">{t.archivedLoading}</p>
     )
    ) : total === 0 ? (
-    <p className="mt-4 rounded-lg bg-background px-4 py-8 text-center text-[13px] leading-relaxed text-muted">{t.archivedEmpty}</p>
+    <p className="mt-6 rounded-md bg-surface px-4 py-8 text-center text-[13px] leading-relaxed text-muted">{t.archivedEmpty}</p>
    ) : (
-    <div className="mt-5 space-y-5">
+    <div className="mt-6 space-y-6">
      {buckets.map((b) => {
       const folded = collapsed[b.key] === true;
       return (
        <div key={b.key}>
-        <div className="flex flex-wrap items-center gap-2 border-b border-border-soft pb-3">
+        <div className="flex flex-wrap items-center gap-2">
          <button
           onClick={() => setCollapsed((m) => ({ ...m, [b.key]: !m[b.key] }))}
           aria-expanded={!folded}
           aria-label={`${b.name}`}
-          className="flex min-h-8 min-w-0 basis-full cursor-pointer items-center gap-2 rounded-md text-left @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0"
+          className="flex min-h-8 min-w-0 basis-full cursor-pointer items-center gap-1.5 rounded-md text-left transition-colors duration-100 hover:bg-hover @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0"
          >
           <ChevronRight
            size={12}
@@ -174,10 +174,10 @@ export function ArchivedSessions() {
           ) : (
            <Archive size={12} aria-hidden className="shrink-0 text-faint" />
           )}
-          <span className="min-w-0 truncate text-[13px] font-semibold">{b.name}</span>
+          <span className="min-w-0 truncate text-xs font-medium text-muted">{b.name}</span>
           {b.path && <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-faint">{b.path}</span>}
          </button>
-         <span className="shrink-0 font-mono text-[11px] text-muted">{b.rows.length}</span>
+         <span className="shrink-0 font-mono text-[11px] text-faint">{b.rows.length}</span>
          <button
           onClick={() => void act("unarchive", b.rows.map((s) => s.id))}
           disabled={busy}
@@ -203,9 +203,9 @@ export function ArchivedSessions() {
          </button>
         </div>
         {!folded && (
-         <div className="mt-0.5 space-y-px">
+         <div className="mt-1.5 divide-y divide-border-soft">
           {b.rows.map((s) => (
-           <div key={s.id} className="flex min-h-11 min-w-0 flex-wrap items-center gap-2 rounded-md px-2 py-2 transition-colors duration-100 hover:bg-hover">
+           <div key={s.id} className="flex min-h-11 flex-wrap items-center gap-2 rounded-md py-2.5 transition-colors duration-100 hover:bg-hover">
             <button
              onClick={() => void restoreSession(s)}
              className="flex min-w-0 basis-full cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 text-left @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0"

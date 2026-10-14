@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { Check, ChevronRight, Copy, FolderOpen, Loader, Puzzle, Refresh } from "reicon-react";
+import { Check, ChevronRight, Copy, FolderOpen, Loader, Refresh } from "reicon-react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api } from "@shared/api";
 import { MarkdownLink } from "../MarkdownLink";
@@ -155,8 +155,8 @@ export function SkillsPanel() {
  const renderSkill = (item: SkillItem) => {
   const open = openKey === item.filePath;
   return (
-   <div key={item.filePath} className="border-b border-border-soft py-2.5 last:border-b-0">
-    <div className="flex flex-wrap items-start gap-2">
+   <div key={item.filePath} className="py-2.5">
+    <div className="flex min-h-11 flex-wrap items-center gap-2">
      <button
       onClick={() => void togglePreview(item)}
       aria-expanded={open}
@@ -205,7 +205,7 @@ export function SkillsPanel() {
      </div>
     </div>
     {open && (
-     <div className="mt-2 rounded-lg border border-border-soft bg-background p-3">
+     <div className="mt-2 rounded-md bg-surface p-3">
       {preview && preview.key === item.filePath && preview.state === "loading" && (
        <p className="text-[13px] text-muted">{t.skillsLoading}</p>
       )}
@@ -242,47 +242,49 @@ export function SkillsPanel() {
  const loadErrorText = loadError === null ? null : loadError || t.skillsLoadFailed;
 
  return (
-  <section
-   aria-label={t.tabSkills}
-   className="shrink-0 rounded-lg border border-border-soft bg-surface p-4 @min-[480px]/panel:p-5"
-  >
-   <div className="flex flex-wrap items-center gap-2">
-    <Puzzle size={16} aria-hidden className="text-muted" />
-    <h2 className="text-sm font-semibold">{t.tabSkills}</h2>
-    {data !== null && <span className="font-mono text-xs text-muted">{fmt(t.skillsCount, total)}</span>}
-    <div className="ml-auto flex flex-wrap items-center gap-2">
-     <EnumSelect
-      label={t.skillsScope}
-      value={scopeValue(options, activeScope)}
-      choices={options.map((o) => ({ value: o.value, label: o.label }))}
-      busy={refreshing}
-      disabled={lock}
-      onPick={(value) => {
-       setRefreshing(true);
-       setScopePath(options.find((o) => o.value === value)?.path ?? null);
-      }}
-     />
+  <section aria-label={t.tabSkills} className="shrink-0">
+   <div className="flex flex-wrap items-start gap-2">
+    <p className="min-w-0 flex-1 text-xs leading-5 text-muted">
+     {t.tabSkillsHint}
+     {data !== null && (
+      <span className="ml-2 font-mono text-[11px] text-faint">{fmt(t.skillsCount, total)}</span>
+     )}
+    </p>
+    <div className="flex shrink-0 items-center gap-0.5">
      <button
       onClick={() => {
        setRefreshing(true);
        setReloadKey((k) => k + 1);
       }}
       disabled={busy || refreshing}
-      className="flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md bg-background px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+      className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
       aria-label={t.refresh}
       title={t.refresh}
      >
       {refreshing ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
-      {t.refresh}
      </button>
     </div>
    </div>
-   <p className="mt-2 text-[13px] leading-relaxed text-faint">{t.tabSkillsHint}</p>
-   <p className="mt-1 text-[12px] leading-relaxed text-faint">
+
+   {/* 发现范围（项目级技能由 omp 从该项目目录向上发现；全局 = 只看用户级） */}
+   <div className="mt-3 flex flex-wrap items-center gap-2">
+    <EnumSelect
+     label={t.skillsScope}
+     value={scopeValue(options, activeScope)}
+     choices={options.map((o) => ({ value: o.value, label: o.label }))}
+     busy={refreshing}
+     disabled={lock}
+     onPick={(value) => {
+      setRefreshing(true);
+      setScopePath(options.find((o) => o.value === value)?.path ?? null);
+     }}
+    />
+   </div>
+   <p className="mt-1 text-xs leading-5 text-faint">
     {t.skillsScopeHint}
     {data && <span className="ml-1 font-mono">{data.cwd}</span>}
    </p>
-   <p className="mt-1 text-[12px] leading-relaxed text-faint">{t.skillsToggleHint}</p>
+   <p className="mt-1 text-xs leading-5 text-faint">{t.skillsToggleHint}</p>
 
    {error && (
     <p role="alert" className="mt-2 rounded border border-danger/40 bg-danger/5 px-3 py-2 text-[13px] text-danger">
@@ -310,29 +312,29 @@ export function SkillsPanel() {
      </p>
     )
    ) : total === 0 && disabled.length === 0 ? (
-    <p className="mt-4 rounded-lg bg-background px-4 py-8 text-center text-[13px] leading-relaxed text-muted">
+    <p className="mt-4 rounded-md bg-surface px-4 py-8 text-center text-[13px] leading-relaxed text-muted">
      {t.skillsEmpty}
     </p>
    ) : (
-    <div className="mt-4 space-y-5">
-     {groups.map((g) => (
-      <div key={g.id}>
-       <h3 className="border-b border-border-soft pb-2 text-[13px] font-semibold text-muted">
-        {g.id === "project" ? t.skillsGroupProject : g.id === "user" ? t.skillsGroupUser : t.skillsGroupOther}
-       </h3>
-       <div>{g.items.map((s) => renderSkill(s))}</div>
-      </div>
-     ))}
+    <>
+     {groups.map((g) => {
+      const label =
+       g.id === "project" ? t.skillsGroupProject : g.id === "user" ? t.skillsGroupUser : t.skillsGroupOther;
+      return (
+       <section key={g.id} aria-label={label} className="mt-6 shrink-0">
+        <h3 className="text-xs font-medium text-muted">{label}</h3>
+        <div className="mt-1.5 divide-y divide-border-soft">{g.items.map((s) => renderSkill(s))}</div>
+       </section>
+      );
+     })}
 
      {disabled.length > 0 && (
-      <div>
-       <h3 className="border-b border-border-soft pb-2 text-[13px] font-semibold text-muted">
-        {fmt(t.skillsGroupDisabled, disabled.length)}
-       </h3>
+      <section aria-label={fmt(t.skillsGroupDisabled, disabled.length)} className="mt-6 shrink-0">
+       <h3 className="text-xs font-medium text-muted">{fmt(t.skillsGroupDisabled, disabled.length)}</h3>
        <p className="mt-1.5 text-[12px] leading-relaxed text-faint">{t.skillsDisabledHint}</p>
-       <div>
+       <div className="mt-1.5 divide-y divide-border-soft">
         {disabled.map((name) => (
-         <div key={name} className="flex flex-wrap items-center gap-2 border-b border-border-soft py-2.5 last:border-b-0">
+         <div key={name} className="flex min-h-11 flex-wrap items-center gap-2 py-2.5">
           <span className="min-w-0 flex-1 truncate text-sm font-medium text-muted">{name}</span>
           <span className="shrink-0 rounded-sm bg-warn/10 px-1.5 py-0.5 text-[11px] text-warn">{t.skillsDisabledTag}</span>
           <Switch
@@ -344,15 +346,13 @@ export function SkillsPanel() {
          </div>
         ))}
        </div>
-      </div>
+      </section>
      )}
 
      {data.warnings.length > 0 && (
-      <div>
-       <h3 className="border-b border-border-soft pb-2 text-[13px] font-semibold text-muted">
-        {fmt(t.skillsWarnings, data.warnings.length)}
-       </h3>
-       <ul className="mt-1.5 space-y-1">
+      <section aria-label={fmt(t.skillsWarnings, data.warnings.length)} className="mt-6 shrink-0">
+       <h3 className="text-xs font-medium text-muted">{fmt(t.skillsWarnings, data.warnings.length)}</h3>
+       <ul className="mt-2 space-y-1">
         {data.warnings.map((w: SkillWarning, i) => (
          <li key={`${w.skillPath}-${i}`} className="text-[12px] leading-relaxed text-faint">
           <span className="font-mono">{w.skillPath}</span>
@@ -360,9 +360,9 @@ export function SkillsPanel() {
          </li>
         ))}
        </ul>
-      </div>
+      </section>
      )}
-    </div>
+    </>
    )}
   </section>
  );

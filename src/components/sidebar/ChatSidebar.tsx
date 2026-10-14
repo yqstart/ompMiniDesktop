@@ -1,12 +1,12 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Archive, BranchDown, BranchUp, ChevronRight, Folder, FolderError, FolderMinus, FolderPlus, Inbox, Layers, LinkOff, Loader, PenLine, Plus, Search, Trash2, X } from "reicon-react";
+import { AlertTriangle, Archive, BranchDown, BranchUp, Check, ChevronRight, Folder, FolderError, FolderMinus, FolderPlus, Inbox, Layers, LinkOff, Loader, PenLine, Plus, Search, Trash2, X } from "reicon-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "@shared/api";
 import type { ProjectView, SessionView, WorkspaceView } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { TEXT, fmt } from "../../lib/locale";
-import { loadCheckouts, refreshSidebar } from "../../lib/checkouts";
+import { loadCheckouts, newChatInDefaultCheckout, refreshSidebar } from "../../lib/checkouts";
 import { pickDropTarget, planProjectMove, type ProjectDropHit, type ProjectDropTarget } from "../../lib/projectDrag";
 import { pickAndAddProject, startChatInProject } from "../../lib/projects";
 import { groupSessionsByProject } from "../../lib/sessions";
@@ -14,6 +14,7 @@ import { openSessionWithHistory } from "../../lib/sessionOpen";
 import { runSessionBatch } from "../../lib/sessionBatch";
 import { formatSessionFullTime, formatSessionTime } from "../../lib/sessionTime";
 import { isCommitTaskRunning, pushWorkspace } from "../../lib/commitTasks";
+import { isMacKeyboard } from "../../lib/platform";
 import { useText } from "../../lib/useText";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { DropLine } from "./DropLine";
@@ -66,11 +67,11 @@ function SessionRow({
 }) {
  const activeSessionId = useApp((st) => st.activeSessionId);
  const locale = useApp((st) => st.locale);
+ const unread = useApp((st) => !!st.unreadBySession[s.id]);
  const t = useText();
  const [confirmDelete, setConfirmDelete] = useState(false);
  const active = s.id === activeSessionId;
- // 行内 = 紧凑相对时间（ZCode 口径）；完整时间进悬停 title（Codex 侧把绝对时间行进内，
- // 本壳侧栏更窄，取两家共同口径 = 行内恒定短 + 悬停看全量）
+ // 行内 = 紧凑相对时间（ZCode 口径）；完整时间进悬停 title。
  const time = s.corrupt ? t.corrupt : formatSessionTime(s.timestamp, t);
  const fullTime = formatSessionFullTime(s.timestamp, locale);
  return (
@@ -79,32 +80,38 @@ function SessionRow({
     className={`group relative flex h-8 min-w-0 items-center rounded-md pr-1 pl-2 transition-colors duration-100 ${active ? "bg-active" : "hover:bg-hover"}`}
    >
     <button
-     onClick={() => void openSessionWithHistory(s.id, s)}
+     onClick={() => {
+      // 打开即已读（v2 完成标）：先清标记，再走打开链路
+      useApp.getState().clearUnread(s.id);
+      void openSessionWithHistory(s.id, s);
+     }}
      className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
      aria-label={fmt(t.chatAria, s.title)}
     >
-     <span
-      className={`h-1.5 w-1.5 shrink-0 rounded-full ${s.running ? "bg-ok" : "bg-transparent"}`}
-      aria-label={s.running ? t.statusRunning : undefined}
-      aria-hidden={!s.running}
-     />
      <span className={`min-w-0 flex-1 truncate text-sm ${active ? "font-semibold" : ""}`}>{s.title}</span>
     </button>
-    {/* 互斥槽（V43 二次口径）：不悬浮时显示时间，悬浮 / 聚焦整行时时间淡出、动作键淡入——
-        按钮常驻占位（决定槽宽，标题零重排），时间是绝对定位的覆盖层（pointer-events-none）；
-        悬浮进入即切换，鼠标落点始终是看得见的那个元素。
-        聚焦判定 = `group-has-focus-visible`（键盘 Tab 到按钮才显形）：`focus-within` 会把
-        「鼠标点击后滞留在行内的焦点」也算上——点完行就移开鼠标，图标会一直挂着（2026-10-13 修） */}
+    {/* 互斥槽（V43 二次口径）：不悬浮时显示「状态标 + 时间」，悬浮 / 聚焦整行时淡出、动作键淡入——
+        按钮常驻占位（决定槽宽，标题零重排），状态与时间是绝对定位的覆盖层（pointer-events-none）；
+        聚焦判定 = `group-has-focus-visible`（键盘 Tab 到按钮才显形）。 */}
     <span className="relative flex shrink-0 items-center justify-end">
      <span className="flex items-center gap-0.5 opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-has-focus-visible:opacity-100">
       <RowAction label={s.running ? t.archiveChatRunning : t.archiveChat} icon={Archive} disabled={busy} onClick={() => onArchive([s.id])} />
       <RowAction label={t.deleteChat} title={t.sessDeleteConfirm} icon={Trash2} danger disabled={busy} onClick={() => setConfirmDelete(true)} />
      </span>
-     <span
-      className="pointer-events-none absolute inset-y-0 right-0 flex items-center font-mono text-[11px] text-faint transition-opacity duration-100 group-hover:opacity-0 group-has-focus-visible:opacity-0"
-      title={fullTime}
-     >
-      {time}
+     <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-1 transition-opacity duration-100 group-hover:opacity-0 group-has-focus-visible:opacity-0">
+      {/* 运行状态标（v2 §1.1）：running 转圈 / 后台跑完未读给勾；都没有时不占位 */}
+      {s.running ? (
+       <span className="flex shrink-0 text-accent" title={t.statusRunning} aria-label={t.statusRunning}>
+        <Loader size={11} className="animate-spin" aria-hidden />
+       </span>
+      ) : unread ? (
+       <span className="flex shrink-0 text-ok" title={t.statusDone} aria-label={t.statusDone}>
+        <Check size={11} aria-hidden />
+       </span>
+      ) : null}
+      <span className="font-mono text-[11px] text-faint" title={fullTime}>
+       {time}
+      </span>
      </span>
     </span>
    </div>
@@ -163,10 +170,11 @@ export function ChatSidebar() {
  const commitTasks = useApp((s) => s.commitTasks);
  // 目录行：项目头的分支 / 上游徽章判定用（主目录那一行；与 git 快照同源）。
  const checkouts = useApp((s) => s.checkouts);
+ /** 新建会话入口（本组第一行钮 / ⌘T）的失败文案：与本地 `error` 共用下面同一条错误条。 */
+ const newChatError = useApp((s) => s.newChatError);
  const [sessions, setSessions] = useState<SessionView[]>([]);
  const [scan, setScan] = useState<{ total: number; scanned: number }>({ total: 0, scanned: 0 });
  const [loaded, setLoaded] = useState(false);
- const [query, setQuery] = useState("");
  const [error, setError] = useState<string | null>(null);
  const [busy, setBusy] = useState(false);
  /** 工作区对话框：null = 关；`group: null` = 新建。 */
@@ -188,6 +196,8 @@ export function ChatSidebar() {
  const rafRef = useRef(0);
  /** 拖完那一下松手会补一个 click（落在项目头上会误触折叠）：吞掉它。 */
  const swallowClickRef = useRef(false);
+ /** 上一份 running 快照（v2 完成未读：对比出「后台刚跑完」的会话）。 */
+ const runningRef = useRef(new Map<string, boolean>());
 
  /** 拉一次会话列表（`want` 不传 = 保持当前窗口）。失败不抛，落在内联错误条上。 */
  const reload = useCallback(async (want?: number) => {
@@ -200,6 +210,18 @@ export function ChatSidebar() {
    setScan({ total: page.totalFiles, scanned: page.scannedFiles });
    setLoaded(true);
    setError(null);
+   // 完成未读标记（v2 左栏状态标）：后台会话的起止只有这份列表快照看得到——
+   // running → 非 running 且不在前台 = 刚跑完一轮、用户还没看。前台会话不标（用户正看着）。
+   const prev = runningRef.current;
+   const next = new Map<string, boolean>();
+   const activeSid = useApp.getState().activeSessionId;
+   for (const s of page.sessions) {
+    next.set(s.id, !!s.running);
+    if (prev.get(s.id) === true && !s.running && s.id !== activeSid) {
+     useApp.getState().markUnread(s.id);
+    }
+   }
+   runningRef.current = next;
   } catch (e) {
    setLoaded(true);
    setError(e instanceof Error ? e.message : String(e));
@@ -519,8 +541,6 @@ export function ChatSidebar() {
   if (!res.ok) setError(res.message);
  };
 
- const q = query.trim().toLowerCase();
- const matchSession = (s: SessionView) => (q ? `${s.title}\n${s.cwd}`.toLowerCase().includes(q) : true);
  // 扫描行 × 已打开会话的实时视图：同 id 以 store 为准（标题/归档/running 的真相），
  // 扫描窗口外的新会话（打开过但扫不到）也补一行——否则刚建的会话在列表里看不见。
  const mergedSessions = useMemo(() => {
@@ -533,9 +553,6 @@ export function ChatSidebar() {
   return out;
  }, [sessions, storeSessions]);
  const { groups, orphanActive } = useMemo(() => groupSessionsByProject(projects, mergedSessions), [projects, mergedSessions]);
- const visibleGroups = groups.map((g) => ({ project: g.project, active: g.active.filter(matchSession) }));
- const visibleOrphan = orphanActive.filter(matchSession);
- const matchCount = visibleGroups.reduce((n, g) => n + g.active.length, 0) + visibleOrphan.length;
 
  /**
   * 工作区分段（V21 容器在左栏的投影）：有自定义工作区时按组分段
@@ -653,7 +670,7 @@ export function ChatSidebar() {
     key={project.id}
     data-proj-row={project.id}
     className={`group/proj mt-1 transition-opacity duration-100 ${dragging ? "opacity-40" : ""}`}
-    open={!q || active.length > 0}
+    open
    >
     {/* 项目头没有折叠箭头——点击整行即展开 / 收起；`data-project-drag` 区 = 拖拽手柄
         （按下后移动超过 4px 才真的开始拖，见拖拽控制器）。行级操作为 hover 悬浮图标（V43）：
@@ -723,30 +740,32 @@ export function ChatSidebar() {
    {/* 顶栏（红绿灯占位 + 两枚版本 chip） */}
    <SidebarTop />
    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
-    {/* 顶部固定区（会话搜索 + 工作区标题行）：sticky 钉在列表上方，`-mx-3 px-3` 让底色铺满容器，
-        滚过去的会话行不会从两侧露出 */}
+    {/* 顶部固定区（v2 §1.1 常驻命令行 + 工作区标题行）：sticky 钉在列表上方，
+        `-mx-3 px-3` 让底色铺满容器，滚过去的会话行不会从两侧露出。
+        命令行两枚行钮 = 新建会话（主命令，视觉最重）/ 快速切换（⌘K；会话搜索与动作合成一栏）。 */}
     <div className="sticky top-0 z-10 -mx-3 bg-sidebar px-3 pt-1 pb-2">
-     <div className="flex items-center gap-2 rounded-md border border-border bg-background px-2.5 py-1.5 text-[13px] text-muted transition-colors duration-100 focus-within:border-accent/70 focus-within:text-foreground">
-      <Search size={14} aria-hidden className="shrink-0" />
-      <label htmlFor="chat-sidebar-search" className="sr-only">
-       {t.searchSessions}
-      </label>
-      <input
-       id="chat-sidebar-search"
-       value={query}
-       onChange={(e) => setQuery(e.target.value)}
-       placeholder={t.searchPlaceholder}
-       className="no-focus-ring w-full min-w-0 bg-transparent outline-none placeholder:text-faint"
-      />
-      {query && (
-       <button
-        onClick={() => setQuery("")}
-        className="shrink-0 cursor-pointer rounded-full p-0.5 text-muted transition-colors duration-100 hover:bg-active hover:text-foreground"
-        aria-label={t.clearSearch}
-       >
-        <X size={12} aria-hidden />
-       </button>
-      )}
+     <div className="flex flex-col gap-0.5">
+      <button
+       onClick={() => {
+        void newChatInDefaultCheckout().then((r) => useApp.getState().setNewChatError(r.ok ? null : r.message));
+       }}
+       className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-[13px] font-medium text-foreground transition-colors duration-100 hover:bg-hover"
+       aria-label={t.newSession}
+       title={t.newChatCommandTitle}
+      >
+       <Plus size={14} aria-hidden className="shrink-0" />
+       <span className="min-w-0 flex-1 truncate text-left">{t.newSession}</span>
+      </button>
+      <button
+       onClick={() => useApp.getState().set({ paletteOpen: true })}
+       className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+       aria-label={t.quickSwitch}
+       title={t.quickSwitch}
+      >
+       <Search size={14} aria-hidden className="shrink-0" />
+       <span className="min-w-0 flex-1 truncate text-left">{t.quickSwitch}</span>
+       <kbd className="shrink-0 text-[10px] text-faint">{isMacKeyboard() ? "⌘K" : "Ctrl+K"}</kbd>
+      </button>
      </div>
      {/* 工作区标题行（标题在左、两枚键在右）：`Layers` = 新建工作区（`WorkspaceGroupDialog`）、
          `FolderPlus` = 添加项目（`pickAndAddProject`）。 */}
@@ -770,11 +789,14 @@ export function ChatSidebar() {
       </button>
      </div>
     </div>
-    {error && (
+    {(error ?? newChatError) && (
      <div role="alert" className="mb-1 flex items-start gap-2 rounded-md border border-danger/40 bg-danger/5 px-2 py-1.5 text-[13px] text-danger">
-      <span className="min-w-0 flex-1">{error}</span>
+      <span className="min-w-0 flex-1">{error ?? newChatError}</span>
       <button
-       onClick={() => setError(null)}
+       onClick={() => {
+        setError(null);
+        useApp.getState().setNewChatError(null);
+       }}
        className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm opacity-70 transition-opacity duration-100 hover:opacity-100"
        aria-label={t.dismissError}
       >
@@ -791,20 +813,17 @@ export function ChatSidebar() {
       {projects.length === 0 && (
        <div className="rounded-lg border border-dashed border-border px-3 py-3 text-sm text-muted">{t.noProjectsAdd}</div>
       )}
-      {q.length > 0 && projects.length > 0 && (
-       <div className="px-1 pt-1 pb-1.5 text-[11px] font-medium tracking-wide text-muted">{fmt(t.titleMatches, matchCount)}</div>
-      )}
       {sections === null ? (
        /* 平铺模式（没有自定义工作区）：全部项目同属「未分组」容器——整段是拖拽落区 */
        <div data-group-drop="">
-        {visibleGroups.map(({ project, active }) => (
+        {groups.map(({ project, active }) => (
          <Fragment key={project.id}>
           {/* 拖拽落点正好在这一行之前 → 画插入线（零高度，不推挤列表） */}
           {dragTarget?.containerId === null && dragTarget.beforeId === project.id && <DropLine />}
           {projectBlock(project, active, draggingId === project.id)}
          </Fragment>
         ))}
-        {dragTarget?.containerId === null && dragTarget.beforeId === null && visibleGroups.length > 0 && <DropLine />}
+        {dragTarget?.containerId === null && dragTarget.beforeId === null && groups.length > 0 && <DropLine />}
        </div>
       ) : (
        sections.map((section) => {
@@ -813,12 +832,11 @@ export function ChatSidebar() {
         const containerId = section.key === "__ungrouped" ? null : section.key;
         const secTarget = dragTarget !== null && dragTarget.containerId === containerId ? dragTarget : null;
         const members = section.projectIds
-         .map((id) => visibleGroups.find((g) => g.project.id === id))
-         .filter((g): g is (typeof visibleGroups)[number] => g !== undefined);
-        const hits = members.reduce((n, g) => n + g.active.length, 0);
+         .map((id) => groups.find((g) => g.project.id === id))
+         .filter((g): g is (typeof groups)[number] => g !== undefined);
         const countLabel = fmt(t.wsGroupCount, String(members.length));
         return (
-         <details key={section.key} data-group-drop={section.key === "__ungrouped" ? "" : section.key} className="group/ws mt-2" open={!q || hits > 0 || (draggingId !== null && members.length === 0)}>
+         <details key={section.key} data-group-drop={section.key === "__ungrouped" ? "" : section.key} className="group/ws mt-2" open>
           {/* 工作区头：没有折叠箭头——点击整行即展开 / 收起，裸 `Layers` 图标（展开时上正文色），
               行尾是成员计数灰字；行级操作为 hover 悬浮图标（「编辑工作区」/「删除工作区」） */}
           <summary className="group/wshead flex cursor-pointer items-center gap-1.5 rounded-md px-1 py-1.5 text-[13px] text-muted transition-colors duration-100 hover:bg-hover [&::-webkit-details-marker]:hidden">
@@ -872,24 +890,24 @@ export function ChatSidebar() {
         );
        })
       )}
-      {visibleOrphan.length > 0 && (
-       <details className="group/orphan mt-1" open={!q || visibleOrphan.length > 0}>
+      {orphanActive.length > 0 && (
+       <details className="group/orphan mt-1" open>
         <summary className="group/orphhead flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1.5 text-[13px] font-semibold text-muted transition-colors duration-100 hover:bg-hover [&::-webkit-details-marker]:hidden">
          <ChevronRight size={12} aria-hidden className="transition-transform duration-150 group-open/orphan:rotate-90" />
          <Inbox size={13} aria-hidden className="shrink-0 text-faint" />
          <span className="min-w-0 flex-1 truncate">{t.orphanChats}</span>
          <span className="relative flex shrink-0 items-center justify-end">
           <span className="flex items-center gap-0.5 opacity-0 transition-opacity duration-100 group-hover/orphhead:opacity-100 group-has-focus-visible/orphhead:opacity-100">
-           <RowAction label={t.archiveOrphanAll} icon={Archive} disabled={busy} onClick={() => void archive(visibleOrphan.map((s) => s.id))} />
-           <RowAction label={t.deleteOrphanAll} title={t.sessDeleteAllDetail} icon={Trash2} danger disabled={busy} onClick={() => setConfirmDeleteAll(visibleOrphan.map((s) => s.id))} />
+           <RowAction label={t.archiveOrphanAll} icon={Archive} disabled={busy} onClick={() => void archive(orphanActive.map((s) => s.id))} />
+           <RowAction label={t.deleteOrphanAll} title={t.sessDeleteAllDetail} icon={Trash2} danger disabled={busy} onClick={() => setConfirmDeleteAll(orphanActive.map((s) => s.id))} />
           </span>
           <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center font-mono transition-opacity duration-100 group-hover/orphhead:opacity-0 group-has-focus-visible/orphhead:opacity-0">
-           {visibleOrphan.length}
+           {orphanActive.length}
           </span>
          </span>
         </summary>
         <div className="mt-0.5 space-y-px border-l border-border pl-1.5">
-         {visibleOrphan.map((s) => (
+         {orphanActive.map((s) => (
           <SessionRow key={s.id} s={s} busy={busy} onArchive={(ids) => void archive(ids)} onDelete={(ids) => void removeSessions(ids)} />
          ))}
         </div>
