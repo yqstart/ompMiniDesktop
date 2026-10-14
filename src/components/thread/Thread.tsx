@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { BranchUp, Bulb, Check, CheckListSquare, ChevronRight, Copy, Loader, PenLine, Sparkles } from "reicon-react";
+import { ArrowDown, BranchUp, Bulb, Check, CheckListSquare, ChevronRight, Copy, Loader, PenLine, Sparkles } from "reicon-react";
 import { THREAD_PAGE, useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
@@ -25,6 +25,12 @@ const EMPTY_EVENTS: ViewMsg[] = [];
 
 /** 一次划选最多引用的字符数：超长选区截断，避免把整篇对话塞进草稿 / 旁问。 */
 const MAX_SELECTION = 2000;
+
+/**
+ * 「还在底部」的距离阈值（px）：粘性判定（`onScroll`）与「回到底部」按钮共用同一口径——
+ * 两个数字一旦分家，就会出现「按钮还在，视口其实已贴底」这种自相矛盾的状态。
+ */
+const NEAR_BOTTOM_PX = 80;
 
 export function Thread() {
  const { projects, activeSessionId, eventsBySession, statusBySession, threadLimitSid, threadLimit, growThreadLimit, sessions } =
@@ -53,6 +59,18 @@ export function Thread() {
   *    8px」即认定用户已经滚开，当场释放；对任何输入方式（滚轮 / 键盘 / 触屏 / 程序化）都成立。
   */
  const lastH = useRef(0);
+ /**
+  * 「离底」渲染状态（V47）：`stick` 是 ref，翻转不触发渲染——而回底按钮要按渲染层面的
+  * 离底与否决定露面。与粘性判定同源同阈值，且只在值变化时写 state：滚动是高频道，
+  * 同值 setState 会让 React 白跑一轮（`onScroll` 每次都会调到这里）。
+  */
+ const [awayFromBottom, setAwayFromBottom] = useState(false);
+ const awayRef = useRef(false);
+ const syncAway = useCallback((away: boolean) => {
+  if (awayRef.current === away) return;
+  awayRef.current = away;
+  setAwayFromBottom(away);
+ }, []);
  const followBottom = useCallback(() => {
   const el = scroller.current;
   if (!el) return;
@@ -62,10 +80,25 @@ export function Thread() {
   if (!stick.current) return;
   if (h - el.scrollTop - el.clientHeight > grew + 8) {
    stick.current = false;
+   syncAway(true);
    return;
   }
   el.scrollTop = h;
- }, []);
+  syncAway(false);
+ }, [syncAway]);
+ /**
+  * 回到底部（V47）：恢复跟随 + 瞬时读底——与贴底跟随是同一个动作。
+  * 不用平滑滚动：滚动途中每一帧都离底，会撞上 `followBottom` 的「用户已滚开」对账
+  * 被当场释放；而流式内容还在增长，最后会停在旧底而不是最新一行。
+  */
+ const jumpToBottom = useCallback(() => {
+  const el = scroller.current;
+  if (!el) return;
+  stick.current = true;
+  lastH.current = el.scrollHeight;
+  el.scrollTop = el.scrollHeight;
+  syncAway(false);
+ }, [syncAway]);
  /**
   * 消息列**内容盒**的回调 ref：平滑揭示每帧长高（不进 store），跟滚 effect 捕获不到——
   * ResizeObserver 盯内容盒，贴底时任何高度增长都补滚（揭示 / 图片加载 / 字体就位）。
@@ -184,6 +217,7 @@ export function Thread() {
  useEffect(() => {
   stick.current = true;
   lastH.current = 0;
+  syncAway(false);
   const raf = requestAnimationFrame(() => {
    requestAnimationFrame(() => {
     const el = scroller.current;
@@ -191,7 +225,7 @@ export function Thread() {
    });
   });
   return () => cancelAnimationFrame(raf);
- }, [activeSessionId]);
+ }, [activeSessionId, syncAway]);
  // 跟随时机（V37）：`events` 引用变化 = 本会话消息流有更新——流式文本原位追加、新消息追加、
  // 指示行出现 / 消失都算（此前缺的就是第一类）。useLayoutEffect 在 DOM 更新后、paint 前补滚动，
  // 不会出现「先画在屏外、再跳一下」的闪动；用户上翻（stick 为假）时不抢滚动。
@@ -204,61 +238,80 @@ export function Thread() {
  }
  return (
   <>
-   <div
-    ref={scroller}
-    onScroll={(e) => {
-     // 滚动即关浮条：位置是 mouseup 那一刻算的，滚走了就贴不住选区
-     setSel(null);
-     const el = e.currentTarget;
-     // 粘性判定（V37）：距底 < 80px 视为「还在底部」（程序化滚动也会走到这里，
-     // 滚回底部附近自动恢复跟随）；上翻更远即释放，流式输出不再把视口拽下去。
-     stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-     // 滚到接近顶部时自动再放一页出来（配合下面的按钮，长会话不必手动点）
-     if (hidden > 0 && el.scrollTop < 24) loadEarlier();
-    }}
-    onMouseUp={onMouseUp}
-    className="thread-scroll mx-auto w-full max-w-(--measure-content) min-h-0 flex-1 px-5 py-5"
-    role="log"
-    aria-label={t.threadAria}
-   >
-    <div ref={attachContent}>
-     {hidden > 0 && (
-      <div className="mb-4 flex justify-center">
-       <button
-        onClick={loadEarlier}
-        className="cursor-pointer rounded-md border border-border px-3 py-1 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
-        aria-label={fmt(t.loadEarlierAria, Math.min(hidden, THREAD_PAGE))}
-       >
-        {fmt(t.loadEarlier, Math.min(hidden, THREAD_PAGE), hidden)}
-       </button>
-      </div>
-     )}
-     {layout.map((item, i) => {
-      if (item.kind === "run") {
-       // 聚合折叠行（v2）：命令批 / 编辑卡——展开仍是逐条 ToolRow
-       return <ToolRunRow key={item.id} group={item.group} items={item.items} cwd={cwd} />;
-      }
-      if (item.kind === "turn") {
-       // 轮时长行（v2）：收在该轮内容之后
-       return <TurnRow key={item.id} span={item.span} />;
-      }
-      const prev = layout[i - 1];
-      const prevMsg = prev?.kind === "msg" ? prev.m : undefined;
-      return (
-       <ThreadRow
-        key={item.m.id}
-        m={item.m}
-        sessionId={activeSessionId}
-        cwd={cwd}
-        tight={isTrace(item.m) && isTrace(prevMsg)}
-        nth={nthById.get(item.m.id) ?? 0}
-        frozen={frozen}
-        frozenTitle={frozenTitle}
-       />
-      );
-     })}
-     {workingVisible && <WorkingRow tight={isTrace(shown[shown.length - 1])} />}
+   {/* 相对定位外壳：回底按钮要相对「消息列视口」固定——scroller 内部是滚动内容，
+       挂进去会随内容滚走，所以按钮是 scroller 的兄弟、absolute 贴外壳底边 */}
+   <div className="relative flex min-h-0 min-w-0 w-full flex-1 flex-col">
+    <div
+     ref={scroller}
+     onScroll={(e) => {
+      // 滚动即关浮条：位置是 mouseup 那一刻算的，滚走了就贴不住选区
+      setSel(null);
+      const el = e.currentTarget;
+      // 粘性判定（V37）：距底 < NEAR_BOTTOM_PX 视为「还在底部」（程序化滚动也会走到这里，
+      // 滚回底部附近自动恢复跟随）；上翻更远即释放，流式输出不再把视口拽下去。
+      // 同一判定喂给回底按钮（V47）：离底即露面，贴底即收起。
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+      stick.current = nearBottom;
+      syncAway(!nearBottom);
+      // 滚到接近顶部时自动再放一页出来（配合下面的按钮，长会话不必手动点）
+      if (hidden > 0 && el.scrollTop < 24) loadEarlier();
+     }}
+     onMouseUp={onMouseUp}
+     className="thread-scroll mx-auto w-full max-w-(--measure-content) min-h-0 flex-1 px-5 py-5"
+     role="log"
+     aria-label={t.threadAria}
+    >
+     <div ref={attachContent}>
+      {hidden > 0 && (
+       <div className="mb-4 flex justify-center">
+        <button
+         onClick={loadEarlier}
+         className="cursor-pointer rounded-md border border-border px-3 py-1 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+         aria-label={fmt(t.loadEarlierAria, Math.min(hidden, THREAD_PAGE))}
+        >
+         {fmt(t.loadEarlier, Math.min(hidden, THREAD_PAGE), hidden)}
+        </button>
+       </div>
+      )}
+      {layout.map((item, i) => {
+       if (item.kind === "run") {
+        // 聚合折叠行（v2）：命令批 / 编辑卡——展开仍是逐条 ToolRow
+        return <ToolRunRow key={item.id} group={item.group} items={item.items} cwd={cwd} />;
+       }
+       if (item.kind === "turn") {
+        // 轮时长行（v2）：收在该轮内容之后
+        return <TurnRow key={item.id} span={item.span} />;
+       }
+       const prev = layout[i - 1];
+       const prevMsg = prev?.kind === "msg" ? prev.m : undefined;
+       return (
+        <ThreadRow
+         key={item.m.id}
+         m={item.m}
+         sessionId={activeSessionId}
+         cwd={cwd}
+         tight={isTrace(item.m) && isTrace(prevMsg)}
+         nth={nthById.get(item.m.id) ?? 0}
+         frozen={frozen}
+         frozenTitle={frozenTitle}
+        />
+       );
+      })}
+      {workingVisible && <WorkingRow tight={isTrace(shown[shown.length - 1])} />}
+     </div>
     </div>
+    {awayFromBottom && (
+     // 回到底部（V47）：离底（> NEAR_BOTTOM_PX）时浮在消息列视口底部中央，点击 = 恢复跟随并读底。
+     // 任何离底都露面（不只流式——长会话回看历史同样需要一键回底）。
+     <button
+      onClick={jumpToBottom}
+      className="absolute bottom-4 left-1/2 z-10 flex size-8 -translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-border bg-elevated text-muted shadow-pop transition-colors duration-100 hover:bg-hover hover:text-foreground"
+      aria-label={t.scrollToBottom}
+      title={t.scrollToBottom}
+     >
+      <ArrowDown size={14} aria-hidden />
+     </button>
+    )}
    </div>
    {sel && (
     // 浮条：fixed 定位（消息列布局一点都不受它影响），mousedown 不夺选区

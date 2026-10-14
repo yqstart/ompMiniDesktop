@@ -122,11 +122,13 @@
 - 子代理生命周期 = 紧凑行（`Sparkles` 图标 + 文本），不画分隔线；其余分隔线（模型 / 思考档 / 标题）保持两翼细线形态。
 - 代码块：`--code` 底 + radius md + 顶部语言标签与复制键（hover 显现）。
 - 流式：光标 1.05em 细线呼吸、贴底 sticky、回看不被拽底（V37/V38 口径保留，视觉微调）。
+- 回到底部（V47）：消息列离底（> 80px）时在视口底部中央浮出 32px 圆形下箭头（`--elevated` + `--border` + `--shadow-pop`，floating 层 `z-10`），点击瞬时读底并恢复贴底跟随；判定与贴底粘性同源，贴底 / 切会话自动收起。
 
 ### 4.5 滚动（血泪规则，不许回归）
 
 - 消息列 `.thread-scroll`：`overflow-y: auto` + `overscroll-behavior: contain`——跟随滚动 / 回看 / 加载更早全靠它；**全 app 不显示滚动条**（`::-webkit-scrollbar { display:none }` + `scrollbar-width: none`）。
 - 窗口与 `#root` 锁死（`overflow: clip`），滚动只发生在列内。
+- 消息列上的浮动控件（回底按钮）挂 `scroller` 的**兄弟位**（relative 外壳 + absolute 定位于外壳底边），不许挂进滚动内容里——挂进去就跟着内容滚走。
 
 ### 4.6 设置（v3 已落地）
 

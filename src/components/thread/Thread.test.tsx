@@ -486,3 +486,106 @@ describe("Thread 摘要式表达（v2）", () => {
   });
  });
 });
+
+/**
+ * V47 回底按钮：消息列滚离底部（> NEAR_BOTTOM_PX）时，在视口底部中央浮出向下箭头；
+ * 点击 = 瞬时读底 + 恢复跟随（按钮收起）；切会话重置离底状态。
+ * jsdom 没有真实布局：`scrollHeight` / `clientHeight` / `scrollTop` 用 defineProperty 摆成
+ * 可控值（scrollTop 的 setter 按浏览器口径钳到底），滚动位置靠手工派发的 scroll 事件驱动。
+ */
+describe("回到底部按钮（V47）", () => {
+ const SID = "s-bottom";
+ /** 视口 / 内容高（测试里的假布局）：贴底线 = scrollTop 600，离底 80px = scrollTop 520。 */
+ const VIEW = 400;
+ const CONTENT = 1000;
+
+ const mount = async () => {
+  const msgs = viewMsgsFromJsonlLines(JSONL_LINES, TEXT["zh-CN"]);
+  useApp.setState({
+   locale: "zh-CN",
+   eventsBySession: { [SID]: msgs },
+   activeSessionId: SID,
+   statusBySession: { [SID]: { state: "idle" } },
+   sessions: [
+    { id: SID, projectId: "p1", title: "t", cwd: "/tmp", updatedAt: 0, archived: false, missing: false } as never,
+   ],
+   projects: [{ id: "p1", name: "p", path: "/tmp" } as never],
+   threadLimitSid: SID,
+   threadLimit: THREAD_PAGE,
+  });
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  await act(async () => {
+   root.render(createElement(Thread));
+  });
+  const scroller = container.querySelector(".thread-scroll") as HTMLElement;
+  let top = CONTENT - VIEW;
+  Object.defineProperty(scroller, "clientHeight", { value: VIEW, configurable: true });
+  Object.defineProperty(scroller, "scrollHeight", { value: CONTENT, configurable: true });
+  Object.defineProperty(scroller, "scrollTop", {
+   configurable: true,
+   get: () => top,
+   set: (v: number) => {
+    top = Math.max(0, Math.min(v, CONTENT - VIEW));
+   },
+  });
+  return { container, root, scroller };
+ };
+
+ const byLabel = (container: HTMLElement, label: string) => container.querySelector(`button[aria-label="${label}"]`);
+
+ /** 滚到指定位置并派发 scroll（与浏览器同路径：onScroll 里做粘性判定）。 */
+ const scrollTo = async (scroller: HTMLElement, top: number) => {
+  scroller.scrollTop = top;
+  await act(async () => {
+   scroller.dispatchEvent(new Event("scroll"));
+  });
+ };
+
+ it("离底露面、点击读底并收起（阈值与粘性判定同源：79px 内仍算贴底）", async () => {
+  const { container, root, scroller } = await mount();
+  const label = TEXT[useApp.getState().locale].scrollToBottom;
+
+  await scrollTo(scroller, CONTENT - VIEW - 79);
+  expect(byLabel(container, label)).toBeNull();
+  await scrollTo(scroller, CONTENT - VIEW - 80);
+  expect(byLabel(container, label)).not.toBeNull();
+
+  await act(async () => {
+   byLabel(container, label)?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  expect(scroller.scrollTop).toBe(CONTENT - VIEW); // 读到底
+  expect(byLabel(container, label)).toBeNull(); // 贴底即收起
+
+  await act(async () => {
+   root.unmount();
+  });
+ });
+
+ it("切会话重置离底状态：新会话贴底，按钮不残留", async () => {
+  const { container, root, scroller } = await mount();
+  const label = TEXT[useApp.getState().locale].scrollToBottom;
+  await scrollTo(scroller, 0);
+  expect(byLabel(container, label)).not.toBeNull();
+
+  // Thread 常驻挂载（只切 store 里的会话），按钮必须跟着会话重置
+  const other = viewMsgsFromJsonlLines(JSONL_LINES, TEXT["zh-CN"]);
+  await act(async () => {
+   useApp.setState({
+    eventsBySession: { [SID]: [], "s-bottom-2": other },
+    activeSessionId: "s-bottom-2",
+    sessions: [
+     { id: "s-bottom-2", projectId: "p1", title: "t2", cwd: "/tmp", updatedAt: 0, archived: false, missing: false } as never,
+    ],
+    threadLimitSid: "s-bottom-2",
+    threadLimit: THREAD_PAGE,
+   });
+  });
+  expect(byLabel(container, label)).toBeNull();
+
+  await act(async () => {
+   root.unmount();
+  });
+ });
+});
