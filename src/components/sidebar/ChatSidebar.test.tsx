@@ -237,6 +237,37 @@ describe("项目分组头的行内悬浮图标（V43）", () => {
  });
 });
 
+describe("会话行的运行状态标（与状态收敛同源）", () => {
+ it("打开过的会话：running 由实时状态派生——任务跑完转圈立即消失，不被打开时的快照钉死", async () => {
+  const t = TEXT["zh-CN"];
+  // 场景：会话打开时没在跑（store 行落 open 时刻的 running=false 快照），随后任务开跑。
+  useApp.setState({
+   sessions: [session("s1", "p1", "登录页重构")],
+   activeSessionId: "s1",
+   statusBySession: { s1: { state: "running" } },
+  });
+  await open();
+  expect(container.querySelector(`[aria-label="${t.statusRunning}"]`), "任务在跑：转圈亮").not.toBeNull();
+  // 任务完成：状态收敛 idle（omp-status 推送）——store 行的 running 快照没人更新
+  act(() => {
+   useApp.setState({ statusBySession: { s1: { state: "idle" } } });
+  });
+  expect(container.querySelector(`[aria-label="${t.statusRunning}"]`), "跑完：转圈必须消失").toBeNull();
+ });
+
+ it("没打开过的会话：照旧用扫描行的 running 快照", async () => {
+  const t = TEXT["zh-CN"];
+  mock.listSessions.mockResolvedValue({
+   sessions: [{ ...session("s1", "p1", "登录页重构"), running: true }],
+   totalFiles: 1,
+   scannedFiles: 1,
+  });
+  useApp.setState({ statusBySession: {} });
+  await open();
+  expect(container.querySelector(`[aria-label="${t.statusRunning}"]`), "扫描快照的转圈不受影响").not.toBeNull();
+ });
+});
+
 describe("会话行的时间展示（2026-10-13 对齐 ZCode 的紧凑相对时间）", () => {
  it("行内 = 刚刚/N分/N小时/N天，完整绝对时间在悬停 title，不再用固定宽度截断", async () => {
   await open();

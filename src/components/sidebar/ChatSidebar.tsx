@@ -168,6 +168,8 @@ export function ChatSidebar() {
  // 已打开会话的实时视图（标题真相）：改名 / 首条回退 / title_change 实时帧只写 store，
  // 本地扫描列表靠它覆盖行标题，否则改名后侧栏 permanent 陈旧（改名根本不触发重扫）。
  const storeSessions = useApp((s) => s.sessions);
+ // 会话实时状态（任务在跑 / 等审批）：列表行的「运行中」标与状态收敛同源，见 mergedSessions。
+ const statusBySession = useApp((s) => s.statusBySession);
  // git 行徽章的数据（刷新时机由 App 的 useWorkspaceGitRefresh 统一管）。
  const gitStates = useApp((s) => s.workspaceGitStates);
  const commitTasks = useApp((s) => s.commitTasks);
@@ -544,17 +546,26 @@ export function ChatSidebar() {
   if (!res.ok) setError(res.message);
  };
 
- // 扫描行 × 已打开会话的实时视图：同 id 以 store 为准（标题/归档/running 的真相），
+ // 扫描行 × 已打开会话的实时视图：同 id 以 store 为准（标题/归档的真相），
  // 扫描窗口外的新会话（打开过但扫不到）也补一行——否则刚建的会话在列表里看不见。
+ //
+ // running 例外：store 行的 running 是「打开那一刻」的快照（写入面只有 open / refresh），
+ // 任务跑完没有人把它归零——直接整行覆盖会让跑完的会话一直转圈（用户实测：切回一个
+ // 正在跑的会话，open 落 running=true，任务结束仍转圈）。与状态收敛同源：有
+ // statusBySession 记录的会话（打开过）按实时状态派生；没记录的行（没打开过）用行自带值。
  const mergedSessions = useMemo(() => {
   const live: Record<string, SessionView> = {};
-  for (const s of storeSessions) live[s.id] = s;
+  for (const s of storeSessions) {
+   const st = statusBySession[s.id]?.state;
+   // running / awaiting-approval = 任务在跑（与 Composer / sessionApproval 同口径，即后端 activity_is_busy）
+   live[s.id] = st === undefined ? s : { ...s, running: st === "running" || st === "awaiting-approval" };
+  }
   const out = sessions.map((s) => live[s.id] ?? s);
   for (const s of storeSessions) {
-   if (!s.archived && !out.some((x) => x.id === s.id)) out.unshift(s);
+   if (!s.archived && !out.some((x) => x.id === s.id)) out.unshift(live[s.id] ?? s);
   }
   return out;
- }, [sessions, storeSessions]);
+ }, [sessions, storeSessions, statusBySession]);
  const { groups, orphanActive } = useMemo(() => groupSessionsByProject(projects, mergedSessions), [projects, mergedSessions]);
 
  /**
