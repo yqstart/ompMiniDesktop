@@ -254,8 +254,8 @@ describe("会话行的时间展示（2026-10-13 对齐 ZCode 的紧凑相对时�
  });
 });
 
-describe("会话标题的显示口径（去掉开头的 Nerd Font 图标码位）", () => {
- it("行里只显示去掉图标后的标题，aria-label 同一口径；原始标题数据不动", async () => {
+describe("会话标题的显示口径（去掉开头的标题卡前缀：图标 + 短码）", () => {
+ it("行里只显示去掉前缀后的标题，aria-label 同一口径；原始标题数据不动", async () => {
   const icon = "\u{F084D}";
   mock.listSessions.mockResolvedValue({
    sessions: [session("s9", "p1", `${icon} HGT: 修复输入框高度过高`)],
@@ -264,11 +264,24 @@ describe("会话标题的显示口径（去掉开头的 Nerd Font 图标码位�
   });
   await open();
   const row = [...container.querySelectorAll<HTMLElement>("div.h-8")].find((el) =>
-   (el.textContent ?? "").includes("HGT: 修复输入框高度过高"),
+   (el.textContent ?? "").includes("修复输入框高度过高"),
   );
-  expect(row, "会话行应按去掉图标后的标题渲染").not.toBeUndefined();
+  expect(row, "会话行应按去掉前缀后的标题渲染").not.toBeUndefined();
   expect(row?.textContent ?? "", "行里不该再出现图标码位").not.toContain(icon);
-  expect(row?.querySelector("button")?.getAttribute("aria-label")).toBe("会话 HGT: 修复输入框高度过高");
+  expect(row?.textContent ?? "", "行里不该再出现标题卡短码").not.toContain("HGT:");
+  expect(row?.querySelector("button")?.getAttribute("aria-label")).toBe("会话 修复输入框高度过高");
+ });
+
+ it("实测的标题卡形态（图标 + 大写短码）整段剥掉", async () => {
+  mock.listSessions.mockResolvedValue({
+   sessions: [session("s10", "p1", "\u{F0718} COMMIT: 提交推送后仍有修改标识")],
+   totalFiles: 1,
+   scannedFiles: 1,
+  });
+  await open();
+  const text = container.textContent ?? "";
+  expect(text).toContain("提交推送后仍有修改标识");
+  expect(text, "行里不该再出现短码").not.toContain("COMMIT:");
  });
 });
 
