@@ -1,25 +1,31 @@
-import { useCallback, useEffect } from "react";
-import { Check, ChevronDown, DiagramTree, Refresh } from "reicon-react";
+import { useCallback, useEffect, useState } from "react";
+import { Check, ChevronDown, DiagramTree, Loader, Refresh } from "reicon-react";
+import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
+import { refreshWorkspaceGitState } from "../../lib/commitTasks";
 import { useDropdown } from "../../lib/useDropdown";
 import { useText } from "../../lib/useText";
 import type { GitInfo } from "@shared/types";
 
 /**
- * 输入框上方的 git 分支指示器（截图右侧那个）：**只读**。
+ * 输入框上方的 git 分支指示器（截图右侧那个）：指示 + **切换**。
  *
  * - 收起态：分支名（detached HEAD 显示短 sha + 「游离」角标）；有未提交改动时带一个
  *   warn 圆点，切分支前能一眼看到。
- * - 展开态：本地分支清单（当前分支置顶并打勾）+ 手动刷新——切分支请回终端，
- *   这里不做任何 git 写操作（checkout 会带着脏工作区走，不该由聊天窗口代劳）。
+ * - 展开态：本地分支清单（当前分支置顶并打勾）+ 手动刷新；**点分支即切换**
+ *   （`git switch <branch>`）——脏工作区交给 git 裁决：不冲突就带着走，冲突整条拒绝，
+ *   错误原文就地显示在浮层里；壳侧不做 stash / force 代劳。
+ * - 切换成功：自增 `gitInfoSeq`（同目录的全部 git 查询一起重读）+ 刷新 ahead / behind 快照。
  */
 export function BranchPicker({
   git,
+  cwd,
   loading,
   onReload,
 }: {
   git: GitInfo;
+  cwd: string;
   loading: boolean;
   onReload: () => void;
 }) {
@@ -32,16 +38,45 @@ export function BranchPicker({
   );
   const ref = useDropdown(open, () => setOpen(false));
   const label = git.branch ?? (git.detached ? t.detachedHead : t.unknownBranch);
+  /** 正在切换的目标分支；非 null 时清单整体锁住（防连点）。 */
+  const [switching, setSwitching] = useState<string | null>(null);
+  /** 上一次切换失败的 git 原文（就地显示在浮层顶部）。 */
+  const [error, setError] = useState<string | null>(null);
 
   // 打开即取最新：用户多半刚在终端里切完分支
   useEffect(() => {
     if (open) onReload();
   }, [open, onReload]);
 
+  const switchTo = async (b: string) => {
+    if (switching) return;
+    // 点当前分支 = 收起浮层（与项目选择器同口径，不重复动作）
+    if (b === git.branch) {
+      setOpen(false);
+      return;
+    }
+    setSwitching(b);
+    setError(null);
+    try {
+      await api.switchBranch(cwd, b);
+      const st = useApp.getState();
+      st.set({ gitInfoSeq: st.gitInfoSeq + 1 });
+      void refreshWorkspaceGitState([cwd]);
+      setOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSwitching(null);
+    }
+  };
+
   return (
     <div className="relative" ref={ref}>
       <button
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          setError(null);
+          setOpen(!open);
+        }}
         className="flex shrink-0 cursor-pointer items-center gap-1 rounded-md px-2 py-1 whitespace-nowrap text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
         aria-label={fmt(t.branchAria, label)}
         aria-expanded={open}
@@ -61,7 +96,7 @@ export function BranchPicker({
             <span className="flex-1 text-[11px] text-muted">{t.localBranches}</span>
             <button
               onClick={onReload}
-              disabled={loading}
+              disabled={loading || switching !== null}
               className="cursor-pointer rounded p-1 text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-50"
               aria-label={t.refreshGit}
               title={t.refreshGit}
@@ -69,6 +104,14 @@ export function BranchPicker({
               <Refresh size={12} className={loading ? "animate-spin" : ""} aria-hidden />
             </button>
           </div>
+          {error && (
+            <div
+              role="alert"
+              className="mb-1 max-h-24 overflow-y-auto rounded bg-danger/10 px-2 py-1 font-mono text-[11px] whitespace-pre-wrap text-danger"
+            >
+              {error}
+            </div>
+          )}
           {git.dirty && (
             <div className="mb-1 rounded bg-warn/10 px-2 py-1 text-[11px] text-warn">
               {t.dirtyWarning}
@@ -76,15 +119,25 @@ export function BranchPicker({
           )}
           {git.branches.map((b) => {
             const current = b === git.branch;
+            const busy = switching === b;
             return (
-              <div
+              <button
                 key={b}
-                className={`flex items-center gap-2 rounded-md px-2 py-1 ${current ? "text-foreground" : "text-muted"}`}
+                onClick={() => void switchTo(b)}
+                disabled={!current && switching !== null}
+                className={`flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-100 hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40 ${
+                  current ? "text-foreground" : "text-muted"
+                }`}
+                aria-label={current ? undefined : fmt(t.switchToBranchAria, b)}
                 aria-current={current ? "true" : undefined}
               >
-                <Check size={12} aria-hidden className={`shrink-0 ${current ? "opacity-100" : "opacity-0"}`} />
+                {busy ? (
+                  <Loader size={12} aria-hidden className="shrink-0 animate-spin" />
+                ) : (
+                  <Check size={12} aria-hidden className={`shrink-0 ${current ? "opacity-100" : "opacity-0"}`} />
+                )}
                 <span className="truncate font-mono text-xs">{b}</span>
-              </div>
+              </button>
             );
           })}
           {git.branches.length === 0 && (

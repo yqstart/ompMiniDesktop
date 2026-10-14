@@ -192,6 +192,12 @@ type AppState = {
  refPickerTarget: RefPickerTarget | null;
  /** Composer 聚焦序号：引用浮层注入草稿后 +1，让输入框拿回焦点接着写。 */
  composerFocusSeq: number;
+ /**
+  * git 信息刷新信号（全局自增）：分支切换这类**跨组件**的 git 状态变化后自增
+  * （`useApp.setState((s) => ({ gitInfoSeq: s.gitInfoSeq + 1 }))`）。
+  * `useGitInfo` 订阅它——输入卡顶行与右栏「变更」各自持有一份查询，靠它一起重读。
+  */
+ gitInfoSeq: number;
 
  // ---------- V14 工作区「提交并推送」（omp commit 集成，见 lib/commitTasks.ts） ----------
 
@@ -489,6 +495,7 @@ export const useApp = create<AppState>((set, get) => ({
  providerUsageOpen: false,
  refPickerTarget: null,
  composerFocusSeq: 0,
+ gitInfoSeq: 0,
 
  // ---------- V19 工作区提交 / 推送（见 lib/commitTasks.ts） ----------
 

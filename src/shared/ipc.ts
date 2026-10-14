@@ -113,6 +113,8 @@ export const IPC = {
  setGlobalApproval: "set_global_approval",
  setSessionApproval: "set_session_approval",
  getGitInfo: "get_git_info",
+ /** 输入卡顶行分支切换（`git switch`）：脏工作区冲突由 git 拒绝并回传原文。 */
+ switchBranch: "switch_branch",
  getContextBreakdown: "get_context_breakdown",
  // —— V40（对标 codex / zcode）：队列真值 / 消息分叉 / 目标模式 / 旁问 / 统计 / 重启 ——
  /** 撤回一条尚未投递的队列消息（steering 或 followUp）→ `{removed, images?, imagesDropped?}`。 */

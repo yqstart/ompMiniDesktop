@@ -17,6 +17,7 @@ import { openForkedSession, refreshTitleAfterFirstSend } from "../../lib/session
 import { useText } from "../../lib/useText";
 import { ProjectPicker } from "../pickers/ProjectPicker";
 import { BranchPicker } from "../pickers/BranchPicker";
+import { CommitButton } from "./CommitButton";
 import { ContextMeter } from "../thread/ContextMeter";
 import { UsageLimits } from "./UsageLimits";
 import { CompactButton, QueueBadge } from "../thread/StatusBar";
@@ -35,12 +36,12 @@ const PASTE_FILE_MIN = 2000;
 
 /**
  * 会话输入卡（v2 §3 形态，对齐 Codex / ZCode 的输入卡）：
- * **卡顶行** = 项目 + 分支选择器内嵌（原外置的上下文条收缩进来）；
+ * **卡顶行** = 项目 + 分支选择器内嵌（原外置的上下文条收缩进来；分支可点切、其后是提交入口）；
  * **输入区** = 附件条 + 提及芯片 + 待发区 + 自动增高输入框；
  * **卡底工具行** = 左「`+` 菜单（图片 / 引用文件）+ 执行模式菜单」，右「压缩行动点 / 上下文容量环 /
  * 供应商用量 + 模型 · 思考档 ▾ + 圆形发送 / 停止」。上下文与供应商用量 2026-10-14 从顶栏右端
  * 搬进输入卡——它们在「我要不要再开一轮」的决策现场（剩余额度、上下文余量），不在窗口 chrome 上；
- * 提交 / 推送在右栏「变更」区块。
+ * 提交入口 = 卡顶行的提交键（与右栏「变更」区块同一浮层链路）。
  * 待发区（V40）：omp 的队列真值（`queue_update`）——可撤回 / 编辑 / 提升，Esc 中断还原
  * （「排队」按钮 2026-10-13 按用户口径退场，排队只走 Tab / ⌘Ctrl+Enter）。
  *
@@ -619,7 +620,12 @@ export function Composer() {
     {/* 卡顶行（v2 §3，对齐 ZCode）：项目 + 分支选择器内嵌；与「+」菜单等共用 composerMenu 互斥槽 */}
     <div className="flex items-center gap-0.5 px-2 pt-2">
      <ProjectPicker project={project} />
-     {git?.isRepo ? <BranchPicker git={git} loading={gitLoading} onReload={reloadGit} /> : null}
+     {git?.isRepo ? (
+      <>
+       <BranchPicker git={git} cwd={cwd} loading={gitLoading} onReload={reloadGit} />
+       <CommitButton cwd={cwd} />
+      </>
+     ) : null}
     </div>
     {awaiting && <div className="px-4 pt-2.5 text-[13px] text-warn">{t.resolveApprovalFirst}</div>}
     {attachments.length > 0 && (

@@ -950,7 +950,8 @@ export type AvailableCommand = {
 };
 
 /**
- * 输入框上方上下文条的 git **只读**信息（后端 `get_git_info`）。
+ * 输入框上方上下文条的 git **只读**查询结果（后端 `get_git_info`；查询本身不改仓库状态，
+ * 切换分支是另一个写命令 `switch_branch`）。
  * 非仓库 / 未装 git / 目录缺失时为 `isRepo:false`，前端整段隐藏分支展示，不当错误弹。
  */
 export type GitInfo = {

@@ -182,6 +182,8 @@ export const api = {
   */
  getContextBreakdown: (id: string) => call<ContextBreakdown>(IPC.getContextBreakdown, { id }),
  getGitInfo: (path: string) => call<GitInfo>(IPC.getGitInfo, { path }),
+ /** 输入卡顶行分支切换：成功即新工作区状态（调用方刷新 git 信息）。 */
+ switchBranch: (cwd: string, branch: string) => call<void>(IPC.switchBranch, { cwd, branch }),
  /**
   * 队列真值（V40）：撤回一条尚未投递的队列消息；`queue` 选 steering / followUp。
   * 返回图片（若有）供编辑回草稿；超传输上限时 `imagesDropped`。

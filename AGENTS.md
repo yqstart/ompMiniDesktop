@@ -32,8 +32,8 @@ src/
   components/sidebar/        # 左栏：ChatSidebar（常驻命令行 + 会话树 + 项目拖拽排序控制器）/ SidebarTop / SidebarBottom / WorkspaceGroupDialog / RowAction / DropLine / OmpUpdateChip / AppUpdateChip
   components/panel/          # 右栏上下文面板（v2）：ContextPanel（停靠/抽屉 + 区块导航）/ PanelSection / ChangesSection / ProgressSection / SubagentsSection / SourcesSection
   components/thread/         # 消息列：ChatView / TopBar / Thread / AssistantText / ToolRow / ToolRunRow / TurnRow / ApprovalCard / UiRequestCard / ChatEmptyState / FindBar / BtwPanel / SessionStatsDialog / DiffDialog…
-  components/composer/       # 输入卡（v2）：Composer（卡顶行项目/分支 + 卡底工具行：`+`/执行模式/压缩/容量环/用量/模型/思考档/发送）/ ApprovalModeMenu / ModelMenu / ThinkingMenu / PlusMenu / GoalRow / MentionList / SlashMenu / UsageLimits
-  components/pickers/        # 选择器：ProjectPicker / BranchPicker（内嵌输入卡顶行）
+  components/composer/       # 输入卡（v2）：Composer（卡顶行项目/分支 + 提交键 + 卡底工具行：`+`/执行模式/压缩/容量环/用量/模型/思考档/发送）/ CommitButton / ApprovalModeMenu / ModelMenu / ThinkingMenu / PlusMenu / GoalRow / MentionList / SlashMenu / UsageLimits
+  components/pickers/        # 选择器：ProjectPicker / BranchPicker（内嵌输入卡顶行；分支清单点选即切）
   components/settings/       # GeneralSettingsPanel / ModelsPanel / PluginsPanel / SkillsPanel / ProvidersSection / MemoryPanel / UsagePanel / SettingsSearch（v3 顶部搜索）/ Highlight（命中高亮）…
   components/usage/ update/ git/   # 供应商用量 / 更新弹窗 / 提交面板
   components/CommandPalette.tsx / SettingsPage.tsx / ReferencePicker.tsx / HealthBanner.tsx …
@@ -78,7 +78,8 @@ scripts/                     # e2e-ipc-selfcheck / generate-icons / changelog-no
 - **模型目录**（`omp models --json`，2–10s）：单飞 + 5 分钟缓存 + 过期后台刷新（`omp-models://catalog` 广播）；`omp config list --json` 一次读全部配置键。
 - **设置写入口径**：omp 侧只经 `omp` CLI（`config set/reset`、`auth-broker`…）；**唯一例外**：`models.yml` 直接写文件（hash 乐观锁 + 预校验 + 备份 + 原子写）。本应用偏好不写 omp 配置。
 - **设置视图（v3 设置重构）**：`SettingsPage` 覆盖主区（`store.settingsTabOpen/settingsTabActive`；打开 = 左栏「设置」/ `⌘,`，关闭 = 顶部返回 / `⌘W` / 再点一次）——顶部条（返回 + 当前条目名 + 搜索钮）+ 左导航**四组七条目**（通用 / 模型 / 扩展 / 数据；窄窗 44px 图标档，容器查询）+ 内容区唯一滚动。搜索 = `store.settingsSearchOpen`（`⌘F`），数据源走 `lib/settingsSearch.ts`（模块级缓存 + 懒加载，设置视图卸载即清；参数 = 常用设置目录 / 模型目录 / 插件 / 技能 / 记忆 / 归档），四档打分复用 `filterCatalog`；结果点击经 `navigateTo` 跳条目，常用设置项带 `SettingsFocusRequest{key,seq}` 定位（通用页展开分组 → 滚动到行 → 一次闪烁；seq 防重放、消费后回调清空）。
-- **提交 / 推送**：两轨（快速 = 一次 `omp -p` 生成信息 + `git commit/push`；完整 = `omp commit`）；按 cwd 建任务表（并行 + BUSY + 取消 + 超时）；入口 = 右栏「变更」区块的提交键与左栏任务徽章。
+- **提交 / 推送**：两轨（快速 = 一次 `omp -p` 生成信息 + `git commit/push`；完整 = `omp commit`）；按 cwd 建任务表（并行 + BUSY + 取消 + 超时）；入口 = 右栏「变更」区块的提交键 + 卡顶行提交键（同一浮层链路、同一状态口径：运行中转圈 / 失败红点）+ 左栏任务徽章。
+- **卡顶行 git 区（分支切换）**：`BranchPicker` 展开清单**点分支即切**（后端 `switch_branch` = `git switch <branch>`，只认分支、不会被同名路径抢语义）——脏工作区交给 git 裁决（带得走就带着走，冲突整条拒绝、错误原文就地显示，壳侧不 stash / 不 force）；切换成功自增 store 的 `gitInfoSeq`（`useGitInfo` 订阅它，输入卡与右栏的查询一起重读）+ `refreshWorkspaceGitState([cwd])` 刷新 ahead/behind。只读查询仍是 `get_git_info`（4s 超时、降级不报错），写命令用 30s 超时。
 - **更新链路两条独立**：本应用（Tauri updater，`latest.json`）与 omp 运行时（`omp update`）互不相干；入口 = 左栏顶栏两枚 chip。
 
 ## 工程约定

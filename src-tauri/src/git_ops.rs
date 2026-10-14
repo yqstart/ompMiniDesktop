@@ -262,6 +262,18 @@ pub fn push_args(branch: &str, has_upstream: bool, remotes: &[String]) -> Result
     }
 }
 
+/// 切换分支的目标名校验：空串、以 `-` 开头（会被 git 当选项解析，如 `--orphan`）都拒绝；
+/// 名字是否真实存在、是否合法引用交给 git 判定（错误原文比我们复刻的规则准确）。
+pub fn validate_branch_arg(branch: &str) -> Result<(), String> {
+    if branch.trim().is_empty() {
+        return Err("分支名为空".into());
+    }
+    if branch.starts_with('-') {
+        return Err("分支名不能以 - 开头".into());
+    }
+    Ok(())
+}
+
 // ---------- git 调用 ----------
 
 /// 仓库根（`rev-parse --show-toplevel`）：变更集与暂存区都是**根基准**（porcelain 与
@@ -386,6 +398,26 @@ pub async fn get_change_set(cwd: String) -> Result<ChangeSet, CmdError> {
         None
     };
     Ok(ChangeSet { is_repo: true, branch, head, upstream, upstream_gone, ahead, behind, files })
+}
+
+/// 切换分支（输入卡顶行的分支清单点选即切）：
+/// - 用 `git switch <branch>` 而不是 `checkout`——只认分支，不会被同名路径抢语义；
+/// - 脏工作区交给 git 自己裁决：改动不冲突就带着走，冲突则整条拒绝、原样回传错误
+///   （前端就地显示，不做 stash / force 代劳）；
+/// - 超时用 [`SLOW`]（切换要更新整个工作区，可能比只读查询慢得多）。
+#[tauri::command]
+pub async fn switch_branch(cwd: String, branch: String) -> Result<(), CmdError> {
+    validate_branch_arg(&branch).map_err(|e| cmd_err("BAD_ARG", e, None))?;
+    if !dir_exists(&cwd) {
+        return Err(cmd_err("DIR_MISSING", "工作目录不存在".into(), None));
+    }
+    let Some(git) = git_bin().await else {
+        return Err(cmd_err("GIT_MISSING", "未找到 git".into(), None));
+    };
+    run_git_timeout(&git, &cwd, &["switch", &branch], SLOW)
+        .await
+        .map_err(|e| cmd_err("GIT_SWITCH", e.trim().to_string(), None))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -518,5 +550,74 @@ mod tests {
         // 多个 remote 且没有 origin：不猜，交给用户
         assert!(push_args("main", false, &["a".into(), "b".into()]).is_err());
         assert!(push_args("main", false, &[]).is_err());
+    }
+
+    #[test]
+    fn validate_branch_arg_rejects_empty_and_option_like() {
+        assert!(validate_branch_arg("main").is_ok());
+        assert!(validate_branch_arg("feature/中文-分支").is_ok());
+        // 空 / 纯空白
+        assert!(validate_branch_arg("").is_err());
+        assert!(validate_branch_arg("   ").is_err());
+        // 以 - 开头会被 git 当选项（`--orphan` / `-f`），必须挡在命令层之外
+        assert!(validate_branch_arg("--orphan").is_err());
+        assert!(validate_branch_arg("-f").is_err());
+    }
+
+    #[tokio::test]
+    async fn real_repo_switch_branch_switches_and_refuses_conflicts() {
+        let Some(git) = git_bin().await else { panic!("未找到 git") };
+        let root = std::env::temp_dir().join(format!("omp-mini-switch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let work = root.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        let init = std::process::Command::new(&git)
+            .args(["init", "--initial-branch=main"])
+            .arg(&work)
+            .output()
+            .unwrap();
+        assert!(init.status.success());
+        let w = work.to_string_lossy().to_string();
+        let g = |args: &[&str]| {
+            let out = std::process::Command::new(&git).arg("-C").arg(&work).args(args).output().unwrap();
+            assert!(out.status.success(), "git {args:?} 失败：{}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        g(&["config", "user.email", "e2e@test.local"]);
+        g(&["config", "user.name", "omp e2e"]);
+        g(&["commit", "--allow-empty", "-m", "chore: init"]);
+        g(&["branch", "feature/x"]);
+
+        // 干净工作区：切出去再切回来
+        switch_branch(w.clone(), "feature/x".into()).await.expect("切分支失败");
+        assert_eq!(g(&["branch", "--show-current"]), "feature/x");
+        switch_branch(w.clone(), "main".into()).await.unwrap();
+        assert_eq!(g(&["branch", "--show-current"]), "main");
+
+        // 不存在的分支：错误原文回传（命令失败而非 panic）
+        let err = switch_branch(w.clone(), "nope".into()).await.unwrap_err();
+        assert_eq!(err.code, "GIT_SWITCH");
+        assert!(err.message.contains("nope"), "err={}", err.message);
+
+        // 选项式输入在命令层就被拒（不会漏到 git 当参数）
+        let err = switch_branch(w.clone(), "--orphan".into()).await.unwrap_err();
+        assert_eq!(err.code, "BAD_ARG");
+
+        // 脏工作区冲突：目标分支里该文件内容不同 → git 拒绝，工作区保持原分支
+        std::fs::write(work.join("f.txt"), "main-version\n").unwrap();
+        g(&["add", "f.txt"]);
+        g(&["commit", "-m", "chore: f on main"]);
+        g(&["switch", "-c", "other"]);
+        std::fs::write(work.join("f.txt"), "other-version\n").unwrap();
+        g(&["commit", "-am", "chore: f on other"]);
+        g(&["switch", "main"]);
+        std::fs::write(work.join("f.txt"), "uncommitted-edit\n").unwrap();
+        let err = switch_branch(w.clone(), "other".into()).await.unwrap_err();
+        assert_eq!(err.code, "GIT_SWITCH");
+        assert!(err.message.contains("overwritten"), "err={}", err.message);
+        assert_eq!(g(&["branch", "--show-current"]), "main", "冲突拒绝后必须留在原分支");
+        assert_eq!(std::fs::read_to_string(work.join("f.txt")).unwrap(), "uncommitted-edit\n", "改动不得被动过");
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

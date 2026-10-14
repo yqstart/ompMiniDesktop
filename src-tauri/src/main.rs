@@ -116,6 +116,7 @@ fn main() {
             git_commit::push_workspace,
             git_commit::cancel_commit_task,
             git_ops::get_change_set,
+            git_ops::switch_branch,
             project_files::list_project_files,
             plugins::list_plugins,
             plugins::set_plugin_enabled,
