@@ -1045,7 +1045,7 @@ type ViewMsgBase =
   kind: "divider";
   id: string;
   /** `subagent` = 子代理生命周期行（v2 §2.1 的紧凑行，不带分隔线）。 */
-  divider: "model" | "thinking" | "title" | "exit" | "turn" | "subagent";
+  divider: "model" | "thinking" | "title" | "exit" | "turn" | "subagent" | "reminder";
   text: string;
  }
  /**

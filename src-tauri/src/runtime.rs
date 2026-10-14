@@ -122,6 +122,14 @@ pub fn activity_state_label(s: u8) -> &'static str {
     }
 }
 
+/// 「任务在跑」的判定（列表运行标 / 未读完成标的口径）：agent 在干活，或一轮
+/// 卡在等用户审批。`idle` / `idle-awaiting`（轮次已 yield，等后台投递）/ `exited`
+/// 都不是——列表转圈只表示**这一轮在跑**，不是「进程开着」（常驻是打开状态，
+/// 不是运行状态；历史实现把两者混为一谈，跑完的任务会一直转圈）。
+pub fn activity_is_busy(s: u8) -> bool {
+    matches!(s, ACT_RUNNING | ACT_AWAITING)
+}
+
 impl Default for SessionActivity {
     fn default() -> Self {
         Self::new()
@@ -2155,6 +2163,13 @@ mod tests {
         assert_eq!(status_pair("exited"), (ACT_EXITED, "exited"));
         // 回读口径与前端一致（切回一个 idle-awaiting 的会话不显示成别的）
         assert_eq!(activity_state_label(ACT_IDLE_AWAITING), "idle");
+        // 列表运行标口径：只有 running / awaiting-approval 算「任务在跑」；
+        // idle-awaiting 是"轮次已 yield"（前端就是 idle），exited 也不是
+        assert!(activity_is_busy(ACT_RUNNING));
+        assert!(activity_is_busy(ACT_AWAITING));
+        assert!(!activity_is_busy(ACT_IDLE));
+        assert!(!activity_is_busy(ACT_IDLE_AWAITING));
+        assert!(!activity_is_busy(ACT_EXITED));
     }
 
     #[test]

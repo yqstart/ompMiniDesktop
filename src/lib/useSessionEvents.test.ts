@@ -254,6 +254,46 @@ describe("标题帧落 store（session_info_update / title_change）", () => {
 });
 
 /**
+ * omp 的规则提醒（`role=developer` 的 TTSR system-reminder）：
+ * 实时帧只落一条提醒分隔行，绝不进正文（与历史回放同口径）。
+ */
+describe("规则提醒帧（developer）", () => {
+ it("message_start(developer) → reminder 分隔行，无正文行", () => {
+  const out = frameToViewMsgs(
+   "s1",
+   {
+    type: "message_start",
+    message: {
+     role: "developer",
+     content: [
+      {
+       type: "text",
+       text: '<system-reminder reason="rule_violation" rule="ts-no-tiny-functions">…</system-reminder>',
+      },
+     ],
+    },
+   },
+   TEXT["zh-CN"],
+  );
+  expect(out).toHaveLength(1);
+  expect(out[0]).toMatchObject({
+   kind: "divider",
+   divider: "reminder",
+   text: expect.stringContaining("ts-no-tiny-functions"),
+  });
+ });
+
+ it("message_end(developer) 不落任何行", () => {
+  const out = frameToViewMsgs(
+   "s1",
+   { type: "message_end", message: { role: "developer", content: [{ type: "text", text: "x" }] } },
+   TEXT["zh-CN"],
+  );
+  expect(out).toEqual([]);
+ });
+});
+
+/**
  * 流式帧的收敛与 id 口径（V46）：
  * - `text_end` 是 omp 每条文本块的完结信号（`content` = 全文，18.10.3 实测）——不消费它，
  *   这一行永远 `complete:false`：流式光标一直挂在已写完的段落上、「思考中…」指示行不再出现；

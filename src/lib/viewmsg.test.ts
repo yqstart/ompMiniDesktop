@@ -60,6 +60,37 @@ describe("viewMsgFromJsonlLine", () => {
  it("未知 type 不崩", () => {
   expect(viewMsgFromJsonlLine({ type: "something_new" }, zh)).toEqual([]);
  });
+ it("developer（omp 规则提醒）→ 提醒分隔行，不落正文", () => {
+  const msgs = viewMsgFromJsonlLine(
+   {
+    type: "message",
+    message: {
+     role: "developer",
+     content: [
+      {
+       type: "text",
+       text: '<system-reminder reason="rule_violation" rule="ts-no-tiny-functions" path="builtin-defaults:ts-no-tiny-functions.md">\n规则全文……\n</system-reminder>',
+      },
+     ],
+    },
+   },
+   zh,
+  );
+  expect(msgs).toHaveLength(1);
+  expect(msgs[0]).toMatchObject({
+   kind: "divider",
+   divider: "reminder",
+   text: expect.stringContaining("ts-no-tiny-functions"),
+  });
+ });
+ it("未知 role 的消息不按正文渲染（注入内容不泄漏）", () => {
+  expect(
+   viewMsgFromJsonlLine(
+    { type: "message", message: { role: "system", content: [{ type: "text", text: "不该出现在正文" }] } },
+    zh,
+   ),
+  ).toEqual([]);
+ });
 
  // V2 M6：带图片的用户消息，图片并进同一条 user 气泡（不是新增一条空消息）
  it("用户消息里的图片块并入同一条 user 消息", () => {
@@ -228,6 +259,36 @@ describe("viewMsgsFromJsonlLines（历史批量归一）", () => {
   const a = viewMsgsFromJsonlLines([callLine, startLine, resultLine], zh);
   const b = viewMsgsFromJsonlLines([callLine, startLine, resultLine], zh);
   expect(a.map((m) => m.id)).toEqual(b.map((m) => m.id));
+ });
+
+ it("developer（omp 规则提醒）→ 提醒分隔行；未知 role 不落正文", () => {
+  const msgs = viewMsgsFromJsonlLines([
+   { type: "message", id: "u-x", message: { role: "user", content: [{ type: "text", text: "改一下" }] } },
+   {
+    type: "message",
+    id: "dev-1",
+    message: {
+     role: "developer",
+     content: [
+      {
+       type: "text",
+       text: '<system-reminder reason="rule_violation" rule="ts-no-tiny-functions">规则全文…</system-reminder>',
+      },
+     ],
+    },
+   },
+   { type: "message", id: "sys-1", message: { role: "system", content: [{ type: "text", text: "不该出现" }] } },
+   { type: "message", id: "a-1", message: { role: "assistant", content: [{ type: "text", text: "好的" }] } },
+  ], zh);
+  expect(msgs.map((m) => m.kind)).toEqual(["user", "divider", "text"]);
+  expect(msgs[1]).toMatchObject({
+   kind: "divider",
+   divider: "reminder",
+   text: expect.stringContaining("ts-no-tiny-functions"),
+  });
+  // 注入正文 / 未知 role 的内容都不入流
+  expect(JSON.stringify(msgs)).not.toContain("规则全文");
+  expect(JSON.stringify(msgs)).not.toContain("不该出现");
  });
 });
 

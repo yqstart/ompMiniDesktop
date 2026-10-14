@@ -36,7 +36,8 @@ const historyPairKey = (m: ViewMsg): string | null =>
  */
 export type SessionHint = Pick<SessionView, "id" | "projectId" | "title" | "cwd"> & Partial<SessionView>;
 
-/** 列表行 → store 行：缺的字段给安全默认值（时间用当下、`running` 视为「正要跑」），
+/** 列表行 → store 行：缺的字段给安全默认值（时间用当下、`running` 缺省为「没在跑」——
+ *  转圈只表示任务在跑，不猜「正要跑」；真在跑时扫描行自带 true），
  *  open 返回后由真值字段收敛（`running` / `archived` / 项目 / 目录）。 */
 function hintRow(h: SessionHint): SessionView {
  return {
@@ -48,7 +49,7 @@ function hintRow(h: SessionHint): SessionView {
   archived: h.archived ?? false,
   corrupt: h.corrupt ?? false,
   note: h.note ?? null,
-  running: h.running ?? true,
+  running: h.running ?? false,
  };
 }
 
@@ -193,8 +194,13 @@ export async function openForkedSession(view: SessionView, opts: { draft?: strin
 export async function openSessionWithHistory(id: string, hint?: SessionHint): Promise<void> {
  // 换会话＝换消息流：把「首屏增量」窗口重置回第一页（否则沿用上一个会话的展开量）
  useApp.getState().resetThreadLimit(id);
- // 会话导航栈（V40，⌘[ / ⌘]）：打开时压栈（导航打开会在 pushNav 里去重截断）
- useApp.getState().pushNav(id);
+ // 真实身份：open 返回前先按请求 id 走（失败时也用它读旧缓存）；open 成功后收敛为
+ // omp 实际给出的身份——请求打开一个已被其他进程持有的会话时，omp 会保护性 fork
+ // （open-elsewhere），真实身份 ≠ 请求 id，后续视图 / 历史 / 导航都必须用真实身份。
+ let realId = id;
+ let forked = false;
+ // 会话导航栈（V40，⌘[ / ⌘]）在 open **成功后**按真实身份压栈（见 try 内）；
+ // 打开失败的会话不该进导航历史。
  // 已知视图先落地（还没有这一行才落）：慢 open 期间项目 / 标题 / cwd 立刻就是对的
  const st0 = useApp.getState();
  if (hint && hint.id === id && !st0.sessions.some((s) => s.id === id)) {
@@ -205,6 +211,12 @@ export async function openSessionWithHistory(id: string, hint?: SessionHint): Pr
  scrollThreadToBottom();
  try {
   const opened = await api.openSession(id);
+  // 身份漂移（omp 的保护性 fork：见后端 spawn_session_runtime 的 open-elsewhere 注释）：
+  // 请求打开的会话已被**其他壳 / 进程**持有，omp 把这次打开分到了新副本。壳必须以
+  // **真实身份**继续（视图行 / 激活 / 历史 / 导航全用 opened.id）——否则点开的明明
+  // 是副本，消息列却去读原会话的历史，列表再点一次又拉起一个新进程。
+  forked = opened.id !== id;
+  realId = opened.id;
   const cur = useApp.getState();
   // 已有行（hint / 扫描行 / 之前打开过）只收敛后端说了算的四个字段——标题留给
   // open / title_change / 首条回退那几条既有路径（本地乐观标题不能被「未命名会话」顶掉）；
@@ -222,7 +234,9 @@ export async function openSessionWithHistory(id: string, hint?: SessionHint): Pr
   // 已有记录（running / awaiting-approval…）保持并等 `syncSessionRuntime` 的回读收敛——
   // 压 idle 会让切回一个正在跑的会话显示成「就绪」：指示不出现、下一条消息还会被当成
   // 新 prompt 发出去（运行中应当走排队 / 转向），一句追问就把进行中的轮次打断。
-  const stillActive = cur.activeSessionId === opened.id;
+  // 打开期间用户没切走（activeSessionId 仍是本函数设置的请求 id）——漂移时也认：
+  // 打开的虽是副本，用户要的就是「打开它」，激活跟着真实身份走。
+  const stillActive = cur.activeSessionId === id;
   const knownStatus = cur.statusBySession[opened.id] !== undefined;
   cur.set({
    ...(stillActive
@@ -233,6 +247,10 @@ export async function openSessionWithHistory(id: string, hint?: SessionHint): Pr
     : {}),
    sessions: rows,
   });
+  // 导航栈（V40，⌘[ / ⌘]）：open 成功后按真实身份压栈（去重截断在 pushNav 内）；
+  // 漂移时补重置一次真实会话的展开量（请求 id 那次重置作用在另一个会话上，无害）。
+  useApp.getState().pushNav(opened.id);
+  if (forked) useApp.getState().resetThreadLimit(opened.id);
   // 运行时真值：**必须等 open 返回之后再补拉**——resume 的长驻进程是在 `open_session`
   // 里 spawn 的，订阅建立时那次补拉必然早于它完成（拉不到），于是模型 / 思考档 /
   // 上下文占用一直空着，直到用户手动切一次模型。这里补拉时进程一定已在。
@@ -241,12 +259,12 @@ export async function openSessionWithHistory(id: string, hint?: SessionHint): Pr
   // 打不开时保留旧缓存可读，状态胶囊会报 exited / 不可用
  }
  try {
-  const page = await api.getHistory(id);
+  const page = await api.getHistory(realId);
   const cur = useApp.getState();
   // 同一会话重复打开不叠历史：tool 卡按 toolCallId 稳定 id，其余按行 id。
   // 乐观回显的 `u-local-*` 消息：历史里同一文本的 `u:<行id>` 到达时视为同一条，
   // 用历史版本替换本地版（行 id 稳定），不翻倍。
-  const cur_list = cur.eventsBySession[id] ?? [];
+  const cur_list = cur.eventsBySession[realId] ?? [];
   const seen = new Set(cur_list.map((m) => m.id));
   const historyRows = viewMsgsFromJsonlLines(page.lines, TEXT[useApp.getState().locale]);
   const historyIds = new Set(historyRows.map((m) => m.id));
@@ -282,7 +300,7 @@ export async function openSessionWithHistory(id: string, hint?: SessionHint): Pr
      st.set({
       eventsBySession: {
        ...st.eventsBySession,
-       [id]: (st.eventsBySession[id] ?? []).map((x) => (x.id === localId ? m : x)),
+       [realId]: (st.eventsBySession[realId] ?? []).map((x) => (x.id === localId ? m : x)),
       },
      });
      return false;
@@ -290,11 +308,11 @@ export async function openSessionWithHistory(id: string, hint?: SessionHint): Pr
    }
    return true;
   });
-  if (fresh.length > 0) useApp.getState().appendEvents(id, fresh);
+  if (fresh.length > 0) useApp.getState().appendEvents(realId, fresh);
   // 回放超限（5000 行 / 2000 条）时在流尾注明——绝不静默丢内容。
   // 固定 id + 先查已有：重复打开同一会话不叠第二条。
   if (page.truncated && !cur_list.some((m) => m.id === "hist-truncated")) {
-   useApp.getState().appendEvents(id, [
+   useApp.getState().appendEvents(realId, [
     {
      kind: "divider",
      id: "hist-truncated",
@@ -303,8 +321,21 @@ export async function openSessionWithHistory(id: string, hint?: SessionHint): Pr
     },
    ]);
   }
+  // 身份漂移（forked）时的说明行：把「为什么列表里多了一个同名会话」讲清楚——
+  // 那是 omp 在「会话已被别处打开」保护下自动分叉的副本，原会话不受影响。固定 id：
+  // 重复打开同一副本不叠第二条（流里已有就跳过）。
+  if (forked && !useApp.getState().eventsBySession[realId]?.some((m) => m.id === "fork-note")) {
+   useApp.getState().appendEvents(realId, [
+    {
+     kind: "divider",
+     id: "fork-note",
+     divider: "reminder",
+     text: TEXT[useApp.getState().locale].dividerSessionForked,
+    },
+   ]);
+  }
   // 历史落位后再读一次底，保证停在最新处（慢历史期间用户已切走就别拽别人的消息列）
-  if (useApp.getState().activeSessionId === id) scrollThreadToBottom();
+  if (useApp.getState().activeSessionId === realId) scrollThreadToBottom();
  } catch {
   // 历史加载失败不阻塞选中
  }

@@ -158,6 +158,22 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dic
    });
    return out;
   }
+  // developer（omp 注入的规则提醒）：落一条提醒分隔行（与历史回放同口径）——
+  // 绝不进正文；只认 message_start，message_end 不重复落。
+  if (t === "message_start" && m?.role === "developer") {
+   const text = (m.content ?? [])
+    .filter((b) => b.type === "text")
+    .map((b) => b.text ?? "")
+    .join("\n");
+   const rule = /rule="([^"]+)"/.exec(text)?.[1];
+   out.push({
+    kind: "divider",
+    id: `${sid}:rem:${fold.msgSeq}`,
+    divider: "reminder",
+    text: rule ? fmt(dict.dividerRuleReminder, rule) : dict.dividerRuleReminderPlain,
+   });
+   return out;
+  }
   if (t === "message_start") return out;
  }
  if (t === "message_update") {

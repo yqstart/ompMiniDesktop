@@ -33,9 +33,9 @@ pub struct AppState {
     /// （见 `plugins.rs` / `skills.rs`）。能力少、争用低，共用一个锁就够。
     pub extensions_edit: Mutex<()>,
     /// 聊天形态（V32 恢复自 V1–V10）：per-会话长驻 `omp --mode rpc-ui` 进程表（见 `runtime.rs`）。
+    /// 列表行「运行中」标记不另存 map：判据是进程表内活动态（`activity_is_busy`），
+    /// 见 `running_snapshot`——单一真值，避免「打开过就一直转圈」。
     pub runtime: crate::runtime::RuntimeMap,
-    /// 会话 id → 是否有长驻进程（列表行「运行中」标记；进程退出 / kill 时移除）。
-    pub running: Mutex<HashMap<String, bool>>,
     /// V14 工作区「提交并推送」：cwd → 任务句柄（同一工作区拒绝重入，不同工作区可并行，
     /// 见 `git_commit.rs`）。
     pub commit_tasks: crate::git_commit::CommitMap,
@@ -885,6 +885,17 @@ pub fn scan_window(limit: Option<usize>, offset: Option<usize>) -> (usize, usize
     (limit, offset.unwrap_or(0))
 }
 
+/// 列表「运行中」标记快照（`SessionView.running` 的唯一数据源）：只反映**任务在跑**
+/// （agent 干活 / 等审批，见 [`crate::runtime::activity_is_busy`]），不是"进程在壳里"。
+/// 常驻进程会把打开过的会话一直留在进程表里——「打开过」不是「在跑」，跑完的任务
+/// 不许继续转圈；spawn 时刻活动态初值就是 idle，刚打开的空转会话天然不亮。
+async fn running_snapshot(state: &State<'_, AppState>) -> HashMap<String, bool> {
+    let rt = state.runtime.lock().await;
+    rt.iter()
+        .map(|(sid, c)| (sid.clone(), crate::runtime::activity_is_busy(c.activity.state())))
+        .collect()
+}
+
 #[tauri::command]
 pub async fn list_sessions(
     state: State<'_, AppState>,
@@ -892,9 +903,11 @@ pub async fn list_sessions(
     limit: Option<usize>,
     offset: Option<usize>,
 ) -> Result<SessionPage, CmdError> {
+    // 列表「运行中」快照从进程表的活动态生成（唯一真值；见 running_snapshot）。
+    // 先取快照再锁 overlay：与 fork 路径（runtime → overlay）保持同一把锁顺序。
+    let running = running_snapshot(&state).await;
     let ov = state.overlay.lock().await;
     let agent = state.agent_dir.lock().await.clone();
-    let running = state.running.lock().await.clone();
     let paths: Vec<(String, String)> = ov.projects.iter().map(|p| (p.id.clone(), p.path.clone())).collect();
     // 只列某个项目的会话：按 id 过滤（归属已算成 id，不必再拿路径比一遍）
     let only: Option<String> = project_id.filter(|pid| ov.projects.iter().any(|p| p.id == *pid));
@@ -983,7 +996,7 @@ pub async fn list_sessions(
         };
         if !candidates.is_empty() {
             let ov = state.overlay.lock().await;
-            for v in unlanded_views(&agent, &candidates, &scope, &ov.notes) {
+            for v in unlanded_views(&agent, &candidates, &scope, &ov.notes, &running) {
                 if out.iter().any(|s| s.id == v.id) {
                     continue;
                 }
@@ -1016,7 +1029,7 @@ pub async fn list_archived_sessions(state: State<'_, AppState>) -> Result<Vec<Se
     let agent = state.agent_dir.lock().await.clone();
     // 归属匹配集含 worktree（与 list_sessions 同一口径）
     let scope = ownership_scope(&projects).await;
-    let running = state.running.lock().await.clone();
+    let running = running_snapshot(&state).await;
     Ok(list_archived_in(&agent.join("sessions"), &archived, &scope, &running, &notes))
 }
 
@@ -1310,6 +1323,7 @@ pub fn unlanded_views(
     candidates: &[(String, String, i64)],
     projects: &[(String, String)],
     notes: &HashMap<String, String>,
+    running: &HashMap<String, bool>,
 ) -> Vec<SessionView> {
     candidates
         .iter()
@@ -1327,7 +1341,7 @@ pub fn unlanded_views(
                 archived: false,
                 corrupt: false,
                 note,
-                running: true,
+                running: running.get(sid).copied().unwrap_or(false),
                 id: sid.clone(),
             }
         })
@@ -1369,9 +1383,6 @@ pub async fn create_session(
         crate::runtime::SpawnOpts { bin, cwd: cwd.clone(), resume: None, model, thinking, approval: None },
     )
     .await?;
-    if let Ok(mut run) = state.running.try_lock() {
-        run.insert(sid.clone(), true);
-    }
     let head = parse_session_head(std::path::Path::new(&sfile));
     // 刚建好的会话还没有 jsonl（omp 懒写盘）：归属退回 spawn 的 --cwd、时间用建会话这一刻
     // ——文件头此时全空，直接透传 timestamp=0 会让左栏那一行显示成 1970 的「01-01」。
@@ -1389,7 +1400,9 @@ pub async fn create_session(
         archived: false,
         corrupt: false,
         note,
-        running: true,
+        // 新建 = 还没跑过任何一轮：运行标（任务在跑）为否；列表转圈只表示任务在跑，
+        // 不是"进程开着"（见 running_snapshot）
+        running: false,
         id: sid,
     })
 }
@@ -1407,12 +1420,12 @@ pub async fn open_session(app: AppHandle, state: State<'_, AppState>, id: String
         let session_cwd = owner_cwd(&head.cwd, &rt_cwd);
         // 文件还没落盘时头里什么都没有：时间退回 spawn 时刻（见 create_session 同样的道理）
         let session_ts = if head.timestamp == 0 { rt_created } else { head.timestamp };
-        return Ok(build_session_view(&state, &id, &head.title, head.first_user_text.as_deref(), session_cwd, session_ts, true).await);
+        return Ok(build_session_view(&state, &id, &head.title, head.first_user_text.as_deref(), session_cwd, session_ts).await);
     }
     // 否则 resume 长驻
     let head = spawn_session_runtime(&app, &state, &id).await?;
     // 历史回放由前端 get_history 一次拉全量（实时增量经事件 pump）
-    Ok(build_session_view(&state, &head.id, &head.title, head.first_user_text.as_deref(), head.cwd.clone(), head.timestamp, true).await)
+    Ok(build_session_view(&state, &head.id, &head.title, head.first_user_text.as_deref(), head.cwd.clone(), head.timestamp).await)
 }
 
 /// resume 拉起一个没有长驻进程的会话并登记进 `runtime` 表（`open_session` 的 spawn 段
@@ -1440,14 +1453,19 @@ async fn spawn_session_runtime<R: tauri::Runtime>(
     // `--resume` 必须给**完整会话 id**（终端侧 resume 一直是全 id 口径）：omp 对前缀的
     // 解析取「最新匹配的那个」（实测），8 字符前缀在同一分钟建的两个会话间会拉起**另一个
     // 会话**——新进程以那个会话的身份登记，若它正在跑就被同 id 补位顶掉（进行中的轮次被中止）。
-    let (sid, _, _meta) = crate::runtime::spawn_long_lived(
+    let (sid, sfile, _meta) = crate::runtime::spawn_long_lived(
         app,
         state.runtime.clone(),
         crate::runtime::SpawnOpts { bin, cwd: spawn_cwd, resume: Some(id.to_string()), model: None, thinking: None, approval },
     )
     .await?;
-    if let Ok(mut run) = state.running.try_lock() {
-        run.insert(sid, true);
+    // 身份漂移 = omp 的保护性 fork（`Session moved to a new file / open-elsewhere`）：
+    // 请求 resume 的会话已被**其他进程**持有（另一个壳实例等），omp 会把本次进程分到
+    // 新身份（新 jsonl、`parentSession` 指向原会话）。视图与 runtime 表必须以**真实
+    // 身份**为准——否则列表行、事件订阅与「再次打开」全部指向旧 id：点开的明明是
+    // 副本，壳却以为打开的是原会话，再点一次又会拉起一个新进程。
+    if sid != id {
+        return Ok(parse_session_head(std::path::Path::new(&sfile)));
     }
     Ok(head)
 }
@@ -1846,15 +1864,9 @@ pub(crate) fn find_message_entry_in(
 /// （归档等同步路径可接受：下次打开会 resume），fork 场景不行——旧 key 留在表里，
 /// 「同 id 接管」与状态收敛都会错位。语义与 `kill_runtime` 一致（哨兵 → stdin 关闭 → 进程退出）。
 async fn kill_runtime_awaited(state: &State<'_, AppState>, id: &str) {
-    {
-        let mut m = state.runtime.lock().await;
-        if let Some(r) = m.remove(id) {
-            let _ = r.tx.send(String::new());
-        }
-    }
-    {
-        let mut run = state.running.lock().await;
-        run.remove(id);
+    let mut m = state.runtime.lock().await;
+    if let Some(r) = m.remove(id) {
+        let _ = r.tx.send(String::new());
     }
 }
 
@@ -1864,7 +1876,8 @@ async fn kill_runtime_awaited(state: &State<'_, AppState>, id: &str) {
 /// 为什么 kill 旧进程：pump 的三通道名（`omp-event://<sid>` 等）在 `start_pump` 时与 sid
 /// 绑定，fork 后进程已换身份而通道名留在旧 sid 上；kill + resume（与「闲置回收后自动恢复」
 /// 同一条已验证路径）是唯一不重构 pump 的通路。新会话由本次调用直接拉起，调用方拿到视图
-/// 时进程已在（running: true），随后 `openSessionWithHistory` 走「已有进程直接聚焦」分支。
+/// 时进程已在（列表运行标按活动态自会显示，新会话空闲即不转圈），随后
+/// `openSessionWithHistory` 走「已有进程直接聚焦」分支。
 async fn fork_at<R: tauri::Runtime>(
     app: &AppHandle<R>,
     state: &State<'_, AppState>,
@@ -1897,7 +1910,7 @@ async fn fork_at<R: tauri::Runtime>(
         .ok_or_else(|| cmd_err("RPC_STATE", "fork 后未拿到新会话身份".into(), None))?;
     kill_runtime_awaited(state, id).await;
     let head = spawn_session_runtime(app, state, &new_sid).await?;
-    Ok(build_session_view(state, &head.id, &head.title, head.first_user_text.as_deref(), head.cwd.clone(), head.timestamp, true).await)
+    Ok(build_session_view(state, &head.id, &head.title, head.first_user_text.as_deref(), head.cwd.clone(), head.timestamp).await)
 }
 
 /// 从某条消息分叉（V40）：`mode="branch"` 从该消息处（保留到它）、`mode="edit"` 从它**之前**
@@ -2175,7 +2188,6 @@ async fn build_session_view(
     first_user_text: Option<&str>,
     cwd: String,
     timestamp: i64,
-    running: bool,
 ) -> SessionView {
     let (projects, archived, note) = {
         let ov = state.overlay.lock().await;
@@ -2186,6 +2198,15 @@ async fn build_session_view(
         )
     };
     let pid = owner_project(&ownership_scope(&projects).await, cwd.as_str());
+    // 「运行中」= 任务在跑（与列表快照同一口径，见 running_snapshot），不是"进程在表里"：
+    // 常驻进程打开着的空闲会话不该转圈，跑完的任务不该一直转。
+    let running = state
+        .runtime
+        .lock()
+        .await
+        .get(id)
+        .map(|r| crate::runtime::activity_is_busy(r.activity.state()))
+        .unwrap_or(false);
     SessionView {
         title: display_title(note.as_ref(), head_title, first_user_text, timestamp),
         project_id: pid,
@@ -2215,8 +2236,10 @@ pub(crate) async fn send_prompt<R: tauri::Runtime>(
         // 进程不在了（闲置回收 / 意外退出）：resume 拉起再发——「发消息」是用户的正常
         // 入口，不该因为后台回收而失败（回收只发生在 idle，这里补一次就是无缝的）。
         // steer / follow_up 不代偿：没有进行中的轮次时这两个语义本身不成立，按原样报错。
-        spawn_session_runtime(app, state, id).await?;
-        tx = map.lock().await.get(id).map(|r| r.tx.clone());
+        // resume 可能发生身份漂移（omp 的保护性 fork，见 spawn_session_runtime 的注释）：
+        // 消息按**真实身份**发给新进程，否则 get(id) 落空、误报「会话未启动」。
+        let real_id = spawn_session_runtime(app, state, id).await?.id;
+        tx = map.lock().await.get(&real_id).map(|r| r.tx.clone());
     }
     let Some(tx) = tx else {
         return Err(cmd_err("NOT_RUNNING", "会话未启动，请先打开会话".into(), None));
@@ -2301,15 +2324,11 @@ pub async fn stop_session(app: AppHandle, state: State<'_, AppState>, id: String
 
 /// 杀掉一个会话的长驻进程（归档 / 删除 / 移除项目前调用）。
 pub fn kill_runtime(state: &State<AppState>, id: &str) {
-    let map = state.runtime.clone();
-    if let Ok(mut m) = map.try_lock() {
+    if let Ok(mut m) = state.runtime.try_lock() {
         if let Some(r) = m.remove(id) {
             let _ = r.tx.send(String::new());
             // child kill 需要 async；此处发哨兵让 pump 退出，进程随 stdin 关闭退出（code 0）
         }
-    }
-    if let Ok(mut run) = state.running.try_lock() {
-        run.remove(id);
     }
 }
 
@@ -2618,7 +2637,6 @@ pub fn load_state<R: tauri::Runtime>(app: &AppHandle<R>) -> AppState {
         models_edit: Mutex::new(()),
         extensions_edit: Mutex::new(()),
         runtime: std::sync::Arc::new(Mutex::new(HashMap::new())),
-        running: Mutex::new(HashMap::new()),
         commit_tasks: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
         omp_update_task: std::sync::Arc::new(std::sync::Mutex::new(None)),
     }
@@ -3218,6 +3236,83 @@ done
         let keys: Vec<String> = map.lock().await.keys().cloned().collect();
         assert!(!keys.contains(&"stub-old".to_string()), "fork 后旧进程应被清出表");
         assert!(keys.contains(&new_id.to_string()), "新会话应已被 resume 拉起");
+
+        kill_runtime(&st, new_id);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `spawn_session_runtime` 的身份漂移分支（open-elsewhere 保护性 fork）：
+    /// omp 对「已被其他进程持有的会话」会把本次 resume 分到新身份——壳必须以
+    /// 返回的真实身份（新 jsonl）为准，而不是请求的 id。
+    #[tokio::test]
+    async fn spawn_session_runtime_adopts_forked_identity() {
+        use tauri::Manager;
+        let root = std::env::temp_dir().join(format!("omp-drift-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let agent = root.join("agent");
+        let dir = agent.join("sessions").join("--tmp-demo--");
+        std::fs::create_dir_all(&dir).unwrap();
+        let req_id = "01a123c6-1111-7524-b1be-53b4fb030bf6";
+        let new_id = "01a123c6-f958-7524-b1be-53b4fb030bf7";
+        // 请求会话的文件（resume 目标）：session_file_for 按完整 id 找得到
+        std::fs::write(
+            dir.join(format!("2026-10-12T10-00-00Z_{req_id}.jsonl")),
+            format!(
+                "{}\n",
+                serde_json::json!({
+                    "type":"session","id":req_id,"timestamp":"2026-10-12T10:00:00.000Z","cwd":"/tmp/demo","title":"原会话"
+                })
+            ),
+        )
+        .unwrap();
+        // omp 分叉出的新身份文件（标题继承原会话——与真实 open-elsewhere 产物同形）
+        let new_file = dir.join(format!("2026-10-12T10-00-01Z_{new_id}.jsonl"));
+        std::fs::write(
+            &new_file,
+            format!(
+                "{}\n{}\n",
+                serde_json::json!({"type":"title","v":1,"title":"原会话","source":"user","updatedAt":"2026-10-12T10:00:01.000Z"}),
+                serde_json::json!({
+                    "type":"session","id":new_id,"timestamp":"2026-10-12T10:00:01.000Z","cwd":"/tmp/demo",
+                    "title":"原会话","titleSource":"user","parentSession":req_id
+                })
+            ),
+        )
+        .unwrap();
+
+        // stub：握手 get_state 回**新身份**（模拟 omp 的保护性 fork）
+        let script = format!(
+            r#"#!/bin/sh
+printf '{{"type":"ready"}}\n'
+while IFS= read -r line; do
+  case "$line" in
+    *'"h-state"'*)
+      printf '%s\n' '{{"type":"response","id":"h-state","command":"get_state","success":true,"data":{{"sessionId":"{new}","sessionFile":"{newfile}"}}}}' ;;
+    *) : ;;
+  esac
+done
+"#,
+            new = new_id,
+            newfile = new_file.to_string_lossy(),
+        );
+        let stub = write_v40_stub(&root, &script);
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app 构建失败");
+        let state = load_state(app.handle());
+        *state.agent_dir.lock().await = agent.clone();
+        *state.omp_path.lock().await = Some(stub.to_string_lossy().to_string());
+        app.manage(state);
+
+        let st = app.state::<AppState>();
+        let head = super::spawn_session_runtime(app.handle(), &st, req_id)
+            .await
+            .expect("resume 应成功");
+        assert_eq!(head.id, new_id, "身份漂移：头必须按 omp 的真实身份（新副本）读");
+        assert_eq!(head.title, "原会话", "标题继承自原会话（open-elsewhere 产物同形）");
+        // runtime 表登记的也应是真实身份（后续 send_prompt / 再次打开都按它定位）
+        let keys: Vec<String> = st.runtime.lock().await.keys().cloned().collect();
+        assert!(keys.contains(&new_id.to_string()));
 
         kill_runtime(&st, new_id);
         let _ = std::fs::remove_dir_all(&root);

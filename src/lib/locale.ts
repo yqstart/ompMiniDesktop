@@ -1263,6 +1263,10 @@ const ZH = {
  dividerSubagentDone: "子代理 {0} 完成",
  dividerSubagentFailed: "子代理 {0} 失败",
  dividerSubagentAborted: "子代理 {0} 已中止",
+ // 规则提醒（omp TTSR 注入的 developer 消息）与 resume 分叉提示
+ dividerRuleReminder: "规则提醒：{0}",
+ dividerRuleReminderPlain: "系统提醒",
+ dividerSessionForked: "会话已在其他窗口打开；omp 已自动分叉出新副本继续（原会话未受影响）",
  // 消息流摘要式表达（v2 §2.1）
  ranCommands: "运行了 {0} 条命令",
  editedFiles: "编辑了 {0} 个文件",
@@ -2540,6 +2544,10 @@ const EN: Record<TextKey, string> = {
  dividerSubagentDone: "Subagent {0} finished",
  dividerSubagentFailed: "Subagent {0} failed",
  dividerSubagentAborted: "Subagent {0} aborted",
+ // Rule reminders (developer messages injected by omp TTSR) and the resume-fork note
+ dividerRuleReminder: "Rule reminder: {0}",
+ dividerRuleReminderPlain: "System reminder",
+ dividerSessionForked: "This session was opened elsewhere; omp forked a fresh copy to continue (the original is untouched)",
  // Summary-style thread rows (v2 §2.1)
  ranCommands: "Ran {0} commands",
  editedFiles: "Edited {0} files",

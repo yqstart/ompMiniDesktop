@@ -242,3 +242,42 @@ describe("打开会话：历史落库与去重", () => {
   });
  });
 });
+
+/**
+ * 身份漂移（open-elsewhere 保护性 fork）：请求打开的会话已被其他进程持有，
+ * omp 会把这次打开分到新副本（新 id）——壳全程以 opened.id 为准：
+ * 激活切到真实身份、历史读真实身份、流尾追加一条说明行。
+ */
+describe("打开被别处持有的会话（身份漂移）", () => {
+ const FORKED_ID = "sess-open-1-forked";
+
+ const forkView = (id: string): SessionView => ({
+  id,
+  projectId: "p1",
+  title: "PANEL: 修复上下文面板",
+  cwd: "/a",
+  timestamp: 2,
+  archived: false,
+  corrupt: false,
+  note: null,
+  running: false,
+ });
+
+ beforeEach(() => {
+  useApp.setState({ eventsBySession: {}, sessions: [], activeSessionId: null, statusBySession: {} });
+ });
+
+ it("open 返回新身份：激活 / 历史 / 说明行都跟真实会话走", async () => {
+  vi.mocked(api.openSession).mockResolvedValueOnce(forkView(FORKED_ID));
+  await openSessionWithHistory(SID);
+  const st = useApp.getState();
+  // 激活切到真实身份（请求 id 只用于发起）
+  expect(st.activeSessionId).toBe(FORKED_ID);
+  // 历史按真实身份读
+  expect(vi.mocked(api.getHistory)).toHaveBeenCalledWith(FORKED_ID);
+  // 说明行落在真实会话的流尾（固定 id，重复打开不叠第二条）
+  expect(st.eventsBySession[FORKED_ID]?.some((m) => m.id === "fork-note")).toBe(true);
+  // 历史也落在真实身份下
+  expect((st.eventsBySession[FORKED_ID] ?? []).some((m) => m.kind === "user")).toBe(true);
+ });
+});

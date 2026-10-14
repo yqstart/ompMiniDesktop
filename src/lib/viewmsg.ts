@@ -344,6 +344,30 @@ export function viewMsgsFromJsonlLines(lines: unknown[], t: Text): ViewMsg[] {
     if (id && !emittedTools.has(id) && !calls.has(id)) emitTool(id, at);
     return;
    }
+   // omp 注入的「规则提醒」（role=developer，实测 TTSR 命中时注入
+   // `<system-reminder reason="rule_violation" rule="…">…</system-reminder>`）：
+   // 是给 agent 的修正指令，不是助手输出——只渲染成一条提醒分隔行（规则名入文案），
+   // 正文绝不落进消息流（旧实现按 text 块渲染，一大段英文混在回答中间）。
+   if (m.role === "developer") {
+    const text = Array.isArray(m.content)
+     ? (m.content as Record<string, unknown>[])
+      .filter((b): b is Record<string, unknown> => !!b && typeof b === "object" && b.type === "text")
+      .map((b) => String(b.text ?? ""))
+      .join("\n")
+     : "";
+    const rule = /rule="([^"]+)"/.exec(text)?.[1];
+    out.push({
+     kind: "divider",
+     id: `d:${lid}`,
+     divider: "reminder",
+     text: rule ? fmt(t.dividerRuleReminder, rule) : t.dividerRuleReminderPlain,
+     ...(at != null ? { at } : {}),
+    });
+    return;
+   }
+   // 其余未知 role：不按正文渲染——content 的 text 块只有 assistant 才是「给用户看的
+   // 输出」；未知注入落成正文就是泄漏（单行入口 viewMsgFromJsonlLine 同口径）。
+   if (m.role !== "assistant") return;
    if (!Array.isArray(m.content)) return;
    (m.content as Record<string, unknown>[]).forEach((b, bi) => {
     if (!b || typeof b !== "object") return;
@@ -408,6 +432,24 @@ export function viewMsgFromJsonlLine(line: unknown, t: Text): ViewMsg[] {
    return files.length > 0 ? [{ kind: "files", id: nid("fm"), files }] : [];
   }
   if (!m || !Array.isArray(m.content)) return [];
+  // developer（omp 注入的规则提醒）：提醒分隔行，不落正文（与批量入口同口径）
+  if (m.role === "developer") {
+   const text = (m.content as Record<string, unknown>[])
+    .filter((b) => b && typeof b === "object" && b.type === "text")
+    .map((b) => String(b.text ?? ""))
+    .join("\n");
+   const rule = /rule="([^"]+)"/.exec(text)?.[1];
+   return [
+    {
+     kind: "divider",
+     id: nid("d"),
+     divider: "reminder",
+     text: rule ? fmt(t.dividerRuleReminder, rule) : t.dividerRuleReminderPlain,
+    },
+   ];
+  }
+  // 未知 role 不按正文渲染（只有 user / assistant / toolResult 有正规范式）
+  if (m.role !== "assistant" && m.role !== "user" && m.role !== "toolResult") return [];
   const out: ViewMsg[] = [];
   for (const b of m.content as Record<string, unknown>[]) {
    if (b.type === "text") {
