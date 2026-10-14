@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-15
+
 ### Added
 
 - 任务清单（to-do list）终于常驻可见：**消息列右上角浮卡**（折叠 = `☑ 3/7` 进度徽标，展开 = 阶段清单：✓ 完成 / ◐ 进行中 / ⊘ 受阻 / ○ 待办，受阻项带阻塞说明；全部完成自动收成 ✓ 徽标、清单被清空即退场、可手动收起 / 隐藏）。数据面按 omp 18.10.4 rpc-ui 实测重接：唯一全量真值是 **todo 工具帧的 `result.details.phases`**（`tool_execution_end` 与 `message_end{toolResult}` 两路同形）——实时写入不等回读节流；`get_state.todoPhases` 回读兜底（数组即覆盖、空数组 = 已清空），重开历史会话由回读自动恢复。此前消息列那张「计划卡」期待 `todo_reminder.phases`，而上游真实帧是「未完成项提醒」（`{todos,attempt,maxAttempts}`，不带阶段清单）——这张卡从来没渲染过，已随重做删除。右栏「进度」区块保留为停靠完整视图，符号 / 色调 / 文案与浮卡共用一张映射表（`lib/todoDisplay.ts`）；字段口径同步真值：上游 phase / task 没有 id（key 用下标）、状态集含 `blocked`；多次 todo 调用在消息列连成一段、聚合成「更新了 N 次任务清单」（清单当前状态看浮卡，工具行只留痕迹）
