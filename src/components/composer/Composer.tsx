@@ -8,7 +8,6 @@ import { api } from "@shared/api";
 import { attachmentFromFile, attachmentFromOmpImage, dataUrl } from "../../lib/attachments";
 import { fmt } from "../../lib/locale";
 import { extractMentions, rewriteMentions } from "../../lib/mentions";
-import { referenceLabel } from "../../lib/workspaceFiles";
 import { LOCAL_COMMANDS, localCommandDescription, matchLocalCommand, type LocalCommand } from "../../lib/localCommands";
 import { cycleSessionApproval } from "../../lib/sessionApproval";
 import { loadHistory, pushHistory } from "../../lib/promptHistory";
@@ -18,7 +17,6 @@ import { openForkedSession, refreshTitleAfterFirstSend } from "../../lib/session
 import { useText } from "../../lib/useText";
 import { ProjectPicker } from "../pickers/ProjectPicker";
 import { BranchPicker } from "../pickers/BranchPicker";
-import { FileIcon } from "../workbench/FileIcon";
 import { CommitButton } from "./CommitButton";
 import { SessionStatsBar } from "../thread/SessionStatsBar";
 import { CompactButton, QueueBadge } from "../thread/StatusBar";
@@ -133,6 +131,22 @@ export function Composer() {
   key: "",
   info: {},
  });
+ /** 解析不到的引用：只给这些留一行提示（正常的引用已经融入正文，不再单独排芯片）。 */
+ const missingMentions = useMemo(
+  () => (checks.key === mentionKey ? mentions.filter((p) => checks.info[p]?.exists === false) : []),
+  [checks, mentionKey, mentions],
+ );
+ /** 输入框的悬停提示：`@标签 → 真实相对路径`（正常态不占版面，要查全路径就悬浮一下）。 */
+ const mentionTitles = useMemo(() => {
+  if (checks.key !== mentionKey) return "";
+  return mentions
+   .map((p) => {
+    const full = checks.info[p]?.resolved;
+    return full ? `@${p} → ${full}` : null;
+   })
+   .filter((line): line is string => line !== null)
+   .join("\n");
+ }, [checks, mentionKey, mentions]);
  const [attachError, setAttachError] = useState<string | null>(null);
  const [dragging, setDragging] = useState(false);
  // `@` 补全状态：mentionIdx 为高亮下标，-1 = 无补全；mentionToken 是 `@` 后的路径前缀。
@@ -790,34 +804,24 @@ export function Composer() {
      </div>
     )}
     {attachError && <div className="px-4 pt-2 text-[13px] text-danger">{attachError}</div>}
-    {mentions.length > 0 && (
-     <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2" aria-label={t.mentionsAria}>
-      {mentions.map((p) => {
-       const check = checks.key === mentionKey ? checks.info[p] : undefined;
-       const missing = check?.exists === false;
-       // 芯片显示**短标签**（草稿里写的就是它），完整相对路径挂在 title 上（`resolved` 是
-       // 短标签反解出的真路径；本来就是真路径 / 缺失时退回原文）
-       const name = referenceLabel(p, false);
-       const isDir = check?.isDir === true;
-       const full = check?.resolved ?? p;
-       return (
-        <span
-         key={p}
-         title={missing ? `${t.mentionMissingTitle}（${p}）` : full}
-         className={`inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-0.5 font-mono text-xs ${missing ? "border-warn/50 text-warn" : "border-border text-muted"
-          }`}
-        >
-         {missing ? (
-          <TriangleWarning size={12} aria-hidden />
-         ) : (
-          <FileIcon name={name} isDir={isDir} size={13} />
-         )}
-         <span className="truncate">@{isDir ? `${name}/` : name}</span>
-         <span className="sr-only">{missing ? t.pathMissing : t.pathExists}</span>
-        </span>
-       );
-      })}
-      <span className="text-[13px] text-muted">{t.mentionSendHint}</span>
+    {/* 引用**不再单独排一行芯片**（2026-10-17 用户口径：标签已经融入正文，别又展示 tag 又展示路径）。
+        只有解析不到的引用才提示——那时用户需要知道「它不会被读进上下文」。 */}
+    {missingMentions.length > 0 && (
+     <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2" role="status">
+      <span className="inline-flex items-center gap-1 text-[12px] text-warn">
+       <TriangleWarning size={12} aria-hidden />
+       {fmt(t.mentionsMissingHint, String(missingMentions.length))}
+      </span>
+      {missingMentions.map((p) => (
+       <span
+        key={p}
+        title={t.mentionMissingTitle}
+        className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-warn/50 px-2 py-0.5 font-mono text-xs text-warn"
+       >
+        <span className="truncate">@{p}</span>
+        <span className="sr-only">{t.pathMissing}</span>
+       </span>
+      ))}
      </div>
     )}
     {imageUnsupported && (
@@ -867,11 +871,13 @@ export function Composer() {
     {slashOpen && (
      <SlashMenu cands={slashCands} active={slashIdx} query={slashToken ?? ""} onPick={pickCommand} onHover={hoverSlash} />
     )}
-    {/* 输入区：1 行起步（`rows` 只是首帧兜底，高度由 autosize 按内容写），封顶 `max-h-44` */}
+    {/* 输入区：1 行起步（`rows` 只是首帧兜底，高度由 autosize 按内容写），封顶 `max-h-44`。
+        悬停给出 `@标签 → 真实相对路径`（引用不单独排芯片，完整路径要查就在这里）。 */}
     <textarea
      ref={taRef}
      id="composer"
      rows={1}
+     title={mentionTitles || undefined}
      value={draft}
      onChange={(e) => {
       persistDraft(activeSessionId, e.target.value);

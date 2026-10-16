@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionView } from "@shared/types";
 import { useApp } from "../../stores/app";
-import { TEXT } from "../../lib/locale";
+import { TEXT, fmt } from "../../lib/locale";
 
 /**
  * Composer 三件事：
@@ -689,6 +689,38 @@ describe("Composer `@` 路径补全", () => {
    await Promise.resolve();
   });
   expect(apiMock.sendMessage).toHaveBeenCalledWith("s1", "@index.ts", []);
+ });
+
+ it("引用只融入正文：正常的引用不再单独排一行芯片", async () => {
+  apiMock.checkPaths.mockResolvedValue([
+   { path: "components/", exists: true, isDir: true, resolved: "src/views/components" },
+  ]);
+  const ta = await mount(false);
+  act(() => useApp.setState({ drafts: { s1: "看 @components/ 这个目录" } }));
+  await act(async () => {
+   await new Promise((resolve) => setTimeout(resolve, 400)); // 过完 check_paths 的 300ms 防抖
+  });
+  // 正文里有标签
+  expect(ta?.value).toBe("看 @components/ 这个目录");
+  // 但上方没有芯片行 / 旧提示行（标签已经融入文字，不再重复展示）
+  expect(container.textContent).not.toContain(TEXT["zh-CN"].mentionSendHint);
+  expect(container.textContent).not.toContain(TEXT["zh-CN"].pathExists);
+  expect(container.querySelector('[role="status"]')).toBeNull();
+  // 完整路径改由输入框的悬停提示给出（`@标签 → 真路径`）
+  expect(ta?.getAttribute("title")).toBe("@components/ → src/views/components");
+ });
+
+ it("解析不到的引用才给一行提示（原文照发）", async () => {
+  apiMock.checkPaths.mockResolvedValue([
+   { path: "index.ts", exists: false, isDir: false, resolved: null },
+  ]);
+  await mount(false);
+  act(() => useApp.setState({ drafts: { s1: "@index.ts" } }));
+  await act(async () => {
+   await new Promise((resolve) => setTimeout(resolve, 400));
+  });
+  expect(container.textContent).toContain(fmt(TEXT["zh-CN"].mentionsMissingHint, "1"));
+  expect(container.textContent).toContain("@index.ts");
  });
 
  it("Esc 关掉浮层，继续打字重新打开", async () => {
