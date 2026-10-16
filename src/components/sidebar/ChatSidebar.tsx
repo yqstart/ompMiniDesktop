@@ -234,8 +234,12 @@ export function ChatSidebar() {
  }, []);
 
  // 挂载就重扫一次（其他形态 / omp TUI 里归档过的会话、新建的会话都能见到）。
- // 项目清单与工作区清单随侧栏一起拉；这里只兜冷路径（一个项目都没有 / 有项目但
- // 工作区还没拉回来），都只做一次。
+ // 项目清单与工作区清单随侧栏一起拉；这里只兜冷路径（各自为空时各拉一次），都只做一次。
+ // **两条判断必须各自独立**：工作区清单的空否就是它自己的条件——重启后 store 全空
+ // （`projects` 也是空的）时，拿「有项目才拉工作区」当门会把这一趟整个跳过，
+ // 结果项目拉回来了、工作区永远是空，左栏把建好的工作区渲染成平铺（用户实测，2026-10-16）。
+ // 目录行同理：它只有「添加项目 / 重定位 / 工作区变更」这几条交互路径会拉，不在这里补，
+ // 重启后 worktree 会话的引用浮层会误报「找不到所属项目」、项目头的上游提示也缺一档。
  const coldLoaded = useRef(false);
  useEffect(() => {
   if (!coldLoaded.current) {
@@ -247,11 +251,8 @@ export function ChatSidebar() {
      .then((list) => useApp.getState().set({ projects: list }))
      .catch(() => undefined);
    }
-   if (st.workspaceGroups.length === 0 && st.projects.length > 0) {
-    api
-     .listWorkspaces()
-     .then((list) => useApp.getState().set({ workspaceGroups: list }))
-     .catch(() => undefined);
+   if (st.workspaceGroups.length === 0 || st.checkouts.length === 0) {
+    void loadCheckouts().catch(() => undefined);
    }
   }
   void reload();

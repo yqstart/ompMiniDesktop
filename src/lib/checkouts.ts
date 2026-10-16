@@ -15,11 +15,23 @@ export function checkoutLabel(ws: CheckoutView): string {
  return where ? `${ws.projectName} · ${where}` : ws.projectName;
 }
 
-/** 拉取目录行 + 工作区清单并落库（唯一刷新入口；项目 / 工作区增删后经 `refreshSidebar` 走到这里）。 */
+/** 拉取目录行 + 工作区清单并落库（唯一刷新入口；项目 / 工作区增删后经 `refreshSidebar` 走到这里，
+ *  左栏冷启动（重启后 store 还是空的）也补这一趟）。
+ *
+ *  两份数据**各拉各的、各落各的**（`allSettled`）：目录行要跑 `git worktree list`，慢且可能失败，
+ *  不许把工作区清单一起拖下水——合并成败的后果是目录行一失败、左栏的工作区分组整个塌成平铺；
+ *  反过来工作区清单失败也不影响目录行落库。目录行失败照旧抛给调用方（返回的是目录行那一份，
+ *  错误文案与过去一致），工作区清单失败只保留旧值，下次刷新再补。 */
 export async function loadCheckouts(): Promise<CheckoutView[]> {
- const [list, groups] = await Promise.all([api.listCheckouts(), api.listWorkspaces()]);
- useApp.getState().set({ checkouts: list, workspaceGroups: groups });
- return list;
+ const [co, ws] = await Promise.allSettled([api.listCheckouts(), api.listWorkspaces()]);
+ if (co.status === "fulfilled" || ws.status === "fulfilled") {
+  useApp.getState().set({
+   ...(co.status === "fulfilled" ? { checkouts: co.value } : {}),
+   ...(ws.status === "fulfilled" ? { workspaceGroups: ws.value } : {}),
+  });
+ }
+ if (co.status === "rejected") throw co.reason instanceof Error ? co.reason : new Error(String(co.reason));
+ return co.value;
 }
 
 /** 左栏刷新：项目列表 + 工作区 / 目录行清单（项目增删 / 重定位 / 移除 / 工作区编辑后都回这里）。

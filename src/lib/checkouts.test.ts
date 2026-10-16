@@ -148,4 +148,23 @@ describe("清单刷新", () => {
   expect(s.checkouts).toEqual(base);
   expect(s.workspaceGroups.map((g) => g.id)).toEqual(["w1"]);
  });
+
+ it("目录行失败：工作区清单照样落库（不塌成平铺），错误照旧抛给调用方", async () => {
+  vi.mocked(api.listCheckouts).mockRejectedValue(new Error("git worktree 挂了"));
+  vi.mocked(api.listWorkspaces).mockResolvedValue([{ id: "w1", name: "全栈", createdAt: 1, projectIds: ["a", "b"] }]);
+  useApp.setState({ checkouts: [], workspaceGroups: [] });
+  await expect(loadCheckouts()).rejects.toThrow("git worktree 挂了");
+  expect(useApp.getState().workspaceGroups.map((g) => g.id)).toEqual(["w1"]);
+ });
+
+ it("工作区清单失败：目录行照样落库，旧的工作区清单不被清空", async () => {
+  vi.mocked(api.listCheckouts).mockResolvedValue(base);
+  vi.mocked(api.listWorkspaces).mockRejectedValue(new Error("overlay 忙"));
+  useApp.setState({ checkouts: [], workspaceGroups: [{ id: "w9", name: "旧的", createdAt: 0, projectIds: [] }] });
+  const list = await loadCheckouts();
+  expect(list).toEqual(base);
+  const s = useApp.getState();
+  expect(s.checkouts).toEqual(base);
+  expect(s.workspaceGroups.map((g) => g.id)).toEqual(["w9"]);
+ });
 });

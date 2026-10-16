@@ -45,6 +45,9 @@ actEnv.IS_REACT_ACT_ENVIRONMENT = true;
 const P1: ProjectView = { id: "p1", path: "/w/alpha", name: "alpha", missing: false, sessionCount: 2, workspaceId: "w1" };
 const P2: ProjectView = { id: "p2", path: "/w/beta", name: "beta", missing: false, sessionCount: 1, workspaceId: "w1" };
 const P3: ProjectView = { id: "p3", path: "/w/solo", name: "solo", missing: false, sessionCount: 0, workspaceId: null };
+/** 覆盖层里的工作区（P1 / P2 的归属）：store 预置与后端回包必须是同一份——
+ *  冷启动会把两份一起拉回来（`loadCheckouts`），夹具里两处不一致就会互相顶掉。 */
+const W1 = { id: "w1", name: "全栈", createdAt: 0, projectIds: ["p1", "p2"] };
 
 /** 会话行相对时间的锚点：用「相对当前」的时间戳，断言「5分 / 3小时 / 2天」（测试间不跨档）。 */
 const NOW = Date.now();
@@ -78,7 +81,7 @@ beforeEach(() => {
  mock.listProjects.mockReset();
  mock.listProjects.mockResolvedValue([]);
  mock.listWorkspaces.mockReset();
- mock.listWorkspaces.mockResolvedValue([]);
+ mock.listWorkspaces.mockResolvedValue([W1]);
  mock.listCheckouts.mockReset();
  mock.listCheckouts.mockResolvedValue([]);
  mock.createWorkspace.mockReset();
@@ -94,7 +97,7 @@ beforeEach(() => {
  mock.moveProject.mockResolvedValue([]);
  useApp.setState({
   projects: [P1, P2],
-  workspaceGroups: [{ id: "w1", name: "全栈", createdAt: 0, projectIds: ["p1", "p2"] }],
+  workspaceGroups: [W1],
   sessions: [],
   activeSessionId: null,
   locale: "zh-CN",
@@ -152,10 +155,25 @@ describe("聊天侧栏的工作区分段（V21 容器在聊天形态的投影）
   expect(text).toContain("solo");
  });
 
+ it("冷启动（内存 store 全空）：工作区清单与项目一起拉回来，不塌成平铺", async () => {
+  // 重启后的真实状态：内存 store 是空的，覆盖层里工作区与归属都还在（后端数据没丢）
+  act(() => {
+   useApp.setState({ projects: [], workspaceGroups: [] });
+  });
+  mock.listProjects.mockResolvedValue([P1, P2]);
+  mock.listWorkspaces.mockResolvedValue([W1]);
+  await open();
+  expect(mock.listWorkspaces, "冷启动必须拉工作区清单").toHaveBeenCalled();
+  expect(mock.listCheckouts, "冷启动也要补目录行（worktree 的引用范围 / 上游提示靠它）").toHaveBeenCalled();
+  expect(container.querySelector("details.group\\/ws"), "工作区段应渲染").not.toBeNull();
+  expect(container.textContent).toContain("全栈");
+ });
+
  it("没有自定义工作区：平铺（不出现工作区头 / 未分组段）", async () => {
   act(() => {
    useApp.setState({ workspaceGroups: [], projects: [{ ...P1, workspaceId: null }, { ...P2, workspaceId: null }] });
   });
+  mock.listWorkspaces.mockResolvedValue([]);
   await open();
   const text = container.textContent ?? "";
   expect(text).not.toContain("未分组");
@@ -537,6 +555,7 @@ describe("项目拖拽排序（V26 控制器，v1 自终端左栏迁移）", () 
   act(() => {
    useApp.setState({ workspaceGroups: [], projects: [{ ...P1, workspaceId: null }, { ...P2, workspaceId: null }] });
   });
+  mock.listWorkspaces.mockResolvedValue([]);
   mock.moveProject.mockResolvedValue([{ ...P2, workspaceId: null }, { ...P1, workspaceId: null }]);
   await open();
 
@@ -572,6 +591,7 @@ describe("项目拖拽排序（V26 控制器，v1 自终端左栏迁移）", () 
   act(() => {
    useApp.setState({ workspaceGroups: [], projects: [{ ...P1, workspaceId: null }, { ...P2, workspaceId: null }] });
   });
+  mock.listWorkspaces.mockResolvedValue([]);
   await open();
   const scroll = container.querySelector("aside div.overflow-y-auto");
   const drop = container.querySelector('[data-group-drop=""]');
