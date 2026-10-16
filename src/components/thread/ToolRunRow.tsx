@@ -19,7 +19,7 @@ type ToolMsg = Extract<ViewMsg, { kind: "tool" }>;
  * - `edits`（写 / 改文件批）：编辑卡——文件名行常显（点击 = 打开该文件的改动 diff），
  *   行尾 `+N −M` 只染数字（MASTER §4.4）；
  * - `plans`（todo 批）：单行摘要 `更新了 N 次任务清单`——清单**当前状态**看消息列
- *   右上角的浮卡（`PlanCard`）。
+ *   底部的浮卡（`PlanCard`）。
  */
 export function ToolRunRow({ group, items, cwd }: { group: ToolGroupKind; items: ToolMsg[]; cwd: string }) {
  const t = useText();

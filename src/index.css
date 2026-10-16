@@ -22,6 +22,29 @@
  --code: #f0f0f0;
  --hover: rgb(13 13 13 / 5%);
  --active: rgb(13 13 13 / 9%);
+
+ /* ---- 终端 16 色（V42 右栏终端，xterm.js）----
+    xterm 的 theme 只吃具体颜色、不吃 CSS 变量，所以由 `lib/termTheme.ts` 在运行时
+    把下面这些 token 的**当前值**读出来喂给它——两套皮肤共用一份 token 的规矩不破。 */
+ --term-background: var(--background);
+ --term-foreground: var(--foreground);
+ --term-cursor: var(--accent);
+ --term-black: #3a4145;
+ --term-red: #dc2626;
+ --term-green: #047857;
+ --term-yellow: #b45309;
+ --term-blue: #0169cc;
+ --term-magenta: #9333ea;
+ --term-cyan: #0e7490;
+ --term-white: #626c74;
+ --term-bright-black: #626c74;
+ --term-bright-red: #ef4444;
+ --term-bright-green: #059669;
+ --term-bright-yellow: #d97706;
+ --term-bright-blue: #0285ff;
+ --term-bright-magenta: #a855f7;
+ --term-bright-cyan: #0891b2;
+ --term-bright-white: #1e2226;
 }
 
 /* 深色走中性近黑（对齐 Codex app 的灰阶：左栏最深、工作面次之、浮层最亮）；
@@ -46,6 +69,27 @@
  --code: #101010;
  --hover: rgb(255 255 255 / 7%);
  --active: rgb(255 255 255 / 11%);
+
+ /* 终端 16 色（深色档；口径同 :root 的注释） */
+ --term-background: var(--background);
+ --term-foreground: var(--foreground);
+ --term-cursor: var(--accent);
+ --term-black: #333333;
+ --term-red: #f87171;
+ --term-green: #34d399;
+ --term-yellow: #fbbf24;
+ --term-blue: #339cff;
+ --term-magenta: #c084fc;
+ --term-cyan: #22d3ee;
+ --term-white: #a8a8a8;
+ --term-bright-black: #8f8f8f;
+ --term-bright-red: #fca5a5;
+ --term-bright-green: #6ee7b7;
+ --term-bright-yellow: #fcd34d;
+ --term-bright-blue: #66b5ff;
+ --term-bright-magenta: #d8b4fe;
+ --term-bright-cyan: #67e8f9;
+ --term-bright-white: #e8e8e8;
 }
 
 /* ---- 语义层 token（MASTER §2.4，v2 落地）----
@@ -61,7 +105,7 @@
  --w-sidebar: 292px;
  /* 左栏默认宽（与 stores/app 的 SIDEBAR_DEFAULT 同步；可拖 292–480） */
  --w-panel: 320px;
- /* 右上下文面板宽（v2 新增） */
+ /* 右栏工作台默认宽（V42；实际值由 `store.workbenchWidth` 驱动——左缘可拖 260–640） */
  --measure-content: min(88rem, 85%);
  /* 中列内容测量宽（消息流正文 / 输入卡 / 目标行 / 查找条 / 归档提示）：中列 85%，两侧各留 7.5%，
     超宽屏（中列 > 1656px）封顶 88rem。`85%` 相对各自包含块——用到它的元素外层**不许再挂水平内边距**：

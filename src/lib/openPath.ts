@@ -47,6 +47,18 @@ export function useOpenPath(cwd: string) {
  return { notice, setNotice, open, confirmOpenUrl };
 }
 
+/**
+ * 在访达 / 文件管理器里显示一个路径（右栏文件树的行尾动作）。
+ * 失败静默：调用点是助手动作，不该为「显示不出来」弹错。
+ */
+export async function revealPath(path: string): Promise<void> {
+ try {
+  await revealItemInDir(path);
+ } catch {
+  // 忽略：路径已不存在等情况
+ }
+}
+
 export function hydrateDrafts() {
  try {
   const raw = localStorage.getItem("omp.drafts.v1");

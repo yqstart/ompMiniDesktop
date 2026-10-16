@@ -1,39 +1,37 @@
-import { useEffect } from "react";
-import { CheckListSquare, ChevronDown, X } from "reicon-react";
+import { useEffect, useLayoutEffect, useRef } from "react";
+import { CheckListSquare, ChevronDown } from "reicon-react";
 import { useApp } from "../../stores/app";
-import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
-import { TODO_DISPLAY, TODO_PENDING } from "../../lib/todoDisplay";
-
-/** 标题行图标钮（无边框轻量档：浮卡本身已是 elevated 面）。 */
-const ICON_BTN =
- "cursor-pointer rounded-md p-0.5 text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground";
+import { TODO_DISPLAY, TODO_PENDING, countTodos, todoStatsText } from "../../lib/todoDisplay";
 
 /**
- * 任务清单浮卡（v2，消息列右上角常驻）：折叠态 = 进度徽标，展开态 = 阶段清单。
+ * 任务清单浮卡（v3，DeepSeek Harness 形态）：**贴消息列底部、浮在输入卡上方的宽卡**。
  *
  * - 数据 = `plansBySession`（todo 工具帧 `details.phases` 实时写入 + `get_state.todoPhases`
  *   回读）；开合 = `planCardBySession`（无记录 = 首次出现自动展开，见 store 的 `applyPlans`）；
- * - 全部完成自动折叠为 ✓ 徽标（同一份清单只自动折一次——用户手动再展开不再打扰）；
- * - 清单清空（回读发现 `[]` / `todo_auto_clear` 帧）即退场；手动隐藏后本次计划不再出现；
- * - 挂载在 Thread 的相对定位外壳内：不入消息流、不随滚动走；**右缘贴消息列右缘
- *   （8px）**——折叠胶囊常驻，必须避开正文列（对齐正文右缘会骑在正文最后一列字符上，
- *   用户实测）；贴边后胶囊落在正文列右侧的留白里（宽窗完全不相交），窄窗也只轻微重叠。
+ * - **两态都是同一张卡**：折叠 = 只留头部行（图标 + 标题 + 统计 + 折叠箭头），展开 = 头部行 +
+ *   清单区（超过 `max-h` 内滚）。头部行整行可点 = 开合开关；
+ * - 宽度与左缘对齐消息列正文列（`--measure-content`，同一变量、同一基准），**水平居中**——
+ *   卡片是浮层（`pointer-events-none` 外壳 + 卡片自身 `auto`），不参与消息流布局；
+ * - 高度经 `onHeightChange` 回报 `Thread`：消息流底部按卡片高度留出等高空白（末尾内容不被
+ *   浮卡永久盖住），「回到底部」按钮同步上移让位；
+ * - 全部完成自动折成头部行（只在 `allDone` 翻转那一下折——用户手动再展开不再打扰）；
+ * - 清单清空（回读发现 `[]` / `todo_auto_clear` 帧）即退场。
  */
-export function PlanCard() {
+export function PlanCard({ onHeightChange }: { onHeightChange?: (height: number) => void }) {
  const t = useText();
  const sid = useApp((s) => s.activeSessionId);
  const phases = useApp((s) => (sid ? s.plansBySession[sid] : undefined));
  const card = useApp((s) => (sid ? s.planCardBySession[sid] : undefined));
  const setPlanCard = useApp((s) => s.setPlanCard);
+ const host = useRef<HTMLDivElement>(null);
 
- const total = phases?.reduce((n, p) => n + p.tasks.length, 0) ?? 0;
- const done = phases?.reduce((n, p) => n + p.tasks.filter((x) => x.status === "completed").length, 0) ?? 0;
- const allDone = total > 0 && done === total;
- const visible = !!sid && !!phases && phases.length > 0 && card !== "hidden";
+ const counts = countTodos(phases ?? []);
+ const allDone = counts.total > 0 && counts.done === counts.total;
+ const visible = !!sid && !!phases && phases.length > 0;
  const expanded = card !== "collapsed";
 
- // 全部完成 → 收成徽标：**只在 `allDone` 翻转的那一下折**（deps 只有 allDone）——
+ // 全部完成 → 收成头部行：**只在 `allDone` 翻转的那一下折**（deps 只有 allDone）——
  // 用户随后手动再展开不被打扰；开合态从 store 读实时值（多实例 / 重挂载时
  // 不会因为本地 ref 没记录过折叠事件而把用户的展开动作再折回去）。
  useEffect(() => {
@@ -44,51 +42,50 @@ export function PlanCard() {
   }
  }, [allDone]);
 
+ // 高度上报（退场 / 收起 / 清单增减都算）：`ResizeObserver` 盯卡片自身，视口缩放导致的换行
+ // 也在内；jsdom（单测）没有 ResizeObserver，按项目惯例留一次同步上报即可。
+ useLayoutEffect(() => {
+  const el = host.current;
+  if (!el) {
+   onHeightChange?.(0);
+   return;
+  }
+  const report = () => onHeightChange?.(el.offsetHeight);
+  report();
+  if (typeof ResizeObserver === "undefined") return;
+  const ro = new ResizeObserver(report);
+  ro.observe(el);
+  return () => ro.disconnect();
+ }, [onHeightChange, visible, expanded]);
+
  if (!visible || !sid || !phases) return null;
 
- const badgeTone = allDone ? "shrink-0 text-ok" : "shrink-0 text-accent";
+ const tone = allDone ? "text-ok" : "text-accent";
+ const stats = todoStatsText(counts, t);
  return (
-  <div className="absolute top-5 right-2 z-10">
-   {!expanded && (
+  // 外壳只负责定位与居中；`pointer-events-none` 让卡外的底部区域照常和消息流交互
+  <div ref={host} className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
+   <div className="pointer-events-auto w-(--measure-content) overflow-hidden rounded-xl border border-border bg-elevated shadow-pop">
     <button
-     onClick={() => setPlanCard(sid, "expanded")}
-     className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-elevated px-2 py-1 shadow-pop transition-colors duration-100 hover:bg-hover"
-     aria-label={fmt(t.planBadgeAria, done, total)}
-     title={t.planTitle}
+     type="button"
+     onClick={() => setPlanCard(sid, expanded ? "collapsed" : "expanded")}
+     aria-expanded={expanded}
+     title={expanded ? t.planCollapse : t.planExpand}
+     className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left transition-colors duration-100 hover:bg-hover"
     >
-     <CheckListSquare size={13} aria-hidden className={badgeTone} />
-     <span className={`font-mono text-[11px] ${allDone ? "text-ok" : "text-muted"}`}>
-      {done}/{total}
+     <CheckListSquare size={13} aria-hidden className={`shrink-0 ${tone}`} />
+     <span className="shrink-0 text-[12px] font-medium text-foreground" title={t.planTitle}>
+      {t.planTitle}
      </span>
+     <span className="truncate text-[11px] text-faint">{stats}</span>
+     <ChevronDown
+      size={13}
+      aria-hidden
+      className={`ml-auto shrink-0 text-faint transition-transform duration-150 ${expanded ? "" : "-rotate-90"}`}
+     />
     </button>
-   )}
-   {expanded && (
-    <div
-     className="w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-elevated shadow-pop"
-     role="group"
-     aria-label={t.planTitle}
-    >
-     <div className="flex items-center gap-1.5 border-b border-border-soft px-2.5 py-1.5">
-      <CheckListSquare size={13} aria-hidden className={badgeTone} />
-      <span className="text-xs font-medium text-muted">{t.planTitle}</span>
-      <span className={`font-mono text-[11px] ${allDone ? "text-ok" : "text-faint"}`}>
-       {done}/{total}
-      </span>
-      <div className="ml-auto flex items-center gap-0.5">
-       <button
-        onClick={() => setPlanCard(sid, "collapsed")}
-        className={ICON_BTN}
-        aria-label={t.planCollapse}
-        title={t.planCollapse}
-       >
-        <ChevronDown size={13} aria-hidden className="rotate-180" />
-       </button>
-       <button onClick={() => setPlanCard(sid, "hidden")} className={ICON_BTN} aria-label={t.planHide} title={t.planHide}>
-        <X size={13} aria-hidden />
-       </button>
-      </div>
-     </div>
-     <div className="max-h-[min(50vh,26rem)] space-y-2 overflow-y-auto px-2.5 py-2">
+    {expanded && (
+     <div className="max-h-[min(38vh,18rem)] space-y-2 overflow-y-auto border-t border-border-soft px-3 py-2">
       {phases.map((p, pi) => (
        <div key={pi}>
         {p.name && <div className="mb-0.5 text-[11px] font-medium text-muted">{p.name}</div>}
@@ -96,8 +93,8 @@ export function PlanCard() {
          {p.tasks.map((task, ti) => {
           const d = TODO_DISPLAY[task.status] ?? TODO_PENDING;
           return (
-           <li key={ti} className="flex items-start gap-1.5 text-[12px] leading-5">
-            <span aria-hidden className={`shrink-0 ${d.tone}`}>
+           <li key={ti} className="flex items-start gap-2 text-[12px] leading-5">
+            <span aria-hidden className={`w-3 shrink-0 text-center ${d.tone}`}>
              {d.symbol}
             </span>
             <span className={`min-w-0 ${task.status === "in_progress" ? "text-foreground" : "text-muted"}`}>
@@ -112,8 +109,8 @@ export function PlanCard() {
        </div>
       ))}
      </div>
-    </div>
-   )}
+    )}
+   </div>
   </div>
  );
 }

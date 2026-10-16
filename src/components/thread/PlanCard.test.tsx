@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 /**
- * 任务清单浮卡（v2）渲染与开合回归：
- * - 无清单 / 隐藏态不渲染；展开态列出阶段与任务（状态符号 + 比例 + 阻塞说明）；
- * - 收起为徽标、点徽标展开、X 隐藏（写 store 的 `planCardBySession`）；
- * - 全部完成自动折叠为 ✓ 徽标（同一份清单只折一次——手动再展开不被再次折叠）。
+ * 任务清单浮卡（v3，贴底宽卡）渲染与开合回归：
+ * - 无清单不渲染；展开态列出阶段与任务（状态符号 + 阻塞说明）；
+ * - 头部行 = 开合开关（折叠态只留头部行：标题 + 统计；点它展开）；
+ * - 统计文案为「未完成档位」口径（进行中 / 待处理 / 受阻；全完成给完成计数）；
+ * - 全部完成自动折成头部行（同一份清单只折一次——手动再展开不被再次折叠）；
+ * - 高度上报（Thread 靠它给消息流底部留白）：挂载即上报一次，退场回报 0。
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { TodoPhase } from "@shared/types";
@@ -33,32 +35,30 @@ const PHASES: TodoPhase[] = [
  },
 ];
 
-function mount() {
+function mount(onHeightChange?: (h: number) => void) {
  const container = document.createElement("div");
  document.body.appendChild(container);
  const root = createRoot(container);
  roots.push(root);
  act(() => {
-  root.render(createElement(PlanCard));
+  root.render(onHeightChange ? createElement(PlanCard, { onHeightChange }) : createElement(PlanCard));
  });
  return container;
 }
 
-function seed(plans: Record<string, TodoPhase[]>, card: Record<string, "expanded" | "collapsed" | "hidden">) {
+function seed(plans: Record<string, TodoPhase[]>, card: Record<string, "expanded" | "collapsed">) {
  act(() => {
   useApp.setState({ activeSessionId: "s1", locale: "zh-CN", plansBySession: plans, planCardBySession: card });
  });
 }
 
 describe("任务清单浮卡（PlanCard）", () => {
- it("无清单 / 隐藏态不渲染", () => {
+ it("无清单不渲染", () => {
   seed({}, {});
-  expect(mount().textContent).toBe("");
-  seed({ s1: PHASES }, { s1: "hidden" });
   expect(mount().textContent).toBe("");
  });
 
- it("展开态列出任务、比例与阻塞说明", () => {
+ it("展开态列出阶段、任务、阻塞说明与统计", () => {
   seed(
    {
     s1: [{ name: "阶段", tasks: [{ content: "卡住项", status: "blocked", blocker: "等上游修复" }] }],
@@ -66,35 +66,35 @@ describe("任务清单浮卡（PlanCard）", () => {
    { s1: "expanded" },
   );
   const c = mount();
-  expect(c.textContent).toContain("任务清单");
+  expect(c.textContent).toContain("任务");
+  expect(c.textContent).toContain("1 受阻");
+  expect(c.textContent).toContain("阶段");
   expect(c.textContent).toContain("卡住项");
   expect(c.textContent).toContain("等上游修复");
-  expect(c.textContent).toContain("0/1");
   expect(c.textContent).toContain("⊘");
  });
 
- it("收起为徽标（n/m）、点徽标再展开、X 隐藏", () => {
+ it("折叠态只留头部行（标题 + 未完成档位统计），点头部行展开", () => {
   seed({ s1: PHASES }, { s1: "collapsed" });
   const c = mount();
-  // 折叠态：只有徽标（进度 + 点击展开的 aria 文案），没有清单行
-  expect(c.textContent).toContain("1/3");
+  expect(c.textContent).toContain("任务");
+  expect(c.textContent).toContain("1 进行中 · 1 待处理");
   expect(c.textContent).not.toContain("已完成的项");
-  const badge = c.querySelector<HTMLButtonElement>('button[aria-label="任务清单 1/3，点击展开"]')!;
+  const head = c.querySelector<HTMLButtonElement>('button[title="展开任务清单"]')!;
   act(() => {
-   badge.click();
+   head.click();
   });
   expect(useApp.getState().planCardBySession["s1"]).toBe("expanded");
   expect(c.textContent).toContain("已完成的项");
-  // X = 隐藏（本次计划不再出现）
-  const hide = c.querySelector<HTMLButtonElement>('button[aria-label="隐藏任务清单"]')!;
+  // 展开后头部行仍是同一个开合开关：再点回去
+  const head2 = c.querySelector<HTMLButtonElement>('button[title="收起"]')!;
   act(() => {
-   hide.click();
+   head2.click();
   });
-  expect(useApp.getState().planCardBySession["s1"]).toBe("hidden");
-  expect(c.textContent).toBe("");
+  expect(useApp.getState().planCardBySession["s1"]).toBe("collapsed");
  });
 
- it("全部完成自动折叠为 ✓ 徽标；手动再展开不被再次折叠", () => {
+ it("全部完成自动折成头部行；手动再展开不被再次折叠", () => {
   seed(
    {
     s1: [{ name: "阶段", tasks: [{ content: "甲", status: "completed" }, { content: "乙", status: "completed" }] }],
@@ -103,14 +103,24 @@ describe("任务清单浮卡（PlanCard）", () => {
   );
   const c = mount();
   expect(useApp.getState().planCardBySession["s1"]).toBe("collapsed");
-  expect(c.textContent).toContain("2/2");
+  expect(c.textContent).toContain("2 已完成");
   expect(c.textContent).not.toContain("甲");
   // 用户手动再展开看完成清单：不再被自动折叠打扰
-  const badge = c.querySelector("button")!;
+  const head = c.querySelector("button")!;
   act(() => {
-   badge.click();
+   head.click();
   });
   expect(useApp.getState().planCardBySession["s1"]).toBe("expanded");
   expect(c.textContent).toContain("甲");
+ });
+
+ it("高度上报：挂载上报、退场回报 0", () => {
+  const onHeightChange = vi.fn();
+  seed({}, {});
+  mount(onHeightChange);
+  expect(onHeightChange).toHaveBeenCalledWith(0);
+  onHeightChange.mockClear();
+  seed({ s1: PHASES }, { s1: "expanded" });
+  expect(onHeightChange).toHaveBeenCalled();
  });
 });

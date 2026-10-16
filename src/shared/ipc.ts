@@ -144,6 +144,15 @@ export const IPC = {
  savePaste: "save_paste",
  /** 本地 shell（V41，codex 的 `!` 前缀）：在会话进程里跑一条命令并取回输出。 */
  runBash: "run_bash",
+ // —— V42（右栏工作台）：文件目录树 + 终端 ——
+ /** 列一层目录（文件页签懒加载）；`withRepoRoot` 只在树根传（变更标色要仓库根）。 */
+ listDir: "list_dir",
+ /** 打开终端：PTY 里的登录 shell，输出经 Channel 回传（见 `pty.rs`）。 */
+ terminalSpawn: "terminal_spawn",
+ terminalWrite: "terminal_write",
+ terminalResize: "terminal_resize",
+ /** 关闭终端（kill 子进程；已退出时是 no-op）。 */
+ terminalKill: "terminal_kill",
  // events
  /** 供应商登录进度（payload = 全量 ProviderLoginStatus 快照）。 */
  providerLogin: "omp-provider://login",

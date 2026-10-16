@@ -6,6 +6,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- 右栏从「上下文」面板换成**工作台**（开关仍是 `⌘⇧G`、仍是默认收起的第三栏），两个页签：
+  - **文件**：当前会话工作目录的**只读目录树**——懒加载一层（展开才取数）、目录优先 + 名称升序、每目录分片 200 条「显示更多」续铺、单层超 2000 条截断并在行下注明；未提交改动按 `get_change_set` 的相对路径换算成绝对路径打徽标（`M` 警示 / `A` 新增 / `D` 删除 / `R`·`C` accent / `?` 未跟踪）；点文件交给系统默认程序打开（失败退到「在访达中显示」），行尾 hover 出「引用到输入框」（与 `⌘⇧P` 引用浮层同一条 `appendReference` 注入口径）与「在访达中显示」。
+  - **终端**：真 PTY 的登录 shell（后端 `portable-pty` 重建 `pty.rs`，前端 xterm.js）——可交互、能跑全屏程序，继承登录 shell 的 PATH（GUI 启动的 .app 只有 launchd 的贫瘠 PATH）；面板**常驻挂载**，收起右栏 / 切页签 / 切设置视图只改显隐，shell 与回看缓冲都不丢；终端按 cwd 保留（`store.terminalCwds`，上限 4，超出淘汰最旧的 shell），shell 退出后浮出「重新打开」，应用退出统一 `kill_all`。
+- 后端新增五个命令：`list_dir`（`workspace_fs.rs`：单层目录列举，树根请求顺带返回 git 仓库根供标色换算）与 `terminal_spawn` / `terminal_write` / `terminal_resize` / `terminal_kill`（输出经 Tauri Channel 回传，口径与 `start_omp_update` 一致：命令立刻返回、过程走通道）。终端 16 色 `--term-*` token 与 `lib/termTheme.ts` 一并回到 `index.css`（切皮肤时终端跟色）。
+- **右栏宽度可拖**（`store.workbenchWidth`：260–640、默认 320、localStorage 持久化）：手柄在右栏左缘，交互与左栏 `SidebarShell` 同一套——平时 3px 隐身热区、悬停 / 拖拽中 6px 高亮，手柄聚焦时 ← 向左扩、→ 向右收（每次 8px）；宽度按「指针到右栏右缘的距离」计算（主区 `mr-2` 外边距不影响手感），并带窗口约束：给中列留 420px，窗口变窄时自动把超限宽度收回（终端与文件树随宽度 reflow，xterm 由既有的 ResizeObserver 重新 fit 并向 PTY 推新行列数）。
+
+### Changed
+
+- 右栏「上下文」面板（变更 / 进度 / 子代理 / 来源四区块，v2 起）整体退场，由工作台承接这一栏。连带口径：① 提交 / 推送只剩输入卡顶行「提交」键一个入口（浮层链路与状态口径不变）；② 子代理清单与输出、任务清单的停靠完整视图、上下文来源清单不再有界面入口——数据层照旧（`subagentsBySession` 事件面、`plansBySession` 回读与消息列任务清单浮卡都不受影响）；③ 删除 `ContextPanel` / `PanelSection` / 四个区块组件（含测试）与 `lib/panelSources.ts`（含测试）。
+- 右栏开关的状态字段随语义更名：`store.contextPanelOpen` → `workbenchOpen`，另加 `workbenchTab`（localStorage 键 `omp.workbench.v1` / `omp.workbenchTab.v1`；旧键 `omp.contextPanel.v1` 作废，首次启动回到默认收起）。
+- 任务清单浮卡改成 **DeepSeek Harness 形态**：从消息列右上角的常驻胶囊换成**贴消息列底部、浮在输入卡上方的宽卡**——宽度 = `--measure-content`（与正文列 / 输入卡同宽、同左缘，水平居中），头部行常驻（`CheckListSquare` + 「任务」+ 未完成档位统计「1 进行中 · 10 待处理」+ 折叠箭头，**整行 = 开合开关**），展开时清单区 `max-h-[min(38vh,18rem)]` 内滚。卡片高度回报 `Thread`：消息流底部垫出等高留白（滚到底时末尾内容停在卡片之上，不被永久盖住）、「回到底部」按钮同步上移让位。同时**去掉隐藏档**（`PlanCardState` 只剩 `expanded` / `collapsed`，两态都是同一张卡），计数与统计文案收进 `lib/todoDisplay.ts`（`countTodos` / `todoStatsText`，零计数档位不出现、全部完成给完成计数）。
+
 ### Fixed
 - 「选项目 → 新建会话」不再因为项目里留着**失效的模型 / 思考档**而整个失败：壳此前把覆盖层里的 `last_model` / `last_thinking` 原样当 `omp --model` / `--thinking` 传下去，而 omp 对不存在的模型是**直接退出**（实测 `Error: Model "ccproxy/deepseek/deepseek-v4.1-flash-fast" not found`，stdout 一帧都没有）——用户看到的是「新建会话失败：omp 进程意外退出」，真正的原因被 `Stdio::null()` 丢掉了。现在：① omp 的 stderr 被采集并接进错误消息（`omp 输出：Model "…" not found` 直接进错误，提示行进 hint），任何启动失败都看得出原因；② 首发被拒**自动降级重试**（去掉这两个参数、用 omp 默认档），并把项目里那对失效偏好清掉——不自愈的话每次新建都要白失败一次；③ 降级说明随回包返回，前端在会话流尾落一条说明行（「项目上次使用的模型「…」在 omp 中已不存在，本次已改用默认模型。」），不许静默换模型；④ 若降级后 omp 仍未拿到模型（问题不在项目偏好上），如实说明并带上 omp 原话，不动用户的项目偏好。覆盖层里的历史脏数据（模型被上游改名 / 删除）由 ② 自愈
 ## [0.1.2] - 2026-10-15

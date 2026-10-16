@@ -36,6 +36,8 @@ pub struct AppState {
     /// 列表行「运行中」标记不另存 map：判据是进程表内活动态（`activity_is_busy`），
     /// 见 `running_snapshot`——单一真值，避免「打开过就一直转圈」。
     pub runtime: crate::runtime::RuntimeMap,
+    /// V42 右栏「终端」页签：终端 id → PTY 句柄（前端打开 / 关闭驱动，见 `pty.rs`）。
+    pub terminals: crate::pty::TerminalMap,
     /// V14 工作区「提交并推送」：cwd → 任务句柄（同一工作区拒绝重入，不同工作区可并行，
     /// 见 `git_commit.rs`）。
     pub commit_tasks: crate::git_commit::CommitMap,
@@ -2786,6 +2788,7 @@ pub fn load_state<R: tauri::Runtime>(app: &AppHandle<R>) -> AppState {
         models_edit: Mutex::new(()),
         extensions_edit: Mutex::new(()),
         runtime: std::sync::Arc::new(Mutex::new(HashMap::new())),
+        terminals: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
         commit_tasks: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
         omp_update_task: std::sync::Arc::new(std::sync::Mutex::new(None)),
     }

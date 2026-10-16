@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
-import type { BtwRecord, ChangeSet, CheckoutView, CommitEvent, ContextBreakdown, FallbackChainsInfo, GitInfo, Goal, GoalState, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, SessionPage, SessionRuntime, SessionStats, SessionView, SkillFileContent, SkillsView, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
+import type { BtwRecord, ChangeSet, CheckoutView, CommitEvent, ContextBreakdown, DirListing, FallbackChainsInfo, GitInfo, Goal, GoalState, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, SessionPage, SessionRuntime, SessionStats, SessionView, SkillFileContent, SkillsView, TerminalEvent, TerminalSpawnOpts, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -409,4 +409,26 @@ export const api = {
  startOmpUpdate: (onEvent: Channel<OmpUpdateEvent>) => call<void>(IPC.startOmpUpdate, { onEvent }),
  /** 取消进行中的更新（杀进程组；终局经 Channel 的 `exit` 到达，phase = canceled）。 */
  cancelOmpUpdate: () => call<void>(IPC.cancelOmpUpdate),
+
+ // ---------- V42（右栏工作台）：文件目录树 + 终端 ----------
+
+ /**
+  * 列一层目录（右栏「文件」页签的懒加载入口）：只读、不递归。
+  * `withRepoRoot` 只在树根传 true——变更标色要仓库根把 `getChangeSet` 的相对路径换算成绝对路径。
+  */
+ listDir: (path: string, withRepoRoot?: boolean) =>
+  call<DirListing>(IPC.listDir, { path, withRepoRoot: withRepoRoot ?? false }),
+ /**
+  * 打开终端（PTY 里的登录 shell）：输出 / 退出走 Channel（`onEvent`），
+  * 与 `startOmpUpdate` 同一套「命令立刻返回、过程走通道」口径。
+  */
+ terminalSpawn: (opts: TerminalSpawnOpts, onEvent: Channel<TerminalEvent>) =>
+  call<void>(IPC.terminalSpawn, { opts, onEvent }),
+ /** 键盘输入写入 PTY（xterm 的 onData 原样透传）。 */
+ terminalWrite: (id: string, data: string) => call<void>(IPC.terminalWrite, { id, data }),
+ /** 面板尺寸变化 → PTY 行列数。 */
+ terminalResize: (id: string, cols: number, rows: number) =>
+  call<void>(IPC.terminalResize, { id, cols, rows }),
+ /** 关闭终端：kill 子进程（SIGHUP → 1s 后进程组 SIGKILL 兜底，见 `pty.rs`）。 */
+ terminalKill: (id: string) => call<void>(IPC.terminalKill, { id }),
 };

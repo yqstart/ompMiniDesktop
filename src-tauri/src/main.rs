@@ -14,12 +14,14 @@ mod proc;
 mod project_files;
 mod provider_usage;
 mod providers;
+mod pty;
 mod runtime;
 mod session_scan;
 mod settings;
 mod skills;
 mod title_prompt;
 mod usage;
+mod workspace_fs;
 
 use commands::*;
 use tauri::Manager;
@@ -117,6 +119,12 @@ fn main() {
             git_ops::get_change_set,
             git_ops::switch_branch,
             project_files::list_project_files,
+            // —— V42（右栏工作台）：文件目录树 + 终端 ——
+            workspace_fs::list_dir,
+            pty::terminal_spawn,
+            pty::terminal_write,
+            pty::terminal_resize,
+            pty::terminal_kill,
             plugins::list_plugins,
             plugins::set_plugin_enabled,
             plugins::set_plugin_features,
@@ -161,6 +169,7 @@ fn main() {
             if let tauri::RunEvent::Exit = event {
                 let state = app.state::<AppState>();
                 runtime::kill_all(&state.runtime);
+                pty::kill_all(&state.terminals);
                 git_commit::kill_all(&state.commit_tasks);
                 omp_update::kill_update(&state.omp_update_task);
             }

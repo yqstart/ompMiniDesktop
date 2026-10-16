@@ -58,8 +58,23 @@ type AppState = {
  setSidebarWidth: (w: number) => void;
  /** 右侧上下文面板是否展开（v2 三栏；localStorage 持久化，**默认收起**——首启不自动展开）。
   *  面板始终停靠为主区第三栏：打开 = 布局变三栏，会话列让位、不被遮盖。 */
- contextPanelOpen: boolean;
- setContextPanelOpen: (v: boolean) => void;
+ /** 右侧工作台面板是否展开（V42 三栏；localStorage 持久化，**默认收起**——首启不自动展开）。
+  *  面板始终停靠为主区第三栏：打开 = 布局变三栏，会话列让位、不被遮盖。 */
+ workbenchOpen: boolean;
+ setWorkbenchOpen: (v: boolean) => void;
+ /** 工作台当前页签（文件 / 终端；localStorage 持久化，重开还是上次那一个）。 */
+ workbenchTab: WorkbenchTab;
+ setWorkbenchTab: (tab: WorkbenchTab) => void;
+ /** 右栏工作台宽度（260–640，默认 320，localStorage 持久化；左缘可拖 / 焦点下 ←→ 微调）。 */
+ workbenchWidth: number;
+ setWorkbenchWidth: (w: number) => void;
+ /**
+  * 右栏终端保留表（V42）：**打开过终端的目录**，保序、最多 `MAX_TERMINALS` 个——
+  * 每个终端是一个常驻 shell，切会话不该把上一个项目的 shell 直接杀掉；
+  * 超出上限时最旧的目录被淘汰（对应组件卸载 = kill 它的进程）。运行期状态，不持久化。
+  */
+ terminalCwds: string[];
+ rememberTerminalCwd: (cwd: string) => void;
 
  // ---------- 聊天形态（v1 起唯一形态） ----------
 
@@ -306,13 +321,56 @@ function loadSidebarWidth(): number {
  }
 }
 
-/** 右上下文面板的初始展开态（v2）：**默认收起**（首次启动不自动占位），用户展开后记住。 */
-function loadContextPanelOpen(): boolean {
+/** 右栏工作台的两个页签（V42）：文件目录树 / 终端。 */
+export type WorkbenchTab = "files" | "terminal";
+
+/**
+ * 右栏工作台宽度（V42）：可拖 260–640，默认 320（= `index.css` 的 `--w-panel`）。
+ *
+ * 下限由终端定：xterm 12px 等宽字在 260px 里约 34 列，再窄看不了常规命令输出；
+ * 上限由中列定：消息列还要放得下正文（`--measure-content` = 85%）与输入卡，640px 之后
+ * 扩宽只服务文件树长路径，收益不再抵得上挤压会话列。拖拽时另有「给中列留 420px」的
+ * 窗口约束（见 `WorkbenchPanel` 的 `maxWidthNow`），所以实际可达上限可能更小。
+ */
+export const WORKBENCH_MIN = 260;
+export const WORKBENCH_MAX = 640;
+export const WORKBENCH_DEFAULT = 320;
+
+/** 右栏同时保留的终端数（按 cwd）：每个终端是一个常驻 shell 进程，不无限攒。 */
+const MAX_TERMINALS = 4;
+
+/** 右栏工作台面板的初始展开态（V42）：**默认收起**（首次启动不自动占位），用户展开后记住。 */
+function loadWorkbenchOpen(): boolean {
  try {
   if (typeof localStorage === "undefined") return false;
-  return localStorage.getItem("omp.contextPanel.v1") === "1";
+  return localStorage.getItem("omp.workbench.v1") === "1";
  } catch {
   return false;
+ }
+}
+
+/** 工作台页签的初始值（默认「文件」）。 */
+function loadWorkbenchTab(): WorkbenchTab {
+ try {
+  if (typeof localStorage === "undefined") return "files";
+  return localStorage.getItem("omp.workbenchTab.v1") === "terminal" ? "terminal" : "files";
+ } catch {
+  return "files";
+ }
+}
+
+/** 右栏宽度的初始值（`omp.workbenchWidth`；越界值夹回范围、坏值回默认）。 */
+function loadWorkbenchWidth(): number {
+ try {
+  if (typeof localStorage === "undefined") return WORKBENCH_DEFAULT;
+  const raw = localStorage.getItem("omp.workbenchWidth");
+  // 缺键（首次启动）回默认：`Number(null)` 是 0，不先判 null 会被夹成下限 260
+  if (raw === null) return WORKBENCH_DEFAULT;
+  const v = Number(raw);
+  if (!Number.isFinite(v)) return WORKBENCH_DEFAULT;
+  return Math.min(WORKBENCH_MAX, Math.max(WORKBENCH_MIN, v));
+ } catch {
+  return WORKBENCH_DEFAULT;
  }
 }
 
@@ -367,15 +425,42 @@ export const useApp = create<AppState>((set, get) => ({
   }
   set({ sidebarWidth: v });
  },
- contextPanelOpen: loadContextPanelOpen(),
- setContextPanelOpen: (v) => {
+ workbenchOpen: loadWorkbenchOpen(),
+ setWorkbenchOpen: (v) => {
   try {
-   localStorage.setItem("omp.contextPanel.v1", v ? "1" : "0");
+   localStorage.setItem("omp.workbench.v1", v ? "1" : "0");
   } catch {
    // 持久化失败不阻断本次切换
   }
-  set({ contextPanelOpen: v });
+  set({ workbenchOpen: v });
  },
+ workbenchTab: loadWorkbenchTab(),
+ setWorkbenchTab: (tab) => {
+  try {
+   localStorage.setItem("omp.workbenchTab.v1", tab);
+  } catch {
+   // 持久化失败不阻断本次切换
+  }
+  set({ workbenchTab: tab });
+ },
+ workbenchWidth: loadWorkbenchWidth(),
+ setWorkbenchWidth: (w) => {
+  const v = Math.min(WORKBENCH_MAX, Math.max(WORKBENCH_MIN, Math.round(w)));
+  try {
+   localStorage.setItem("omp.workbenchWidth", String(v));
+  } catch {
+   // 持久化失败不阻断本次拖拽
+  }
+  set({ workbenchWidth: v });
+ },
+ terminalCwds: [],
+ rememberTerminalCwd: (cwd) =>
+  set((s) =>
+   // 已经在表里 = 不写（值没变不写，避免无意义的重渲染）
+   s.terminalCwds.includes(cwd)
+    ? s
+    : { terminalCwds: [...s.terminalCwds, cwd].slice(-MAX_TERMINALS) },
+  ),
 
  // ---------- 聊天形态（v1 起唯一形态） ----------
 
@@ -464,7 +549,7 @@ export const useApp = create<AppState>((set, get) => ({
    if (JSON.stringify(s.plansBySession[sid]) === JSON.stringify(phases)) return {};
    return {
     plansBySession: { ...s.plansBySession, [sid]: phases },
-    // 首次出现（无浮卡记录）：自动展开一次；用户之后的收起 / 隐藏不被覆盖
+    // 首次出现（无浮卡记录）：自动展开一次；用户之后的收起不被覆盖
     ...(s.planCardBySession[sid]
      ? {}
      : { planCardBySession: { ...s.planCardBySession, [sid]: "expanded" as PlanCardState } }),

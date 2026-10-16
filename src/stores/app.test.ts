@@ -100,7 +100,7 @@ describe("任务清单：applyPlans / setPlanCard", () => {
   expect(useApp.getState().plansBySession).toBe(before);
  });
 
- it("用户收起 / 隐藏后，后续清单更新不覆盖开合状态", () => {
+ it("用户收起后，后续清单更新不覆盖开合状态", () => {
   useApp.setState({ plansBySession: {}, planCardBySession: {} });
   useApp.getState().applyPlans("s1", P1);
   useApp.getState().setPlanCard("s1", "collapsed");

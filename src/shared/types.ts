@@ -943,7 +943,7 @@ export type TodoTask = { content: string; status: string; blocker?: string };
 export type TodoPhase = { name: string; tasks: TodoTask[] };
 
 /** 任务清单浮卡的 UI 状态（会话级；无记录 = 计划首次出现自动展开，见 store 的 `applyPlans`）。 */
-export type PlanCardState = "expanded" | "collapsed" | "hidden";
+export type PlanCardState = "expanded" | "collapsed";
 
 /** 可用命令的一条子命令（omp `subcommands[]` 原样透传；本期只作行内说明，不做二级补全）。 */
 export type AvailableSubcommand = { name: string; description?: string; usage?: string };
@@ -1111,3 +1111,43 @@ export type SessionStatus =
  | { state: "awaiting-approval" }
  | { state: "error"; detail: string }
  | { state: "exited"; detail: string };
+
+// ---------- V42（右栏工作台）：文件目录树 + 终端 ----------
+
+/** 目录里的一个条目（`list_dir` 的返回项）。 */
+export interface DirEntry {
+ name: string;
+ /** 绝对路径（打开 / 引用注入直接用它）。 */
+ path: string;
+ /** 目录（跟随符号链接后的判断：链接到目录也能展开）。 */
+ isDir: boolean;
+ /** 符号链接（列表里标 `↗`，不假装是真实目录）。 */
+ isSymlink: boolean;
+ /** 文件字节数；目录 / stat 失败为 null。 */
+ size: number | null;
+}
+
+/** 一次目录列举（文件页签懒加载一层的结果）。 */
+export interface DirListing {
+ path: string;
+ /** 父目录（文件系统根为 null）。 */
+ parent: string | null;
+ entries: DirEntry[];
+ /** 命中后端上限：界面注明「还有更多未列出」。 */
+ truncated: boolean;
+ /** 所属 git 仓库根（仅树根请求时给）：变更标色按它换算相对路径。 */
+ repoRoot: string | null;
+}
+
+/** 终端 spawn 入参（`id` 由前端生成：写 / resize / kill 都用它寻址）。 */
+export interface TerminalSpawnOpts {
+ id: string;
+ cwd: string;
+ cols: number;
+ rows: number;
+ /** 指定 shell 可执行文件；缺省 = 用户登录 shell（`$SHELL`，退回 /bin/zsh）。 */
+ shell?: string | null;
+}
+
+/** 终端事件（Channel 回传）：PTY 输出 / shell 退出。 */
+export type TerminalEvent = { type: "data"; data: string } | { type: "exit"; code: number | null };

@@ -26,7 +26,7 @@ import { sessionTitleForDisplay } from "../../lib/sessionTitle";
  * - 左端窄屏（<768px）保留抽屉入口，否则项目列表与设置不可达。
  */
 export function TopBar() {
- const { activeSessionId, sessions, set, contextPanelOpen, setContextPanelOpen } = useApp();
+ const { activeSessionId, sessions, set, workbenchOpen, setWorkbenchOpen } = useApp();
  const t = useText();
  const cur = sessions.find((s) => s.id === activeSessionId);
  /** 改名草稿：`original` = 打开时的回显值（**显示口径**，标题卡前缀已剥）——原样提交 = 没改名，不写 omp。 */
@@ -195,14 +195,14 @@ export function TopBar() {
      </button>
     )}
    </div>
-   {/* 右端图标组（v2）：右面板开关（上下文容量环 / 供应商用量在输入卡工具行） */}
+   {/* 右端图标组（v2）：右栏工作台开关（文件 / 终端；用量与上下文容量环在输入卡工具行） */}
    <div className="ml-auto flex items-center gap-0.5">
     <button
-     onClick={() => setContextPanelOpen(!contextPanelOpen)}
-     className={`flex cursor-pointer items-center justify-center rounded-md p-1.5 transition-colors duration-100 ${contextPanelOpen ? "bg-active text-foreground" : "text-muted hover:bg-hover hover:text-foreground"}`}
-     aria-label={t.panelToggleAria}
-     aria-pressed={contextPanelOpen}
-     title={t.panelToggleAria}
+     onClick={() => setWorkbenchOpen(!workbenchOpen)}
+     className={`flex cursor-pointer items-center justify-center rounded-md p-1.5 transition-colors duration-100 ${workbenchOpen ? "bg-active text-foreground" : "text-muted hover:bg-hover hover:text-foreground"}`}
+     aria-label={t.workbenchToggleAria}
+     aria-pressed={workbenchOpen}
+     title={t.workbenchToggleAria}
     >
      <SidebarRight size={16} aria-hidden />
     </button>

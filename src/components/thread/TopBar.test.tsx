@@ -13,7 +13,7 @@ import { TopBar } from "./TopBar";
  *   （`sessionTitleForDisplay`），omp 标题卡的图标 / 短码不进输入框；
  * - 提交 = Enter 或**点输入框外**，改过才写 omp（V40 起改名 = `set_session_name` 写 jsonl 真名），
  *   原样提交不写；Esc 取消也不写；
- * - 顶栏右端 = 只剩右面板开关（上下文容量环与供应商用量 2026-10-14 搬进输入卡工具行）。
+ * - 顶栏右端 = 只剩右栏工作台开关（上下文容量环与供应商用量 2026-10-14 搬进输入卡工具行）。
  */
 
 /** `vi.mock` 的工厂会被提升：用 `vi.hoisted` 拿能在用例里改行为的 mock。 */
@@ -194,15 +194,15 @@ describe("聊天 TopBar 会话名编辑", () => {
   expect(noteInput()).toBeNull();
  });
 
- it("顶栏右端只剩右面板开关：上下文容量环与供应商用量都在输入卡工具行", () => {
-  useApp.setState({ contextPanelOpen: false });
+ it("顶栏右端只剩右栏工作台开关：上下文容量环与供应商用量都在输入卡工具行", () => {
+  useApp.setState({ workbenchOpen: false });
   render();
   // 2026-10-14 起右上角不再有这两个入口（搬进 Composer 工具行，见 Composer.test.tsx）
   expect(container.querySelector('header button[aria-label="供应商用量"]')).toBeNull();
   expect(container.querySelector('header button[aria-label^="上下文容量"]')).toBeNull();
-  const panel = container.querySelector<HTMLButtonElement>('header button[aria-label^="上下文面板"]');
+  const panel = container.querySelector<HTMLButtonElement>('header button[aria-label^="右栏工作台"]');
   expect(panel).not.toBeNull();
   act(() => panel?.click());
-  expect(useApp.getState().contextPanelOpen).toBe(true);
+  expect(useApp.getState().workbenchOpen).toBe(true);
  });
 });

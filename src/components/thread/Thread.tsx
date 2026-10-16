@@ -70,6 +70,16 @@ export function Thread() {
   */
  const [awayFromBottom, setAwayFromBottom] = useState(false);
  const awayRef = useRef(false);
+ /**
+  * 任务清单浮卡高度（V51）：卡片贴消息列底部、浮在输入卡上方——消息流底部要按它留出一段
+  * 等高空白（末尾内容不被浮卡永久盖住），「回到底部」按钮也要上移让位。高度由 `PlanCard`
+  * 上报（ResizeObserver 盯卡片自身：展开 / 收起、清单增减、视口变窄换行都会重报）；
+  * 同值不写（滚动与 resize 频率下白跑一轮渲染不划算）。
+  */
+ const [planCardH, setPlanCardH] = useState(0);
+ const syncPlanCardH = useCallback((h: number) => {
+  setPlanCardH((prev) => (Math.abs(prev - h) < 1 ? prev : h));
+ }, []);
  const syncAway = useCallback((away: boolean) => {
   if (awayRef.current === away) return;
   awayRef.current = away;
@@ -282,7 +292,9 @@ export function Thread() {
      role="log"
      aria-label={t.threadAria}
     >
-     <div ref={attachContent}>
+     {/* 浮卡留白（V51）：`paddingBottom` = 卡片高度——`.`thread-scroll` 自带 `pb-5`，
+         这段是额外垫高，滚到底时最后一条消息停在卡片之上而不是被盖住。 */}
+     <div ref={attachContent} style={planCardH > 0 ? { paddingBottom: planCardH } : undefined}>
       {hidden > 0 && (
        <div className="mb-4 flex justify-center">
         <button
@@ -320,13 +332,15 @@ export function Thread() {
       {workingVisible && <WorkingRow tight={isTrace(shown[shown.length - 1])} />}
      </div>
     </div>
-    <PlanCard />
+    <PlanCard onHeightChange={syncPlanCardH} />
     {awayFromBottom && (
      // 回到底部（V47）：离底（> NEAR_BOTTOM_PX）时浮在消息列视口底部中央，点击 = 恢复跟随并读底。
      // 任何离底都露面（不只流式——长会话回看历史同样需要一键回底）。
+     // 任务清单浮卡在场时整体上移到卡片之上（V51）——两者都贴底，重叠就点不到了。
      <button
       onClick={jumpToBottom}
-      className="absolute bottom-4 left-1/2 z-10 flex size-8 -translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-border bg-elevated text-muted shadow-pop transition-colors duration-100 hover:bg-hover hover:text-foreground"
+      style={{ bottom: planCardH + 16 }}
+      className="absolute left-1/2 z-10 flex size-8 -translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-border bg-elevated text-muted shadow-pop transition-colors duration-100 hover:bg-hover hover:text-foreground"
       aria-label={t.scrollToBottom}
       title={t.scrollToBottom}
      >

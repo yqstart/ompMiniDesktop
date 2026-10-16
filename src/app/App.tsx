@@ -13,7 +13,7 @@ import { CommitTaskPanel } from "../components/git/CommitTaskPanel";
 import { HealthBanner } from "../components/HealthBanner";
 import { SettingsPage } from "../components/SettingsPage";
 import { ChatView } from "../components/thread/ChatView";
-import { ContextPanel } from "../components/panel/ContextPanel";
+import { WorkbenchPanel } from "../components/workbench/WorkbenchPanel";
 import { UpdateDialog } from "../components/update/UpdateDialog";
 import { OmpUpdateDialog } from "../components/update/OmpUpdateDialog";
 import { ProviderUsageDialog } from "../components/usage/ProviderUsageDialog";
@@ -161,8 +161,8 @@ function useHotkeys() {
     // 命令中心（V41）：再按一次收起（toggle）
     s.setPaletteOpen(!s.paletteOpen);
    } else if (key === "g" && e.shiftKey) {
-    // 右上下文面板开关（v2 §5）：面板始终停靠为第三栏，切换只影响这一栏在不在
-    s.setContextPanelOpen(!s.contextPanelOpen);
+    // 右栏工作台开关（⌘⇧G）：面板始终停靠为第三栏，切换只影响这一栏在不在
+    s.setWorkbenchOpen(!s.workbenchOpen);
    } else {
     // 会话导航栈：空栈 / 到头由 `navStep` 返回 null（此时什么都不做）
     const id = s.navStep(key === "[" ? -1 : 1);
@@ -375,8 +375,9 @@ export function App() {
         main 的高度（顶部凭空多出半屏空白）。 */}
     <div className={settingsTabActive ? "hidden" : "flex min-h-0 min-w-0 flex-1"}>
      <ChatView visible={!settingsTabActive} />
-     {/* 右栏上下文面板（v2 三栏）：设置视图打开时整栏退场；打开即停靠为第三栏（不遮盖会话） */}
-     {!settingsTabActive && <ContextPanel />}
+     {/* 右栏工作台（V42 三栏：文件 / 终端）：**常驻挂载**——收起或切设置视图只改显隐，
+         终端进程与 xterm 回看缓冲不因为收起右栏而丢；打开即停靠为第三栏（不遮盖会话） */}
+     <WorkbenchPanel />
     </div>
     {settingsTabOpen && <SettingsPage visible={settingsTabActive} />}
    </main>
