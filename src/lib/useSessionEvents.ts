@@ -9,6 +9,7 @@ import { fmt, TEXT, type Text } from "./locale";
 import { imagesFromContent } from "./attachments";
 import { normalizeCommands } from "./slashCommands";
 import { forgetSessionLiveStats } from "./sessionLiveStats";
+import { scheduleWorkspaceGitRefresh } from "./commitTasks";
 import { resolveThinking } from "./thinking";
 import { createStreamBuffer, mergeViewMsgs, type IncomingViewMsg } from "./mergeEvents";
 
@@ -923,9 +924,18 @@ export function useSessionEvents() {
      statusBySession: { ...st.statusBySession, [sid]: { state: e.payload.state } as SessionStatus },
     });
     // 转为 idle 且挂着「执行模式切换等生效」→ 自动重启 runtime（BUSY 时静默放弃）
-    if (e.payload.state === "idle" && st.approvalRestartBySession[sid]) {
-     st.clearApprovalRestart(sid);
-     void restartRuntimeForApproval(sid);
+    if (e.payload.state === "idle") {
+     // 活干完（running → idle 的翻转那一下）= agent 刚把文件写完的时刻：本会话目录的 git 快照
+     // （提交键的改动状态 / 左栏徽章）跟着重读一次，别等 30s 兜底轮询——分支上「再有改动」要
+     // 立刻看得见。只认翻转（重复 idle 帧不刷）；只刷本会话目录（别的目录这一轮没被动过）。
+     if (st.statusBySession[sid]?.state !== "idle") {
+      const cwd = st.sessions.find((x) => x.id === sid)?.cwd;
+      scheduleWorkspaceGitRefresh(cwd ? [cwd] : undefined);
+     }
+     if (st.approvalRestartBySession[sid]) {
+      st.clearApprovalRestart(sid);
+      void restartRuntimeForApproval(sid);
+     }
     }
    });
    if (disposed) {

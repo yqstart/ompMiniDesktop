@@ -254,13 +254,23 @@ export async function refreshWorkspaceGitState(paths?: string[]): Promise<void> 
  }
 }
 
-/** 终端刚干完活（π 转就绪 / 等待确认）时的防抖刷新——最可能有新改动的时点（零轮询成本的聪明时机）。 */
+/** 活刚干完（会话一轮收敛到 idle）时的防抖刷新——最可能有新改动的时点（零轮询成本的聪明时机）。
+ *
+ *  `paths` 省略 = 全部工作区；给了就只刷这几个（一轮改动只落在本会话目录里，多项目下不白跑）。
+ *  防抖 2s，多次调用**合并**（一轮收尾常连着几帧状态；全量优先于局部，不会互相顶掉）。 */
 let readyTimer: number | undefined;
-export function scheduleWorkspaceGitRefresh(delayMs = 2000): void {
+/** 待刷新目录；null = 全量。 */
+let readyPaths: Set<string> | null = null;
+export function scheduleWorkspaceGitRefresh(paths?: string[], delayMs = 2000): void {
+ if (!paths) readyPaths = null;
+ else if (readyPaths) for (const p of paths) readyPaths.add(p);
+ else readyPaths = new Set(paths);
  clearTimeout(readyTimer);
  readyTimer = window.setTimeout(() => {
   readyTimer = undefined;
-  void refreshWorkspaceGitState();
+  const pending = readyPaths;
+  readyPaths = null;
+  void refreshWorkspaceGitState(pending ? [...pending] : undefined);
  }, delayMs);
 }
 
