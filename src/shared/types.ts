@@ -758,7 +758,16 @@ export type MentionFile = {
 };
 
 /** `check_paths` 的返回：输入框里 @提及 的存在性提示（只读 stat，不读内容）。 */
-export type PathCheck = { path: string; exists: boolean; isDir: boolean };
+export type PathCheck = {
+ path: string;
+ exists: boolean;
+ isDir: boolean;
+ /**
+  * **短标签还原出的真实相对路径**（`components/` → `src/views/…/components/`）：
+  * 直接可解析时为 null（不需要替换），歧义 / 没有也是 null。发送前按它展开。
+  */
+ resolved: string | null;
+};
 
 /**
  * 待发送的图片附件（本地读取，随 `prompt.images` 一次性发给 omp，不落覆盖层、不进草稿）。

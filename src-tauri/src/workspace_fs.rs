@@ -3,7 +3,10 @@
 //! 不做递归树（大仓库一次全量会卡首屏）、不读文件内容、不写文件——范围边界见 `AGENTS.md`
 //! 「不做编辑器」：这里只回答「这个目录里有什么」，打开交给系统默认程序。
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -162,6 +165,155 @@ pub struct SearchResult {
     pub hits: Vec<PathHit>,
     /// 结果被截断（命中 / 扫描预算用尽，或超出 `limit`）：界面据此注明「继续输入以缩小范围」。
     pub truncated: bool,
+}
+
+/// 条目表缓存 TTL：一次全量遍历（跳依赖目录）几毫秒到几十毫秒，标签 / 后缀解析共用一张表；
+/// 30s 足够新鲜，也免掉「展开每层目录都重扫一遍」。
+const ENTRIES_TTL: Duration = Duration::from_secs(30);
+/// 缓存条目上限：超过直接清表（简单防膨胀，与 `project_files` 同风格）。
+const ENTRIES_CACHE_MAX: usize = 32;
+
+/// root → `(写入时刻, [(相对路径, 是否目录)])`。
+static ENTRIES_CACHE: LazyLock<Mutex<HashMap<String, (Instant, Arc<Vec<(String, bool)>>)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// 遍历整棵树收集 `(相对路径, 是否目录)`：跳依赖与缓存目录、深度与条目数带预算、符号链接不跟。
+/// 命中预算就停（返回已收集的部分）——标签与后缀解析只需要「大致全」的视野。
+pub fn collect_entries(root: &str) -> Vec<(String, bool)> {
+    let mut out = Vec::new();
+    let mut stack: Vec<(PathBuf, String, usize)> = vec![(PathBuf::from(root), String::new(), 0)];
+    let mut scanned = 0usize;
+    while let Some((dir, rel, depth)) = stack.pop() {
+        if depth > SEARCH_MAX_DEPTH {
+            continue;
+        }
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for item in rd.flatten() {
+            scanned += 1;
+            if scanned > SEARCH_SCAN_BUDGET {
+                return out;
+            }
+            let Ok(file_type) = item.file_type() else { continue };
+            let name = item.file_name().to_string_lossy().into_owned();
+            let child = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+            let is_dir = file_type.is_dir();
+            let skip = SEARCH_SKIP_DIRS.contains(&name.as_str());
+            if is_dir && !skip {
+                stack.push((item.path(), child.clone(), depth + 1));
+            }
+            out.push((child, is_dir));
+        }
+    }
+    out
+}
+
+/// 取（并缓存）某棵树的条目表；缓存未命中才重新遍历（锁只在读写缓存时持有）。
+pub fn entries_for(root: &str) -> Arc<Vec<(String, bool)>> {
+    if let Ok(map) = ENTRIES_CACHE.lock() {
+        if let Some((at, list)) = map.get(root) {
+            if at.elapsed() < ENTRIES_TTL {
+                return list.clone();
+            }
+        }
+    }
+    let fresh = Arc::new(collect_entries(root));
+    if let Ok(mut map) = ENTRIES_CACHE.lock() {
+        if map.len() >= ENTRIES_CACHE_MAX {
+            map.clear();
+        }
+        map.insert(root.to_string(), (Instant::now(), fresh.clone()));
+    }
+    fresh
+}
+
+/// 路径的各级后缀（`a/b/c` → `["c", "b/c", "a/b/c"]`，短的在前；`/` 是 ASCII，切字节安全）。
+fn suffixes(rel: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut end = rel.len();
+    loop {
+        let start = rel[..end].rfind('/').map(|i| i + 1).unwrap_or(0);
+        out.push(&rel[start..]);
+        if start == 0 {
+            break;
+        }
+        end = start - 1;
+    }
+    out
+}
+
+/// 一批相对路径 → **最短唯一后缀**（输入框 `@` 标签用它：`src/views/…/components` → `components`）。
+///
+/// 唯一性看全库：段数从 1 开始增长，取第一个只对应这一个条目的后缀；都不唯一 → 完整相对路径
+/// （它本身必然唯一）。`all` = 同一棵树的全量条目（`entries_for`）。
+pub fn unique_labels(all: &[(String, bool)], targets: &[String]) -> HashMap<String, String> {
+    let mut need: HashSet<String> = HashSet::new();
+    for target in targets {
+        for suffix in suffixes(target) {
+            if !suffix.is_empty() {
+                need.insert(suffix.to_string());
+            }
+        }
+    }
+    // 目标的 1 段后缀必然也在 need 里（它本身就是某目标的后缀），所以「尾段都不在 need」
+    // 的条目一个 need 后缀都贡献不了，可以整体跳过——这让全库扫描基本只做一次哈希查询。
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for (rel, _) in all {
+        let segs = suffixes(rel);
+        if !segs.first().is_some_and(|tail| need.contains(*tail)) {
+            continue;
+        }
+        for suffix in segs {
+            if need.contains(suffix) {
+                *counts.entry(suffix.to_string()).or_insert(0) += 1;
+            }
+        }
+    }
+    let mut out = HashMap::new();
+    for target in targets {
+        let label = suffixes(target)
+            .into_iter()
+            .find(|suffix| counts.get(*suffix).copied().unwrap_or(0) == 1)
+            .unwrap_or(target.as_str());
+        out.insert(target.clone(), label.to_string());
+    }
+    out
+}
+
+/// 后缀反解：`components/` → 全库里**唯一**以它结尾的条目；不唯一（歧义）或没有 → None。
+/// 芯片的存在性、发送前的短标签展开共用它（同一套规则，两边不会各说各话）。
+pub fn resolve_suffix(all: &[(String, bool)], token: &str) -> Option<(String, bool)> {
+    let needle = token.trim_end_matches('/');
+    if needle.is_empty() || needle.contains("..") {
+        return None;
+    }
+    let tail = format!("/{needle}");
+    let mut hit: Option<(String, bool)> = None;
+    for (rel, is_dir) in all {
+        if rel == needle || rel.ends_with(&tail) {
+            if hit.is_some() {
+                return None; // 歧义：不猜
+            }
+            hit = Some((rel.clone(), *is_dir));
+        }
+    }
+    hit
+}
+
+/// 绝对路径 → 相对 `base` 的路径（词法计算，POSIX）：不在 `base` 之内（含等于）→ None。
+/// 与前端 `lib/workspaceFiles.ts` 的 `relativeToCwd` 同一口径。
+pub fn rel_to(base: &str, path: &str) -> Option<String> {
+    let base = base.trim_end_matches('/');
+    let base = if base.is_empty() { "/" } else { base };
+    let path = path.trim_end_matches('/');
+    if path.is_empty() || path == base {
+        return None;
+    }
+    let rest = if base == "/" {
+        path.strip_prefix('/')?
+    } else {
+        path.strip_prefix(base)?.strip_prefix('/')?
+    };
+    (!rest.is_empty() && !rest.split('/').any(|part| part == "..")).then(|| rest.to_string())
 }
 
 /// 单条命中的相关度（越大越靠前；None = 不匹配）。
@@ -370,5 +522,89 @@ mod tests {
         assert!(search_entries(dir, "x", 0).0.is_empty());
         assert!(search_entries("/nonexistent-omp-mini-search", "x", 10).0.is_empty());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `@` 标签：最短唯一后缀（尾段唯一就用尾段，重名才逐级加父目录）。
+    #[test]
+    fn labels_pick_shortest_unique_suffix() {
+        let all = vec![
+            ("src/views/engineering/baseline/components".to_string(), true),
+            ("src/components/FileTree.tsx".to_string(), false),
+            ("docs/components.md".to_string(), false),
+        ];
+        let labels = unique_labels(
+            &all,
+            &[
+                "src/views/engineering/baseline/components".to_string(),
+                "src/components/FileTree.tsx".to_string(),
+            ],
+        );
+        assert_eq!(labels["src/views/engineering/baseline/components"], "components");
+        assert_eq!(labels["src/components/FileTree.tsx"], "FileTree.tsx");
+
+        // 尾段重名 → 加一层父目录；加到顶都不唯一 → 完整相对路径
+        let dup = vec![
+            ("src/a/index.ts".to_string(), false),
+            ("src/b/index.ts".to_string(), false),
+        ];
+        let labels = unique_labels(&dup, &["src/a/index.ts".to_string()]);
+        assert_eq!(labels["src/a/index.ts"], "a/index.ts");
+        let same = vec![("index.ts".to_string(), false), ("sub/index.ts".to_string(), false)];
+        let labels = unique_labels(&same, &["sub/index.ts".to_string()]);
+        assert_eq!(labels["sub/index.ts"], "sub/index.ts", "都不唯一就只能给完整路径");
+
+        // 目录与同名文件并存：尾段不唯一，照样逐级加
+        let mixed = vec![("components".to_string(), true), ("src/components".to_string(), true)];
+        let labels = unique_labels(&mixed, &["src/components".to_string()]);
+        assert_eq!(labels["src/components"], "src/components");
+    }
+
+    /// 后缀反解：唯一才认，歧义不猜；`..` 一律拒绝。
+    #[test]
+    fn resolve_suffix_only_accepts_unique_hits() {
+        let all = vec![
+            ("src/views/components".to_string(), true),
+            ("src/a/index.ts".to_string(), false),
+            ("src/b/index.ts".to_string(), false),
+        ];
+        assert_eq!(
+            resolve_suffix(&all, "components/"),
+            Some(("src/views/components".to_string(), true)),
+            "目录标签（带尾斜杠）按尾段唯一命中"
+        );
+        assert_eq!(
+            resolve_suffix(&all, "src/a/index.ts"),
+            Some(("src/a/index.ts".to_string(), false)),
+            "完整相对路径原样命中"
+        );
+        assert_eq!(resolve_suffix(&all, "index.ts"), None, "两个同名 → 歧义，不猜");
+        assert_eq!(resolve_suffix(&all, "nope"), None);
+        assert_eq!(resolve_suffix(&all, "../x"), None);
+        assert_eq!(resolve_suffix(&all, "/"), None);
+    }
+
+    /// 条目表：跳依赖目录（不进去）、符号链接不跟、相对路径是 POSIX 写法。
+    #[test]
+    fn collect_entries_skips_dependency_dirs() {        let root = sample_tree("entries");
+        let dir = root.to_str().unwrap();
+        let all = collect_entries(dir);
+        let rels: Vec<&str> = all.iter().map(|(rel, _)| rel.as_str()).collect();
+        assert!(rels.contains(&"src/components/FileTree.tsx"), "{rels:?}");
+        assert!(rels.contains(&"node_modules"), "跳过的目录本身仍要在表里");
+        assert!(!rels.contains(&"node_modules/pkg/index.ts"), "但不进去：{rels:?}");
+        assert!(all.iter().any(|(rel, is_dir)| rel == "src" && *is_dir));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 绝对路径 → 会话目录内的相对路径（与前端 `relativeToCwd` 同口径）。
+    #[test]
+    fn rel_to_only_inside_base() {
+        assert_eq!(rel_to("/w/alpha", "/w/alpha/src/a.ts").as_deref(), Some("src/a.ts"));
+        assert_eq!(rel_to("/w/alpha/", "/w/alpha/src/a.ts").as_deref(), Some("src/a.ts"));
+        assert_eq!(rel_to("/w/alpha", "/w/alpha"), None, "目录自己不算相对路径");
+        assert_eq!(rel_to("/w/alpha", "/w/alpha-2/a.ts"), None, "同前缀但不是子目录");
+        assert_eq!(rel_to("/w/alpha", "/w/beta/a.ts"), None);
+        assert_eq!(rel_to("/", "/etc/hosts").as_deref(), Some("etc/hosts"));
+        assert_eq!(rel_to("/w/alpha", "/w/alpha/../x"), None, "越界不认");
     }
 }

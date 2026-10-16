@@ -36,3 +36,20 @@ export function extractMentions(text: string): string[] {
   }
   return out;
 }
+
+/**
+ * 按 `rewrite` 改写文本里的提及（返回 null = 原样保留），用于**发送前把短标签还原成完整相对路径**。
+ *
+ * 与 `extractMentions` 共用同一套正则与边界规则——改写只动真正的提及位置，
+ * 正文里恰好出现的同名字符串不受影响；新路径含空白时写回引号形式（`@"a b.md"`）。
+ */
+export function rewriteMentions(text: string, rewrite: (token: string) => string | null): string {
+  return text.replace(MENTION, (whole, dq: string | undefined, sq: string | undefined, plain: string | undefined, offset: number) => {
+    if (offset !== 0 && !PRECEDING.test(text[offset - 1] ?? "")) return whole;
+    const token = dq !== undefined || sq !== undefined ? (dq ?? sq ?? "").trim() : trimToken(plain ?? "");
+    if (!token) return whole;
+    const next = rewrite(token);
+    if (next === null || next === token) return whole;
+    return `@${/[\s"]/.test(next) ? `"${next}"` : next}`;
+  });
+}

@@ -26,8 +26,12 @@ const { apiMock } = vi.hoisted(() => ({
   followUpMessage: vi.fn(async (_sid: string, _text: string, _images?: unknown) => undefined),
   runSlash: vi.fn(async (_sid: string, _cmd: string) => undefined),
   stop: vi.fn(async (_sid: string) => undefined),
-  checkPaths: vi.fn(async (_base: string, _paths: string[]) => []),
-  completePath: vi.fn(async (_base: string, _prefix: string): Promise<{ path: string; isDir: boolean }[]> => []),
+  checkPaths: vi.fn(
+   async (_base: string, _paths: string[]): Promise<{ path: string; exists: boolean; isDir: boolean; resolved: string | null }[]> => [],
+  ),
+  completePath: vi.fn(
+   async (_base: string, _prefix: string): Promise<{ path: string; isDir: boolean; label: string }[]> => [],
+  ),
   removeQueuedMessage: vi.fn(async () => ({ removed: true })),
   promoteQueuedMessage: vi.fn(async () => ({ promoted: true })),
   abortAndRestoreQueue: vi.fn(async () => ({ steering: [] as { text: string }[], followUp: [] as { text: string }[] })),
@@ -600,7 +604,7 @@ const afterDebounce = async () => {
  */
 describe("Composer `@` 路径补全", () => {
  it("取词中显示「搜索中」，取完显示候选（子目录里的匹配也出）", async () => {
-  let settle: ((v: { path: string; isDir: boolean }[]) => void) | null = null;
+  let settle: ((v: { path: string; isDir: boolean; label: string }[]) => void) | null = null;
   apiMock.completePath.mockImplementation(
    () =>
     new Promise((resolve) => {
@@ -613,7 +617,7 @@ describe("Composer `@` 路径补全", () => {
   await afterDebounce();
   expect(apiMock.completePath).toHaveBeenCalledWith("/w/alpha", "baselin");
   await act(async () => {
-   settle?.([{ path: "src/baseline_utils.ts", isDir: false }]);
+   settle?.([{ path: "src/baseline_utils.ts", isDir: false, label: "baseline_utils.ts" }]);
    await Promise.resolve();
   });
   expect(container.textContent).toContain("baseline_utils.ts");
@@ -629,10 +633,10 @@ describe("Composer `@` 路径补全", () => {
   expect(container.textContent).toContain(TEXT["zh-CN"].mentionListEmpty);
  });
 
- it("选中候选：相对路径补全，文件收尾空格、目录补斜杠", async () => {
+ it("选中候选：写进草稿的是短标签，文件收尾空格、目录补斜杠", async () => {
   apiMock.completePath.mockResolvedValue([
-   { path: "src/a.ts", isDir: false },
-   { path: "src/components", isDir: true },
+   { path: "src/a.ts", isDir: false, label: "a.ts" },
+   { path: "src/components", isDir: true, label: "components" },
   ]);
   const ta = await mount(false);
   await typeInto(ta!, "@a");
@@ -642,7 +646,7 @@ describe("Composer `@` 路径补全", () => {
   await act(async () => {
    opts[0]?.click();
   });
-  expect(useApp.getState().drafts["s1"]).toBe("@src/a.ts ");
+  expect(useApp.getState().drafts["s1"]).toBe("@a.ts ");
 
   await typeInto(ta!, "@comp");
   await afterDebounce();
@@ -652,11 +656,43 @@ describe("Composer `@` 路径补全", () => {
   await act(async () => {
    dirOpt?.click();
   });
-  expect(useApp.getState().drafts["s1"]).toBe("@src/components/");
+  expect(useApp.getState().drafts["s1"]).toBe("@components/");
+ });
+
+ it("发送前把短标签还原成完整相对路径（回显 / 历史仍是用户写的短标签）", async () => {
+  apiMock.checkPaths.mockResolvedValue([
+   { path: "components/", exists: true, isDir: true, resolved: "src/views/components" },
+  ]);
+  const ta = await mount(false);
+  act(() => useApp.setState({ drafts: { s1: "看看 @components/ 这个目录" } }));
+  await act(async () => {});
+  await press(ta, { key: "Enter" });
+  await act(async () => {
+   await Promise.resolve();
+  });
+  // 发给 omp 的是真路径（omp 只认真路径）
+  expect(apiMock.sendMessage).toHaveBeenCalledWith("s1", "看看 @src/views/components/ 这个目录", []);
+  // 用户看到的（乐观回显）还是他自己写的短标签
+  const msgs = useApp.getState().eventsBySession["s1"] ?? [];
+  expect(msgs.some((m) => m.kind === "user" && m.text === "看看 @components/ 这个目录")).toBe(true);
+ });
+
+ it("解析不出来（歧义 / 不存在）就按原文发，不猜路径", async () => {
+  apiMock.checkPaths.mockResolvedValue([
+   { path: "index.ts", exists: false, isDir: false, resolved: null },
+  ]);
+  const ta = await mount(false);
+  act(() => useApp.setState({ drafts: { s1: "@index.ts" } }));
+  await act(async () => {});
+  await press(ta, { key: "Enter" });
+  await act(async () => {
+   await Promise.resolve();
+  });
+  expect(apiMock.sendMessage).toHaveBeenCalledWith("s1", "@index.ts", []);
  });
 
  it("Esc 关掉浮层，继续打字重新打开", async () => {
-  apiMock.completePath.mockResolvedValue([{ path: "src/a.ts", isDir: false }]);
+  apiMock.completePath.mockResolvedValue([{ path: "src/a.ts", isDir: false, label: "a.ts" }]);
   const ta = await mount(false);
   await typeInto(ta!, "@a");
   await afterDebounce();

@@ -151,7 +151,7 @@ export const api = {
  checkPaths: (base: string, paths: string[]) => call<PathCheck[]>(IPC.checkPaths, { base, paths }),
  /** `@` 路径补全（只读目录列举，不读文件内容）。 */
  completePath: (base: string, prefix: string) =>
-  call<{ path: string; isDir: boolean }[]>(IPC.completePath, { base, prefix }),
+  call<{ path: string; isDir: boolean; label: string }[]>(IPC.completePath, { base, prefix }),
  stop: (id: string) => call<void>(IPC.stopSession, { id }),
  approve: (id: string, uiId: string, decision: "once" | "always" | "deny") =>
   call<void>(IPC.approve, { id, uiId, decision }),
@@ -436,6 +436,11 @@ export const api = {
   */
  searchPaths: (root: string, query: string, limit?: number) =>
   call<PathSearch>(IPC.searchPaths, { root, query, limit: limit ?? null }),
+ /**
+  * 引用注入的**短标签**（输入框里显示的 `@components/` 这种）：给会话目录内的条目返回
+  * 最短唯一后缀，目录外原样返回（跨项目仍用绝对路径）。发送前由 `checkPaths` 的 `resolved` 还原。
+  */
+ mentionLabel: (base: string, path: string) => call<string>(IPC.mentionLabel, { base, path }),
  /**
   * 打开终端（PTY 里的登录 shell）：输出 / 退出走 Channel（`onEvent`），
   * 与 `startOmpUpdate` 同一套「命令立刻返回、过程走通道」口径。

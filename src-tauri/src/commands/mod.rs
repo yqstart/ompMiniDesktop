@@ -2547,6 +2547,9 @@ pub struct PathCheck {
     pub path: String,
     pub exists: bool,
     pub is_dir: bool,
+    /// **短标签还原出的真实相对路径**（`components/` → `src/views/…/components/`）。
+    /// 直接可解析（本来就是真实路径）时为 None——不需要替换；解不出来（歧义 / 没有）也是 None。
+    pub resolved: Option<String>,
 }
 
 /// 相对路径按 base 解析并做**词法归一**（不触碰文件系统）：`.` 丢弃、`..` 回退一层。
@@ -2570,14 +2573,32 @@ pub fn resolve_path(base: &str, p: &str) -> PathBuf {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PathCandidate {
+    /// 展示 / 定位用的路径（相对 base；短标签补全时保持用户写的前缀）。
     pub path: String,
     pub is_dir: bool,
+    /// 选中后写进输入框的**短标签**（最短唯一后缀；目录由前端补尾斜杠）。
+    pub label: String,
+}
+
+/// 候选批量补标签：一次索引查询（`entries_for` 有 30s 缓存）。
+fn with_labels(base: &str, rows: Vec<(String, String, bool)>) -> Vec<PathCandidate> {
+    let targets: Vec<String> = rows.iter().map(|(_, real, _)| real.clone()).collect();
+    let all = crate::workspace_fs::entries_for(base);
+    let labels = crate::workspace_fs::unique_labels(&all, &targets);
+    rows.into_iter()
+        .map(|(path, real, is_dir)| {
+            let label = labels.get(&real).cloned().unwrap_or(real);
+            PathCandidate { path, is_dir, label }
+        })
+        .collect()
 }
 
 /// 输入框 `@` 补全的取词（同步纯逻辑，便于单测）：按当前 token 给候选（最多 `limit` 条）。
 ///
 /// 两种口径：
 /// - **一层**（空 token 的 `@`、带目录的 `@src/components/`）→ 列那个目录（快，够用）；
+///   目录名也可能是**短标签**（`@components/`）——直接解析不到时按后缀反解出真实目录再列，
+///   候选仍按用户写的前缀展示（这样「选中短标签后继续往里打」的链路是连贯的）。
 /// - **有名字、还没写目录**（`@baselin`）→ 递归搜名字（忽略大小写、名字包含，浅层与前缀命中优先）。
 ///   ——只列一层的话，目标在子目录里（`tracsys_web/baseline/`）时补全永远搜不到，
 ///   用户只能手打整条路径；这也正是「`@` 有弹窗、继续输入就消失」的根因。
@@ -2595,22 +2616,35 @@ pub fn complete_candidates(base: &str, prefix: &str, limit: usize) -> Vec<PathCa
     }
     // 有名字、没写目录：递归搜（`search_entries` 自带扫描预算与相关度排序）
     if dir_rel.is_empty() && !file_prefix.is_empty() {
-        return crate::workspace_fs::search_entries(base, &file_prefix, limit)
+        let rows: Vec<(String, String, bool)> = crate::workspace_fs::search_entries(base, &file_prefix, limit)
             .0
             .into_iter()
-            .map(|hit| PathCandidate { path: hit.rel, is_dir: hit.is_dir })
+            .map(|hit| (hit.rel.clone(), hit.rel, hit.is_dir))
             .collect();
+        return with_labels(base, rows);
     }
-    let dir = if dir_rel.is_empty() {
-        PathBuf::from(base)
+    // 一层：先按真实目录解析；解析不到再当短标签反解（`@components/`）
+    let direct = if dir_rel.is_empty() {
+        Some(PathBuf::from(base))
     } else {
-        resolve_path(base, &dir_rel)
+        let candidate = resolve_path(base, &dir_rel);
+        candidate.is_dir().then_some(candidate)
+    };
+    let (dir, real_prefix) = match direct {
+        Some(dir) => (dir, dir_rel.clone()),
+        None => {
+            let all = crate::workspace_fs::entries_for(base);
+            match crate::workspace_fs::resolve_suffix(&all, &dir_rel) {
+                Some((rel, true)) => (resolve_path(base, &rel), rel),
+                _ => return vec![],
+            }
+        }
     };
     let entries = std::fs::read_dir(&dir)
         .map(|rd| rd.filter_map(|e| e.ok()).take(200).collect::<Vec<_>>())
         .unwrap_or_default();
     let needle = file_prefix.to_lowercase();
-    let mut out: Vec<PathCandidate> = entries
+    let mut rows: Vec<(String, String, bool)> = entries
         .into_iter()
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
@@ -2618,17 +2652,19 @@ pub fn complete_candidates(base: &str, prefix: &str, limit: usize) -> Vec<PathCa
                 return None;
             }
             let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
-            let path = if dir_rel.is_empty() { name } else { format!("{dir_rel}/{name}") };
-            Some(PathCandidate { path, is_dir })
+            // `path` = 用户视角（保持他写的前缀）；`real` = 真实相对路径（算标签用）
+            let path = if dir_rel.is_empty() { name.clone() } else { format!("{dir_rel}/{name}") };
+            let real = if real_prefix.is_empty() { name } else { format!("{real_prefix}/{name}") };
+            Some((path, real, is_dir))
         })
         .collect();
-    out.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+    rows.sort_by(|a, b| match (a.2, b.2) {
         (true, false) => std::cmp::Ordering::Less,
         (false, true) => std::cmp::Ordering::Greater,
-        _ => a.path.cmp(&b.path),
+        _ => a.0.cmp(&b.0),
     });
-    out.truncate(limit);
-    out
+    rows.truncate(limit);
+    with_labels(base, rows)
 }
 
 /// 输入框 `@` 补全：只读目录 / 名字，不读文件内容（取词见 `complete_candidates`）。
@@ -2637,27 +2673,86 @@ pub async fn complete_path(base: String, prefix: String) -> Vec<PathCandidate> {
     if base.is_empty() || prefix.contains('\0') {
         return vec![];
     }
-    // 递归搜索是磁盘活：放阻塞线程池，不占 tokio worker
+    // 递归搜索 / 后缀反解是磁盘活：放阻塞线程池，不占 tokio worker
     tauri::async_runtime::spawn_blocking(move || complete_candidates(&base, &prefix, 20))
         .await
         .unwrap_or_default()
 }
 
+/// 引用注入用的**短标签**：路径 → 最短唯一后缀（`components`、`FileTree.tsx`）。
+///
+/// 入参可以是绝对路径，也可以是相对 `base` 的路径；会话目录之外的条目原样返回
+/// （跨项目引用仍用绝对路径，见 `lib/workspaceFiles.ts`）。
+#[tauri::command]
+pub async fn mention_label(base: String, path: String) -> String {
+    if base.is_empty() || path.is_empty() {
+        return path;
+    }
+    let abs = if path.starts_with('/') {
+        path.clone()
+    } else {
+        resolve_path(&base, &path).to_string_lossy().into_owned()
+    };
+    let Some(rel) = crate::workspace_fs::rel_to(&base, &abs) else {
+        return path;
+    };
+    let fallback = rel.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let all = crate::workspace_fs::entries_for(&base);
+        let labels = crate::workspace_fs::unique_labels(&all, std::slice::from_ref(&rel));
+        labels.get(&rel).cloned().unwrap_or(rel)
+    })
+    .await
+    .unwrap_or(fallback)
+}
+
+/// 直接解析（相对 / 绝对路径）命中时的回执；解析不到返回 None 交给后缀反解。
+fn check_direct(base: &str, token: &str) -> Option<PathCheck> {
+    let meta = std::fs::metadata(resolve_path(base, token)).ok()?;
+    Some(PathCheck { path: token.to_string(), exists: true, is_dir: meta.is_dir(), resolved: None })
+}
+
+/// 短标签后缀反解：唯一命中就是它（`resolved` 给出真实相对路径），歧义 / 没有一律记不存在。
+fn check_suffix(base: &str, token: &str, table: &[(String, bool)]) -> PathCheck {
+    match crate::workspace_fs::resolve_suffix(table, token) {
+        // 表是缓存的，落盘状态再确认一次（文件可能刚被删 / 刚加）
+        Some((rel, is_dir)) if std::fs::metadata(resolve_path(base, &rel)).is_ok() => {
+            PathCheck { path: token.to_string(), exists: true, is_dir, resolved: Some(rel) }
+        }
+        _ => PathCheck { path: token.to_string(), exists: false, is_dir: false, resolved: None },
+    }
+}
+
 /// 输入框 `@提及` 的存在性提示（V2 M6b）：只 stat，不读内容、不写任何东西。
-/// 展开动作是 omp 做的，这里只回答「这个路径在会话 cwd 下存在吗」。
+///
+/// 解析两级：**直接解析**（相对 / 绝对路径）→ **短标签后缀反解**（唯一才认）→ 记不存在。
+/// 前者命中时 `resolved` 为 None（本来就是真路径）；后者给 `resolved`（发送前按它展开）。
 #[tauri::command]
 pub async fn check_paths(base: String, paths: Vec<String>) -> Vec<PathCheck> {
-    paths
-        .into_iter()
-        .take(50)
-        .map(|p| {
-            let full = resolve_path(&base, &p);
-            match std::fs::metadata(&full) {
-                Ok(m) => PathCheck { path: p, exists: true, is_dir: m.is_dir() },
-                Err(_) => PathCheck { path: p, exists: false, is_dir: false },
-            }
-        })
-        .collect()
+    let tokens: Vec<String> = paths.into_iter().take(50).collect();
+    if tokens.is_empty() {
+        return vec![];
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        // 后缀反解要全库条目（有 30s 缓存）：只在「直接解析失败」时才取，省掉常见路径的那一趟
+        let mut table: Option<std::sync::Arc<Vec<(String, bool)>>> = None;
+        let mut out = Vec::with_capacity(tokens.len());
+        for token in tokens {
+            let check = match check_direct(&base, &token) {
+                Some(hit) => hit,
+                None => {
+                    let entries = table
+                        .get_or_insert_with(|| crate::workspace_fs::entries_for(&base))
+                        .clone();
+                    check_suffix(&base, &token, &entries)
+                }
+            };
+            out.push(check);
+        }
+        out
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -2835,7 +2930,8 @@ pub fn load_state<R: tauri::Runtime>(app: &AppHandle<R>) -> AppState {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_project_order, assign_members, catalog_fresh, clean_workspace_name, complete_candidates,
+        apply_project_order, assign_members, catalog_fresh, check_direct, check_suffix, clean_workspace_name,
+        complete_candidates,
         derived_title, display_title, discover_omp_path, get_global_approval, kill_runtime, list_archived_in,
         load_cached, load_state, owner_project, plan_after_rejected_params, rpc_request, scan_window,
         session_file_for, spawn_session_runtime, stderr_first_line, AppState, Plan, MODELS_TTL_MS,
@@ -2877,6 +2973,56 @@ mod tests {
         assert!(complete_candidates("", "x", 20).is_empty());
         assert!(complete_candidates(base, "baselin", 0).is_empty());
         assert_eq!(complete_candidates(base, "baselin", 1).len(), 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 短标签（尾段式 mention）：标签唯一、后缀反解、歧义不猜、补全能沿短标签继续往里打。
+    #[test]
+    fn mention_short_labels_round_trip() {
+        let root = std::env::temp_dir().join(format!("omp-mini-label-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let deep = root.join("src/views/engineering/baseline/components");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("FileTree.tsx"), "x").unwrap();
+        std::fs::write(root.join("README.md"), "x").unwrap();
+        let base = root.to_str().unwrap();
+        let table = crate::workspace_fs::collect_entries(base);
+
+        // 最短唯一后缀：目录给 `components`、文件给 `FileTree.tsx`（尾段唯一就用尾段）
+        let labels = crate::workspace_fs::unique_labels(
+            &table,
+            &[
+                "src/views/engineering/baseline/components".to_string(),
+                "src/views/engineering/baseline/components/FileTree.tsx".to_string(),
+            ],
+        );
+        assert_eq!(labels["src/views/engineering/baseline/components"], "components");
+        assert_eq!(labels["src/views/engineering/baseline/components/FileTree.tsx"], "FileTree.tsx");
+
+        // 存在性：绝对路径直接命中（resolved 为 None）；短标签走反解并给出真实相对路径
+        assert!(check_direct(base, &deep.to_string_lossy()).is_some());
+        let dir_check = check_suffix(base, "components/", &table);
+        assert!(dir_check.exists && dir_check.is_dir);
+        assert_eq!(dir_check.resolved.as_deref(), Some("src/views/engineering/baseline/components"));
+        let file_check = check_suffix(base, "FileTree.tsx", &table);
+        assert!(file_check.exists && !file_check.is_dir);
+        assert_eq!(
+            file_check.resolved.as_deref(),
+            Some("src/views/engineering/baseline/components/FileTree.tsx")
+        );
+        assert!(!check_suffix(base, "nope", &table).exists);
+
+        // 短标签后继续往里打：候选按用户写的前缀展示，同时带上自己的标签
+        let nested = complete_candidates(base, "components/", 20);
+        assert_eq!(nested.len(), 1);
+        assert_eq!(nested[0].path, "components/FileTree.tsx");
+        assert_eq!(nested[0].label, "FileTree.tsx");
+
+        // 同名目录出现 → 标签歧义 → 不存在（不猜）；加一层父目录就唯一了
+        std::fs::create_dir_all(root.join("other/components")).unwrap();
+        let table2 = crate::workspace_fs::collect_entries(base);
+        assert!(!check_suffix(base, "components/", &table2).exists);
+        assert!(check_suffix(base, "baseline/components/", &table2).exists);
         let _ = std::fs::remove_dir_all(&root);
     }
 

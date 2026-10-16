@@ -7,7 +7,7 @@ import { useApp } from "../../stores/app";
 import { api } from "@shared/api";
 import { attachmentFromFile, attachmentFromOmpImage, dataUrl } from "../../lib/attachments";
 import { fmt } from "../../lib/locale";
-import { extractMentions } from "../../lib/mentions";
+import { extractMentions, rewriteMentions } from "../../lib/mentions";
 import { referenceLabel } from "../../lib/workspaceFiles";
 import { LOCAL_COMMANDS, localCommandDescription, matchLocalCommand, type LocalCommand } from "../../lib/localCommands";
 import { cycleSessionApproval } from "../../lib/sessionApproval";
@@ -25,7 +25,7 @@ import { CompactButton, QueueBadge } from "../thread/StatusBar";
 import { resolveContext } from "../../lib/context";
 import { useGitInfo } from "../../lib/useGitInfo";
 import { GoalRow } from "./GoalRow";
-import { MentionList } from "./MentionList";
+import { MentionList, type PathCandidate } from "./MentionList";
 import { SlashMenu } from "./SlashMenu";
 import { PlusMenu } from "./PlusMenu";
 import { ApprovalModeMenu } from "./ApprovalModeMenu";
@@ -126,7 +126,10 @@ export function Composer() {
  const mentions = useMemo(() => extractMentions(draft), [draft]);
  const mentionKey = `${cwd}\u0000${mentions.join("\u0000")}`;
  /** 提及的存在性回执（`check_paths`）：芯片据此标「缺失 / 目录 / 文件」。 */
- const [checks, setChecks] = useState<{ key: string; info: Record<string, { exists: boolean; isDir: boolean }> }>({
+ const [checks, setChecks] = useState<{
+  key: string;
+  info: Record<string, { exists: boolean; isDir: boolean; resolved: string | null }>;
+ }>({
   key: "",
   info: {},
  });
@@ -134,7 +137,7 @@ export function Composer() {
  const [dragging, setDragging] = useState(false);
  // `@` 补全状态：mentionIdx 为高亮下标，-1 = 无补全；mentionToken 是 `@` 后的路径前缀。
  const [mentionIdx, setMentionIdx] = useState(-1);
- const [mentionCands, setMentionCands] = useState<{ path: string; isDir: boolean }[]>([]);
+ const [mentionCands, setMentionCands] = useState<PathCandidate[]>([]);
  const [caret, setCaret] = useState(0);
 
  useEffect(() => {
@@ -148,7 +151,9 @@ export function Composer() {
      if (alive) {
       setChecks({
        key: mentionKey,
-       info: Object.fromEntries(rs.map((r) => [r.path, { exists: r.exists, isDir: r.isDir }])),
+       info: Object.fromEntries(
+        rs.map((r) => [r.path, { exists: r.exists, isDir: r.isDir, resolved: r.resolved }]),
+       ),
       });
      }
     })
@@ -233,9 +238,11 @@ export function Composer() {
 
  // 选中一条候选：把光标前的 `@前缀` 换成完整路径（目录补 `/` 接着往里打，文件补空格收尾）。
  // 点击、Tab、Enter 三个入口共用它，免得三处各写一遍替换规则。
- const pickMention = (c: { path: string; isDir: boolean }) => {
+ const pickMention = (c: PathCandidate) => {
   const before = draft.slice(0, caret);
-  setDraft(activeSessionId, before.replace(/@[^\s@]*$/, `@${c.path}${c.isDir ? "/" : " "}`) + draft.slice(caret));
+  // 写进草稿的是**短标签**（`components/FileTree.tsx` 这种尽可能短的唯一后缀），
+  // 发送前由 `expandMentions` 还原成完整相对路径——输入框里不再出现一长串路径
+  setDraft(activeSessionId, before.replace(/@[^\s@]*$/, `@${c.label}${c.isDir ? "/" : " "}`) + draft.slice(caret));
   setMentionIdx(-1);
   setMentionCands([]);
  };
@@ -342,9 +349,36 @@ export function Composer() {
  // ⌘Ctrl+Enter 两个键盘入口。
  // 「待发区」（V40）= **omp 的队列真值**（`queue_update` 帧驱动，ack 后立即到达）：
  // 撤回 / 编辑 / 提升 / 中断还原全部按真值操作，壳侧不做本地对账（V39 的乐观条目已退场）。
+ /**
+  * 发送前把输入框里的**短标签**还原成完整相对路径（`@components/` → `@src/views/…/components/`）。
+  *
+  * 输入框显示短标签、omp 只认真路径，所以这一步必须有；解析规则与芯片的「存在性」同一个后端
+  * 入口（`check_paths` 的 `resolved`），两边不会各说各话。解析不出来（歧义 / 不存在）就按原文发
+  * ——芯片此时已经用警告色告诉过用户了。**失败不阻塞发送**。
+  */
+ const expandMentions = async (text: string): Promise<string> => {
+  const tokens = extractMentions(text);
+  if (tokens.length === 0 || !cwd) return text;
+  try {
+   const rs = await api.checkPaths(cwd, tokens);
+   const map = new Map(rs.filter((r) => r.resolved).map((r) => [r.path, r.resolved as string]));
+   return map.size > 0
+    ? rewriteMentions(text, (token) => {
+       const hit = map.get(token);
+       if (hit === undefined) return null;
+       // 目录写法（`@components/`）保留尾斜杠，还原后仍是「这是一个目录」的写法
+       return token.endsWith("/") && !hit.endsWith("/") ? `${hit}/` : hit;
+      })
+    : text;
+  } catch {
+   return text;
+  }
+ };
+
  const sendQueued = async (mode: "steer" | "follow_up") => {
   if (!activeSessionId || (!draft.trim() && attachments.length === 0) || archived) return;
-  const text = draft;
+  const raw = draft;
+  const text = await expandMentions(raw);
   const sentImages = attachments;
   // 清空 / 回滚都走 persistDraft（带 localStorage 同步）：只清内存的话，
   // 已发送的内容下次启动会被 hydrateDrafts 从 `omp.drafts.v1` 恢复回输入框（幽灵草稿）。
@@ -360,8 +394,32 @@ export function Composer() {
    pushHistory(activeSessionId, text);
    resetHistory();
   } catch {
-   persistDraft(activeSessionId, text);
+   persistDraft(activeSessionId, raw);
    addAttachments(activeSessionId, sentImages);
+  }
+ };
+
+ /**
+  * 发送前展开的**逆操作**：把文本里的真路径缩成短标签（退回输入框的队列消息用）。
+  * 规则由 `mention_label` 一端决定（最短唯一后缀），拿不到标签的 mention 原样保留。
+  */
+ const shortenMentions = async (text: string): Promise<string> => {
+  const tokens = extractMentions(text);
+  if (tokens.length === 0 || !cwd) return text;
+  try {
+   const pairs = await Promise.all(
+    tokens.map(async (token) => [token, await api.mentionLabel(cwd, token).catch(() => null)] as const),
+   );
+   const map = new Map(pairs.filter(([, label]) => label !== null) as [string, string][]);
+   return map.size > 0
+    ? rewriteMentions(text, (token) => {
+       const hit = map.get(token);
+       if (hit === undefined || hit === token) return null;
+       return token.endsWith("/") && !hit.endsWith("/") ? `${hit}/` : hit;
+      })
+    : text;
+  } catch {
+   return text;
   }
  };
 
@@ -372,8 +430,10 @@ export function Composer() {
   try {
    const r = await api.removeQueuedMessage(sid, text, queue);
    if (!r.removed) return;
+   // 队列里存的是发给 omp 的真路径：退回草稿时缩回短标签，与输入框口径一致
+   const back = await shortenMentions(text);
    const cur = useApp.getState().draftOf(sid);
-   persistDraft(sid, cur.trim() ? `${cur}\n\n${text}` : text);
+   persistDraft(sid, cur.trim() ? `${cur}\n\n${back}` : back);
    if (r.images && r.images.length > 0) {
     addAttachments(sid, (r.images as { data?: string; mimeType?: string }[]).map(attachmentFromOmpImage));
    }
@@ -608,7 +668,9 @@ export function Composer() {
    return;
   }
   if (!activeSessionId || (!draft.trim() && attachments.length === 0) || running || archived) return;
-  const text = draft;
+  // 输入框里是短标签，omp 只认真路径：发送前展开（回显 / 历史 / 回滚都用原文，用户看到的还是自己写的）
+  const raw = draft;
+  const text = await expandMentions(raw);
   const sentImages = attachments;
   const sid = activeSessionId;
   // 首条判定：流里还没有 user 消息 = 这是本会话第一条（标题回退只做这一次）
@@ -621,8 +683,8 @@ export function Composer() {
    {
     kind: "user",
     id: optimisticId,
-    text,
-    mentions: extractMentions(text),
+    text: raw,
+    mentions: extractMentions(raw),
     ...(sentImages.length > 0
      ? { images: sentImages.map((a) => ({ mimeType: a.mimeType, data: a.dataBase64 })) }
      : {}),
@@ -636,16 +698,16 @@ export function Composer() {
     text,
     sentImages.map((a) => ({ name: a.name, mimeType: a.mimeType, dataBase64: a.dataBase64, bytes: a.bytes })),
    );
-   pushHistory(sid, text);
+   pushHistory(sid, raw);
    resetHistory();
    // 首条发送成功：本地回退先顶上 + 回读 omp 真值（rpc-ui 实测不产标题，回退即终态；
    // TUI 侧改过名时真值覆盖回退）。失败不阻塞发送链路。
-   if (isFirst && text.trim() && sentImages.length === 0) {
-    void refreshTitleAfterFirstSend(sid, text).catch(() => undefined);
+   if (isFirst && raw.trim() && sentImages.length === 0) {
+    void refreshTitleAfterFirstSend(sid, raw).catch(() => undefined);
    }
   } catch {
    // 发失败就把草稿与附件还回去、不留幽灵消息，不让用户重打一遍
-   persistDraft(sid, text);
+   persistDraft(sid, raw);
    addAttachments(sid, sentImages);
    const st = useApp.getState();
    st.set({
@@ -733,13 +795,15 @@ export function Composer() {
       {mentions.map((p) => {
        const check = checks.key === mentionKey ? checks.info[p] : undefined;
        const missing = check?.exists === false;
-       // 芯片只显示**名字**（目录补尾斜杠）：草稿里已经是相对路径，整条路径仍挂在 title 上
+       // 芯片显示**短标签**（草稿里写的就是它），完整相对路径挂在 title 上（`resolved` 是
+       // 短标签反解出的真路径；本来就是真路径 / 缺失时退回原文）
        const name = referenceLabel(p, false);
        const isDir = check?.isDir === true;
+       const full = check?.resolved ?? p;
        return (
         <span
          key={p}
-         title={missing ? `${t.mentionMissingTitle}（${p}）` : p}
+         title={missing ? `${t.mentionMissingTitle}（${p}）` : full}
          className={`inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-0.5 font-mono text-xs ${missing ? "border-warn/50 text-warn" : "border-border text-muted"
           }`}
         >

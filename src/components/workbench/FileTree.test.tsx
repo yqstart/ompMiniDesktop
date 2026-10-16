@@ -12,7 +12,13 @@ import { TEXT } from "../../lib/locale";
  * 后端与系统打开都替换成 mock——本用例只验证前端的取数口径与交互。
  */
 const { apiMock, openerMock } = vi.hoisted(() => ({
- apiMock: { listDir: vi.fn(), getChangeSet: vi.fn(), searchPaths: vi.fn() },
+ apiMock: {
+  listDir: vi.fn(),
+  getChangeSet: vi.fn(),
+  searchPaths: vi.fn(),
+  // 短标签：默认给尾段（真实实现是「最短唯一后缀」，这里只验前端拿它写草稿）
+  mentionLabel: vi.fn(async (_base: string, path: string) => path.split("/").pop() ?? path),
+ },
  openerMock: { openPath: vi.fn(async () => {}), revealItemInDir: vi.fn(async () => {}) },
 }));
 vi.mock("@shared/api", () => ({ api: apiMock }));
@@ -162,23 +168,43 @@ describe("FileTree", () => {
   expect(openerMock.openPath).toHaveBeenCalledWith(`${ROOT}/a.ts`);
  });
 
- it("行尾「引用到输入框」写进草稿的是相对路径（不是绝对路径）", async () => {
+ it("行尾「引用到输入框」写进草稿的是**短标签**（不是整条路径）", async () => {
   apiMock.listDir.mockResolvedValue(listing(ROOT, [entry("a.ts", false), entry("src", true)]));
   apiMock.getChangeSet.mockResolvedValue(changeSet([]));
   await render();
   const btn = rowByName("a.ts")?.querySelector<HTMLButtonElement>(`button[aria-label="${zh.filesInsertRef}"]`);
   expect(btn).toBeTruthy();
-  act(() => btn?.click());
+  await act(async () => {
+   btn?.click();
+   for (let i = 0; i < 5; i += 1) await Promise.resolve();
+  });
+  expect(apiMock.mentionLabel).toHaveBeenCalledWith(ROOT, `${ROOT}/a.ts`);
   expect(useApp.getState().drafts["s1"]).toBe("@a.ts ");
  });
 
- it("目录也能引用（相对路径 + 尾空格）", async () => {
+ it("目录引用补尾斜杠（短标签 + `/`）", async () => {
   apiMock.listDir.mockResolvedValue(listing(ROOT, [entry("src", true)]));
   apiMock.getChangeSet.mockResolvedValue(changeSet([]));
   await render();
   const btn = rowByName("src")?.querySelector<HTMLButtonElement>(`button[aria-label="${zh.filesInsertRef}"]`);
-  act(() => btn?.click());
-  expect(useApp.getState().drafts["s1"]).toBe("@src ");
+  await act(async () => {
+   btn?.click();
+   for (let i = 0; i < 5; i += 1) await Promise.resolve();
+  });
+  expect(useApp.getState().drafts["s1"]).toBe("@src/ ");
+ });
+
+ it("拿不到标签（后端失败）时回退相对路径，照旧能引用", async () => {
+  apiMock.listDir.mockResolvedValue(listing(ROOT, [entry("a.ts", false)]));
+  apiMock.getChangeSet.mockResolvedValue(changeSet([]));
+  apiMock.mentionLabel.mockRejectedValueOnce(new Error("boom"));
+  await render();
+  const btn = rowByName("a.ts")?.querySelector<HTMLButtonElement>(`button[aria-label="${zh.filesInsertRef}"]`);
+  await act(async () => {
+   btn?.click();
+   for (let i = 0; i < 5; i += 1) await Promise.resolve();
+  });
+  expect(useApp.getState().drafts["s1"]).toBe("@a.ts ");
  });
 
  it("目录读不到时显示失败行，不抛到界面上", async () => {
@@ -244,8 +270,11 @@ describe("FileTree", () => {
     const btn = rowByName("Composer.tsx")?.querySelector<HTMLButtonElement>(
      `button[aria-label="${zh.filesInsertRef}"]`,
     );
-    act(() => btn?.click());
-    expect(useApp.getState().drafts["s1"]).toBe("@src/components/composer/Composer.tsx ");
+    await act(async () => {
+     btn?.click();
+     for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    });
+    expect(useApp.getState().drafts["s1"]).toBe("@Composer.tsx ");
    } finally {
     vi.useRealTimers();
    }

@@ -5,8 +5,12 @@ import { fileKindOf, type FileKind } from "../../lib/fileKind";
 import { splitPath } from "../../lib/toolLine";
 import { useText } from "../../lib/useText";
 
-/** 后端 `complete_path` 的单条候选（与 `shared/api.ts` 的返回形状一致）。 */
-export type PathCandidate = { path: string; isDir: boolean };
+/**
+ * 后端 `complete_path` 的单条候选（与 `shared/api.ts` 的返回形状一致）。
+ * `path` = 展示 / 定位用（可能是用户写的短标签前缀），`label` = 选中后写进输入框的**短标签**
+ * （最短唯一后缀，目录由调用方补尾斜杠）。
+ */
+export type PathCandidate = { path: string; isDir: boolean; label: string };
 
 /**
  * 类别 → 图标形状。**形状承担辨识度，颜色不承担**（§2 单强调色）：

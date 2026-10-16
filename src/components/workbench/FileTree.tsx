@@ -86,6 +86,8 @@ export function FileTree({ root }: { root: string }) {
  const hitRefs = useRef<Record<string, HTMLDivElement | null>>({});
  /** 待滚动到的行（等这一轮渲染把行铺出来）。 */
  const scrollTo = useRef<string | null>(null);
+ /** 引用注入的串行队列（标签要问后端，连点也不能乱序）。 */
+ const refQueue = useRef<Promise<void>>(Promise.resolve());
 
  /** 取一层目录（`isRoot` 为真时顺带拿仓库根，由调用方使用）。 */
  const loadDir = useCallback(async (path: string, isRoot: boolean) => {
@@ -229,12 +231,21 @@ export function FileTree({ root }: { root: string }) {
   if (!dirs[entry.path] && !loading.has(entry.path)) void loadDir(entry.path, false);
  };
 
- /** 引用到输入框（与 ⌘⇧P 引用浮层同一注入口径：`appendReference` + 聚焦）。 */
- const insertRef = (path: string) => {
-  if (!activeSessionId) return;
-  const s = useApp.getState();
-  s.setDraft(activeSessionId, appendReference(s.draftOf(activeSessionId), referenceTarget(root, path)));
-  s.set({ composerFocusSeq: s.composerFocusSeq + 1 });
+ /**
+  * 引用到输入框：写**短标签**（`@components/`）而不是整条路径，拿不到标签才退相对路径。
+  * 标签要问一次后端（最短唯一后缀），所以串一条队列——连点几个引用也按点击顺序落进草稿。
+  */
+ const insertRef = (path: string, isDir: boolean) => {
+  const sid = activeSessionId;
+  if (!sid) return;
+  refQueue.current = refQueue.current.then(async () => {
+   const label = await api.mentionLabel(root, path).catch(() => null);
+   const insert = label ?? referenceTarget(root, path);
+   const s = useApp.getState();
+   if (s.activeSessionId !== sid) return; // 会话已经切走：别把文本写进另一个会话
+   s.setDraft(sid, appendReference(s.draftOf(sid), isDir ? `${insert}/` : insert));
+   s.set({ composerFocusSeq: s.composerFocusSeq + 1 });
+  });
  };
 
  /** 过滤结果 → 树：退出过滤态，逐级展开到目标（文件则展开它的父目录）并高亮。 */
@@ -328,7 +339,7 @@ export function FileTree({ root }: { root: string }) {
         <span className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
          {activeSessionId && (
           <button
-           onClick={() => insertRef(e.path)}
+           onClick={() => insertRef(e.path, e.isDir)}
            className="flex size-5 cursor-pointer items-center justify-center rounded text-faint transition-colors duration-100 hover:bg-active hover:text-foreground"
            aria-label={t.filesInsertRef}
            title={t.filesInsertRef}
@@ -393,7 +404,7 @@ export function FileTree({ root }: { root: string }) {
     <span className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
      {activeSessionId && (
       <button
-       onClick={() => insertRef(hit.path)}
+       onClick={() => insertRef(hit.path, hit.isDir)}
        className="flex size-5 cursor-pointer items-center justify-center rounded text-faint transition-colors duration-100 hover:bg-active hover:text-foreground"
        aria-label={t.filesInsertRef}
        title={t.filesInsertRef}
