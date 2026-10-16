@@ -56,7 +56,7 @@ export const IPC = {
  readMemoryFile: "read_memory_file",
  deleteMemoryFile: "delete_memory_file",
  deleteMemoryProject: "delete_memory_project",
- // 使用统计（设置 › 使用统计）：会话 jsonl 里 usage 的聚合（只读）
+ // 使用统计（设置 › 使用统计）：会话 jsonl 里 usage 的聚合 ∪ 壳侧账本（已删除会话的补记；只读）
  getUsageStats: "get_usage_stats",
  // 供应商用量（设置 › 供应商用量）：`omp usage --json` 的各供应商滚动窗口（只读）
  getProviderUsage: "get_provider_usage",

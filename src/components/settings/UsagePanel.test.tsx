@@ -52,6 +52,7 @@ const usage: UsageStats = {
  },
  heat,
  scannedFiles: 2,
+ extras: 0,
  truncated: false,
 };
 
@@ -165,6 +166,16 @@ describe("使用统计 › 三张指标卡", () => {
   await render();
   expect(container.textContent).toContain("—");
   expect(container.textContent).not.toContain("%");
+ });
+
+ it("有账本补记时说清来源，没有则不出现这一行", async () => {
+  await render();
+  expect(container.textContent).not.toContain("本地记账");
+
+  mock.getUsageStats.mockImplementation(async () => ({ ...usage, extras: 7 }));
+  act(() => radio("近 7 日").click());
+  await flush();
+  expect(container.textContent).toContain("其中 7 条来自本地记账");
  });
 });
 

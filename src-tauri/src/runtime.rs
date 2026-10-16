@@ -1167,6 +1167,25 @@ async fn handle_frame<R: tauri::Runtime>(
             .get("message")
             .and_then(SessionMeta::usage_from_message_end)
         {
+            // 使用统计的**壳侧账本**：这一轮的用量先记下来，会话以后被删掉统计也不会少
+            // （扫描时按 responseId 与 jsonl 去重，见 usage.rs 模块头「壳侧账本」）。
+            // 失败 / 重试的调用 usage 全 0 且没有 responseId：不记账（省假活跃日）。
+            if let Some(m) = v.get("message") {
+                let u = crate::usage::parse_usage(&m["usage"]);
+                if u.total > 0 {
+                    let rec = crate::usage::UsageRecord {
+                        sid: key.to_string(),
+                        response_id: m.get("responseId").and_then(|r| r.as_str()).unwrap_or("").to_string(),
+                        ts_ms: m.get("timestamp").and_then(|t| t.as_i64()),
+                        model: m.get("model").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                        usage: u,
+                    };
+                    let ledger = app.state::<crate::commands::AppState>().usage_ledger.clone();
+                    // 走异步入口：首次记账要加载整个账本，同步读盘会把会话事件循环卡住。
+                    // 记账失败（磁盘满 / 权限）只影响「已删除会话的补记」，不能拖累会话线程。
+                    let _ = ledger.record_async(&rec).await;
+                }
+            }
             let map = app.state::<crate::commands::AppState>().runtime.clone();
             let payload = {
                 let mut guard = map.lock().await;
@@ -1495,8 +1514,14 @@ mod real_rpc_tests {
             .expect("mock app 构建失败");
         // 会话进程表必须用 `AppState.runtime` 那一份：pump 的 meta 更新与 message_end 用量回写
         // 都经 `app.state::<AppState>()` 取表——传一份自己的 map 进去会看着「什么都没发生」。
-        let state = crate::commands::load_state(app.handle());
+        let mut state = crate::commands::load_state(app.handle());
         let map = state.runtime.clone();
+        // 使用统计账本换成测试自己的临时文件：**不许**往用户的应用数据目录里写（真实轮次会记账）
+        let ledger_path = std::env::temp_dir()
+            .join(format!("omp-rpc-it-ledger-{}", std::process::id()))
+            .join("usage-ledger.jsonl");
+        let ledger = crate::usage::UsageLedger::new(ledger_path.clone());
+        state.usage_ledger = ledger.clone();
         app.manage(state);
         let handle = app.handle().clone();
 
@@ -1626,6 +1651,51 @@ mod real_rpc_tests {
         );
         assert!(sts.iter().any(|s| s == "running"), "状态应经过 running：{sts:?}");
         assert!(sts.iter().any(|s| s == "idle"), "状态应回到 idle：{sts:?}");
+
+        // 使用统计账本：真实轮次跑完必须落下一行，且那一行能被统计直接读回来
+        // （字段口径 = `usage.rs` 的 UsageEvent；`responseId` / 时间戳 / 用量与 jsonl 同源）
+        let lines: Vec<serde_json::Value> = std::fs::read_to_string(&ledger_path)
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect();
+        assert!(!lines.is_empty(), "真实轮次应往账本记至少一条：{}", ledger_path.display());
+        let first = &lines[0];
+        // sid 只能从账本读（闭包里的 sid 已出作用域）：它必须是**完整 uuid**（不许 8 字符前缀）
+        let sid_in_ledger = first["sid"].as_str().unwrap_or("").to_string();
+        assert_eq!(sid_in_ledger.len(), 36, "账本行的 sid = 本会话完整 uuid：{sid_in_ledger}");
+        assert!(first["tsMs"].as_i64().unwrap_or(0) > 0, "账本行要带毫秒时间戳");
+        assert!(first["usage"]["total"].as_u64().unwrap_or(0) > 0, "账本行要带真实用量");
+        println!("[real_rpc] 账本落盘 {} 条；首条 = {first}", lines.len());
+        // 统计侧读回来：会话 jsonl 目录不存在（= 会话已删）也照样给出这条用量
+        let no_sessions = std::env::temp_dir().join(format!("omp-rpc-it-none-{}", std::process::id()));
+        let stats = crate::usage::scan_usage_full(
+            &no_sessions,
+            None,
+            chrono::Local::now(),
+            Some(&ledger_path),
+        );
+        assert!(stats.totals.bucket.calls >= 1, "账本这几条应被统计读到");
+        assert!(stats.totals.bucket.total >= first["usage"]["total"].as_u64().unwrap());
+        assert!(stats.extras >= 1, "会话已删 → 算「本地记账」补上的那一条");
+        // 幂等：同一条消息（同一 responseId）再记一次不写新行
+        let before = lines.len();
+        for line in &lines {
+            ledger
+                .record(&crate::usage::UsageRecord {
+                    sid: line["sid"].as_str().unwrap_or("").to_string(),
+                    response_id: line["responseId"].as_str().unwrap_or("").to_string(),
+                    ts_ms: line["tsMs"].as_i64(),
+                    model: line["model"].as_str().unwrap_or("").to_string(),
+                    usage: crate::usage::parse_usage(&line["usage"]),
+                })
+                .unwrap();
+        }
+        let after = std::fs::read_to_string(&ledger_path).unwrap_or_default().lines().count();
+        assert_eq!(after, before, "同一 responseId 重放不许写第二行");
+
+        let _ = std::fs::remove_dir_all(ledger_path.parent().unwrap());
         while let Ok(v) = st_rx.try_recv() {
             sts.push(v.get("state").and_then(|s| s.as_str()).unwrap_or("").to_string());
         }

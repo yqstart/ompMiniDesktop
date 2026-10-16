@@ -234,6 +234,11 @@ export type UsageStats = {
  /** 热力图：最近 53 周（周日对齐、逐日补零、到今天为止），**不随 `days` 裁剪**。 */
  heat: UsageHeatRow[];
  scannedFiles: number;
+ /**
+  * 只由壳侧使用账本补上、omp 会话记录里已经没有的条数——即**已删除会话**的那部分用量
+  * （壳侧每条 assistant 消息记一条，会话删掉也不影响统计）。
+  */
+ extras: number;
  truncated: boolean;
 };
 

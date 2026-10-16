@@ -186,17 +186,19 @@ function Heatmap({ cells, numLocale }: { cells: UsageHeatRow[]; numLocale: strin
 }
 
 /**
- * 设置 ›「使用统计」：把 omp 本地会话记录里的用量聚合成一页只读统计。
+ * 设置 ›「使用统计」：把 omp 本地会话记录与壳侧账本里的用量聚合成一页统计。
  *
  * 口径（与 ZCode 的「使用统计」对齐，数据源换成 omp）：
  * - 总览三项指标：tokens 用量 / Cache 命中率 / 活跃天数（**默认看「今日」**）；
  * - 范围只作用于 tokens 用量与 Cache 命中率：**活跃天数与连续天数恒为全量历史**，不随范围缩水
  *   （「今日」档下它们与「全部」档相同）；
  * - 「Token 活动」热力图：最近 53 周的逐日日历，**不随范围切换**，右上三档换取值口径；
- * - 数据来自会话 jsonl 里每条 assistant 消息的 `usage`，含已归档会话；
- * - 全部数字（含命中率 / 连续天数）由后端算好，前端只做格式化；
+ * - 数据来源 = omp 会话记录（每条 assistant 消息的 `usage`，含已归档会话）**∪** 壳侧使用账本
+ *   （后端按 `responseId` 去重）：**会话被删掉后那部分用量仍留在统计里**，`extras` 就是账本补上的
+ *   条数，界面上要明说来源；
+ * - 全数字（含命中率 / 连续天数）由后端算好，前端只做格式化；
  * - 扫描有预算，超出时明说「统计可能不全」（后端 `truncated`），不假装统计完了；
- * - **只读**：不写 omp 配置、不写覆盖层、不落盘（刷新即重扫）。
+ * - 本页自身**只读**（不写 omp 配置、不写覆盖层）；账本的写入在会话运行时（`runtime.rs`）。
  */
 export function UsagePanel() {
  const { locale } = useApp();
@@ -288,6 +290,10 @@ export function UsagePanel() {
    )}
    {data?.truncated && (
     <p className="mt-2 text-[13px] text-warn">{fmt(t.usageTruncated, data.scannedFiles)}</p>
+   )}
+   {data !== null && data.extras > 0 && (
+    /* 数据来源要明说：这部分是壳侧账本补的（omp 会话记录已经删了），不是 jsonl 扫出来的 */
+    <p className="mt-2 text-[12px] leading-relaxed text-faint">{fmt(t.usageLedgerExtra, data.extras)}</p>
    )}
 
    {data === null ? (

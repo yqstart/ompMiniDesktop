@@ -17,6 +17,11 @@
   - **项目脚本 = 后端只读识别**（`project_scripts.rs` 的 `discover_scripts`；进面板 / 切项目 / 点刷新时重扫）：`package.json` 的 `scripts`（包管理器按 `pnpm-lock.yaml` / `yarn.lock` / `bun.lock(b)` / `package-lock.json` 或 `packageManager` 字段判定，命令统一 `<pm> run <名>`）、`Cargo.toml`（build / test / run / clippy / fmt + `.cargo/config.toml` 的 `[alias]`）、`go.mod`（build / test / run / vet）、`manage.py`（Django 五条）与 `pyproject.toml` 的 `[project.scripts]` / `[tool.poetry.scripts]`、`Makefile` 的 target、`justfile` 的 recipe、`Taskfile.yml` 的 task（后两者含 Makefile 一律**行扫描**解析——不为几个清单文件引 TOML / YAML 依赖，认不出的写法就是没有，不猜；每条带来源徽标）。面板顶部显示识别到的生态（如「识别到 Node (pnpm) · Rust」）。
   - **自定义脚本 = 本应用偏好**（按项目目录分组存 `omp.scripts.v1`，**不往用户仓库写文件**），行内新建 / 编辑 / 删除；要团队共享就写进 `package.json` / `Makefile`——那正好会被识别读到。
   - **执行**：点行 → 展开右栏 + 切到终端页签 + **新开一个终端**跑它（标签名 = 脚本名）；`TerminalPane` 在**首帧输出后**（shell 起来、提示符出来）把命令写进 PTY，1.5s 超时兜底，`consumedRunRef` 挡住重复——脚本面板自己不另起进程。连点几条脚本就是几个终端，各跑各的、互不打断（终端已退出时就地提示，不静默丢命令）。
+- **使用统计不再因为删会话而丢数据**：壳侧新增一份**使用账本**（`app_data_dir/omp-mini/usage-ledger.jsonl`）——每个会话进程的每条 assistant `message_end` 一落，就把那一轮的 usage（未缓存输入 / 输出 / 缓存读·写 / 合计 / 模型 / 时间戳 / 上游 `responseId`）**追加**进账本，只追加、不改写、键重复即跳过（重启后重新加载账本重建去重集合，重放不会写第二遍）。设置 ›「使用统计」的统计口径随之变成 **omp 会话记录 ∪ 账本**：
+  - 两路都进同一个累加器，按 `responseId`（缺失时退回 `sid|时间戳|四段用量`）**全局去重**——实测同一轮在实时帧与 jsonl 里的 `responseId` / `message.timestamp` / `usage` 完全一致（探针：`rid=e4445cd1… ts=1792128700867 total=4260` 两边同值），所以已落盘的会话不会因为账本而翻倍；**同一条消息两边都有时以 jsonl 为准**（jsonl 先扫、先占键），账本去重剩下的正是「jsonl 里已经没有的」= 已删除会话的用量，或 jsonl 被预算截断丢掉的那部分。
+  - 失败 / 重试的调用（`responseId` 缺失且 `totalTokens = 0`）不记账；账本读取按 0 用量丢弃，不造出假的活跃日与请求数（真机验证：模型不可用时整轮 `assistant` 消息都是 `stopReason=error` + usage 全 0 + 无 `responseId`，账本一个字都不写）。
+  - 账本读取自身也有预算（20 万条 / 3 秒，到点即停并把「统计可能不全」照旧说出来）；面板底部明说来源：`extras`（只由账本补上、jsonl 里已经没有的条数）> 0 时给一行「其中 N 条来自本地记账（会话记录已删除，用量仍保留）」——统计里有多少是账本补的，一眼看得出。
+  - 记账只影响「已删除会话的补记」：写盘在阻塞线程池里做（首次记账要加载整个账本，不许卡住会话事件循环），失败（磁盘满 / 权限）不会拖累会话线程，也不写 omp 的任何配置。
 
 ### Changed
 

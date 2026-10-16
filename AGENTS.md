@@ -48,7 +48,7 @@ src-tauri/src/
   commands/mod.rs            # RPC 命令面 + 项目 / 工作区 / 会话 / git 命令
   context.rs session_scan.rs overlay.rs git_info.rs git_commit.rs git_ops.rs project_files.rs workspace_fs.rs project_scripts.rs
   plugins.rs skills.rs settings.rs themes.rs models_config.rs title_prompt.rs omp_update.rs
-  providers.rs memories.rs usage.rs provider_usage.rs extra_usage.rs
+  providers.rs memories.rs usage.rs provider_usage.rs extra_usage.rs   # usage.rs = 使用统计（jsonl 聚合 + 壳侧账本）
 scripts/                     # e2e-ipc-selfcheck / generate-icons / changelog-notes / fixup-latest-json / make-signing-cert / tauri-build
 ```
 
@@ -82,6 +82,10 @@ scripts/                     # e2e-ipc-selfcheck / generate-icons / changelog-no
 - **标题**：omp 对 `--mode rpc-ui` 强制关闭自动标题——壳侧两层补：pump 在首条用户消息帧（`message_start` role=user 等）一到就注入一次 `/rename`（`/` 开头在 omp 侧先过命令门、早于 streaming 判定，`/rename` 无参数走后台执行：运行中注入不插话、不排队、不阻塞——标题在任务跑完前就有），spawn 时（resume 旧会话）与每次终态 `agent_end`（失败兜底重试）各再看一眼，每进程至多成功一次 → `session_info_update` 帧回灌；后端扫描 `first_user_text` 派生显示标题兜底。标题语言随壳界面语言（`TITLE_SYSTEM.md`，用户自写文件不覆盖）。**标题显示口径**：omp 18.8.7+ 的标题卡（上游 `utils/title-card.ts`，`title.icons` 默认 `nf+emoji`）会在生成 / `/rename` 时把标题写成 `${icon} ${code}: ${title}`（实测 `󰜘 COMMIT: 提交推送后仍有修改标识`；图标是私有区码位，壳里没有覆盖私有区的字体，WebKit 会回退成 Apple Symbols 的杂物字形，U+F084D 画成 6 根横条），**显示层一律去掉开头这整段前缀（图标 + 大写短码）**（`lib/sessionTitle.ts` 的 `sessionTitleForDisplay`，侧栏行 / 删除确认 / 顶栏 / 命令面 / 归档页 / 设置搜索 / **改名输入框回显**同一口径；没有图标的裸 `HGT: ` 不是卡、不剥），数据保持原样（jsonl 标题、导出仍带前缀）。**改名交互**（顶栏点标题就地改名）：Enter 或**点输入框外**提交、Esc 取消，改过才写 omp 真名（原样提交 = 不写）——「点输入框外」走 document `pointerdown`，不用 blur（WKWebView 里点非聚焦元素不搬焦点）；同一次点击里 pointerdown 提交后 blur 的补发由一次性结算挡住。
 - **内存治理**：每 60s 一轮闲置回收（idle 30 分钟且已落盘 → kill；重新打开 / 发消息自动 resume）；`eventsBySession` 只留最近 3 个会话（切会话时触发 LRU 裁剪）；工具全量输出封顶 100K 字符。
 - **模型目录**（`omp models --json`，2–10s）：单飞 + 5 分钟缓存 + 过期后台刷新（`omp-models://catalog` 广播）；`omp config list --json` 一次读全部配置键。
+- **使用统计（`usage.rs`）= omp 会话记录 ∪ 壳侧账本**：只扫 jsonl 的话**删掉会话，那部分用量就从统计里消失**，所以壳侧另记一份账本——每条 assistant `message_end`（`runtime.rs`，`totalTokens > 0` 才记）把那一轮 usage 追加进 `app_data_dir/omp-mini/usage-ledger.jsonl`（**只追加、不改写**，键已记过即跳过；`UsageLedger` 懒加载，首次记账才建目录 / 开文件 / 重建去重集合）。
+  - **去重键唯一口径 = `usage.rs` 的 `usage_key`**：`sid|responseId` 优先，`responseId` 缺失（失败 / 重试调用）退回 `sid|时间戳|四段用量`；jsonl 解析与账本记录共用这一处，口径不一致就会重复计数。实测同一轮在实时帧与 jsonl 里的 `responseId` / `message.timestamp` / `usage` **完全一致**（探针：`rid=e4445cd1… ts=1792128700867 total=4260` 两边同值），**两路都有时以 jsonl 为准**（jsonl 先扫、先占键；账本随后扫，去重剩下的就是「jsonl 里已经没有的」）。两路都不看对方的状态，只认这一个全局键——**不许**再加时间窗口 / 「会话文件在不在」之类的额外判据（试过：老会话后来追加过消息时按 mtime 判会误杀，按数据时间窗判要么重复要么漏）。
+  - 派生指标（命中率 / 活跃天数 / 连续天数 / 热力图）与 jsonl 同一条口径：账本事件同样进活跃日与热力图；返回的 `extras` = 只由账本补上、jsonl 里已经没有的条数，设置页据此明说数据来源。账本读不完（超预算）与 jsonl 预算一样置 `truncated`，不假装统计完了。
+  - 记账失败（磁盘满 / 权限）只影响「已删除会话的补记」，**不许拖累会话线程**；本应用只读 omp，账本写在自己的应用数据目录里。
 - **设置写入口径**：omp 侧只经 `omp` CLI（`config set/reset`、`auth-broker`…）；**唯一例外**：`models.yml` 直接写文件（hash 乐观锁 + 预校验 + 备份 + 原子写）。本应用偏好不写 omp 配置。
 - **设置视图（v3 设置重构）**：`SettingsPage` 覆盖主区（`store.settingsTabOpen/settingsTabActive`；打开 = 左栏「设置」/ `⌘,`，关闭 = 顶部返回 / `⌘W` / 再点一次）——顶部条（返回 + 当前条目名 + 搜索钮）+ 左导航**四组七条目**（通用 / 模型 / 扩展 / 数据；窄窗 44px 图标档，容器查询）+ 内容区唯一滚动。搜索 = `store.settingsSearchOpen`（`⌘F`），数据源走 `lib/settingsSearch.ts`（模块级缓存 + 懒加载，设置视图卸载即清；参数 = 常用设置目录 / 模型目录 / 插件 / 技能 / 记忆 / 归档），四档打分复用 `filterCatalog`；结果点击经 `navigateTo` 跳条目，常用设置项带 `SettingsFocusRequest{key,seq}` 定位（通用页展开分组 → 滚动到行 → 一次闪烁；seq 防重放、消费后回调清空）。
 - **提交 / 推送**：两轨（快速 = 一次 `omp -p` 生成信息 + `git commit/push`；完整 = `omp commit`）；按 cwd 建任务表（并行 + BUSY + 取消 + 超时）；入口 = **卡顶行提交键**（V42 起右栏「变更」区块随上下文面板退场，这里是唯一入口；同一浮层链路、同一状态口径：运行中转圈 / 失败红点）+ 左栏任务徽章。

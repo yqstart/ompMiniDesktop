@@ -44,6 +44,9 @@ pub struct AppState {
     /// V24 omp 运行时更新：**全局单槽**任务句柄（一台机器只有一份 omp 安装，两次更新互斥；
     /// 见 `omp_update.rs`）。
     pub omp_update_task: crate::omp_update::UpdateSlot,
+    /// 使用统计的**壳侧账本**（`<appData>/omp-mini/usage-ledger.jsonl`，只追加）：会话被删掉后
+    /// 用量仍能补回来（见 `usage.rs` 模块头「壳侧账本」）。
+    pub usage_ledger: crate::usage::UsageLedger,
 }
 
 #[derive(Debug, Serialize)]
@@ -2766,13 +2769,22 @@ pub async fn get_git_info(path: String) -> Result<crate::git_info::GitInfo, CmdE
 }
 
 pub fn load_state<R: tauri::Runtime>(app: &AppHandle<R>) -> AppState {
-    let dir = app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
-    let overlay_path = dir.join("omp-mini").join("overlay.json");
+    let dir = app.path().app_data_dir().ok();
+    let overlay_path = dir
+        .clone()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join("omp-mini")
+        .join("overlay.json");
     let (ov, reset) = load_overlay(&overlay_path);
     if reset {
         let _ = std::fs::create_dir_all(overlay_path.parent().unwrap());
         let _ = std::fs::write(&overlay_path, serde_json::to_string_pretty(&ov).unwrap());
     }
+    // 使用统计账本：拿不到应用数据目录就退化成空账本（统计照跑，只少「已删除会话」那一块）
+    let usage_ledger = match dir {
+        Some(d) => crate::usage::UsageLedger::new(d.join("omp-mini").join("usage-ledger.jsonl")),
+        None => crate::usage::UsageLedger::disabled(),
+    };
     AppState {
         overlay_path,
         overlay: Mutex::new(ov),
@@ -2791,6 +2803,7 @@ pub fn load_state<R: tauri::Runtime>(app: &AppHandle<R>) -> AppState {
         terminals: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
         commit_tasks: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
         omp_update_task: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        usage_ledger,
     }
 }
 

@@ -315,7 +315,7 @@ const ZH = {
  // 设置 › 使用统计（omp 会话 jsonl 里的用量聚合：tokens 用量 / Cache 命中率 / 活跃天数）
  tabUsage: "使用统计",
  usageHint:
-  "统计来自本机 omp 的会话记录（每一条 assistant 消息的 usage 求和，含已归档会话）：tokens 用量、Cache 命中率与活跃天数。本应用只读取，不写 omp，也不做联网上报。",
+  "统计来自本机 omp 的会话记录（每一条 assistant 消息的 usage 求和，含已归档会话）：tokens 用量、Cache 命中率与活跃天数。本应用只读取 omp，不做联网上报；运行期间的用量另在本地记一份账，会话删掉也不会从统计里消失。",
  usageRangeToday: "今日",
  usageRange7d: "近 7 日",
  usageRange30d: "近 30 日",
@@ -325,6 +325,7 @@ const ZH = {
  usageLoadFailed: "统计加载失败",
  usageEmpty: "这个范围内还没有可统计的用量。跑过带模型的 omp 会话后，这里会给出 tokens 用量、缓存命中率与活跃天数。",
  usageTruncated: "已到扫描预算（已扫描 {0} 个会话文件），统计可能不全。",
+ usageLedgerExtra: "其中 {0} 条来自本地记账（会话记录已删除，用量仍保留）。",
  usageTokens: "tokens 用量",
  usageCacheHit: "Cache 命中率",
  usageCacheReadSub: "缓存读 {0} tokens",
@@ -1642,7 +1643,7 @@ const EN: Record<TextKey, string> = {
  // 设置 › 使用统计（omp 会话 jsonl 里的用量聚合：tokens 用量 / Cache 命中率 / 活跃天数）
  tabUsage: "Usage",
  usageHint:
-  "Stats come from local omp session records (summed from each assistant message's usage, archived chats included): tokens used, cache hit rate and active days. This app only reads — it never writes to omp and never reports usage anywhere.",
+  "Stats come from local omp session records (summed from each assistant message's usage, archived chats included): tokens used, cache hit rate and active days. This app only reads omp and never reports usage anywhere; it also keeps a local ledger while sessions run, so deleting a chat no longer removes its usage from these numbers.",
  usageRangeToday: "Today",
  usageRange7d: "Last 7 days",
  usageRange30d: "Last 30 days",
@@ -1652,6 +1653,7 @@ const EN: Record<TextKey, string> = {
  usageLoadFailed: "Failed to load usage stats",
  usageEmpty: "No usage in this range yet. Once omp sessions run with a model, tokens used, cache hit rate and active days show up here.",
  usageTruncated: "Hit the scan budget ({0} session files scanned); figures may be incomplete.",
+ usageLedgerExtra: "{0} of them come from the local ledger (their session records were deleted).",
  usageTokens: "tokens used",
  usageCacheHit: "Cache hit rate",
  usageCacheReadSub: "{0} cached tokens",
