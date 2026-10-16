@@ -196,24 +196,32 @@ export function Composer() {
  const moveSlash = (step: number) =>
   setSlashNav({ key: slashKey, idx: (slashIdx + step + slashCands.length) % (slashCands.length || 1) });
 
- // `@` 补全：取光标前 `@` 起的路径前缀，300ms 防抖问后端（只读目录列举）。
+ // `@` 补全：取光标前 `@` 起的路径前缀，300ms 防抖问后端（一层列举 / 递归搜名字，见 `complete_path`）。
  const mentionToken = (() => {
   const before = draft.slice(0, caret);
   const m = /@([^\s@]*)$/.exec(before);
   return m ? m[1] : null;
  })();
  const mentionEmpty = mentionToken == null || !cwd || !activeSessionId || slashToken !== null;
+ /** 当前补全的取词 key（`cwd\0token`）：与 `mentionLoadedKey` 对不上 = 还在搜。 */
+ const mentionQueryKey = `${cwd}\u0000${mentionToken ?? ""}`;
+ /** ESC 关掉后记住当时的 key：继续打字（key 变）就重新打开，与 `/` 命令面同一口径。 */
+ const [mentionDismissed, setMentionDismissed] = useState<string | null>(null);
+ /** 已取完词的 key：对不上就渲染「搜索中」，**不许让浮层无声消失**（用户实测的坑）。 */
+ const [mentionLoadedKey, setMentionLoadedKey] = useState<string | null>(null);
+ const mentionOpen = !mentionEmpty && mentionDismissed !== mentionQueryKey;
  useEffect(() => {
   if (mentionEmpty) return;
   let alive = true;
+  const key = mentionQueryKey;
   const timer = setTimeout(() => {
    void api
     .completePath(cwd, mentionToken)
     .then((rs) => {
-     if (alive) {
-      setMentionCands(rs);
-      setMentionIdx(rs.length > 0 ? 0 : -1);
-     }
+     if (!alive) return;
+     setMentionCands(rs);
+     setMentionIdx(rs.length > 0 ? 0 : -1);
+     setMentionLoadedKey(key);
     })
     .catch(() => undefined);
   }, 300);
@@ -221,7 +229,7 @@ export function Composer() {
    alive = false;
    clearTimeout(timer);
   };
- }, [mentionToken, cwd, activeSessionId, mentionEmpty]);
+ }, [mentionQueryKey, mentionToken, cwd, activeSessionId, mentionEmpty]);
 
  // 选中一条候选：把光标前的 `@前缀` 换成完整路径（目录补 `/` 接着往里打，文件补空格收尾）。
  // 点击、Tab、Enter 三个入口共用它，免得三处各写一遍替换规则。
@@ -780,9 +788,16 @@ export function Composer() {
     <label htmlFor="composer" className="sr-only">
      {t.composerLabel}
     </label>
-    {/* `@` 路径补全：前缀匹配的目录列举，Tab/Enter 选中 */}
-    {mentionToken !== null && !mentionEmpty && mentionCands.length > 0 && (
-     <MentionList cands={mentionCands} active={mentionIdx} onPick={pickMention} onHover={setMentionIdx} />
+    {/* `@` 路径补全：一层列举 / 递归搜名字（`complete_path`），Tab/Enter 选中。
+        取词中与「没有匹配」都留在浮层里如实说——无声消失会被当成坏了（用户实测）。 */}
+    {mentionOpen && (
+     <MentionList
+      cands={mentionCands}
+      active={mentionIdx}
+      onPick={pickMention}
+      onHover={setMentionIdx}
+      status={mentionLoadedKey !== mentionQueryKey ? "loading" : mentionCands.length > 0 ? "ready" : "empty"}
+     />
     )}
     {/* `/` 命令补全：omp 命令面（含技能），限高内部滚动，不挤压输入框 */}
     {slashOpen && (
@@ -872,7 +887,9 @@ export function Composer() {
        if (c) pickMention(c);
        return;
       }
-      if (completing && e.key === "Escape") {
+      // Esc 关浮层也认「正在取词」这一态（此时还没有候选，completing 为假）
+      if (e.key === "Escape" && mentionOpen) {
+       setMentionDismissed(mentionQueryKey);
        setMentionCands([]);
        setMentionIdx(-1);
        return;

@@ -2574,34 +2574,47 @@ pub struct PathCandidate {
     pub is_dir: bool,
 }
 
-/// 输入框 `@` 补全：按当前 token 列举 base 下的匹配项（前缀匹配，最多 20 条）。
-/// 只读目录名、不跟符号链接、不递归——补全够用即可，不做文件搜索。
-#[tauri::command]
-pub async fn complete_path(base: String, prefix: String) -> Vec<PathCandidate> {
-    if base.is_empty() || prefix.contains('\0') {
+/// 输入框 `@` 补全的取词（同步纯逻辑，便于单测）：按当前 token 给候选（最多 `limit` 条）。
+///
+/// 两种口径：
+/// - **一层**（空 token 的 `@`、带目录的 `@src/components/`）→ 列那个目录（快，够用）；
+/// - **有名字、还没写目录**（`@baselin`）→ 递归搜名字（忽略大小写、名字包含，浅层与前缀命中优先）。
+///   ——只列一层的话，目标在子目录里（`tracsys_web/baseline/`）时补全永远搜不到，
+///   用户只能手打整条路径；这也正是「`@` 有弹窗、继续输入就消失」的根因。
+pub fn complete_candidates(base: &str, prefix: &str, limit: usize) -> Vec<PathCandidate> {
+    if base.is_empty() || prefix.contains('\0') || limit == 0 {
         return vec![];
     }
     // token 含目录分隔符时按最后一段做前缀，搜索目录为前面部分
     let (dir_rel, file_prefix) = match prefix.rsplit_once('/') {
         Some((d, f)) => (d.to_string(), f.to_string()),
-        None => (String::new(), prefix.clone()),
+        None => (String::new(), prefix.to_string()),
     };
     if file_prefix.contains("..") || dir_rel.contains("..") {
         return vec![];
     }
+    // 有名字、没写目录：递归搜（`search_entries` 自带扫描预算与相关度排序）
+    if dir_rel.is_empty() && !file_prefix.is_empty() {
+        return crate::workspace_fs::search_entries(base, &file_prefix, limit)
+            .0
+            .into_iter()
+            .map(|hit| PathCandidate { path: hit.rel, is_dir: hit.is_dir })
+            .collect();
+    }
     let dir = if dir_rel.is_empty() {
-        PathBuf::from(&base)
+        PathBuf::from(base)
     } else {
-        resolve_path(&base, &dir_rel)
+        resolve_path(base, &dir_rel)
     };
     let entries = std::fs::read_dir(&dir)
         .map(|rd| rd.filter_map(|e| e.ok()).take(200).collect::<Vec<_>>())
         .unwrap_or_default();
+    let needle = file_prefix.to_lowercase();
     let mut out: Vec<PathCandidate> = entries
         .into_iter()
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
-            if name.starts_with('.') || !name.starts_with(file_prefix.as_str()) {
+            if name.starts_with('.') || !name.to_lowercase().starts_with(&needle) {
                 return None;
             }
             let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
@@ -2614,8 +2627,20 @@ pub async fn complete_path(base: String, prefix: String) -> Vec<PathCandidate> {
         (false, true) => std::cmp::Ordering::Greater,
         _ => a.path.cmp(&b.path),
     });
-    out.truncate(20);
+    out.truncate(limit);
     out
+}
+
+/// 输入框 `@` 补全：只读目录 / 名字，不读文件内容（取词见 `complete_candidates`）。
+#[tauri::command]
+pub async fn complete_path(base: String, prefix: String) -> Vec<PathCandidate> {
+    if base.is_empty() || prefix.contains('\0') {
+        return vec![];
+    }
+    // 递归搜索是磁盘活：放阻塞线程池，不占 tokio worker
+    tauri::async_runtime::spawn_blocking(move || complete_candidates(&base, &prefix, 20))
+        .await
+        .unwrap_or_default()
 }
 
 /// 输入框 `@提及` 的存在性提示（V2 M6b）：只 stat，不读内容、不写任何东西。
@@ -2810,13 +2835,50 @@ pub fn load_state<R: tauri::Runtime>(app: &AppHandle<R>) -> AppState {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_project_order, assign_members, catalog_fresh, clean_workspace_name, derived_title, display_title,
-        discover_omp_path, get_global_approval, kill_runtime, list_archived_in, load_cached, load_state,
-        owner_project, plan_after_rejected_params, rpc_request, scan_window, session_file_for,
-        spawn_session_runtime, stderr_first_line, AppState, Plan, MODELS_TTL_MS,
+        apply_project_order, assign_members, catalog_fresh, clean_workspace_name, complete_candidates,
+        derived_title, display_title, discover_omp_path, get_global_approval, kill_runtime, list_archived_in,
+        load_cached, load_state, owner_project, plan_after_rejected_params, rpc_request, scan_window,
+        session_file_for, spawn_session_runtime, stderr_first_line, AppState, Plan, MODELS_TTL_MS,
     };
     use crate::overlay::{Overlay, Project};
     use std::collections::HashMap;
+
+    /// `@` 补全取词：一层列举 / 递归搜索两条口径。
+    /// 用户实测的坑：只列一层时，目标在子目录里就「`@` 有弹窗、继续输入就消失」。
+    #[test]
+    fn complete_mentions_search_nested_names() {
+        let root = std::env::temp_dir().join(format!("omp-mini-complete-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("Baseline")).unwrap();
+        std::fs::write(root.join("src/baseline_utils.ts"), "x").unwrap();
+        std::fs::write(root.join("README.md"), "x").unwrap();
+        let base = root.to_str().unwrap();
+
+        // 空 token（刚打 `@`）：只列一层，目录优先、不递归
+        let top = complete_candidates(base, "", 20);
+        assert_eq!(top.first().map(|c| c.path.as_str()), Some("Baseline"), "{top:?}");
+        assert!(top.iter().all(|c| !c.path.contains('/')), "空 token 不该递归：{top:?}");
+
+        // 有名字、没写目录：递归搜 + 忽略大小写（一层里的 Baseline 与子目录里的文件都出）
+        let hits = complete_candidates(base, "baselin", 20);
+        let paths: Vec<&str> = hits.iter().map(|c| c.path.as_str()).collect();
+        assert!(paths.contains(&"Baseline"), "{paths:?}");
+        assert!(paths.contains(&"src/baseline_utils.ts"), "子目录里的匹配也要出：{paths:?}");
+        assert!(complete_candidates(base, "BASELIN", 20).iter().any(|c| c.path == "Baseline"));
+
+        // 带目录（`@src/`）：只列那一层，路径带目录前缀
+        let in_src = complete_candidates(base, "src/", 20);
+        assert!(!in_src.is_empty());
+        assert!(in_src.iter().all(|c| c.path.starts_with("src/")), "{in_src:?}");
+
+        // 越界 / 空 base / limit 的边界
+        assert!(complete_candidates(base, "../x", 20).is_empty());
+        assert!(complete_candidates("", "x", 20).is_empty());
+        assert!(complete_candidates(base, "baselin", 0).is_empty());
+        assert_eq!(complete_candidates(base, "baselin", 1).len(), 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     /// `stderr_first_line`：从「omp 输出：xxx（yyy）」里取回 omp 的原话；
     /// 没有那段标记（不是启动失败类错误）就回 `None`，不许瞎猜。

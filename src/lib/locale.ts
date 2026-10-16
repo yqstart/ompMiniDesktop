@@ -1023,6 +1023,8 @@ const ZH = {
  composerLabel: "输入消息",
  mentionListAria: "路径补全",
  mentionListTitle: "文件",
+ mentionListLoading: "搜索中…",
+ mentionListEmpty: "没有匹配的文件或文件夹",
  mentionListHint: "↑↓ 选择 · Tab 或 Enter 补全 · Esc 关闭",
  // 输入框 `/` 命令补全（数据是 omp 自己的命令面，不是壳侧编的清单）
  slashListAria: "命令补全",
@@ -2373,6 +2375,8 @@ const EN: Record<TextKey, string> = {
  composerLabel: "Message",
  mentionListAria: "Path completion",
  mentionListTitle: "Files",
+ mentionListLoading: "Searching…",
+ mentionListEmpty: "No matching file or folder",
  mentionListHint: "↑↓ to move · Tab or Enter to complete · Esc to close",
  // Composer `/` command completion (the data is omp's own command surface, not a shell-side list)
  slashListAria: "Command completion",

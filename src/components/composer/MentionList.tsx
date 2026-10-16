@@ -27,18 +27,24 @@ const KIND_ICON: Record<FileKind, IconComponent> = {
  * 行内口径与工具行（`ToolRow`）一致——**主片段是文件基名**（正文色，完整显示），
  * **次要片段是目录**（11px mono `faint`，保留结尾斜杠，放不下时截断）；
  * 识别信息交给图标，不给文件名上色（上游数据是路径，不是我们的文案）。
+ *
+ * 取词状态也在这个框里如实说（`status`）：**正在搜**与**没有匹配**都留着这一行——
+ * 让浮层无声消失会被当成「补全坏了」（用户实测：输入 `@baselin` 浮层直接没了）。
  */
 export function MentionList({
  cands,
  active,
  onPick,
  onHover,
+ status = "ready",
 }: {
  cands: PathCandidate[];
  /** 高亮下标（`-1` = 无高亮）。 */
  active: number;
  onPick: (c: PathCandidate) => void;
  onHover: (index: number) => void;
+ /** `loading` = 防抖 / 取词中；`empty` = 取完了没有匹配；`ready` = 有候选。 */
+ status?: "loading" | "ready" | "empty";
 }) {
  const t = useText();
  const boxRef = useRef<HTMLDivElement>(null);
@@ -57,25 +63,28 @@ export function MentionList({
     aria-label={t.mentionListAria}
     className="max-h-52 overflow-y-auto overscroll-contain pb-1"
    >
-    {cands.map((c, i) => {
-     const { base, dir } = splitPath(c.path);
-     const Icon = KIND_ICON[fileKindOf(c.path, c.isDir)];
-     return (
-      <button
-       key={c.path}
-       type="button"
-       role="option"
-       aria-selected={i === active}
-       onClick={() => onPick(c)}
-       onMouseEnter={() => onHover(i)}
-       className={`flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left ${i === active ? "bg-hover" : ""}`}
-      >
-       <Icon size={14} aria-hidden className={`shrink-0 ${c.isDir ? "text-accent" : "text-muted"}`} />
-       <span className="shrink-0 text-[13px] text-foreground">{base}</span>
-       {dir && <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-faint">{dir}</span>}
-      </button>
-     );
-    })}
+    {status === "loading" && <p className="px-2.5 py-1.5 text-[12px] text-faint">{t.mentionListLoading}</p>}
+    {status === "empty" && <p className="px-2.5 py-1.5 text-[12px] text-faint">{t.mentionListEmpty}</p>}
+    {status === "ready" &&
+     cands.map((c, i) => {
+      const { base, dir } = splitPath(c.path);
+      const Icon = KIND_ICON[fileKindOf(c.path, c.isDir)];
+      return (
+       <button
+        key={c.path}
+        type="button"
+        role="option"
+        aria-selected={i === active}
+        onClick={() => onPick(c)}
+        onMouseEnter={() => onHover(i)}
+        className={`flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left ${i === active ? "bg-hover" : ""}`}
+       >
+        <Icon size={14} aria-hidden className={`shrink-0 ${c.isDir ? "text-accent" : "text-muted"}`} />
+        <span className="shrink-0 text-[13px] text-foreground">{base}</span>
+        {dir && <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-faint">{dir}</span>}
+       </button>
+      );
+     })}
    </div>
    <div className="flex items-center gap-1.5 border-t border-border-soft px-2.5 py-1.5 text-[11px] text-faint">
     <CircleInfo size={12} aria-hidden />

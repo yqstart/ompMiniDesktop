@@ -27,7 +27,7 @@ const { apiMock } = vi.hoisted(() => ({
   runSlash: vi.fn(async (_sid: string, _cmd: string) => undefined),
   stop: vi.fn(async (_sid: string) => undefined),
   checkPaths: vi.fn(async (_base: string, _paths: string[]) => []),
-  completePath: vi.fn(async (_base: string, _prefix: string) => []),
+  completePath: vi.fn(async (_base: string, _prefix: string): Promise<{ path: string; isDir: boolean }[]> => []),
   removeQueuedMessage: vi.fn(async () => ({ removed: true })),
   promoteQueuedMessage: vi.fn(async () => ({ promoted: true })),
   abortAndRestoreQueue: vi.fn(async () => ({ steering: [] as { text: string }[], followUp: [] as { text: string }[] })),
@@ -133,6 +133,10 @@ const session = (over: Partial<SessionView> = {}): SessionView => ({
 
 beforeEach(() => {
  vi.clearAllMocks();
+ // jsdom 没实现 scrollIntoView（`@` 补全浮层把高亮项滚进视野要用），给个空实现
+ if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+ }
  useApp.setState({
   sessions: [],
   projects: [],
@@ -571,5 +575,96 @@ describe("Composer 图片附件：`#N` 占位与角标", () => {
   ta!.setSelectionRange(2, 2);
   await pasteFiles(ta!, [png("m.png")], "截图说明");
   expect(useApp.getState().drafts["s1"]).toBe("看看截图说明#1");
+ });
+});
+
+/** 受控 textarea 的一次输入（React 19 认原生 value setter + input 事件）。 */
+const typeInto = async (ta: HTMLTextAreaElement, value: string) => {
+ const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+ await act(async () => {
+  setter?.call(ta, value);
+  ta.dispatchEvent(new Event("input", { bubbles: true }));
+ });
+};
+
+/** 等过 `@` 补全的防抖窗口（300ms）。 */
+const afterDebounce = async () => {
+ await act(async () => {
+  await new Promise((resolve) => setTimeout(resolve, 350));
+ });
+};
+
+/**
+ * `@` 补全：一层列举 / 递归搜名字两条口径（后端 `complete_path`）+ 取词中与空态**留在浮层里**。
+ * 用户实测的坑：以前候选为空就让浮层消失，看着像「补全坏了」。
+ */
+describe("Composer `@` 路径补全", () => {
+ it("取词中显示「搜索中」，取完显示候选（子目录里的匹配也出）", async () => {
+  let settle: ((v: { path: string; isDir: boolean }[]) => void) | null = null;
+  apiMock.completePath.mockImplementation(
+   () =>
+    new Promise((resolve) => {
+     settle = resolve;
+    }),
+  );
+  const ta = await mount(false);
+  await typeInto(ta!, "@baselin");
+  expect(container.textContent).toContain(TEXT["zh-CN"].mentionListLoading);
+  await afterDebounce();
+  expect(apiMock.completePath).toHaveBeenCalledWith("/w/alpha", "baselin");
+  await act(async () => {
+   settle?.([{ path: "src/baseline_utils.ts", isDir: false }]);
+   await Promise.resolve();
+  });
+  expect(container.textContent).toContain("baseline_utils.ts");
+  expect(container.textContent).toContain("src/");
+  expect(container.textContent).not.toContain(TEXT["zh-CN"].mentionListLoading);
+ });
+
+ it("取完没有匹配：浮层留着如实说，不无声消失", async () => {
+  apiMock.completePath.mockResolvedValue([]);
+  const ta = await mount(false);
+  await typeInto(ta!, "@zzzz");
+  await afterDebounce();
+  expect(container.textContent).toContain(TEXT["zh-CN"].mentionListEmpty);
+ });
+
+ it("选中候选：相对路径补全，文件收尾空格、目录补斜杠", async () => {
+  apiMock.completePath.mockResolvedValue([
+   { path: "src/a.ts", isDir: false },
+   { path: "src/components", isDir: true },
+  ]);
+  const ta = await mount(false);
+  await typeInto(ta!, "@a");
+  await afterDebounce();
+  const opts = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')];
+  expect(opts.length).toBe(2);
+  await act(async () => {
+   opts[0]?.click();
+  });
+  expect(useApp.getState().drafts["s1"]).toBe("@src/a.ts ");
+
+  await typeInto(ta!, "@comp");
+  await afterDebounce();
+  const dirOpt = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((b) =>
+   b.textContent?.includes("components"),
+  );
+  await act(async () => {
+   dirOpt?.click();
+  });
+  expect(useApp.getState().drafts["s1"]).toBe("@src/components/");
+ });
+
+ it("Esc 关掉浮层，继续打字重新打开", async () => {
+  apiMock.completePath.mockResolvedValue([{ path: "src/a.ts", isDir: false }]);
+  const ta = await mount(false);
+  await typeInto(ta!, "@a");
+  await afterDebounce();
+  expect(container.querySelector('[role="option"]')).not.toBeNull();
+  await press(ta, { key: "Escape" });
+  expect(container.querySelector('[role="option"]')).toBeNull();
+  await typeInto(ta!, "@ab");
+  await afterDebounce();
+  expect(container.querySelector('[role="option"]')).not.toBeNull();
  });
 });
