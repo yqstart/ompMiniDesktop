@@ -151,9 +151,13 @@ export type RefTreeNode =
  | { kind: "dir"; name: string; rel: string; rank: number; children: RefTreeNode[] }
  | { kind: "file"; name: string; item: RefItem; rank: number };
 
-/** 渲染行：目录行（chevron 折叠，不参与键盘导航）或文件行（`index` = 光标序号，与渲染顺序一致）。 */
+/**
+ * 渲染行：目录行（chevron 折叠，行尾 hover 出「引用整个文件夹」）或文件行（叶子 = 候选）。
+ * `index` = **行序号**（↑↓ 光标序列，与渲染顺序严格一致）——目录行也参与，所以停在目录行按 Enter
+ * 就是引用这个文件夹。
+ */
 export type RefRow =
- | { kind: "dir"; name: string; rel: string; depth: number }
+ | { kind: "dir"; name: string; rel: string; depth: number; index: number }
  | { kind: "file"; name: string; item: RefItem; depth: number; index: number };
 
 function isDirNode(node: RefTreeNode): node is Extract<RefTreeNode, { kind: "dir" }> {
@@ -220,7 +224,8 @@ export function buildRefTree(items: readonly RefItem[], byRank = false): RefTree
 }
 
 /**
- * 前序遍历成渲染序列，并给文件行编上连续的光标序号（目录行不参与导航）。
+ * 前序遍历成渲染序列，并给**每一行**（目录行 + 文件行）编上连续的光标序号——
+ * ↑↓ 既能停在文件上（Enter = 引用文件），也能停在目录行上（Enter = 引用整个文件夹）。
  * `isCollapsed(rel)` 命中的目录：目录行本身保留，整棵子树跳过（资源管理器树的折叠语义）。
  */
 export function flattenRefTree(
@@ -232,12 +237,11 @@ export function flattenRefTree(
  const walk = (list: readonly RefTreeNode[], depth: number): void => {
   for (const node of list) {
    if (isDirNode(node)) {
-    rows.push({ kind: "dir", name: node.name, rel: node.rel, depth });
+    rows.push({ kind: "dir", name: node.name, rel: node.rel, depth, index: index++ });
     if (isCollapsed?.(node.rel)) continue;
     walk(node.children, depth + 1);
    } else {
-    rows.push({ kind: "file", name: node.name, item: node.item, depth, index });
-    index += 1;
+    rows.push({ kind: "file", name: node.name, item: node.item, depth, index: index++ });
    }
   }
  };

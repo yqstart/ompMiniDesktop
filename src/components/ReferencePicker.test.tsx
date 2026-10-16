@@ -17,6 +17,11 @@ vi.mock("@shared/api", () => ({
 const actEnv = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
 actEnv.IS_REACT_ACT_ENVIRONMENT = true;
 
+// jsdom 没实现 scrollIntoView（键盘移动时要把选中行滚进视野），给个空实现
+if (!Element.prototype.scrollIntoView) {
+ Element.prototype.scrollIntoView = () => {};
+}
+
 const t = TEXT["zh-CN"];
 
 const FE = { id: "fe", path: "/p/fe", name: "FE", missing: false, sessionCount: 0, workspaceId: "w1" };
@@ -129,6 +134,20 @@ describe("引用工作区文件浮层", () => {
   expect(useApp.getState().composerFocusSeq).toBeGreaterThan(0);
  });
 
+ it("键盘：默认停在第一条文件行，↑ 能停到文件夹行、Enter 引用整个文件夹", async () => {
+  await open();
+  // 树的行序：src(0) → src/db(1) → index.ts(2) → api.ts(3) → README.md(4)
+  press("ArrowUp"); // 从默认落点（index.ts）上移到 src/db
+  press("Enter");
+  expect(useApp.getState().pendingReference).toMatchObject({
+   sessionId: "s1",
+   path: "/p/be/src/db",
+   label: "db/",
+   isDir: true,
+  });
+  expect(useApp.getState().refPickerTarget).toBeNull();
+ });
+
  it("已有草稿时追加在原文之后（尾随空格收口提及解析）", async () => {
   act(() => useApp.setState({ drafts: { s1: "看看这个：" } }));
   await open();
@@ -149,6 +168,28 @@ describe("引用工作区文件浮层", () => {
 
   clickByText("src");
   expect([...container.querySelectorAll('[role="option"]')].map((o) => o.textContent)).toEqual(before);
+ });
+
+ it("文件夹可引用：目录行尾的链接键投递目录引用（isDir、短名带尾斜杠、路径不带）", async () => {
+  await open();
+  // 行尾链接键按树的前序排列：src、src/db
+  const buttons = [...container.querySelectorAll("button")].filter(
+   (b) => b.getAttribute("aria-label") === t.refPickDirRef,
+  );
+  expect(buttons).toHaveLength(2);
+
+  act(() => {
+   buttons[1]?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  // 跨项目 = 绝对路径；尾斜杠由引用芯片序列化时补（`@/p/be/src/db/`）
+  expect(useApp.getState().pendingReference).toMatchObject({
+   sessionId: "s1",
+   path: "/p/be/src/db",
+   label: "db/",
+   isDir: true,
+  });
+  expect(useApp.getState().refPickerTarget).toBeNull();
+  expect(useApp.getState().composerFocusSeq).toBeGreaterThan(0);
  });
 
  it("当前项目不在工作区里（没有其他项目）：给提示且不发请求", async () => {

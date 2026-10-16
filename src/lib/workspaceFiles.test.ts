@@ -168,7 +168,7 @@ describe("模糊排序（rankRefItems）", () => {
 });
 
 describe("目录树（buildRefTree / flattenRefTree）", () => {
- it("浏览态（默认）：目录在前、同级按名字；同名目录合并；文件行序号与渲染顺序一致", () => {
+ it("浏览态（默认）：目录在前、同级按名字；同名目录合并；行序号与渲染顺序一致（目录行也参与导航）", () => {
   const rows = flattenRefTree(buildRefTree([
    item("src/main.js"),
    item("src/layout/menu/x.vue"),
@@ -176,13 +176,13 @@ describe("目录树（buildRefTree / flattenRefTree）", () => {
    item("src/layout/menu/y.vue"),
   ]));
   expect(rows).toEqual([
-   { kind: "dir", name: "src", rel: "src", depth: 0 },
-   { kind: "dir", name: "layout", rel: "src/layout", depth: 1 },
-   { kind: "dir", name: "menu", rel: "src/layout/menu", depth: 2 },
-   { kind: "file", name: "x.vue", item: item("src/layout/menu/x.vue"), depth: 3, index: 0 },
-   { kind: "file", name: "y.vue", item: item("src/layout/menu/y.vue"), depth: 3, index: 1 },
-   { kind: "file", name: "main.js", item: item("src/main.js"), depth: 1, index: 2 },
-   { kind: "file", name: "README.md", item: item("README.md"), depth: 0, index: 3 },
+   { kind: "dir", name: "src", rel: "src", depth: 0, index: 0 },
+   { kind: "dir", name: "layout", rel: "src/layout", depth: 1, index: 1 },
+   { kind: "dir", name: "menu", rel: "src/layout/menu", depth: 2, index: 2 },
+   { kind: "file", name: "x.vue", item: item("src/layout/menu/x.vue"), depth: 3, index: 3 },
+   { kind: "file", name: "y.vue", item: item("src/layout/menu/y.vue"), depth: 3, index: 4 },
+   { kind: "file", name: "main.js", item: item("src/main.js"), depth: 1, index: 5 },
+   { kind: "file", name: "README.md", item: item("README.md"), depth: 0, index: 6 },
   ]);
   expect(rows.filter(isFileRow)).toHaveLength(4);
  });
@@ -204,15 +204,15 @@ describe("目录树（buildRefTree / flattenRefTree）", () => {
   expect(rows).toEqual([{ kind: "file", name: "a.ts", item: item("a.ts"), depth: 0, index: 0 }]);
  });
 
- it("折叠目录：目录行保留、整棵子树跳过、文件序号仍连续", () => {
+ it("折叠目录：目录行保留、整棵子树跳过、行序号仍连续（目录行也占一位）", () => {
   const tree = buildRefTree([
    item("src/main.js"),
    item("src/layout/menu/x.vue"),
    item("README.md"),
   ]);
   expect(flattenRefTree(tree, (rel) => rel === "src")).toEqual([
-   { kind: "dir", name: "src", rel: "src", depth: 0 },
-   { kind: "file", name: "README.md", item: item("README.md"), depth: 0, index: 0 },
+   { kind: "dir", name: "src", rel: "src", depth: 0, index: 0 },
+   { kind: "file", name: "README.md", item: item("README.md"), depth: 0, index: 1 },
   ]);
   // 折叠内层：只跳它自己的子树，外层不受影响
   const rows = flattenRefTree(tree, (rel) => rel === "src/layout");
@@ -222,7 +222,7 @@ describe("目录树（buildRefTree / flattenRefTree）", () => {
    "main.js",
    "README.md",
   ]);
-  expect(rows.filter(isFileRow).map((row) => row.index)).toEqual([0, 1]);
+  expect(rows.map((row) => row.index)).toEqual([0, 1, 2, 3]);
  });
 });
 

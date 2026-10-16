@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight } from "reicon-react";
+import { ChevronDown, ChevronRight, Link } from "reicon-react";
 import { api } from "@shared/api";
 import type { ProjectFiles } from "@shared/types";
 import { useApp } from "../stores/app";
@@ -11,6 +11,7 @@ import {
  flattenRefTree,
  highlightName,
  isFileRow,
+ joinAbs,
  rankRefItems,
  refQueryTerms,
  referenceLabel,
@@ -43,10 +44,13 @@ type Section = { key: string; name: string; count: number; rows: RefRow[] };
 
 /**
  * 引用工作区文件（V22）：⌘⇧P 打开；搜索**其他**成员项目的文件（当前项目不列——本项目文件在
- * 输入框里用 omp 原生 `@` 直接可补全）；Enter 把 `@<绝对路径> ` 注入**引用目标**：
+ * 输入框里用 omp 原生 `@` 直接可补全）；Enter（或点文件行）把引用注入**引用目标**：
  * 该会话的 Composer 草稿（追加进草稿并把焦点交还输入框——omp 在 prompt 时会把 `@<路径>`
  * 展开成 fileMention 消息，含 cwd 之外的绝对路径，2026-10-09 真机实测），跨项目文件因此照样进上下文。
- * 结果按项目分组、以资源管理器式目录树展示（chevron 折叠 / 目录与文件类型图标 / 只走文件行的键盘导航）。
+ * **文件夹同样可引用**（条目树里的目录行尾悬停出链接键，与右栏文件树同一口径）——注入 `@<目录>/`，
+ * 语义 = omp 的目录提及（整个目录进上下文）。
+ * 结果按项目分组、以资源管理器式目录树展示（chevron 折叠 / 目录与文件类型图标 / ↑↓ 走每一行，
+ * **默认落点 = 第一条文件行**——打字后 Enter 仍是引用文件，要引用文件夹就 ↑↓ 停到目录行）。
  *
  * 数据只在打开时拉一次（后端 60s 缓存）——输入不触发 IPC。
  */
@@ -58,10 +62,12 @@ export function ReferencePicker(): React.JSX.Element | null {
  const projects = useApp((s) => s.projects);
  const workspaceGroups = useApp((s) => s.workspaceGroups);
  const inputRef = useRef<HTMLInputElement>(null);
+ /** 渲染行的元素表（行序号 → 元素）：键盘移动时把选中行滚进视野。 */
+ const rowRefs = useRef<Record<number, HTMLElement | null>>({});
  const listId = useId();
  const [query, setQuery] = useState("");
  const terms = useMemo(() => refQueryTerms(query), [query]);
- const [cursor, setCursor] = useState(0);
+ const [cursor, setCursor] = useState<number | null>(null);
  const [reloadSeq, setReloadSeq] = useState(0);
  const [loaded, setLoaded] = useState<{ key: string; groups: ProjectFiles[]; error: string | null } | null>(null);
  const [collapseState, setCollapseState] = useState<{ query: string; keys: ReadonlySet<string> }>({
@@ -129,12 +135,11 @@ export function ReferencePicker(): React.JSX.Element | null {
 
  /**
   * 每个项目一段：过滤 → 目录树（按折叠状态剪枝）→ 前序遍历成渲染行；
-  * 文件行的光标序号在段间连续，与渲染顺序严格一致（不会跳）。
+  * 行序号在段间连续，与渲染顺序严格一致（不会跳）。
   */
  const sections = useMemo<Section[]>(() => {
   if (load.state !== "ready") return [];
   const searching = refQueryTerms(query).length > 0;
-  let index = 0;
   const out: Section[] = [];
   for (const group of load.groups) {
    if (group.error !== null) continue;
@@ -142,7 +147,7 @@ export function ReferencePicker(): React.JSX.Element | null {
    const rows = flattenRefTree(
     buildRefTree(matched, searching),
     (rel) => collapsedKeys.has(collapseKey(group.path, rel)),
-   ).map((row) => (isFileRow(row) ? { ...row, index: index++ } : row));
+   );
    const project = projects.find((p) => p.path === group.path);
    out.push({
     key: group.path,
@@ -153,27 +158,52 @@ export function ReferencePicker(): React.JSX.Element | null {
   }
   return out;
  }, [load, projects, query, collapsedKeys]);
- const fileRows = useMemo(() => sections.flatMap((section) => section.rows.filter(isFileRow)), [sections]);
- const total = fileRows.length;
- const activeIndex = total > 0 ? Math.min(cursor, total - 1) : -1;
- const active = activeIndex >= 0 ? fileRows[activeIndex] ?? null : null;
+ /** ↑↓ 的导航序列（目录行与文件行都在里面）：同时记住该行属于哪个项目（目录引用要用项目根算绝对路径）。 */
+ const entries = useMemo(
+  () => sections.flatMap((section) => section.rows.map((row) => ({ row, projectRoot: section.key }))),
+  [sections],
+ );
+ const total = entries.length;
+ /** 没按过方向键时的默认落点 = 第一条**文件**行（打字后 Enter 直接引用文件；要引用文件夹就 ↑↓ 停上去）。 */
+ const defaultIndex = useMemo(() => {
+  const at = entries.findIndex((entry) => isFileRow(entry.row));
+  return at >= 0 ? at : 0;
+ }, [entries]);
+ /** `cursor === null` = 还没动过方向键（跟随默认落点，列表变化后也不会错位）。 */
+ const activeIndex = total === 0 ? -1 : cursor === null || cursor >= total ? defaultIndex : cursor;
+ const active = activeIndex >= 0 ? entries[activeIndex] ?? null : null;
+
+ /**
+  * 光标移动时把选中行带进视野：列表可能有上百行，没有跟随就不知道高亮落到哪了
+  * （↑ 从第一条文件行往上找文件夹时尤其需要）。
+  */
+ useEffect(() => {
+  if (activeIndex < 0) return;
+  rowRefs.current[activeIndex]?.scrollIntoView({ block: "nearest" });
+ }, [activeIndex]);
 
  const close = () => useApp.getState().set({ refPickerTarget: null });
- const choose = (item: RefItem) => {
+ /**
+  * 投递一枚引用芯片（跨项目 → 绝对路径；目录的尾斜杠由芯片序列化时补），由 Composer
+  * 插进草稿编辑器、焦点交还输入框。**文件行与目录行共用这一条投递口径**。
+  */
+ const deliver = (abs: string, isDir: boolean) => {
   const s = useApp.getState();
   const sid = target?.sessionId ?? null;
   if (!sid || !s.sessions.some((x) => x.id === sid)) {
    close();
    return;
   }
-  // 投递一枚引用芯片（跨项目 → 绝对路径），由 Composer 插进草稿编辑器；焦点交还输入框。
   s.insertDraftReference(sid, {
-   path: referenceTarget(cwd ?? "", item.abs),
-   label: referenceLabel(item.abs, false),
-   isDir: false,
+   path: referenceTarget(cwd ?? "", abs),
+   label: referenceLabel(abs, isDir),
+   isDir,
   });
   s.set({ refPickerTarget: null, composerFocusSeq: s.composerFocusSeq + 1 });
  };
+ const choose = (item: RefItem) => deliver(item.abs, false);
+ /** 引用整个文件夹：项目根 + 树里的相对目录路径 → 绝对路径。 */
+ const chooseDir = (projectRoot: string, rel: string) => deliver(joinAbs(projectRoot, rel), true);
 
  if (!target || cwd === null) return null;
 
@@ -190,7 +220,7 @@ export function ReferencePicker(): React.JSX.Element | null {
      value={query}
      onChange={(e) => {
       setQuery(e.target.value);
-      setCursor(0);
+      setCursor(null);
      }}
      onKeyDown={(e) => {
       if (e.nativeEvent.isComposing) return;
@@ -202,14 +232,18 @@ export function ReferencePicker(): React.JSX.Element | null {
       } else if (e.key === "Enter") {
        if (active) {
         e.preventDefault();
-        choose(active.item);
+        // 停在文件行 = 引用这个文件；停在目录行 = 引用整个文件夹
+        if (isFileRow(active.row)) choose(active.row.item);
+        else chooseDir(active.projectRoot, active.row.rel);
        }
       }
      }}
      role="combobox"
      aria-expanded
      aria-controls={listId}
-     aria-activedescendant={activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined}
+     aria-activedescendant={
+      activeIndex >= 0 && active !== null && isFileRow(active.row) ? `${listId}-${activeIndex}` : undefined
+     }
      aria-autocomplete="list"
      placeholder={t.refPickSearchPlaceholder}
      aria-label={t.refPickSearchPlaceholder}
@@ -264,31 +298,53 @@ export function ReferencePicker(): React.JSX.Element | null {
           const key = collapseKey(section.key, row.rel);
           const collapsed = collapsedKeys.has(key);
           return (
-           <button
+           <div
             key={`d:${row.rel}`}
-            type="button"
-            onClick={() => toggleDir(key)}
+            ref={(el) => {
+             rowRefs.current[row.index] = el;
+            }}
+            className={`group flex items-center gap-1 rounded-md py-[3px] pr-1 transition-colors duration-100 ${activeIndex === row.index ? "bg-active" : "hover:bg-hover"}`}
             style={{ paddingLeft: 6 + row.depth * INDENT }}
-            className="flex w-full cursor-pointer items-center gap-1.5 rounded-md py-[3px] pr-2 text-left text-[12px] text-muted transition-colors duration-100 hover:bg-hover"
            >
-            {collapsed
-             ? <ChevronRight size={12} className="shrink-0 text-faint" aria-hidden />
-             : <ChevronDown size={12} className="shrink-0 text-faint" aria-hidden />}
-            <FileIcon name={row.name} isDir expanded={!collapsed} size={14} />
-            <span className="min-w-0 flex-1 truncate">
-             {highlightName(row.name, terms).map((part, partIndex) => (
-              part.hit
-               ? <span key={partIndex} className="font-medium text-accent">{part.text}</span>
-               : <span key={partIndex}>{part.text}</span>
-             ))}
-            </span>
-           </button>
+            <button
+             type="button"
+             onClick={() => toggleDir(key)}
+             aria-expanded={!collapsed}
+             title={joinAbs(section.key, row.rel)}
+             className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left text-[12px] text-muted"
+            >
+             {collapsed
+              ? <ChevronRight size={12} className="shrink-0 text-faint" aria-hidden />
+              : <ChevronDown size={12} className="shrink-0 text-faint" aria-hidden />}
+             <FileIcon name={row.name} isDir expanded={!collapsed} size={14} />
+             <span className="min-w-0 flex-1 truncate">
+              {highlightName(row.name, terms).map((part, partIndex) => (
+               part.hit
+                ? <span key={partIndex} className="font-medium text-accent">{part.text}</span>
+                : <span key={partIndex}>{part.text}</span>
+              ))}
+             </span>
+            </button>
+            {/* 行尾动作：引用整个文件夹（hover 才露面，与右栏文件树同一口径） */}
+            <button
+             type="button"
+             onClick={() => chooseDir(section.key, row.rel)}
+             className="hidden size-5 shrink-0 cursor-pointer items-center justify-center rounded text-faint transition-colors duration-100 group-hover:flex hover:bg-active hover:text-foreground"
+             aria-label={t.refPickDirRef}
+             title={t.refPickDirRef}
+            >
+             <Link size={11} aria-hidden />
+            </button>
+           </div>
           );
          }
          return (
           <button
            key={`f:${row.item.abs}`}
            id={`${listId}-${row.index}`}
+           ref={(el) => {
+            rowRefs.current[row.index] = el;
+           }}
            type="button"
            role="option"
            aria-selected={activeIndex === row.index}
@@ -314,6 +370,7 @@ export function ReferencePicker(): React.JSX.Element | null {
      </div>
     )}
     <p className="text-[11px] text-faint">{t.refPickInsertHint}</p>
+    <p className="text-[11px] text-faint">{t.refPickDirHint}</p>
    </div>
   </DialogShell>
  );
