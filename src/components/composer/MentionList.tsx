@@ -10,7 +10,15 @@ import { useText } from "../../lib/useText";
  * `path` = 展示 / 定位用（可能是用户写的短标签前缀），`label` = 选中后写进输入框的**短标签**
  * （最短唯一后缀，目录由调用方补尾斜杠）。
  */
-export type PathCandidate = { path: string; isDir: boolean; label: string };
+export type PathCandidate = {
+ /** 展示 / 定位用（短标签补全时保持用户写的前缀）。 */
+ path: string;
+ /** **真实相对路径**：写进输入框芯片、最终交给 omp 的形态。 */
+ real: string;
+ isDir: boolean;
+ /** 选中后显示在芯片上的短标签（最短唯一后缀）。 */
+ label: string;
+};
 
 /**
  * 类别 → 图标形状。**形状承担辨识度，颜色不承担**（§2 单强调色）：

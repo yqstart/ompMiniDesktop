@@ -482,6 +482,21 @@ export type RefPickerTarget = {
  sessionId: string;
 };
 
+/**
+ * 待插入草稿的**引用芯片**（右栏文件树 / 快速过滤 / 引用浮层 → Composer）。
+ * 草稿编辑器（Lexical）是非受控的：引用要作为原子节点插进去，不能靠改草稿文本；
+ * 外部只投递这条请求，Composer 消费后插入编辑器并清空（`seq` 防重放）。
+ */
+export type PendingReference = {
+ sessionId: string;
+ /** 真路径（会话目录内是相对路径，跨项目是绝对路径）——发给 omp 的形态。 */
+ path: string;
+ /** 显示用的短标签（最短唯一后缀）。 */
+ label: string;
+ isDir: boolean;
+ seq: number;
+};
+
 // ---------- 工作区提交 / 推送（V19） ----------
 
 /**

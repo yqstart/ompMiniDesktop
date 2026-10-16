@@ -179,7 +179,13 @@ describe("FileTree", () => {
    for (let i = 0; i < 5; i += 1) await Promise.resolve();
   });
   expect(apiMock.mentionLabel).toHaveBeenCalledWith(ROOT, `${ROOT}/a.ts`);
-  expect(useApp.getState().drafts["s1"]).toBe("@a.ts ");
+  // 引用走「待插入芯片」通道（草稿编辑器非受控，插入由 Composer 消费）
+  expect(useApp.getState().pendingReference).toMatchObject({
+   sessionId: "s1",
+   path: "a.ts",
+   label: "a.ts",
+   isDir: false,
+  });
  });
 
  it("目录引用补尾斜杠（短标签 + `/`）", async () => {
@@ -191,7 +197,12 @@ describe("FileTree", () => {
    btn?.click();
    for (let i = 0; i < 5; i += 1) await Promise.resolve();
   });
-  expect(useApp.getState().drafts["s1"]).toBe("@src/ ");
+  expect(useApp.getState().pendingReference).toMatchObject({
+   sessionId: "s1",
+   path: "src",
+   label: "src",
+   isDir: true,
+  });
  });
 
  it("拿不到标签（后端失败）时回退相对路径，照旧能引用", async () => {
@@ -204,7 +215,7 @@ describe("FileTree", () => {
    btn?.click();
    for (let i = 0; i < 5; i += 1) await Promise.resolve();
   });
-  expect(useApp.getState().drafts["s1"]).toBe("@a.ts ");
+  expect(useApp.getState().pendingReference).toMatchObject({ path: "a.ts", label: "a.ts" });
  });
 
  it("目录读不到时显示失败行，不抛到界面上", async () => {
@@ -274,7 +285,10 @@ describe("FileTree", () => {
      btn?.click();
      for (let i = 0; i < 5; i += 1) await Promise.resolve();
     });
-    expect(useApp.getState().drafts["s1"]).toBe("@Composer.tsx ");
+    expect(useApp.getState().pendingReference).toMatchObject({
+     path: "src/components/composer/Composer.tsx",
+     label: "Composer.tsx",
+    });
    } finally {
     vi.useRealTimers();
    }

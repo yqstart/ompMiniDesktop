@@ -2575,8 +2575,11 @@ pub fn resolve_path(base: &str, p: &str) -> PathBuf {
 pub struct PathCandidate {
     /// 展示 / 定位用的路径（相对 base；短标签补全时保持用户写的前缀）。
     pub path: String,
+    /// **真实相对路径**：写进输入框芯片、最终交给 omp 的形态（一层列举时可能与 `path` 不同，
+    /// 例如用户写的 `@components/` 前缀挡在前面，真实路径是 `src/views/…/components`）。
+    pub real: String,
     pub is_dir: bool,
-    /// 选中后写进输入框的**短标签**（最短唯一后缀；目录由前端补尾斜杠）。
+    /// 输入框里显示的**短标签**（最短唯一后缀；目录由前端补尾斜杠）。
     pub label: String,
 }
 
@@ -2587,8 +2590,8 @@ fn with_labels(base: &str, rows: Vec<(String, String, bool)>) -> Vec<PathCandida
     let labels = crate::workspace_fs::unique_labels(&all, &targets);
     rows.into_iter()
         .map(|(path, real, is_dir)| {
-            let label = labels.get(&real).cloned().unwrap_or(real);
-            PathCandidate { path, is_dir, label }
+            let label = labels.get(&real).cloned().unwrap_or_else(|| real.clone());
+            PathCandidate { path, real, is_dir, label }
         })
         .collect()
 }

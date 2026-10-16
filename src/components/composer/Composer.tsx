@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+ useEffect,
+ useMemo,
+ useRef,
+ useState,
+ type ClipboardEvent as ReactClipboardEvent,
+ type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { ArrowUp, Hourglass, PenLine, Timer, TriangleWarning, X } from "reicon-react";
@@ -24,6 +31,7 @@ import { resolveContext } from "../../lib/context";
 import { useGitInfo } from "../../lib/useGitInfo";
 import { GoalRow } from "./GoalRow";
 import { MentionList, type PathCandidate } from "./MentionList";
+import { DraftEditor, type DraftEditorHandle, type DraftTextSource } from "./draft/DraftEditor";
 import { SlashMenu } from "./SlashMenu";
 import { PlusMenu } from "./PlusMenu";
 import { ApprovalModeMenu } from "./ApprovalModeMenu";
@@ -57,10 +65,11 @@ export function Composer() {
  const t = useText();
  const { activeSessionId, draftOf, setDraft, statusBySession, sessions, attachmentsOf, addAttachments, removeAttachment, clearAttachments, queuedOf, currentModel, currentRuntime, models, composerFocusSeq } =
   useApp();
- const taRef = useRef<HTMLTextAreaElement | null>(null);
+ /** 草稿编辑器句柄（Lexical；不受控——编辑器状态是权威，store 里的草稿是它的投影）。 */
+ const editorRef = useRef<DraftEditorHandle | null>(null);
  /** 引用浮层注入草稿后回到输入框接着写（序号信号：同一会话反复注入也能重新聚焦）。 */
  useEffect(() => {
-  if (composerFocusSeq > 0) taRef.current?.focus();
+  if (composerFocusSeq > 0) editorRef.current?.focus();
  }, [composerFocusSeq]);
  const persistDraft = (sid: string | null, text: string) => {
   setDraft(sid, text);
@@ -78,34 +87,15 @@ export function Composer() {
  };
  const draft = draftOf(activeSessionId);
  /**
-  * 输入区自动增高（MASTER §4.3）：**1 行起步**，随内容长高，到 `max-h-44` 封顶后内部滚动。
-  * 受控值从任何路径变化（打字 / 引用注入 / 队列退回 / 历史浏览）都要重算，所以挂 effect 而不是 onChange。
+  * 草稿投影同步：store 里的草稿是**外部写入**的入口（队列退回 / 历史调回 / 切会话），
+  * 与编辑器当前全文不一致时才灌进去（编辑器自己打字时两者一致，不会重置光标）。
+  * 高度不再手工算——编辑器是真实 DOM（CSS 封顶 `max-h-44` 后内部滚动）。
   */
- const autosize = useCallback(() => {
-  const ta = taRef.current;
-  if (!ta) return;
-  ta.style.height = "auto";
-  const h = ta.scrollHeight;
-  // jsdom 里 scrollHeight = 0（没有布局）：不动内联高度，避免把输入框量成 0
-  ta.style.height = h > 0 ? `${h}px` : "";
- }, []);
- useLayoutEffect(() => {
-  autosize();
- }, [autosize, draft]);
- // 宽度变化（窗口缩放 / 左栏拖拽）会改变折行数，要重算。观察自身：RO 会因我们写进去的高度触发，
- // 所以只在宽度真的变了时才跑（否则自我喂食成死循环）。
- useLayoutEffect(() => {
-  const ta = taRef.current;
-  if (!ta || typeof ResizeObserver === "undefined") return;
-  let last = ta.clientWidth;
-  const ro = new ResizeObserver(() => {
-   if (ta.clientWidth === last) return;
-   last = ta.clientWidth;
-   autosize();
-  });
-  ro.observe(ta);
-  return () => ro.disconnect();
- }, [autosize]);
+ useEffect(() => {
+  const handle = editorRef.current;
+  if (!handle) return;
+  if (handle.getText() !== draft) handle.setText(draft);
+ }, [draft]);
  const attachments = attachmentsOf(activeSessionId);
  /** 待发队列真值（V40）：omp 的 steering / followUp 芯片文本（`queue_update` 驱动）。 */
  const queued = queuedOf(activeSessionId);
@@ -152,7 +142,8 @@ export function Composer() {
  // `@` 补全状态：mentionIdx 为高亮下标，-1 = 无补全；mentionToken 是 `@` 后的路径前缀。
  const [mentionIdx, setMentionIdx] = useState(-1);
  const [mentionCands, setMentionCands] = useState<PathCandidate[]>([]);
- const [caret, setCaret] = useState(0);
+ /** 光标前的那一段文本（编辑器每次 selection 变化上报）：`/` 与 `@` 补全都从它取词。 */
+ const [caretBefore, setCaretBefore] = useState("");
 
  useEffect(() => {
   if (mentions.length === 0 || !cwd) return;
@@ -196,7 +187,7 @@ export function Composer() {
  // 插话，`/xxx` 是当文本发出去的，弹出补全等于暗示它能当命令跑。
  const slashToken = (() => {
   if (running || !activeSessionId) return null;
-  const m = /^\/(\S*)$/.exec(draft.slice(0, caret));
+  const m = /^\/(\S*)$/.exec(caretBefore);
   return m ? m[1] : null;
  })();
  // Esc 关掉后记住当时的 token：token 一变（继续打字）就重新打开，不用手动清标记
@@ -217,8 +208,7 @@ export function Composer() {
 
  // `@` 补全：取光标前 `@` 起的路径前缀，300ms 防抖问后端（一层列举 / 递归搜名字，见 `complete_path`）。
  const mentionToken = (() => {
-  const before = draft.slice(0, caret);
-  const m = /@([^\s@]*)$/.exec(before);
+  const m = /@([^\s@]*)$/.exec(caretBefore);
   return m ? m[1] : null;
  })();
  const mentionEmpty = mentionToken == null || !cwd || !activeSessionId || slashToken !== null;
@@ -250,13 +240,12 @@ export function Composer() {
   };
  }, [mentionQueryKey, mentionToken, cwd, activeSessionId, mentionEmpty]);
 
- // 选中一条候选：把光标前的 `@前缀` 换成完整路径（目录补 `/` 接着往里打，文件补空格收尾）。
- // 点击、Tab、Enter 三个入口共用它，免得三处各写一遍替换规则。
+ // 选中一条候选：把光标前的 `@前缀` 换成一枚**引用芯片**（`ReferenceChipNode`）。
+ // 芯片显示短标签（`@components/`），序列化出去的是真路径（`c.real`）——发送链路因此不需要改写。
+ // 点击、Tab、Enter 三个入口共用它。
  const pickMention = (c: PathCandidate) => {
-  const before = draft.slice(0, caret);
-  // 写进草稿的是**短标签**（`components/FileTree.tsx` 这种尽可能短的唯一后缀），
-  // 发送前由 `expandMentions` 还原成完整相对路径——输入框里不再出现一长串路径
-  setDraft(activeSessionId, before.replace(/@[^\s@]*$/, `@${c.label}${c.isDir ? "/" : " "}`) + draft.slice(caret));
+  const token = mentionToken ?? "";
+  editorRef.current?.replaceMention(token, { path: c.real, label: c.label, isDir: c.isDir });
   setMentionIdx(-1);
   setMentionCands([]);
  };
@@ -270,22 +259,199 @@ export function Composer() {
   setSlashDismissed(slashToken);
  };
 
+ // 外部投递的引用（右栏文件树 / 快速过滤 / ⌘⇧P 引用浮层）：插进编辑器后立刻清掉请求。
+ // 编辑器非受控，所以引用只能这样进来（改草稿文本只会显示成长路径文本，不是芯片）。
+ const pendingReference = useApp((s) => s.pendingReference);
+ useEffect(() => {
+  if (!pendingReference || pendingReference.sessionId !== activeSessionId) return;
+  editorRef.current?.insertReference({
+   path: pendingReference.path,
+   label: pendingReference.label,
+   isDir: pendingReference.isDir,
+  });
+  useApp.getState().clearPendingReference();
+ }, [pendingReference, activeSessionId]);
+
+ /**
+  * 草稿文本变化（编辑器每次 update 上报）：落 store + localStorage；
+  * 用户编辑即退出历史浏览（文本保留，下次 ↑ 从最近一条重新开始）。
+  */
+ const handleText = (text: string, source: DraftTextSource) => {
+  // `sync` = 把 store 的草稿投影进编辑器，store 本来就是权威：不回写
+  // （回写会让迟到的投影通知覆盖更新的草稿，例如发送失败后的回滚）
+  if (source === "sync") return;
+  persistDraft(activeSessionId, text);
+  // 只有用户敲的才算「编辑」；壳插入引用不该打断历史浏览（否则 ↑ 调回后被立刻清掉）
+  if (source === "user" && browsing) setHist(null);
+ };
+
+ /** 输入框占位文案（按当前状态切换；审批中优先）。 */
+ const placeholder = awaiting
+  ? t.resolveApprovalFirst
+  : dragging
+   ? t.placeholderDragging
+   : running
+    ? t.placeholderRunning
+    : empty
+     ? t.placeholderNew
+     : t.placeholderIdle;
+
+ /** 粘贴（编辑器 capture 阶段先问这里）：图片走附件、大段文本转文件引用、其余交给编辑器。 */
+ const handlePaste = (e: ReactClipboardEvent<HTMLElement>): boolean => {
+  const files = Array.from(e.clipboardData?.files ?? []);
+  if (files.length === 0) {
+   // 纯文本粘贴：大段文本转文件引用（V41，zcode 同款）——输入框不被几万字撑爆，
+   // omp 侧按 `@file` 提及把内容读进上下文；短文本照常走浏览器默认粘贴。
+   const text = e.clipboardData?.getData("text/plain") ?? "";
+   if (text.length > PASTE_FILE_MIN) {
+    void pasteAsFile(text);
+    return true;
+   }
+   if (text.includes("\n")) {
+    // 多行文本走 LineBreakNode（编辑器恒定一个段落；不让粘贴造出段落结构）
+    editorRef.current?.insertText(text);
+    return true;
+   }
+   return false;
+  }
+  // 只拦截图片：文字照常粘贴，图文混贴时文字不丢
+  const images = files.filter((f) => f.type.startsWith("image/"));
+  if (images.length === 0) {
+   if (files.length > 0) setAttachError(t.attachOnlyImages);
+   return false;
+  }
+  // 图文混贴（截图工具常同时给 text+image）：剪贴板文字在前、`#N` 占位紧随其后，
+  // 拼成**一次**插入——顺序与光标定位都不依赖两段异步插入的先后。
+  const text = e.clipboardData?.getData("text/plain") ?? "";
+  void readImages(files).then((added) => commitImages(added, text));
+  return true;
+ };
+
+ /**
+  * 键盘（编辑器 capture 阶段先问这里，返回 true = 这个键归壳处理）：
+  * `/` 与 `@` 补全 → 发送 / 插话 / 排队 → 历史浏览 → Shift+Tab 执行模式。
+  * 语义与旧 textarea 版逐条对应，只是「光标在开头」改问编辑器（多行编辑时不该抢方向键）。
+  */
+ const handleKeyDown = (e: ReactKeyboardEvent<HTMLElement>): boolean => {
+  // `/` 命令补全打开时先接管键盘（它和 `@` 补全互斥，开着就说明草稿是条命令）。
+  // Esc 用 slashOpen 判定：零命中时面板也在，也该关得掉。
+  if (slashOpen && e.key === "Escape") {
+   setSlashDismissed(slashToken);
+   return true;
+  }
+  const slashActive = slashOpen && slashCands.length > 0;
+  if (slashActive && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+   moveSlash(e.key === "ArrowDown" ? 1 : -1);
+   return true;
+  }
+  if (slashActive && e.key === "Tab") {
+   // 没有高亮（slashIdx = -1）时补第一项：Tab 在补全里不该"什么都不做"
+   const c = slashCands[Math.max(0, slashIdx)];
+   if (c) pickCommand(c);
+   return true;
+  }
+  if (slashActive && e.key === "Enter" && !e.shiftKey && !(e.metaKey || e.ctrlKey)) {
+   // **打全即发**：首 token 已是完整命令名（含别名）时不拦，交给下面的发送逻辑；
+   // 否则补全——不然打 `/comp` 回车会被当成把半截命令发出去。
+   if (!isCompleteCommand(commands, slashToken ?? "")) {
+    const c = slashIdx >= 0 ? slashCands[slashIdx] : undefined;
+    if (c) {
+     pickCommand(c);
+     return true;
+    }
+   }
+  }
+  // `@` 补全打开时：上下键导航、Tab/Enter 选中、Esc 关闭（优先于发送）
+  const completing = mentionCands.length > 0;
+  if (completing && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+   setMentionIdx((i) => (i + (e.key === "ArrowDown" ? 1 : -1) + mentionCands.length) % mentionCands.length);
+   return true;
+  }
+  if (completing && e.key === "Tab") {
+   // 没有高亮（mentionIdx = -1）时补第一项：Tab 在补全里不该"什么都不做"
+   const c = mentionCands[Math.max(0, mentionIdx)];
+   if (c) pickMention(c);
+   return true;
+  }
+  // Esc 关浮层也认「正在取词」这一态（此时还没有候选，completing 为假）
+  if (e.key === "Escape" && mentionOpen) {
+   setMentionDismissed(mentionQueryKey);
+   setMentionCands([]);
+   setMentionIdx(-1);
+   return true;
+  }
+  if (completing && e.key === "Enter" && !e.shiftKey && !(e.metaKey || e.ctrlKey)) {
+   const c = mentionIdx >= 0 ? mentionCands[mentionIdx] : undefined;
+   if (c) {
+    pickMention(c);
+    return true;
+   }
+  }
+  // ↑↓ 调回已发送的 prompt 历史（V41，codex 的「Press Up or Down to restore draft history」）：
+  // ↑ 只在光标位于**整段开头**（或正在浏览）时接管——多行编辑中照常移动光标；↓ 只在浏览态接管。
+  if (e.key === "ArrowUp" && !e.shiftKey && !slashOpen && !completing && activeSessionId) {
+   if (browsing || editorRef.current?.isCaretAtStart() === true) {
+    browseHistory(-1);
+    return true;
+   }
+  }
+  if (e.key === "ArrowDown" && !e.shiftKey && !slashOpen && !completing && browsing) {
+   browseHistory(1);
+   return true;
+  }
+  // Shift+Tab = 执行模式循环（V40，对齐 codex / zcode 的 Shift+Tab；补全浮层开着时放行）
+  if (e.key === "Tab" && e.shiftKey && !slashOpen && mentionEmpty && activeSessionId && !archived) {
+   void cycleApproval();
+   return true;
+  }
+  // Tab = 排队（V39/V40）：流式中且有内容时把草稿排进本轮之后。
+  if (
+   e.key === "Tab" &&
+   !e.shiftKey &&
+   running &&
+   activeSessionId &&
+   !archived &&
+   !slashOpen &&
+   mentionEmpty &&
+   (draft.trim() || attachments.length > 0)
+  ) {
+   void sendQueued("follow_up");
+   return true;
+  }
+  if (e.key === "Enter" && !e.shiftKey && !(e.metaKey || e.ctrlKey)) {
+   void send();
+   return true;
+  }
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && running && activeSessionId) {
+   // 流式中 Cmd/Ctrl+Enter = 排队（follow_up，本轮后执行）——与 omp 终端的 ctrl+enter / ctrl+q 对齐
+   void sendQueued("follow_up");
+   return true;
+  }
+  if (e.key === "Escape" && running && activeSessionId) {
+   // Esc = 中断并交还队列（V40；omp TUI 的 Esc 等价物）
+   void abortAndRestore(activeSessionId);
+   return true;
+  }
+  // Shift+Enter = 软换行（插入 LineBreakNode；段落只在草稿里有一个，见 `DraftEditor` 的口径）
+  if (e.key === "Enter" && e.shiftKey && !(e.metaKey || e.ctrlKey)) {
+   editorRef.current?.insertLineBreak();
+   return true;
+  }
+  // 其余按键（普通字符、输入法组合、方向键）交给编辑器
+  return false;
+ };
+
  // 模型是否支持图片（模型目录里 `input` 含 image）；目录没加载出来时不做判断，不误报
  const model = models?.models.find((m) => `${m.provider}/${m.id}` === currentModel);
  const imageUnsupported = attachments.length > 0 && !!model?.input && !model.input.includes("image");
 
- /** 在光标处插入文本、落草稿（含 localStorage）、把光标移到插入段之后——受控 textarea 的值更新
-  *  会丢光标，用 rAF 在提交后再定位；`@` 大段粘贴与图片 `#N` 占位共用。 */
- const insertAtCaret = (sid: string, insert: string) => {
+ /**
+  * 在光标处插入纯文本：`#N` 图片占位与「大段粘贴转文件」的 `@路径` 共用。
+  * 光标定位交给编辑器（Lexical 自己把 caret 放到插入段之后），不再手工 setSelectionRange。
+  */
+ const insertAtCaret = (_sid: string, insert: string) => {
   if (!insert) return;
-  const cur = useApp.getState().draftOf(sid) ?? "";
-  const ta = taRef.current;
-  const at = ta?.selectionStart ?? cur.length;
-  const end = ta?.selectionEnd ?? cur.length;
-  persistDraft(sid, cur.slice(0, at) + insert + cur.slice(end));
-  requestAnimationFrame(() => {
-   taRef.current?.setSelectionRange(at + insert.length, at + insert.length);
-  });
+  editorRef.current?.insertText(insert);
  };
 
  /** File[] → 附件对象（只收图片，非图片给提示）。不落库、不插占位——由 `commitImages` 收尾。 */
@@ -325,7 +491,12 @@ export function Composer() {
   if (!sid) return;
   try {
    const { path } = await api.savePaste(text);
-   insertAtCaret(sid, `@${path} `);
+   // 大段粘贴落成临时文件后直接插一枚引用芯片（显示文件名，序列化出绝对路径）
+   editorRef.current?.insertReference({
+    path,
+    label: path.split("/").pop() ?? path,
+    isDir: false,
+   });
    setAttachError(fmt(t.pasteAsFile, path.split("/").pop() ?? path));
   } catch (e) {
    setAttachError(e instanceof Error ? e.message : String(e));
@@ -451,7 +622,7 @@ export function Composer() {
    if (r.images && r.images.length > 0) {
     addAttachments(sid, (r.images as { data?: string; mimeType?: string }[]).map(attachmentFromOmpImage));
    }
-   taRef.current?.focus();
+   editorRef.current?.focus();
   } catch {
    // 失败（已被投递 / 已消费）：队列快照随后自行收敛，不弹错
   }
@@ -497,7 +668,7 @@ export function Composer() {
     if (imgs.length > 0) {
      addAttachments(sid, imgs.map((x) => attachmentFromOmpImage(x as { data?: string; mimeType?: string })));
     }
-    taRef.current?.focus();
+    editorRef.current?.focus();
    }
   } catch {
    // 接口失败兜底：直发 abort（保证「停止」这个动作本身不丢）
@@ -557,10 +728,7 @@ export function Composer() {
    if (dir === 1) return; // 不在浏览态时 ↓ 不做事
    setHist({ sid, idx: list.length - 1, backup: draft });
    persistDraft(sid, list[list.length - 1]);
-   requestAnimationFrame(() => {
-    const ta = taRef.current;
-    if (ta) ta.setSelectionRange(ta.value.length, ta.value.length);
-   });
+   // 光标落到末尾由编辑器负责（`setText` 的语义）
    return;
   }
   const next = browsing.idx + dir;
@@ -871,172 +1039,20 @@ export function Composer() {
     {slashOpen && (
      <SlashMenu cands={slashCands} active={slashIdx} query={slashToken ?? ""} onPick={pickCommand} onHover={hoverSlash} />
     )}
-    {/* 输入区：1 行起步（`rows` 只是首帧兜底，高度由 autosize 按内容写），封顶 `max-h-44`。
+    {/* 输入区：草稿编辑器（Lexical）——`@引用` 是原子芯片（图标 + 短标签），
+        序列化出去的是真路径；高度由内容撑开（CSS 封顶 `max-h-44`）。
         悬停给出 `@标签 → 真实相对路径`（引用不单独排芯片，完整路径要查就在这里）。 */}
-    <textarea
-     ref={taRef}
-     id="composer"
-     rows={1}
+    <DraftEditor
+     ref={editorRef}
+     ariaLabel={t.composerLabel}
+     placeholder={placeholder}
      title={mentionTitles || undefined}
-     value={draft}
-     onChange={(e) => {
-      persistDraft(activeSessionId, e.target.value);
-      setCaret(e.target.selectionStart ?? e.target.value.length);
-      // 用户编辑即退出历史浏览（文本保留；下次 ↑ 从最近一条重新开始）
-      if (browsing) setHist(null);
-     }}
-     onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
-     onClick={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
-     onPaste={(e) => {
-      const files = Array.from(e.clipboardData?.files ?? []);
-      if (files.length === 0) {
-       // 纯文本粘贴：大段文本转文件引用（V41，zcode 同款）——输入框不被几万字撑爆，
-       // omp 侧按 `@file` 提及把内容读进上下文；短文本照常走浏览器默认粘贴。
-       const text = e.clipboardData?.getData("text/plain") ?? "";
-       if (text.length > PASTE_FILE_MIN) {
-        e.preventDefault();
-        void pasteAsFile(text);
-       }
-       return;
-      }
-      // 只拦截图片：文字照常粘贴，图文混贴时文字不丢
-      const images = files.filter((f) => f.type.startsWith("image/"));
-      if (images.length === 0) {
-       if (files.length > 0) setAttachError(t.attachOnlyImages);
-       return;
-      }
-      e.preventDefault();
-      // 图文混贴（截图工具常同时给 text+image）：剪贴板文字在前、`#N` 占位紧随其后，
-      // 拼成**一次**插入——顺序与光标定位都不依赖两段异步插入的先后。
-      const text = e.clipboardData?.getData("text/plain") ?? "";
-      void readImages(files).then((added) => commitImages(added, text));
-     }}
-     onKeyDown={(e) => {
-      // `/` 命令补全打开时先接管键盘（它和 `@` 补全互斥，开着就说明草稿是条命令）。
-      // Esc 用 slashOpen 判定：零命中时面板也在，也该关得掉。
-      if (slashOpen && e.key === "Escape") {
-       setSlashDismissed(slashToken);
-       return;
-      }
-      const slashActive = slashOpen && slashCands.length > 0;
-      if (slashActive && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
-       e.preventDefault();
-       moveSlash(e.key === "ArrowDown" ? 1 : -1);
-       return;
-      }
-      if (slashActive && e.key === "Tab") {
-       e.preventDefault();
-       // 没有高亮（slashIdx = -1）时补第一项：Tab 在补全里不该"什么都不做"
-       const c = slashCands[Math.max(0, slashIdx)];
-       if (c) pickCommand(c);
-       return;
-      }
-      if (slashActive && e.key === "Enter" && !e.shiftKey && !(e.metaKey || e.ctrlKey)) {
-       // **打全即发**：首 token 已是完整命令名（含别名）时不拦，交给下面的发送逻辑；
-       // 否则补全——不然打 `/comp` 回车会被当成把半截命令发出去。
-       if (!isCompleteCommand(commands, slashToken ?? "")) {
-        const c = slashIdx >= 0 ? slashCands[slashIdx] : undefined;
-        if (c) {
-         e.preventDefault();
-         pickCommand(c);
-         return;
-        }
-       }
-      }
-      // `@` 补全打开时：上下键导航、Tab/Enter 选中、Esc 关闭（优先于发送）
-      const completing = mentionCands.length > 0;
-      if (completing && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
-       e.preventDefault();
-       setMentionIdx((i) => (i + (e.key === "ArrowDown" ? 1 : -1) + mentionCands.length) % mentionCands.length);
-       return;
-      }
-      if (completing && e.key === "Tab") {
-       e.preventDefault();
-       // 没有高亮（mentionIdx = -1）时补第一项：Tab 在补全里不该"什么都不做"
-       const c = mentionCands[Math.max(0, mentionIdx)];
-       if (c) pickMention(c);
-       return;
-      }
-      // Esc 关浮层也认「正在取词」这一态（此时还没有候选，completing 为假）
-      if (e.key === "Escape" && mentionOpen) {
-       setMentionDismissed(mentionQueryKey);
-       setMentionCands([]);
-       setMentionIdx(-1);
-       return;
-      }
-      if (completing && e.key === "Enter" && !e.shiftKey && !(e.metaKey || e.ctrlKey)) {
-       const c = mentionIdx >= 0 ? mentionCands[mentionIdx] : undefined;
-       if (c) {
-        e.preventDefault();
-        pickMention(c);
-        return;
-       }
-      }
-      // ↑↓ 调回已发送的 prompt 历史（V41，codex 的「Press Up or Down to restore draft history」）：
-      // ↑ 只在光标位于开头（或正在浏览）时接管——多行编辑中照常移动光标；↓ 只在浏览态接管。
-      if (e.key === "ArrowUp" && !e.shiftKey && !slashOpen && !completing && activeSessionId) {
-       const ta = e.currentTarget;
-       if (browsing || (ta.selectionStart === 0 && ta.selectionEnd === 0)) {
-        e.preventDefault();
-        browseHistory(-1);
-        return;
-       }
-      }
-      if (e.key === "ArrowDown" && !e.shiftKey && !slashOpen && !completing && browsing) {
-       e.preventDefault();
-       browseHistory(1);
-       return;
-      }
-      // Shift+Tab = 执行模式循环（V40，对齐 codex / zcode 的 Shift+Tab；补全浮层开着时放行——
-      // 与参照物同口径：补全上下文优先级更高）
-      if (e.key === "Tab" && e.shiftKey && !slashOpen && mentionEmpty && activeSessionId && !archived) {
-       e.preventDefault();
-       void cycleApproval();
-       return;
-      }
-      // Tab = 排队（V39/V40，对齐 codex 的「Tab to queue message」）：流式中且有内容时把草稿排进
-      // 本轮之后。补全浮层（`/` 与 `@`）开着时上面的分支已经吃掉 Tab。
-      if (
-       e.key === "Tab" &&
-       !e.shiftKey &&
-       running &&
-       activeSessionId &&
-       !archived &&
-       !slashOpen &&
-       mentionEmpty &&
-       (draft.trim() || attachments.length > 0)
-      ) {
-       e.preventDefault();
-       void sendQueued("follow_up");
-       return;
-      }
-      if (e.key === "Enter" && !e.shiftKey && !(e.metaKey || e.ctrlKey)) {
-       e.preventDefault();
-       void send();
-      }
-      if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && running && activeSessionId) {
-       // 流式中 Cmd/Ctrl+Enter = 排队（follow_up，本轮后执行）——与 omp 终端的 ctrl+enter / ctrl+q 对齐
-       e.preventDefault();
-       void sendQueued("follow_up");
-      }
-      if (e.key === "Escape" && running && activeSessionId) {
-       // Esc = 中断并交还队列（V40；omp TUI 的 Esc 等价物）
-       void abortAndRestore(activeSessionId);
-      }
-     }}
-     disabled={awaiting}
-     placeholder={
-      awaiting
-       ? t.resolveApprovalFirst
-       : dragging
-        ? t.placeholderDragging
-        : running
-         ? t.placeholderRunning
-         : empty
-          ? t.placeholderNew
-          : t.placeholderIdle
-     }
-     className="no-focus-ring max-h-44 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-sm leading-6 outline-none placeholder:text-faint disabled:opacity-60"
+     initialText={draft}
+     onText={handleText}
+     onCaretText={setCaretBefore}
+     onKeyDown={handleKeyDown}
+     onPaste={handlePaste}
+     editable={!awaiting}
     />
     <div className="flex flex-wrap items-center gap-0.5 gap-y-1 px-2 py-1.5">
      {/* 卡底工具行（v2 §3）：左 = `+`（附件 / 引用文件 / 图片）+ 执行模式菜单 + 排队徽标；

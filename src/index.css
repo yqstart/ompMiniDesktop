@@ -252,6 +252,13 @@ kbd {
  outline: none;
 }
 
+/* 草稿编辑器（Lexical）：段落零间距（等价于旧 textarea 的连续文本流），
+   空段落也保留行高——否则空输入框会塌成一条线。 */
+.draft-editor p {
+ margin: 0;
+ min-height: 1.5em;
+}
+
 /* `<details>` 的原生三角：WKWebView 里 `::-webkit-details-marker` 不总是生效，
    必须同时关掉 `list-style` 才会消失（思考折叠卡、项目分组都用 summary 当行头）。 */
 summary {

@@ -5,7 +5,7 @@ import type { ChangeFile, DirEntry, PathHit } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { revealPath, useOpenPath } from "../../lib/openPath";
 import { useText } from "../../lib/useText";
-import { appendReference, joinAbs, referenceTarget } from "../../lib/workspaceFiles";
+import { joinAbs, referenceLabel, referenceTarget } from "../../lib/workspaceFiles";
 import { FileIcon } from "./FileIcon";
 
 /** 每个目录一次渲染的条数：`node_modules` 那种大目录不做分片会把整棵树卡住。 */
@@ -232,7 +232,7 @@ export function FileTree({ root }: { root: string }) {
  };
 
  /**
-  * 引用到输入框：写**短标签**（`@components/`）而不是整条路径，拿不到标签才退相对路径。
+  * 引用到输入框：投递一枚**引用芯片**（短标签 + 真路径），由 Composer 插进草稿编辑器。
   * 标签要问一次后端（最短唯一后缀），所以串一条队列——连点几个引用也按点击顺序落进草稿。
   */
  const insertRef = (path: string, isDir: boolean) => {
@@ -240,10 +240,14 @@ export function FileTree({ root }: { root: string }) {
   if (!sid) return;
   refQueue.current = refQueue.current.then(async () => {
    const label = await api.mentionLabel(root, path).catch(() => null);
-   const insert = label ?? referenceTarget(root, path);
+   const target = referenceTarget(root, path);
    const s = useApp.getState();
-   if (s.activeSessionId !== sid) return; // 会话已经切走：别把文本写进另一个会话
-   s.setDraft(sid, appendReference(s.draftOf(sid), isDir ? `${insert}/` : insert));
+   if (s.activeSessionId !== sid) return; // 会话已经切走：别把引用写进另一个会话
+   s.insertDraftReference(sid, {
+    path: target,
+    label: label ?? referenceLabel(target, false),
+    isDir,
+   });
    s.set({ composerFocusSeq: s.composerFocusSeq + 1 });
   });
  };

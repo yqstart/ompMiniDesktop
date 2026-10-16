@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { BtwRecord, CheckoutView, CommitOutcome, CommitTaskView, Goal, HealthInfo, ImageAttachment, ModelCatalog, OmpUpdate, OmpUpdateRun, PlanCardState, ProjectView, QueuedMessages, RefPickerTarget, SessionRuntime, SessionStatus, SessionView, SubAgentInfo, TodoPhase, UpdateState, ViewMsg, WorkspaceGitState, WorkspaceView } from "@shared/types";
+import type { BtwRecord, CheckoutView, CommitOutcome, CommitTaskView, Goal, HealthInfo, ImageAttachment, ModelCatalog, OmpUpdate, OmpUpdateRun, PendingReference, PlanCardState, ProjectView, QueuedMessages, RefPickerTarget, SessionRuntime, SessionStatus, SessionView, SubAgentInfo, TodoPhase, UpdateState, ViewMsg, WorkspaceGitState, WorkspaceView } from "@shared/types";
 import type { Locale, LocaleMode } from "../lib/locale";
 import { loadLocaleMode, resolveLocale, saveLocaleMode, systemLang } from "../lib/locale";
 import { applyTheme, loadTheme, saveTheme, type ThemeMode } from "../lib/theme";
@@ -176,6 +176,9 @@ type AppState = {
  threadLimit: number;
  draftOf: (sid: string | null) => string;
  setDraft: (sid: string | null, text: string) => void;
+ /** 把一枚引用芯片插进指定会话的草稿（消费方是 Composer；见 `PendingReference`）。 */
+ insertDraftReference: (sid: string | null, ref: { path: string; label: string; isDir: boolean }) => void;
+ clearPendingReference: () => void;
  attachmentsOf: (sid: string | null) => ImageAttachment[];
  /** 附件入库唯一入口：分配稳定编号（`slot`）并返回并入的那批（带编号，供调用方补 `#N` 占位）。 */
  addAttachments: (sid: string | null, items: ImageAttachment[]) => ImageAttachment[];
@@ -257,6 +260,12 @@ type AppState = {
  refPickerTarget: RefPickerTarget | null;
  /** Composer 聚焦序号：引用浮层注入草稿后 +1，让输入框拿回焦点接着写。 */
  composerFocusSeq: number;
+ /**
+  * 待插入的**引用芯片**（右栏文件树 / 快速过滤 / ⌘⇧P 引用浮层 → Composer）：
+  * 草稿编辑器是非受控的（Lexical 状态是权威），所以引用不能靠改草稿文本来插入——
+  * 外部写入这一条请求，Composer 消费后插进编辑器并清空（`seq` 防重放）。
+  */
+ pendingReference: PendingReference | null;
  /**
   * git 信息刷新信号（全局自增）：**唯一写入面**是 `lib/commitTasks.ts` 的
   * `refreshWorkspaceGitState`（git 状态的统一刷新入口：启动 / 焦点 / 30s 轮询 /
@@ -683,6 +692,14 @@ export const useApp = create<AppState>((set, get) => ({
  draftOf: (sid) => (sid ? get().drafts[sid] ?? "" : ""),
  setDraft: (sid, text) =>
   set((s) => (sid ? { drafts: { ...s.drafts, [sid]: text } } : {})),
+ /** 投递一次「把引用插进草稿」的请求（Composer 消费后清空；`seq` 让重复内容也能触发）。 */
+ insertDraftReference: (sid, ref) => {
+  if (!sid) return;
+  set((s) => ({
+   pendingReference: { sessionId: sid, ...ref, seq: (s.pendingReference?.seq ?? 0) + 1 },
+  }));
+ },
+ clearPendingReference: () => set({ pendingReference: null }),
  attachmentsOf: (sid) => (sid ? get().attachmentsBySession[sid] ?? [] : []),
  addAttachments: (sid, items) => {
   if (!sid || items.length === 0) return [];
@@ -795,6 +812,7 @@ export const useApp = create<AppState>((set, get) => ({
  providerUsageOpen: false,
  refPickerTarget: null,
  composerFocusSeq: 0,
+ pendingReference: null,
  gitInfoSeq: 0,
 
  // ---------- V19 工作区提交 / 推送（见 lib/commitTasks.ts） ----------

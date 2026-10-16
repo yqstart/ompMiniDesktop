@@ -6,7 +6,6 @@ import { useApp } from "../stores/app";
 import { useText } from "../lib/useText";
 import { fmt } from "../lib/locale";
 import {
- appendReference,
  buildRefItems,
  buildRefTree,
  flattenRefTree,
@@ -14,6 +13,7 @@ import {
  isFileRow,
  rankRefItems,
  refQueryTerms,
+ referenceLabel,
  referenceScope,
  referenceTarget,
  type RefItem,
@@ -166,9 +166,12 @@ export function ReferencePicker(): React.JSX.Element | null {
    close();
    return;
   }
-  // 追加进该会话的草稿（尾随空格让 omp 的提及解析立刻收口），焦点交还输入框。
-  // 路径口径与右栏文件树一致（`referenceTarget`）：会话目录内给相对路径，目录外才用绝对路径。
-  s.setDraft(sid, appendReference(s.draftOf(sid), referenceTarget(cwd ?? "", item.abs)));
+  // 投递一枚引用芯片（跨项目 → 绝对路径），由 Composer 插进草稿编辑器；焦点交还输入框。
+  s.insertDraftReference(sid, {
+   path: referenceTarget(cwd ?? "", item.abs),
+   label: referenceLabel(item.abs, false),
+   isDir: false,
+  });
   s.set({ refPickerTarget: null, composerFocusSeq: s.composerFocusSeq + 1 });
  };
 

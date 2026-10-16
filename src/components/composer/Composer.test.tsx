@@ -30,7 +30,7 @@ const { apiMock } = vi.hoisted(() => ({
    async (_base: string, _paths: string[]): Promise<{ path: string; exists: boolean; isDir: boolean; resolved: string | null }[]> => [],
   ),
   completePath: vi.fn(
-   async (_base: string, _prefix: string): Promise<{ path: string; isDir: boolean; label: string }[]> => [],
+   async (_base: string, _prefix: string): Promise<{ path: string; real: string; isDir: boolean; label: string }[]> => [],
   ),
   removeQueuedMessage: vi.fn(async () => ({ removed: true })),
   promoteQueuedMessage: vi.fn(async () => ({ promoted: true })),
@@ -170,7 +170,11 @@ afterEach(() => {
  container.remove();
 });
 
-/** 挂载一个带草稿「你好」的会话（running 决定流式 / 就绪）。 */
+/**
+ * 挂载一个带草稿「你好」的会话（running 决定流式 / 就绪）。
+ * 返回**草稿编辑器**（Lexical 的 contenteditable）：键盘 / 粘贴事件都派发到它，
+ * 由 `Composer` 的 capture 处理器接管；改内容则走 store（编辑器由草稿同步 effect 跟进）。
+ */
 const mount = async (running: boolean) => {
  useApp.setState({
   sessions: [session()],
@@ -180,7 +184,7 @@ const mount = async (running: boolean) => {
  });
  act(() => root.render(<Composer />));
  await act(async () => { });
- return container.querySelector<HTMLTextAreaElement>("textarea");
+ return container.querySelector<HTMLElement>('[contenteditable="true"]');
 };
 
 const press = async (el: HTMLElement | null, init: KeyboardEventInit) => {
@@ -323,7 +327,10 @@ describe("Composer 发送语义（V39/V40：对齐 omp 终端与 codex）", () =
   apiMock.followUpMessage.mockRejectedValueOnce(new Error("boom"));
   const ta = await mount(true);
   await press(ta, { key: "Tab" });
-  expect(useApp.getState().drafts["s1"]).toBe("你好");
+  // 发送是异步链路（展开引用 → 清空 → 失败回滚）：等回滚落定再断言
+  await act(async () => {
+   await vi.waitFor(() => expect(useApp.getState().drafts["s1"]).toBe("你好"));
+  });
  });
 
  it("就绪时：Tab 不发送（照常移焦），Enter 走普通 send_message", async () => {
@@ -420,7 +427,6 @@ describe("Composer 历史浏览（V41，codex 的 ↑↓ 调回）", () => {
   const ta = await mount(false);
   act(() => useApp.setState({ drafts: { s1: "" } }));
   await act(async () => { });
-  ta!.setSelectionRange(0, 0);
   await press(ta, { key: "ArrowUp" });
   expect(useApp.getState().drafts["s1"]).toBe("第二条");
   await press(ta, { key: "ArrowUp" });
@@ -434,13 +440,12 @@ describe("Composer 历史浏览（V41，codex 的 ↑↓ 调回）", () => {
   expect(useApp.getState().drafts["s1"]).toBe(""); // 还原浏览前的空草稿
  });
 
- it("光标在中间时 ↑ 不接管（多行编辑照常）", async () => {
+ it("光标不在开头时 ↑ 不接管（多行编辑照常）", async () => {
   localStorage.removeItem("omp.promptHistory.v1");
   pushHistory("s1", "旧文本");
   const ta = await mount(false);
   act(() => useApp.setState({ drafts: { s1: "第一行\n第二行" } }));
   await act(async () => { });
-  ta!.setSelectionRange(3, 3);
   await press(ta, { key: "ArrowUp" });
   expect(useApp.getState().drafts["s1"]).toBe("第一行\n第二行");
  });
@@ -524,7 +529,7 @@ describe("Composer 图片附件：`#N` 占位与角标", () => {
  const png = (name: string) => new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], name, { type: "image/png" });
 
  /** 触发一次带图片的粘贴（读文件 → base64 是异步：轮询等到这一批附件真正入库再断言）。 */
- const pasteFiles = async (el: HTMLTextAreaElement, files: File[], text = "") => {
+ const pasteFiles = async (el: HTMLElement, files: File[], text = "") => {
   const ev = new Event("paste", { bubbles: true, cancelable: true });
   Object.defineProperty(ev, "clipboardData", { value: { files, getData: () => text } });
   await act(async () => {
@@ -541,7 +546,6 @@ describe("Composer 图片附件：`#N` 占位与角标", () => {
   const ta = await mount(false);
   act(() => useApp.setState({ drafts: { s1: "如图" } }));
   await act(async () => { });
-  ta!.setSelectionRange(2, 2);
   await pasteFiles(ta!, [png("shot.png")]);
   const atts = useApp.getState().attachmentsBySession["s1"] ?? [];
   expect(atts).toHaveLength(1);
@@ -555,7 +559,6 @@ describe("Composer 图片附件：`#N` 占位与角标", () => {
   const ta = await mount(false);
   act(() => useApp.setState({ drafts: { s1: "" } }));
   await act(async () => { });
-  ta!.setSelectionRange(0, 0);
   await pasteFiles(ta!, [png("a.png"), png("b.png")]);
   expect(useApp.getState().drafts["s1"]).toBe("#1 #2");
   expect((useApp.getState().attachmentsBySession["s1"] ?? []).map((a) => a.slot)).toEqual([1, 2]);
@@ -564,9 +567,7 @@ describe("Composer 图片附件：`#N` 占位与角标", () => {
    container.querySelector<HTMLButtonElement>('button[aria-label="移除 a.png"]')!.click();
   });
   expect((useApp.getState().attachmentsBySession["s1"] ?? []).map((a) => a.slot)).toEqual([2]);
-  const ta2 = container.querySelector<HTMLTextAreaElement>("textarea")!;
-  const len = useApp.getState().drafts["s1"].length;
-  ta2.setSelectionRange(len, len);
+  const ta2 = container.querySelector<HTMLElement>('[contenteditable="true"]')!;
   await pasteFiles(ta2, [png("c.png")]);
   expect((useApp.getState().attachmentsBySession["s1"] ?? []).map((a) => a.slot)).toEqual([2, 3]);
   expect(useApp.getState().drafts["s1"]).toBe("#1 #2#3");
@@ -576,19 +577,18 @@ describe("Composer 图片附件：`#N` 占位与角标", () => {
   const ta = await mount(false);
   act(() => useApp.setState({ drafts: { s1: "看看" } }));
   await act(async () => { });
-  ta!.setSelectionRange(2, 2);
   await pasteFiles(ta!, [png("m.png")], "截图说明");
   expect(useApp.getState().drafts["s1"]).toBe("看看截图说明#1");
  });
 });
 
-/** 受控 textarea 的一次输入（React 19 认原生 value setter + input 事件）。 */
-const typeInto = async (ta: HTMLTextAreaElement, value: string) => {
- const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
- await act(async () => {
-  setter?.call(ta, value);
-  ta.dispatchEvent(new Event("input", { bubbles: true }));
- });
+/**
+ * 「输入」一段文本：直接改 store 草稿，编辑器由同步 effect 跟进（`setText` 后光标在末尾）。
+ * 旧 textarea 那套原生 setter + input 事件在 contenteditable 上不适用。
+ */
+const typeInto = async (_el: HTMLElement | null, value: string) => {
+ act(() => useApp.setState({ drafts: { s1: value } }));
+ await act(async () => {});
 };
 
 /** 等过 `@` 补全的防抖窗口（300ms）。 */
@@ -604,7 +604,7 @@ const afterDebounce = async () => {
  */
 describe("Composer `@` 路径补全", () => {
  it("取词中显示「搜索中」，取完显示候选（子目录里的匹配也出）", async () => {
-  let settle: ((v: { path: string; isDir: boolean; label: string }[]) => void) | null = null;
+  let settle: ((v: { path: string; real: string; isDir: boolean; label: string }[]) => void) | null = null;
   apiMock.completePath.mockImplementation(
    () =>
     new Promise((resolve) => {
@@ -617,7 +617,9 @@ describe("Composer `@` 路径补全", () => {
   await afterDebounce();
   expect(apiMock.completePath).toHaveBeenCalledWith("/w/alpha", "baselin");
   await act(async () => {
-   settle?.([{ path: "src/baseline_utils.ts", isDir: false, label: "baseline_utils.ts" }]);
+   settle?.([
+    { path: "src/baseline_utils.ts", real: "src/baseline_utils.ts", isDir: false, label: "baseline_utils.ts" },
+   ]);
    await Promise.resolve();
   });
   expect(container.textContent).toContain("baseline_utils.ts");
@@ -635,8 +637,8 @@ describe("Composer `@` 路径补全", () => {
 
  it("选中候选：写进草稿的是短标签，文件收尾空格、目录补斜杠", async () => {
   apiMock.completePath.mockResolvedValue([
-   { path: "src/a.ts", isDir: false, label: "a.ts" },
-   { path: "src/components", isDir: true, label: "components" },
+   { path: "src/a.ts", real: "src/a.ts", isDir: false, label: "a.ts" },
+   { path: "src/components", real: "src/components", isDir: true, label: "components" },
   ]);
   const ta = await mount(false);
   await typeInto(ta!, "@a");
@@ -646,7 +648,9 @@ describe("Composer `@` 路径补全", () => {
   await act(async () => {
    opts[0]?.click();
   });
-  expect(useApp.getState().drafts["s1"]).toBe("@a.ts ");
+  // 草稿（序列化）里是真路径，屏幕上是短标签
+  expect(useApp.getState().drafts["s1"]).toBe("@src/a.ts ");
+  expect(container.querySelector("[data-mention-chip]")?.textContent).toBe("@a.ts");
 
   await typeInto(ta!, "@comp");
   await afterDebounce();
@@ -656,7 +660,8 @@ describe("Composer `@` 路径补全", () => {
   await act(async () => {
    dirOpt?.click();
   });
-  expect(useApp.getState().drafts["s1"]).toBe("@components/");
+  expect(useApp.getState().drafts["s1"]).toBe("@src/components/ ");
+  expect(container.querySelector("[data-mention-chip]")?.textContent).toBe("@components/");
  });
 
  it("发送前把短标签还原成完整相对路径（回显 / 历史仍是用户写的短标签）", async () => {
@@ -695,19 +700,21 @@ describe("Composer `@` 路径补全", () => {
   apiMock.checkPaths.mockResolvedValue([
    { path: "components/", exists: true, isDir: true, resolved: "src/views/components" },
   ]);
-  const ta = await mount(false);
+  await mount(false);
   act(() => useApp.setState({ drafts: { s1: "看 @components/ 这个目录" } }));
   await act(async () => {
    await new Promise((resolve) => setTimeout(resolve, 400)); // 过完 check_paths 的 300ms 防抖
   });
   // 正文里有标签
-  expect(ta?.value).toBe("看 @components/ 这个目录");
+  expect(useApp.getState().drafts["s1"]).toBe("看 @components/ 这个目录");
   // 但上方没有芯片行 / 旧提示行（标签已经融入文字，不再重复展示）
   expect(container.textContent).not.toContain(TEXT["zh-CN"].mentionSendHint);
   expect(container.textContent).not.toContain(TEXT["zh-CN"].pathExists);
   expect(container.querySelector('[role="status"]')).toBeNull();
   // 完整路径改由输入框的悬停提示给出（`@标签 → 真路径`）
-  expect(ta?.getAttribute("title")).toBe("@components/ → src/views/components");
+  expect(container.querySelector("[data-draft-editor]")?.getAttribute("title")).toBe(
+   "@components/ → src/views/components",
+  );
  });
 
  it("解析不到的引用才给一行提示（原文照发）", async () => {
@@ -724,7 +731,9 @@ describe("Composer `@` 路径补全", () => {
  });
 
  it("Esc 关掉浮层，继续打字重新打开", async () => {
-  apiMock.completePath.mockResolvedValue([{ path: "src/a.ts", isDir: false, label: "a.ts" }]);
+  apiMock.completePath.mockResolvedValue([
+   { path: "src/a.ts", real: "src/a.ts", isDir: false, label: "a.ts" },
+  ]);
   const ta = await mount(false);
   await typeInto(ta!, "@a");
   await afterDebounce();

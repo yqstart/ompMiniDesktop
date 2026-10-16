@@ -151,7 +151,7 @@ export const api = {
  checkPaths: (base: string, paths: string[]) => call<PathCheck[]>(IPC.checkPaths, { base, paths }),
  /** `@` 路径补全（只读目录列举，不读文件内容）。 */
  completePath: (base: string, prefix: string) =>
-  call<{ path: string; isDir: boolean; label: string }[]>(IPC.completePath, { base, prefix }),
+  call<{ path: string; real: string; isDir: boolean; label: string }[]>(IPC.completePath, { base, prefix }),
  stop: (id: string) => call<void>(IPC.stopSession, { id }),
  approve: (id: string, uiId: string, decision: "once" | "always" | "deny") =>
   call<void>(IPC.approve, { id, uiId, decision }),

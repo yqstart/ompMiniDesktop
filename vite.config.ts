@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
@@ -14,6 +14,10 @@ export default defineConfig({
     },
   },
   clearScreen: false,
+  // 测试环境补齐（jsdom 缺的 Web API，见 `src/test/setup.ts`）
+  test: {
+    setupFiles: ["./src/test/setup.ts"],
+  },
   server: {
     port: 1420,
     strictPort: true,

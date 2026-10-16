@@ -117,8 +117,14 @@ describe("引用工作区文件浮层", () => {
   expect(options.map((o) => o.textContent)).toEqual(["api.ts"]);
 
   press("Enter");
-  // 跨项目 = 会话目录（/p/fe）之外：按绝对路径注入（目录内的引用才走相对路径，见 workspaceFiles.test.ts）
-  expect(useApp.getState().drafts.s1).toBe("@/p/be/src/api.ts ");
+  // 跨项目 = 会话目录（/p/fe）之外：按绝对路径投递待插入芯片（目录内的引用才走相对路径，
+  // 见 workspaceFiles.test.ts）；真正的插入由 Composer 消费这条请求完成
+  expect(useApp.getState().pendingReference).toMatchObject({
+   sessionId: "s1",
+   path: "/p/be/src/api.ts",
+   label: "api.ts",
+   isDir: false,
+  });
   expect(useApp.getState().refPickerTarget).toBeNull();
   expect(useApp.getState().composerFocusSeq).toBeGreaterThan(0);
  });
@@ -128,7 +134,8 @@ describe("引用工作区文件浮层", () => {
   await open();
   typeQuery("api");
   press("Enter");
-  expect(useApp.getState().drafts.s1).toBe("看看这个： @/p/be/src/api.ts ");
+  // 草稿本身不再被直接改写（非受控编辑器）：引用以「待插入芯片」投递，原文保持不动
+  expect(useApp.getState().pendingReference).toMatchObject({ path: "/p/be/src/api.ts", seq: expect.any(Number) });
  });
 
  it("目录行可折叠：子树隐藏、目录行保留、再点恢复", async () => {
