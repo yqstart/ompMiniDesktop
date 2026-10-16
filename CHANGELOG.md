@@ -10,13 +10,13 @@
 
 - 右栏从「上下文」面板换成**工作台**（开关仍是 `⌘⇧G`、仍是默认收起的第三栏），两个页签：
   - **文件**：当前会话工作目录的**只读目录树**——懒加载一层（展开才取数）、目录优先 + 名称升序、每目录分片 200 条「显示更多」续铺、单层超 2000 条截断并在行下注明；未提交改动按 `get_change_set` 的相对路径换算成绝对路径打徽标（`M` 警示 / `A` 新增 / `D` 删除 / `R`·`C` accent / `?` 未跟踪）；点文件交给系统默认程序打开（失败退到「在访达中显示」），行尾 hover 出「引用到输入框」（与 `⌘⇧P` 引用浮层同一条 `appendReference` 注入口径）与「在访达中显示」。
-  - **终端**：真 PTY 的登录 shell（后端 `portable-pty` 重建 `pty.rs`，前端 xterm.js）——可交互、能跑全屏程序，继承登录 shell 的 PATH（GUI 启动的 .app 只有 launchd 的贫瘠 PATH）；面板**常驻挂载**，收起右栏 / 切页签 / 切设置视图只改显隐，shell 与回看缓冲都不丢；终端按 cwd 保留（`store.terminalCwds`，上限 4，超出淘汰最旧的 shell），shell 退出后浮出「重新打开」，应用退出统一 `kill_all`；容器底部留 24px 间距（最后一行不贴面板底）——用抬高容器（`bottom-6`）而不是 `padding-bottom`：xterm 的 FitAddon 算可用高度时会再减一次容器 padding，用 padding 会双重扣减（实际留出约 48px 且少两行）。
+  - **终端**：真 PTY 的登录 shell（后端 `portable-pty` 重建 `pty.rs`，前端 xterm.js）——可交互、能跑全屏程序，继承登录 shell 的 PATH（GUI 启动的 .app 只有 launchd 的贫瘠 PATH）；面板**常驻挂载**，收起右栏 / 切页签 / 切设置视图只改显隐，shell 与回看缓冲都不丢。**支持多开**（V44 用户口径）：终端页签内一条标签行（切换 / `+` 新建 / 关闭），每个标签是一个常驻 shell，上限 6、超出淘汰最旧的非活跃项（组件卸载即 kill）；终端在创建时定格工作目录，**切会话不改目录也不被杀**（切会话只影响「新建终端用哪个目录」）；shell 退出后浮出「重新打开」，应用退出统一 `kill_all`。容器底部留 24px 间距（最后一行不贴面板底）——用抬高容器（`bottom-6`）而不是 `padding-bottom`：xterm 的 FitAddon 算可用高度时会再减一次容器 padding，用 padding 会双重扣减（实际留出约 48px 且少两行）。
 - 后端新增五个命令：`list_dir`（`workspace_fs.rs`：单层目录列举，树根请求顺带返回 git 仓库根供标色换算）与 `terminal_spawn` / `terminal_write` / `terminal_resize` / `terminal_kill`（输出经 Tauri Channel 回传，口径与 `start_omp_update` 一致：命令立刻返回、过程走通道）。终端 16 色 `--term-*` token 与 `lib/termTheme.ts` 一并回到 `index.css`（切皮肤时终端跟色）。
 - **右栏宽度可拖**（`store.workbenchWidth`：260–640、默认 320、localStorage 持久化）：手柄在右栏左缘，交互与左栏 `SidebarShell` 同一套——平时 3px 隐身热区、悬停 / 拖拽中 6px 高亮，手柄聚焦时 ← 向左扩、→ 向右收（每次 8px）；宽度按「指针到右栏右缘的距离」计算（主区 `mr-2` 外边距不影响手感），并带窗口约束：给中列留 420px，窗口变窄时自动把超限宽度收回（终端与文件树随宽度 reflow，xterm 由既有的 ResizeObserver 重新 fit 并向 PTY 推新行列数）。
 - **右栏第三个页签「脚本」**（V43）：把项目里能跑的东西摆出来，点一下就在右栏终端里执行。
   - **项目脚本 = 后端只读识别**（`project_scripts.rs` 的 `discover_scripts`；进面板 / 切项目 / 点刷新时重扫）：`package.json` 的 `scripts`（包管理器按 `pnpm-lock.yaml` / `yarn.lock` / `bun.lock(b)` / `package-lock.json` 或 `packageManager` 字段判定，命令统一 `<pm> run <名>`）、`Cargo.toml`（build / test / run / clippy / fmt + `.cargo/config.toml` 的 `[alias]`）、`go.mod`（build / test / run / vet）、`manage.py`（Django 五条）与 `pyproject.toml` 的 `[project.scripts]` / `[tool.poetry.scripts]`、`Makefile` 的 target、`justfile` 的 recipe、`Taskfile.yml` 的 task（后两者含 Makefile 一律**行扫描**解析——不为几个清单文件引 TOML / YAML 依赖，认不出的写法就是没有，不猜；每条带来源徽标）。面板顶部显示识别到的生态（如「识别到 Node (pnpm) · Rust」）。
   - **自定义脚本 = 本应用偏好**（按项目目录分组存 `omp.scripts.v1`，**不往用户仓库写文件**），行内新建 / 编辑 / 删除；要团队共享就写进 `package.json` / `Makefile`——那正好会被识别读到。
-  - **执行**：点行 → 展开右栏 + 切到终端页签 + 把命令投递给该 cwd 的终端；`TerminalPane` 在**首帧输出后**（shell 起来、提示符出来）写进 PTY，1.5s 超时兜底，`consumedRunRef` 挡住重复——脚本面板自己不另起进程（该目录的终端没开过就顺带起一个）。
+  - **执行**：点行 → 展开右栏 + 切到终端页签 + **新开一个终端**跑它（标签名 = 脚本名）；`TerminalPane` 在**首帧输出后**（shell 起来、提示符出来）把命令写进 PTY，1.5s 超时兜底，`consumedRunRef` 挡住重复——脚本面板自己不另起进程。连点几条脚本就是几个终端，各跑各的、互不打断（终端已退出时就地提示，不静默丢命令）。
 
 ### Changed
 

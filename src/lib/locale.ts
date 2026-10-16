@@ -1289,6 +1289,8 @@ const ZH = {
  termRestart: "重新打开",
  termScrollToBottom: "回到最新输出",
  termRunNoShell: "终端已退出，这条命令没有执行——先点「重新打开」再运行。",
+ terminalNew: "新建终端",
+ terminalClose: "关闭终端",
  // 右栏「脚本」页签（V43）
  scriptsDetecting: "正在识别项目脚本…",
  scriptsEcosystems: "识别到 {0}",
@@ -2565,6 +2567,8 @@ const EN: Record<TextKey, string> = {
  termRestart: "Reopen",
  termScrollToBottom: "Jump to latest output",
  termRunNoShell: "The terminal has exited — command not run. Reopen it first.",
+ terminalNew: "New terminal",
+ terminalClose: "Close terminal",
  // Right "Scripts" tab (V43)
  scriptsDetecting: "Detecting project scripts…",
  scriptsEcosystems: "Detected {0}",

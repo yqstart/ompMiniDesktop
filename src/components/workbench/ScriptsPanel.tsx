@@ -103,7 +103,8 @@ export function ScriptsPanel({ cwd, visible }: { cwd: string; visible: boolean }
      </p>
     ) : (
      scripts.map((s) => (
-      <ScriptRow key={`${s.source}:${s.name}`} script={s} onRun={() => runInTerminal(cwd, s.command)} />
+      // 标题用脚本名：多开时标签行一眼看出哪个终端在跑哪条脚本
+      <ScriptRow key={`${s.source}:${s.name}`} script={s} onRun={() => runInTerminal(cwd, s.command, s.name)} />
      ))
     )}
 
@@ -170,7 +171,7 @@ export function ScriptsPanel({ cwd, visible }: { cwd: string; visible: boolean }
       <ScriptRow
        key={s.id}
        script={s}
-       onRun={() => runInTerminal(cwd, s.command)}
+       onRun={() => runInTerminal(cwd, s.command, s.name)}
        onEdit={() => setDraft({ id: s.id, name: s.name, command: s.command })}
        onDelete={() => useApp.getState().removeCustomScript(cwd, s.id)}
       />

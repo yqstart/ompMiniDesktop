@@ -59,7 +59,9 @@ beforeEach(() => {
   workbenchOpen: true,
   workbenchTab: "files",
   workbenchWidth: 300,
-  terminalCwds: [],
+  terminals: [],
+  activeTerminalId: null,
+  terminalSeq: 0,
   settingsTabActive: false,
  });
  container = document.createElement("div");
@@ -92,15 +94,40 @@ describe("WorkbenchPanel", () => {
   expect(container.querySelector('[data-testid="term"]')).toBeNull();
  });
 
- it("切到终端页签：渲染终端并把 cwd 记进保留表", () => {
+ it("切到终端页签：按会话目录建一个终端并渲染它", () => {
   render();
   act(() => buttonByText(zh.workbenchTerminal)?.click());
   expect(useApp.getState().workbenchTab).toBe("terminal");
   const term = container.querySelector('[data-testid="term"]');
   expect(term?.textContent).toBe("/w/alpha");
-  // 终端 id 由 cwd 派生（后端进程表按它寻址）
-  expect(term?.getAttribute("data-id")).toBe("term:/w/alpha");
-  expect(useApp.getState().terminalCwds).toEqual(["/w/alpha"]);
+  const state = useApp.getState();
+  // 标签标题取目录名；id 由 store 生成（后端进程表按它寻址）
+  expect(state.terminals).toHaveLength(1);
+  expect(state.terminals[0]).toMatchObject({ cwd: "/w/alpha", title: "alpha" });
+  expect(state.activeTerminalId).toBe(state.terminals[0].id);
+  expect(term?.getAttribute("data-id")).toBe(state.terminals[0].id);
+ });
+
+ it("多开：新建 / 切换 / 关闭都在标签行上（终端常驻挂载）", () => {
+  render();
+  act(() => buttonByText(zh.workbenchTerminal)?.click());
+  // 新建第二个（+ 键）
+  act(() => container.querySelector<HTMLButtonElement>(`button[aria-label="${zh.terminalNew}"]`)?.click());
+  let state = useApp.getState();
+  expect(state.terminals).toHaveLength(2);
+  expect(state.activeTerminalId).toBe(state.terminals[1].id);
+  expect(container.querySelectorAll('[data-testid="term"]')).toHaveLength(2);
+  // 点第一个标签切回去
+  act(() => buttonByText(state.terminals[0].title)?.click());
+  state = useApp.getState();
+  expect(state.activeTerminalId).toBe(state.terminals[0].id);
+  // 关掉当前的：切到列表末尾那个，另一个仍在
+  act(() =>
+   container.querySelectorAll<HTMLButtonElement>(`button[aria-label="${zh.terminalClose}"]`)[0]?.click(),
+  );
+  state = useApp.getState();
+  expect(state.terminals).toHaveLength(1);
+  expect(state.activeTerminalId).toBe(state.terminals[0].id);
  });
 
  it("切到脚本页签：渲染脚本面板并以当前 cwd 为范围（可见才扫描）", () => {
@@ -127,7 +154,7 @@ describe("WorkbenchPanel", () => {
   render();
   expect(container.textContent).toContain(zh.workbenchNoSession);
   expect(container.querySelector('[data-testid="term"]')).toBeNull();
-  expect(useApp.getState().terminalCwds).toEqual([]);
+  expect(useApp.getState().terminals).toEqual([]);
  });
 
  it("关闭键收起整栏", () => {

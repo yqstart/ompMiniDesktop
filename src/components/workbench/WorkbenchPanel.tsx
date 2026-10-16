@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bolt, Command, Folder, X } from "reicon-react";
+import { Bolt, Command, Folder, Plus, X } from "reicon-react";
 import { WORKBENCH_MAX, WORKBENCH_MIN, useApp } from "../../stores/app";
 import { resolveContext } from "../../lib/context";
 import { useText } from "../../lib/useText";
@@ -13,15 +13,16 @@ const CENTER_MIN = 420;
 const STEP = 8;
 
 /**
- * 右栏工作台（V42，替代 v2 的「上下文」面板）：**文件**与**终端**两个页签。
+ * 右栏工作台（V42 / V43 / V44）：**文件 / 脚本 / 终端**三个页签。
  *
  * - 始终停靠为第三栏（打开 = 主区变三栏，会话列让位、不遮盖）；开关 `workbenchOpen` 只决定这一栏在不在。
  * - 面板**常驻挂载**（收起 / 切页签只改显隐）：终端进程与 xterm 回看缓冲不因为收起右栏而丢。
  * - **左缘可拖调宽**（260–640，持久化；口径与左栏 `SidebarShell` 同一套：3px 隐身热区、
  *   悬停 / 拖拽高亮、焦点下 ←→ 微调）。拖拽按「指针到右栏右缘的距离」算宽度——主区有外边距
  *   也不影响手感；另有窗口约束（给中列留 `CENTER_MIN`）。
- * - 目标目录 = 当前会话的工作目录（`resolveContext`），会话切换即跟着切；
- *   终端按 cwd 保留（`store.terminalCwds`，上限见 store），收起面板不杀进程，应用退出统一收尾（`pty.rs`）。
+ * - 目标目录 = 当前会话的工作目录（`resolveContext`）——**新建的终端**用它当 cwd；
+ *   已经开着的终端是用户的（多开、各自一个常驻 shell），不随会话切换被杀或改目录，
+ *   应用退出统一收尾（`pty.rs`）。
  */
 export function WorkbenchPanel() {
  const t = useText();
@@ -33,8 +34,11 @@ export function WorkbenchPanel() {
  const projects = useApp((s) => s.projects);
  const sessions = useApp((s) => s.sessions);
  const activeSessionId = useApp((s) => s.activeSessionId);
- const termCwds = useApp((s) => s.terminalCwds);
- const rememberTerminalCwd = useApp((s) => s.rememberTerminalCwd);
+ const terminals = useApp((s) => s.terminals);
+ const activeTerminalId = useApp((s) => s.activeTerminalId);
+ const newTerminal = useApp((s) => s.newTerminal);
+ const closeTerminal = useApp((s) => s.closeTerminal);
+ const setActiveTerminal = useApp((s) => s.setActiveTerminal);
  const sidebarWidth = useApp((s) => s.sidebarWidth);
  const width = useApp((s) => s.workbenchWidth);
  const setWorkbenchWidth = useApp((s) => s.setWorkbenchWidth);
@@ -93,12 +97,13 @@ export function WorkbenchPanel() {
   return () => window.removeEventListener("resize", clampToWindow);
  }, [maxWidthNow, setWorkbenchWidth]);
 
- // 只有「终端页签真的显示过」才把 cwd 记进保留表：没打开过的目录不白起 shell。
- // 同步到 store（外部状态）是 effect 的正当用途——组件本地 state 的写法会引入级联渲染。
+ // 进终端页签时保证至少有一个终端（列表空就按当前会话目录新建一个）；已经有终端就不动——
+ // 多开的那几个是用户的，不许被会话切换重置。同步到 store 是 effect 的正当用途。
  useEffect(() => {
   if (!visible || tab !== "terminal" || !cwd) return;
-  rememberTerminalCwd(cwd);
- }, [visible, tab, cwd, rememberTerminalCwd]);
+  if (useApp.getState().terminals.length > 0) return;
+  newTerminal(cwd);
+ }, [visible, tab, cwd, newTerminal]);
 
  const tabButton = (key: "files" | "scripts" | "terminal", Icon: typeof Folder, label: string) => (
   <button
@@ -177,12 +182,56 @@ export function WorkbenchPanel() {
      <p className="px-3.5 py-4 text-[12px] text-faint">{t.workbenchNoSession}</p>
     )}
    </div>
-   <div className={`relative min-h-0 flex-1 ${tab === "terminal" ? "" : "hidden"}`}>
+   {/* 终端页签（V44 多开）：上面是终端标签行（切换 / 新建 / 关闭），下面是当前终端。
+       所有终端都保持挂载：切标签只切显隐，回看缓冲与常驻 shell 都不丢。 */}
+   <div className={`flex min-h-0 flex-1 flex-col ${tab === "terminal" ? "" : "hidden"}`}>
     {cwd ? (
-     // 终端 cwd 由上面的 effect 补进保留表；补进前这一帧什么都不画（不闪空态文案）
-     termCwds.map((dir) => (
-      <TerminalPane key={dir} id={`term:${dir}`} cwd={dir} visible={visible && tab === "terminal" && dir === cwd} />
-     ))
+     <>
+      <div className="flex h-8 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border-soft px-1">
+       {terminals.map((term) => (
+        <div
+         key={term.id}
+         className={`flex h-6 shrink-0 items-center rounded-md pr-0.5 pl-2 text-[11px] transition-colors duration-100 ${
+          term.id === activeTerminalId ? "bg-active text-foreground" : "text-muted hover:bg-hover hover:text-foreground"
+         }`}
+        >
+         <button
+          onClick={() => setActiveTerminal(term.id)}
+          className="max-w-[96px] cursor-pointer truncate"
+          title={`${term.title} — ${term.cwd}`}
+         >
+          {term.title}
+         </button>
+         <button
+          onClick={() => closeTerminal(term.id)}
+          aria-label={t.terminalClose}
+          title={t.terminalClose}
+          className="ml-0.5 flex size-4 shrink-0 cursor-pointer items-center justify-center rounded text-faint transition-colors duration-100 hover:bg-hover hover:text-foreground"
+         >
+          <X size={10} aria-hidden />
+         </button>
+        </div>
+       ))}
+       <button
+        onClick={() => newTerminal(cwd)}
+        aria-label={t.terminalNew}
+        title={t.terminalNew}
+        className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-faint transition-colors duration-100 hover:bg-hover hover:text-foreground"
+       >
+        <Plus size={11} aria-hidden />
+       </button>
+      </div>
+      <div className="relative min-h-0 flex-1">
+       {terminals.map((term) => (
+        <TerminalPane
+         key={term.id}
+         id={term.id}
+         cwd={term.cwd}
+         visible={visible && tab === "terminal" && term.id === activeTerminalId}
+        />
+       ))}
+      </div>
+     </>
     ) : (
      <p className="px-3.5 py-4 text-[12px] text-faint">{t.workbenchNoSession}</p>
     )}

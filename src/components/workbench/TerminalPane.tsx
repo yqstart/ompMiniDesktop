@@ -51,15 +51,15 @@ export function TerminalPane({ id, cwd, visible }: { id: string; cwd: string; vi
   */
  const flushPendingRun = useCallback(() => {
   const p = useApp.getState().pendingTerminalRun;
-  if (!p || p.cwd !== cwd || consumedRunRef.current === p.seq) return;
+  if (!p || p.terminalId !== id || consumedRunRef.current === p.seq) return;
   consumedRunRef.current = p.seq;
   void api.terminalWrite(id, `${p.command}\r`).catch(() => {});
   useApp.getState().clearTerminalRun(p.seq);
- }, [cwd, id]);
+ }, [id]);
 
  // 投递来的命令：已经出过输出的终端立刻写；否则等首帧输出，或 1.5s 后兜底写
  useEffect(() => {
-  if (!pendingRun || pendingRun.cwd !== cwd) return;
+  if (!pendingRun || pendingRun.terminalId !== id) return;
   if (status === "exited") {
    // shell 已经退出：这条命令没有落点。清掉**并就地说明**——不静默丢，也不自动重启
    // （用户可能正看着回看内容；重开终端这个动作交给他，点「重新打开」即可）。
@@ -74,7 +74,7 @@ export function TerminalPane({ id, cwd, visible }: { id: string; cwd: string; vi
   }
   const timer = window.setTimeout(() => flushPendingRun(), 1500);
   return () => window.clearTimeout(timer);
- }, [pendingRun, cwd, flushPendingRun, status, t]);
+ }, [pendingRun, id, flushPendingRun, status, t]);
 
  // xterm 实例（仅随组件建立 / 销毁）
  useEffect(() => {
@@ -178,7 +178,7 @@ export function TerminalPane({ id, cwd, visible }: { id: string; cwd: string; vi
     setExitCode(null);
     // 终端起不来，投递过来的命令没有落点：清掉，别让 `pendingTerminalRun` 一直挂着
     const p = useApp.getState().pendingTerminalRun;
-    if (p && p.cwd === cwd) useApp.getState().clearTerminalRun(p.seq);
+    if (p && p.terminalId === id) useApp.getState().clearTerminalRun(p.seq);
    }
   })();
   return () => {

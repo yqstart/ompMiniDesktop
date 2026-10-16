@@ -39,6 +39,9 @@ beforeEach(() => {
  useApp.setState({
   locale: "zh-CN",
   customScripts: {},
+  terminals: [],
+  activeTerminalId: null,
+  terminalSeq: 0,
   pendingTerminalRun: null,
   terminalRunSeq: 0,
   workbenchOpen: false,
@@ -81,17 +84,36 @@ describe("ScriptsPanel", () => {
   expect(container.textContent).toContain("package.json");
  });
 
- it("点脚本行 = 投递到该目录的终端（顺带展开右栏并切到终端页签）", async () => {
+ it("点脚本行 = 新开一个终端并把命令投给它（顺带展开右栏并切到终端页签）", async () => {
   await render();
   const row = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("pnpm run build"));
   await act(async () => {
    row?.click();
   });
-  const pending = useApp.getState().pendingTerminalRun;
-  expect(pending?.cwd).toBe(CWD);
-  expect(pending?.command).toBe("pnpm run build");
-  expect(useApp.getState().workbenchTab).toBe("terminal");
-  expect(useApp.getState().workbenchOpen).toBe(true);
+  const state = useApp.getState();
+  expect(state.terminals).toHaveLength(1);
+  expect(state.terminals[0]).toMatchObject({ cwd: CWD, title: "build" }); // 标签名 = 脚本名
+  expect(state.activeTerminalId).toBe(state.terminals[0].id);
+  expect(state.pendingTerminalRun?.terminalId).toBe(state.terminals[0].id);
+  expect(state.pendingTerminalRun?.command).toBe("pnpm run build");
+  expect(state.workbenchTab).toBe("terminal");
+  expect(state.workbenchOpen).toBe(true);
+ });
+
+ it("多开：连点两条脚本 = 两个终端，各跑各的", async () => {
+  await render();
+  const pick = (cmd: string) => [...container.querySelectorAll("button")].find((b) => b.textContent?.includes(cmd));
+  await act(async () => {
+   pick("pnpm run dev")?.click();
+  });
+  await act(async () => {
+   pick("pnpm run build")?.click();
+  });
+  const state = useApp.getState();
+  expect(state.terminals.map((t) => t.title)).toEqual(["dev", "build"]);
+  expect(state.activeTerminalId).toBe(state.terminals[1].id);
+  // 投递落点是最新那个终端（每条命令对应它自己那一次新建）
+  expect(state.pendingTerminalRun?.terminalId).toBe(state.terminals[1].id);
  });
 
  it("页签没显示过就不扫描项目", async () => {

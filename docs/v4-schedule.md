@@ -1,6 +1,6 @@
-# 排期 4：右栏工作台（文件目录 + 项目脚本 + 终端）
+# 排期 4：右栏工作台（文件目录 + 项目脚本 + 多开终端）
 
-> 状态：**已实施**（2026-10-16，随 `0.2.0` 发布前记录）。锚点 = 用户口径「右栏不要现在的上下文信息，改成文件目录和终端」（V42），随后按「为项目配置快捷执行的终端命令、识别项目语言自动出脚本、也可自定义」（V43）补第三个页签；形态参照 DeepSeek Harness 的工作区文件 / 终端入口。
+> 状态：**已实施**（2026-10-16，随 `0.2.0` 发布前记录）。锚点 = 用户口径「右栏不要现在的上下文信息，改成文件目录和终端」（V42），随后按「为项目配置快捷执行的终端命令、识别项目语言自动出脚本、也可自定义」（V43）补第三个页签，再按「终端 tab 下要能多开，有时不止跑一个脚本」把终端做成标签行多开（V44）；形态参照 DeepSeek Harness 的工作区文件 / 终端入口。
 > 性质：**右栏整栏替换** + 两条新数据链路（只读目录列举、PTY 终端）。左栏 / 中列 / 会话运行时 / 设置面不动。
 > 前置阅读：`../AGENTS.md`（工程导航）、`roadmap.md`、`v1-schedule.md`（§1 的删除清单——本次是它唯一的例外口）。
 
@@ -25,15 +25,15 @@
 
 | 模块 | 说明 |
 |---|---|
-| `components/workbench/WorkbenchPanel.tsx` | 右栏容器：三个页签（文件 / 脚本 / 终端）+ 关闭键 + 左缘宽度拖拽；**常驻挂载、只切显隐** |
+| `components/workbench/WorkbenchPanel.tsx` | 右栏容器：三个页签（文件 / 脚本 / 终端）+ 关闭键 + 左缘宽度拖拽 + **终端标签行**（多开切换 / 新建 / 关闭）；**常驻挂载、只切显隐** |
 | `components/workbench/FileTree.tsx` | 只读目录树：懒加载一层、变更标色、打开、引用到输入框 |
-| `components/workbench/ScriptsPanel.tsx` | 项目脚本（识别结果，只读）+ 自定义脚本（增删改）+ 点击投递到终端 |
-| `components/workbench/TerminalPane.tsx` | xterm.js 实例 + 到 PTY 的双向管道（一 cwd 一个终端）+ 消费 `pendingTerminalRun` |
+| `components/workbench/ScriptsPanel.tsx` | 项目脚本（识别结果，只读）+ 自定义脚本（增删改）+ 点击新开终端跑它 |
+| `components/workbench/TerminalPane.tsx` | 一个终端实例：xterm.js + 到 PTY 的双向管道 + 消费 `pendingTerminalRun{terminalId}` |
 | `lib/termTheme.ts` | 把 `--term-*` 的当前值读成 xterm 的 `ITheme`（皮肤切换跟色） |
 | `src-tauri/src/pty.rs` | PTY 终端：`terminal_spawn` / `terminal_write` / `terminal_resize` / `terminal_kill` + `kill_all` |
 | `src-tauri/src/workspace_fs.rs` | `list_dir`：单层目录列举；树根请求顺带返回 git 仓库根 |
 | `src-tauri/src/project_scripts.rs` | `discover_scripts`：**只读**识别项目脚本（行扫描解析，一律不引 TOML / YAML 依赖） |
-| store 字段 | `workbenchOpen` / `workbenchTab` / `workbenchWidth` / `terminalCwds` / `customScripts` / `pendingTerminalRun`（+ `terminalRunSeq`）与九个动作 |
+| store 字段 | `workbenchOpen` / `workbenchTab` / `workbenchWidth` / `terminals` / `activeTerminalId` / `terminalSeq` / `customScripts` / `pendingTerminalRun`（+ `terminalRunSeq`）与十二个动作 |
 | 共享面 | `shared/ipc.ts` 六条命令常量、`shared/api.ts` 六个方法、`shared/types.ts` 六个类型 |
 | 依赖 | `portable-pty 0.9`（Rust）、`@xterm/xterm 6` + `@xterm/addon-fit 0.11`（前端） |
 | 样式 | `index.css` 的 `--term-*` 16 色 token（浅 / 深两套） |
@@ -43,7 +43,7 @@
 1. **右栏只有一个形态**：工作台（文件 / 终端双页签），停靠在主区第三栏；`⌘⇧G` 开关、**默认收起**、持久化。
 2. **常驻挂载**：收起右栏 / 切页签 / 切设置视图都只改 `hidden`——终端进程、xterm 回看缓冲、文件树展开位置都不丢（`WorkbenchPanel` 不许写成 `if (!open) return null`）。
 3. **目标目录 = 当前会话 cwd**（`resolveContext`），会话切换即跟着切；没有会话时两个页签都给空态文案。
-4. **终端按 cwd 保留**（`store.terminalCwds`，上限 4）：切会话不杀上一个 shell，超出上限淘汰最旧的（组件卸载 = `terminal_kill`）；应用退出统一 `pty::kill_all`。
+4. **终端多开、标签切换**（`store.terminals` + `activeTerminalId`，V44 用户口径：不分屏）：终端页签内一条标签行（切换 / `+` 新建 / 关闭），每个标签一个常驻 shell；上限 6、超出淘汰最旧的**非活跃**项（组件卸载 = `terminal_kill`）；终端在创建时定格 cwd，**切会话不改目录也不被杀**（切会话只影响「新建终端用哪个目录」）；应用退出统一 `pty::kill_all`。点脚本**每次新开一个终端**跑它（标签名 = 脚本名）。
 5. **高频字节流只进 xterm**，不进 store（与聊天流式同一治理口径）。
 6. **文件树只读**：`list_dir` 不写盘、不读文件内容；打开交给系统默认程序（`openPath`，失败退 `revealItemInDir`）；「引用到输入框」与 `⌘⇧P` 引用浮层共用 `appendReference` 这一条注入口径。
 7. **终端不许长出终端形态的会话模型**：不做 π 标题解析、不做目录行 / 标签栏、不做覆盖层注入——一个终端就是「一个 cwd 的登录 shell」。
@@ -61,4 +61,5 @@
    - 终端页签：起 shell（`echo $SHELL` / `pwd` 对得上会话目录）→ 跑 `ls`、`vim` 之类全屏程序 → 拖窗 / 切页签后尺寸正确 → `exit` 后「重新打开」→ 切会话再切回来，原 shell 状态还在；
    - 收起右栏后终端里的长命令继续跑（常驻挂载的证据）；
    - 拖右栏左缘调宽：终端跟着 reflow（列数变化，`stty size` 对得上）、文件树行不破版；把窗口拉窄，右栏自动收回超限宽度；重开应用宽度还是拖完的值；
-   - 脚本页签：进面板看到识别到的生态与脚本（拿一个 Node / Rust 项目对一眼 `package.json` / `Cargo.toml`）→ 点某条脚本：右栏切到终端页签并自动执行（终端原本没开过也成立）→ 自定义脚本新建一条再点运行；删掉后行消失、重开应用不复活。
+   - 脚本页签：进面板看到识别到的生态与脚本（拿一个 Node / Rust 项目对一眼 `package.json` / `Cargo.toml`）→ 点某条脚本：右栏切到终端页签、**新开一个标签**并自动执行 → 再点另一条：第二个标签各跑各的（互不打断）→ 自定义脚本新建一条再点运行；删掉后行消失、重开应用不复活；
+   - 终端多开：`+` 新建 → 标签行来回切（各自 shell 的状态与回看缓冲都在）→ 关掉其中一个不影响别的（`ps` 里对应 shell 消失）→ 切到别的会话再回来，标签行不动；开到第 7 个时最旧的非活跃标签被淘汰。

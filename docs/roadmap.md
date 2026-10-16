@@ -14,7 +14,7 @@
 | 版本 | 主题 | 一句话目标 | 明细 |
 |---|---|---|---|
 | **0.1.0** | 首个版本（三部分一体交付） | 形态收敛 + 聊天对标 + 设置重构——终端形态整体下线；聊天形态按 Codex / ZCode 范式重做；设置改为独立视图 | [`v1-schedule.md`](v1-schedule.md) / [`v2-schedule.md`](v2-schedule.md) / [`v3-schedule.md`](v3-schedule.md) |
-| **0.2.0** | 右栏工作台 | 右栏从「上下文」面板换成**文件目录 + 项目脚本 + 终端**三页签（形态参照 DeepSeek Harness 的工作区文件 / 终端入口） | [`v4-schedule.md`](v4-schedule.md) |
+| **0.2.0** | 右栏工作台 | 右栏从「上下文」面板换成**文件目录 + 项目脚本 + 多开终端**三页签（形态参照 DeepSeek Harness 的工作区文件 / 终端入口） | [`v4-schedule.md`](v4-schedule.md) |
 
 各排期的口径定格：
 

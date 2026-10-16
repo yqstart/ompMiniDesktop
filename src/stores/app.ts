@@ -67,12 +67,20 @@ type AppState = {
  workbenchWidth: number;
  setWorkbenchWidth: (w: number) => void;
  /**
-  * 右栏终端保留表（V42）：**打开过终端的目录**，保序、最多 `MAX_TERMINALS` 个——
-  * 每个终端是一个常驻 shell，切会话不该把上一个项目的 shell 直接杀掉；
-  * 超出上限时最旧的目录被淘汰（对应组件卸载 = kill 它的进程）。运行期状态，不持久化。
+  * 终端实例表（V42 起、V44 多开）：**同一目录可以开多个终端**，一次只显示 `activeTerminalId`
+  * 那个，靠终端页签里的标签行切换。每个终端是一个常驻 shell 进程（上限 `MAX_TERMINALS`，
+  * 超了淘汰最旧的**非活跃**项），切会话不会把它们杀掉。运行期状态，不持久化。
   */
- terminalCwds: string[];
- rememberTerminalCwd: (cwd: string) => void;
+ terminals: TerminalInstance[];
+ /** 当前显示的终端（null = 还没建过 / 全被关掉）。 */
+ activeTerminalId: string | null;
+ /** 终端 id 发生器（`t1` / `t2`…，运行期计数，不持久化）。 */
+ terminalSeq: number;
+ /** 新建一个终端（`title` 缺省 = 目录名；点脚本时传脚本名），返回它的 id 并切到它。 */
+ newTerminal: (cwd: string, title?: string) => string;
+ /** 关掉一个终端（关的是当前显示的那个时，自动切到列表末尾那个）。 */
+ closeTerminal: (id: string) => void;
+ setActiveTerminal: (id: string) => void;
  /**
   * 用户自定义脚本（V43，按项目目录分组）：只存**本应用偏好**（localStorage，不写用户仓库）。
   * 后端识别出来的项目脚本不进这里——那是每次进面板重新扫描的只读结果。
@@ -82,14 +90,18 @@ type AppState = {
  updateCustomScript: (cwd: string, id: string, patch: { name?: string; command?: string }) => void;
  removeCustomScript: (cwd: string, id: string) => void;
  /**
-  * 待投递到终端的命令（V43）：脚本页签点「运行」时落这里，由该 cwd 的 `TerminalPane` 消费
-  * （等 shell 起来并收到首帧输出后写进 PTY）。运行期状态，不持久化。
+  * 待投递到终端的命令（V43 / V44）：脚本页签点「运行」时落这里，**目标是那一次新开的终端**
+  * （`terminalId`），由对应的 `TerminalPane` 在 shell 起来并收到首帧输出后写进 PTY。
+  * 运行期状态，不持久化。
   */
- pendingTerminalRun: { cwd: string; command: string; seq: number } | null;
+ pendingTerminalRun: { terminalId: string; command: string; seq: number } | null;
  /** 待运行命令的序号发生器：区分「同一条」与「又点了一次运行」。 */
  terminalRunSeq: number;
- /** 在指定目录的终端里跑一条命令（必要时展开右栏并切到终端页签；终端没起就等它起来）。 */
- runInTerminal: (cwd: string, command: string) => void;
+ /**
+  * 在指定目录**新开一个终端**并跑一条命令（展开右栏 + 切到终端页签 + 切到新终端）。
+  * 「每次点脚本都新开」是用户口径：多开的终端各跑各的脚本，互不打断。
+  */
+ runInTerminal: (cwd: string, command: string, title?: string) => void;
  /** 消费掉一条待运行命令（`seq` 不符 = 已被更新的命令顶掉，不动）。 */
  clearTerminalRun: (seq: number) => void;
 
@@ -348,6 +360,15 @@ export interface CustomScript {
  command: string;
 }
 
+/** 一个终端实例（V44 多开）：`id` 是后端 PTY 进程表里的寻址键，`title` 只用于标签显示。 */
+export interface TerminalInstance {
+ id: string;
+ /** 创建时的工作目录（终端不随会话切换改目录）。 */
+ cwd: string;
+ /** 标签显示名（点脚本开的是脚本名，手动开的是目录名）。 */
+ title: string;
+}
+
 /** 自定义脚本的 id（本地生成，不要求跨设备稳定——只在本应用偏好里做行标识）。 */
 function newScriptId(): string {
  return `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -407,8 +428,17 @@ export const WORKBENCH_MIN = 260;
 export const WORKBENCH_MAX = 640;
 export const WORKBENCH_DEFAULT = 320;
 
-/** 右栏同时保留的终端数（按 cwd）：每个终端是一个常驻 shell 进程，不无限攒。 */
-const MAX_TERMINALS = 4;
+/**
+ * 同时保留的终端数（多开上限）：每个终端是一个常驻 shell 进程——比 omp 会话轻得多，
+ * 但也没必要无限攒；超上限时淘汰最旧的**非活跃**终端（正在看的那个不许被顶掉）。
+ */
+const MAX_TERMINALS = 6;
+
+/** 目录尾名（`/a/b/proj/` → `proj`）：终端标签的默认标题。 */
+function dirName(path: string): string {
+ const trimmed = path.replace(/\/+$/, "");
+ return trimmed.split("/").pop() || trimmed || "终端";
+}
 
 /** 右栏工作台面板的初始展开态（V42）：**默认收起**（首次启动不自动占位），用户展开后记住。 */
 function loadWorkbenchOpen(): boolean {
@@ -525,14 +555,31 @@ export const useApp = create<AppState>((set, get) => ({
   }
   set({ workbenchWidth: v });
  },
- terminalCwds: [],
- rememberTerminalCwd: (cwd) =>
-  set((s) =>
-   // 已经在表里 = 不写（值没变不写，避免无意义的重渲染）
-   s.terminalCwds.includes(cwd)
-    ? s
-    : { terminalCwds: [...s.terminalCwds, cwd].slice(-MAX_TERMINALS) },
-  ),
+ terminals: [],
+ activeTerminalId: null,
+ terminalSeq: 0,
+ newTerminal: (cwd, title) => {
+  const s = get();
+  const seq = s.terminalSeq + 1;
+  const term: TerminalInstance = { id: `t${seq}`, cwd, title: title?.trim() || dirName(cwd) };
+  let list = [...s.terminals, term];
+  // 超上限：淘汰最旧的**非活跃**终端（正在看的那个不许被顶掉；淘汰 = 组件卸载 = kill 进程）
+  if (list.length > MAX_TERMINALS) {
+   const victim = list.find((t) => t.id !== s.activeTerminalId && t.id !== term.id);
+   if (victim) list = list.filter((t) => t.id !== victim.id);
+  }
+  set({ terminals: list, activeTerminalId: term.id, terminalSeq: seq });
+  return term.id;
+ },
+ closeTerminal: (id) =>
+  set((s) => {
+   const list = s.terminals.filter((t) => t.id !== id);
+   if (list.length === s.terminals.length) return s;
+   // 关掉的是当前显示的那个 → 切到列表末尾（最近开的）那个；否则看作息不变
+   const active = s.activeTerminalId === id ? (list[list.length - 1]?.id ?? null) : s.activeTerminalId;
+   return { terminals: list, activeTerminalId: active };
+  }),
+ setActiveTerminal: (id) => set({ activeTerminalId: id }),
  customScripts: loadCustomScripts(),
  addCustomScript: (cwd, name, command) => {
   const s = get();
@@ -563,13 +610,15 @@ export const useApp = create<AppState>((set, get) => ({
  },
  pendingTerminalRun: null,
  terminalRunSeq: 0,
- runInTerminal: (cwd, command) => {
+ runInTerminal: (cwd, command, title) => {
   const s = get();
-  // 脚本在终端里跑：先把右栏与终端页签摆到用户眼前；终端没起来由 `TerminalPane` 起来后消费
+  // 脚本在终端里跑：先把右栏与终端页签摆到用户眼前，再**新开一个终端**放它
+  // （多开口径：连点几条脚本就是几个终端，各跑各的、互不打断）
   s.setWorkbenchOpen(true);
   s.setWorkbenchTab("terminal");
+  const terminalId = s.newTerminal(cwd, title);
   const seq = s.terminalRunSeq + 1;
-  set({ pendingTerminalRun: { cwd, command, seq }, terminalRunSeq: seq });
+  set({ pendingTerminalRun: { terminalId, command, seq }, terminalRunSeq: seq });
  },
  clearTerminalRun: (seq) =>
   set((s) => (s.pendingTerminalRun?.seq === seq ? { pendingTerminalRun: null } : s)),
