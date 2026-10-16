@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Command, Folder, X } from "reicon-react";
+import { Bolt, Command, Folder, X } from "reicon-react";
 import { WORKBENCH_MAX, WORKBENCH_MIN, useApp } from "../../stores/app";
 import { resolveContext } from "../../lib/context";
 import { useText } from "../../lib/useText";
 import { FileTree } from "./FileTree";
+import { ScriptsPanel } from "./ScriptsPanel";
 import { TerminalPane } from "./TerminalPane";
 
 /** 右栏宽度上限还要给中列留出可用宽度：窗口扣除左栏后至少留这么多（消息列 + 输入卡）。 */
@@ -99,7 +100,7 @@ export function WorkbenchPanel() {
   rememberTerminalCwd(cwd);
  }, [visible, tab, cwd, rememberTerminalCwd]);
 
- const tabButton = (key: "files" | "terminal", Icon: typeof Folder, label: string) => (
+ const tabButton = (key: "files" | "scripts" | "terminal", Icon: typeof Folder, label: string) => (
   <button
    onClick={() => setTab(key)}
    aria-pressed={tab === key}
@@ -149,6 +150,7 @@ export function WorkbenchPanel() {
    />
    <header className="flex h-(--h-chrome) shrink-0 items-center gap-1 border-b border-border px-2">
     {tabButton("files", Folder, t.workbenchFiles)}
+    {tabButton("scripts", Bolt, t.workbenchScripts)}
     {tabButton("terminal", Command, t.workbenchTerminal)}
     <button
      onClick={() => setOpen(false)}
@@ -163,6 +165,14 @@ export function WorkbenchPanel() {
    <div className={`min-h-0 flex-1 ${tab === "files" ? "" : "hidden"}`}>
     {cwd ? (
      <FileTree root={cwd} />
+    ) : (
+     <p className="px-3.5 py-4 text-[12px] text-faint">{t.workbenchNoSession}</p>
+    )}
+   </div>
+   {/* 脚本页签：常驻挂载，但只有真的显示过才扫描项目（`visible` 传给面板自己判） */}
+   <div className={`min-h-0 flex-1 ${tab === "scripts" ? "" : "hidden"}`}>
+    {cwd ? (
+     <ScriptsPanel cwd={cwd} visible={visible && tab === "scripts"} />
     ) : (
      <p className="px-3.5 py-4 text-[12px] text-faint">{t.workbenchNoSession}</p>
     )}

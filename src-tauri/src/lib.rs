@@ -11,6 +11,7 @@ pub mod overlay;
 pub mod plugins;
 pub mod proc;
 pub mod project_files;
+pub mod project_scripts;
 pub mod providers;
 pub mod pty;
 pub mod runtime;

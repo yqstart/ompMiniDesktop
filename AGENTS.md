@@ -12,7 +12,7 @@ oh-my-pi（`omp`）的桌面端：**聊天形态的 omp 工作台**（Tauri v2 +
 | `docs/v1-schedule.md` | 排期 1：终端形态删除清单 / 迁移清单 / 验收（**已实施**，2026-10-14）|
 | `docs/v2-schedule.md` | 排期 2：布局 / 流式 / 聊天框对标 Codex、ZCode |
 | `docs/v3-schedule.md` | 排期 3：设置重构（功能保留、形态重做）|
-| `docs/v4-schedule.md` | 排期 4：右栏改造——文件目录 + 终端（**已实施**）|
+| `docs/v4-schedule.md` | 排期 4：右栏工作台——文件目录 + 项目脚本 + 终端（**已实施**）|
 | `docs/benchmark-codex-desktop.md` | Codex Desktop 对标调研（含截图证据与设计语言合约）|
 | `docs/benchmark-zcode-desktop.md` | Zcode Desktop 对标调研 |
 | `design-system/MASTER.md` | 设计系统（颜色 / 布局 / 组件 / 层级真相；改 UI 先读）|
@@ -31,7 +31,7 @@ oh-my-pi（`omp`）的桌面端：**聊天形态的 omp 工作台**（Tauri v2 +
 src/
   app/App.tsx                # 顶层装配（左栏 + 中列 + 右栏工作台 + 设置视图 + 全局浮层与快捷键）
   components/sidebar/        # 左栏：ChatSidebar（常驻命令行 + 会话树 + 项目拖拽排序控制器）/ SidebarTop / SidebarBottom / WorkspaceGroupDialog / RowAction / DropLine / OmpUpdateChip / AppUpdateChip
-  components/workbench/      # 右栏工作台（V42）：WorkbenchPanel（停靠 + 文件/终端双页签）/ FileTree（只读目录树 + 变更标色 + 引用注入）/ TerminalPane（xterm.js + PTY 管道）
+  components/workbench/      # 右栏工作台（V42 / V43）：WorkbenchPanel（停靠 + 文件/脚本/终端三页签 + 宽度拖拽）/ FileTree（只读目录树 + 变更标色 + 引用注入）/ ScriptsPanel（项目脚本识别 + 自定义脚本 + 投递到终端）/ TerminalPane（xterm.js + PTY 管道）
   components/thread/         # 消息列：ChatView / TopBar / Thread / AssistantText / ToolRow / ToolRunRow / TurnRow / ApprovalCard / UiRequestCard / ChatEmptyState / PlanCard（任务清单浮卡）/ FindBar / BtwPanel / SessionStatsDialog / DiffDialog…
   components/composer/       # 输入卡（v2）：Composer（卡顶行项目/分支 + 提交键 + 卡底工具行：`+`/执行模式/压缩/容量环/用量/模型/思考档/发送）/ CommitButton / ApprovalModeMenu / ModelMenu / ThinkingMenu / PlusMenu / GoalRow / MentionList / SlashMenu / UsageLimits
   components/pickers/        # 选择器：ProjectPicker / BranchPicker（内嵌输入卡顶行；分支清单点选即切）
@@ -46,7 +46,7 @@ src-tauri/src/
   pty.rs                     # 右栏终端：PTY 里的登录 shell（spawn / write / resize / kill / kill_all，输出走 Channel）
   proc.rs                    # 进程与环境工具（登录 shell PATH 探测 / 进程组强杀；runtime / pty / git_commit / commit_msg / omp_update 复用）
   commands/mod.rs            # RPC 命令面 + 项目 / 工作区 / 会话 / git 命令
-  context.rs session_scan.rs overlay.rs git_info.rs git_commit.rs git_ops.rs project_files.rs workspace_fs.rs
+  context.rs session_scan.rs overlay.rs git_info.rs git_commit.rs git_ops.rs project_files.rs workspace_fs.rs project_scripts.rs
   plugins.rs skills.rs settings.rs themes.rs models_config.rs title_prompt.rs omp_update.rs
   providers.rs memories.rs usage.rs provider_usage.rs extra_usage.rs
 scripts/                     # e2e-ipc-selfcheck / generate-icons / changelog-notes / fixup-latest-json / make-signing-cert / tauri-build
@@ -74,8 +74,8 @@ scripts/                     # e2e-ipc-selfcheck / generate-icons / changelog-no
   - `text_end` 是文本块完结信号（消费它，行才收敛）；工具占位卡从 `partial` 取真名 / 真 id / 半截参数。
   - **注入消息分类**：`role=developer`（omp TTSR 规则提醒 `<system-reminder …>`）不落正文——历史回放与实时帧都渲染成一条 `divider:"reminder"` 紧凑行（规则名进文案，正文不入流）；其余未知 role 一律不按正文渲染（正文只认 assistant，注入内容落成正文就是泄漏）。
 - **消息列滚动**：`.thread-scroll` 必须保持 `overflow-y: auto`（`index.css`）——跟随 / 回看 / 加载更早全靠它（V32 曾漏恢复导致「输入框上方文字重叠」）。
-- **三栏布局（v2；右栏 V42 改造）**：左栏（`SidebarShell` + `ChatSidebar`）/ 中列（`ChatView`）/ 右栏**工作台**（`WorkbenchPanel`，装配在 `App` 主区内、`ChatView` 之侧）。右栏开关 = `store.workbenchOpen`（持久化、**默认收起**，⌘⇧G）；打开即停靠为第三栏（布局变三栏，会话列让位、不遮盖）。**右栏宽度可拖**（`store.workbenchWidth`：260–640、默认 320、持久化；手柄在左缘，另受「给中列留 420px」的窗口约束，窗口变窄自动收回超限值）。**右栏 = 文件 / 终端两个页签**（`store.workbenchTab`，持久化），面板**常驻挂载、只切显隐**（收起 / 切页签 / 切设置视图都不卸载：终端进程与 xterm 回看缓冲、文件树的展开位置都不丢）。
-- **右栏工作台（V42）**：目标目录 = 当前会话 cwd（`lib/context.ts` 的 `resolveContext`），会话切换即跟着切。**文件页签** = 只读目录树（`workbench/FileTree.tsx`）：懒加载一层（`list_dir`，`withRepoRoot` 只在树根传）、目录优先 + 名称升序、每目录分片 200 条、单层超 2000 条截断；未提交改动拿一次 `get_change_set`，按「仓库根 + 相对路径」换算成绝对路径打徽标（`M/A/D/R·C/?`）；点文件用系统默认程序打开，行尾 hover 出「引用到输入框」（与 `⌘⇧P` 引用浮层同一条 `appendReference` 注入口径）与「在访达中显示」。**不许**变成编辑器：只读、不写文件、不预览内容。**终端页签** = PTY 里的登录 shell（`pty.rs` + `workbench/TerminalPane.tsx`）：`terminal_spawn` 建 PTY、输出走 Tauri Channel、`terminal_write` / `terminal_resize` / `terminal_kill` 三路寻址；终端**按 cwd 保留**（`store.terminalCwds`，RS 里上限 4——每个是一个常驻 shell，超出淘汰最旧的，对应组件卸载即 kill）；高频字节流只进 xterm，**不进 store**；应用退出走 `pty::kill_all`。**不许**再引入终端形态的会话模型（π 标题 / 目录行 / 标签栏 / 覆盖层注入）。
+- **三栏布局（v2；右栏 V42 改造）**：左栏（`SidebarShell` + `ChatSidebar`）/ 中列（`ChatView`）/ 右栏**工作台**（`WorkbenchPanel`，装配在 `App` 主区内、`ChatView` 之侧）。右栏开关 = `store.workbenchOpen`（持久化、**默认收起**，⌘⇧G）；打开即停靠为第三栏（布局变三栏，会话列让位、不遮盖）。**右栏宽度可拖**（`store.workbenchWidth`：260–640、默认 320、持久化；手柄在左缘，另受「给中列留 420px」的窗口约束，窗口变窄自动收回超限值）。**右栏 = 文件 / 脚本 / 终端三个页签**（`store.workbenchTab`，持久化），面板**常驻挂载、只切显隐**（收起 / 切页签 / 切设置视图都不卸载：终端进程与 xterm 回看缓冲、文件树的展开位置都不丢）。
+- **右栏工作台（V42 / V43）**：目标目录 = 当前会话 cwd（`lib/context.ts` 的 `resolveContext`），会话切换即跟着切。**文件页签** = 只读目录树（`workbench/FileTree.tsx`）：懒加载一层（`list_dir`，`withRepoRoot` 只在树根传）、目录优先 + 名称升序、每目录分片 200 条、单层超 2000 条截断；未提交改动拿一次 `get_change_set`，按「仓库根 + 相对路径」换算成绝对路径打徽标（`M/A/D/R·C/?`）；点文件用系统默认程序打开，行尾 hover 出「引用到输入框」（与 `⌘⇧P` 引用浮层同一条 `appendReference` 注入口径）与「在访达中显示」。**不许**变成编辑器：只读、不写文件、不预览内容。**脚本页签** = 项目脚本（`workbench/ScriptsPanel.tsx` + `project_scripts.rs` 的 `discover_scripts`）：后端**只读**扫清单文件给出候选命令——`package.json` 的 scripts（包管理器由锁文件 / `packageManager` 定）、`Cargo.toml`（固定五条 + `.cargo` 的 `[alias]`）、`go.mod`、`manage.py` / `pyproject.toml` 的 scripts 段、`Makefile` / `justfile` / `Taskfile`；解析全是**行扫描**（不为几个清单文件引 TOML / YAML 依赖，认不出的写法就是没有，不猜）。**自定义脚本** = 本应用偏好（`store.customScripts` 按 cwd 分组、localStorage `omp.scripts.v1`，**不写用户仓库**）。执行口径：点脚本 → `runInTerminal(cwd, command)` 展开右栏 + 切终端页签 + 落 `store.pendingTerminalRun`，由该 cwd 的 `TerminalPane` 在**首帧输出后**（shell 起来、提示符出来）写进 PTY，1.5s 超时兜底（`flushPendingRun` 用 `consumedRunRef` 挡重复）——脚本面板不自己起进程。**终端页签** = PTY 里的登录 shell（`pty.rs` + `workbench/TerminalPane.tsx`）：`terminal_spawn` 建 PTY、输出走 Tauri Channel、`terminal_write` / `terminal_resize` / `terminal_kill` 三路寻址；终端**按 cwd 保留**（`store.terminalCwds`，RS 里上限 4——每个是一个常驻 shell，超出淘汰最旧的，对应组件卸载即 kill）；高频字节流只进 xterm，**不进 store**；应用退出走 `pty::kill_all`。**不许**再引入终端形态的会话模型（π 标题 / 目录行 / 标签栏 / 覆盖层注入）。
 - **消息列布局（v2）**：`lib/threadLayout.ts` 的 `buildThreadLayout(shown, running)` 是渲染前的唯一布局派生——相邻同类工具行聚合成摘要行（命令批 / 编辑卡 / 任务清单批——`todo` 工具行连成一段折成「更新了 N 次任务清单」，清单的当前状态看消息列底部浮卡），每轮末尾追加轮时长行（`user.at` → 该轮最后一条消息的 `at`；running 时跳过流尾轮）。`ViewMsg.at` 来源：历史 = jsonl 行的 `timestamp`（`lib/viewmsg.ts` 的 `lineAtOf`），实时 = 帧到达时刻（`useSessionEvents` 统一打戳）。聚合/时长只在布局层做，不改 `mergeViewMsgs` 的合并口径。
 - **左栏未读完成标（v2）**：后台会话的**一轮起止**只有 `list_sessions` 快照看得到——`running` 字段 = **任务在跑**（进程表活动态派生，见「状态收敛」），`ChatSidebar.reload` 对比上一份快照，`running → 非 running` 且不在前台 → `store.markUnread`；打开会话（SessionRow 点击）`clearUnread`。运行期状态，不持久化。
 - **删除 / 归档的列表缓存同步**：左栏的 `mergedSessions` 把 `store.sessions` 当真相覆盖，并把「扫描结果里没有的行」补回列表（服务的是刚新建、还没落盘的会话）——所以删除 / 归档 / 恢复**必须在 `runSessionBatch` 里同步这些行**（删除 = 丢行 + 清激活；归档 / 恢复 = 只改归档位）。漏掉这一步的后果（用户实测）：后端删掉 jsonl、下一次刷新扫不到它，缓存里那一行又被补回来（还被顶到组首），看着像「点删除以后又冒出一个会话」；归档同理——缓存里过期的 `archived: false` 会把扫描回传的 `archived: true` 顶掉，归档过的会话继续留在「进行中」。命令面 ⌘K 的「归档当前会话」走同一入口，不许各写一份「归档完清什么」。
@@ -123,6 +123,6 @@ pnpm icon                   # 从 design-system/icon/omp-mini-icon.svg 重生成
 
 ## 范围边界
 
-- **做**：聊天唯一形态（v1 已实施）、Codex / ZCode 对标（v2 已实施）、设置重构（v3 已实施）、**右栏工作台**——文件目录 + 终端（V42 已实施，口径见 `docs/v4-schedule.md`）。
+- **做**：聊天唯一形态（v1 已实施）、Codex / ZCode 对标（v2 已实施）、设置重构（v3 已实施）、**右栏工作台**——文件目录 + 项目脚本 + 终端（V42 / V43 已实施，口径见 `docs/v4-schedule.md`）。
 - **不做**：编辑器（文件只读浏览，打开交给系统默认程序）/ 内置浏览器 / SSH / 移动端 / PR 集成；分屏 / 多窗口；worktree 生命周期管理；云同步 / 定时任务。
 - 终端**只作为右栏工作台的页签**存在：不许再长出终端形态的会话模型（π 标题 / 目录行 / 标签栏 / 覆盖层注入 / 多标签管理），也不许把文件树升级成编辑器或全屏工作区（`docs/v1-schedule.md` §1 的删除清单仍然有效，`docs/v4-schedule.md` 是唯一例外口）。

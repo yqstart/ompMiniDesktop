@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
@@ -35,6 +35,46 @@ export function TerminalPane({ id, cwd, visible }: { id: string; cwd: string; vi
  const [spawnSeq, setSpawnSeq] = useState(0);
  /** 视口是否停在滚动缓冲底部——「回到最新输出」悬浮键的唯一显隐信号。 */
  const [atBottom, setAtBottom] = useState(true);
+ /** 脚本页签投递过来的待运行命令（见 `store.runInTerminal`）。 */
+ const pendingRun = useApp((s) => s.pendingTerminalRun);
+ /** 已消费的命令序号：首帧输出与超时兜底两条路都会走到，同一条不许写两次。 */
+ const consumedRunRef = useRef(0);
+ /** 是否已经收到过 PTY 输出（= shell 起来了，可以直接写命令）。 */
+ const sawOutputRef = useRef(false);
+
+ /**
+  * 把投递过来的命令写进 PTY。
+  *
+  * 什么时候算「能写了」：PTY 的输入有 tty 缓冲，spawn 之后写进去字符不会丢，但 shell 启动时会先跑
+  * rc 文件——那期间写进去的字符可能被 rc 里的命令读走。所以默认等**首帧输出**（提示符出来 = shell
+  * 已经能读输入）；shell 万一没有任何输出，由下面的 1.5s 超时兜底。
+  */
+ const flushPendingRun = useCallback(() => {
+  const p = useApp.getState().pendingTerminalRun;
+  if (!p || p.cwd !== cwd || consumedRunRef.current === p.seq) return;
+  consumedRunRef.current = p.seq;
+  void api.terminalWrite(id, `${p.command}\r`).catch(() => {});
+  useApp.getState().clearTerminalRun(p.seq);
+ }, [cwd, id]);
+
+ // 投递来的命令：已经出过输出的终端立刻写；否则等首帧输出，或 1.5s 后兜底写
+ useEffect(() => {
+  if (!pendingRun || pendingRun.cwd !== cwd) return;
+  if (status === "exited") {
+   // shell 已经退出：这条命令没有落点。清掉**并就地说明**——不静默丢，也不自动重启
+   // （用户可能正看着回看内容；重开终端这个动作交给他，点「重新打开」即可）。
+   consumedRunRef.current = pendingRun.seq;
+   useApp.getState().clearTerminalRun(pendingRun.seq);
+   termRef.current?.write(`\r\n\x1b[33m${t.termRunNoShell}\x1b[0m\r\n`);
+   return;
+  }
+  if (sawOutputRef.current) {
+   flushPendingRun();
+   return;
+  }
+  const timer = window.setTimeout(() => flushPendingRun(), 1500);
+  return () => window.clearTimeout(timer);
+ }, [pendingRun, cwd, flushPendingRun, status, t]);
 
  // xterm 实例（仅随组件建立 / 销毁）
  useEffect(() => {
@@ -101,6 +141,8 @@ export function TerminalPane({ id, cwd, visible }: { id: string; cwd: string; vi
   let alive = true;
   setStatus("running");
   setExitCode(null);
+  // 新 shell 还没出提示符：投递来的命令要重新等首帧输出（见 `sawOutputRef`）
+  sawOutputRef.current = false;
   // spawn 前先量一次尺寸；测不到就用 xterm 当前 cols/rows（可见后会补一次 resize）
   try {
    fit.fit();
@@ -116,8 +158,12 @@ export function TerminalPane({ id, cwd, visible }: { id: string; cwd: string; vi
    const channel = new Channel<TerminalEvent>();
    channel.onmessage = (e) => {
     if (!alive) return;
-    if (e.type === "data") termRef.current?.write(e.data);
-    else {
+    if (e.type === "data") {
+     termRef.current?.write(e.data);
+     // 首帧输出 = shell 已经起来（提示符出来了）：把脚本页签投递过来的命令写进去
+     sawOutputRef.current = true;
+     flushPendingRun();
+    } else {
      setStatus("exited");
      setExitCode(e.code);
     }
@@ -130,12 +176,15 @@ export function TerminalPane({ id, cwd, visible }: { id: string; cwd: string; vi
     termRef.current?.write(`\r\n\x1b[31m${fmt(txt.termStartFailed, String(err))}\x1b[0m\r\n`);
     setStatus("exited");
     setExitCode(null);
+    // 终端起不来，投递过来的命令没有落点：清掉，别让 `pendingTerminalRun` 一直挂着
+    const p = useApp.getState().pendingTerminalRun;
+    if (p && p.cwd === cwd) useApp.getState().clearTerminalRun(p.seq);
    }
   })();
   return () => {
    alive = false;
   };
- }, [id, cwd, spawnSeq]);
+ }, [id, cwd, spawnSeq, flushPendingRun]);
 
  // 尺寸跟随（右栏宽度变化 / 窗口缩放）：隐藏态不量、不推
  useEffect(() => {
@@ -187,7 +236,13 @@ export function TerminalPane({ id, cwd, visible }: { id: string; cwd: string; vi
  const visibleClass = visible ? "" : "hidden";
  return (
   <div className={`relative h-full w-full ${visibleClass}`} aria-label={t.termPaneAria}>
-   <div ref={hostRef} className="absolute inset-0 px-1.5 py-1" />
+   {/*
+    终端容器底部留 24px（`bottom-6`）：最后一行不贴着面板底。
+    这里是**抬高容器**而不是给容器 `pb-6`——xterm 的 FitAddon 在算可用高度时会再减一次
+    容器的 padding（`getComputedStyle().height` 已是 content 高），用 padding 会双重扣减
+    （实际留出 ~48px 且少两行）。
+   */}
+   <div ref={hostRef} className="absolute inset-x-0 top-0 bottom-6 px-1.5 pt-1" />
    {/* 回看中（视口离开底部）浮出「回到最新输出」键：一键回底再把键盘焦点交还终端 */}
    {!atBottom && status === "running" && (
     <button

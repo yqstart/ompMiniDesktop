@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
-import type { BtwRecord, ChangeSet, CheckoutView, CommitEvent, ContextBreakdown, DirListing, FallbackChainsInfo, GitInfo, Goal, GoalState, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, SessionPage, SessionRuntime, SessionStats, SessionView, SkillFileContent, SkillsView, TerminalEvent, TerminalSpawnOpts, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
+import type { BtwRecord, ChangeSet, CheckoutView, CommitEvent, ContextBreakdown, DirListing, FallbackChainsInfo, GitInfo, Goal, GoalState, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, ScriptCatalog, SessionPage, SessionRuntime, SessionStats, SessionView, SkillFileContent, SkillsView, TerminalEvent, TerminalSpawnOpts, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -431,4 +431,9 @@ export const api = {
   call<void>(IPC.terminalResize, { id, cols, rows }),
  /** 关闭终端：kill 子进程（SIGHUP → 1s 后进程组 SIGKILL 兜底，见 `pty.rs`）。 */
  terminalKill: (id: string) => call<void>(IPC.terminalKill, { id }),
+ /**
+  * 识别项目里的可跑脚本（`package.json` / `Cargo.toml` / `go.mod` / `manage.py` /
+  * `Makefile` / `justfile` / `Taskfile.yml` …）。**只读**：不执行、不写盘。
+  */
+ discoverScripts: (cwd: string) => call<ScriptCatalog>(IPC.discoverScripts, { cwd }),
 };

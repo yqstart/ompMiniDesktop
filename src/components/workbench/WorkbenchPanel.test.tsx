@@ -20,6 +20,13 @@ vi.mock("./TerminalPane", () => ({
 vi.mock("./FileTree", () => ({
  FileTree: ({ root }: { root: string }) => <div data-testid="files">{root}</div>,
 }));
+vi.mock("./ScriptsPanel", () => ({
+ ScriptsPanel: ({ cwd, visible }: { cwd: string; visible: boolean }) => (
+  <div data-testid="scripts" data-visible={String(visible)}>
+   {cwd}
+  </div>
+ ),
+}));
 
 import { WorkbenchPanel } from "./WorkbenchPanel";
 
@@ -94,6 +101,16 @@ describe("WorkbenchPanel", () => {
   // 终端 id 由 cwd 派生（后端进程表按它寻址）
   expect(term?.getAttribute("data-id")).toBe("term:/w/alpha");
   expect(useApp.getState().terminalCwds).toEqual(["/w/alpha"]);
+ });
+
+ it("切到脚本页签：渲染脚本面板并以当前 cwd 为范围（可见才扫描）", () => {
+  render();
+  expect(container.querySelector('[data-testid="scripts"]')?.getAttribute("data-visible")).toBe("false");
+  act(() => buttonByText(zh.workbenchScripts)?.click());
+  expect(useApp.getState().workbenchTab).toBe("scripts");
+  const panel = container.querySelector('[data-testid="scripts"]');
+  expect(panel?.textContent).toBe("/w/alpha");
+  expect(panel?.getAttribute("data-visible")).toBe("true");
  });
 
  it("收起时整栏隐藏但仍挂载（终端进程与树的位置不丢）", () => {

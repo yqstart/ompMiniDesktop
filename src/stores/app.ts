@@ -56,13 +56,11 @@ type AppState = {
  /** 左侧栏宽度（292–480，默认 292，持久化 localStorage）。 */
  sidebarWidth: number;
  setSidebarWidth: (w: number) => void;
- /** 右侧上下文面板是否展开（v2 三栏；localStorage 持久化，**默认收起**——首启不自动展开）。
-  *  面板始终停靠为主区第三栏：打开 = 布局变三栏，会话列让位、不被遮盖。 */
  /** 右侧工作台面板是否展开（V42 三栏；localStorage 持久化，**默认收起**——首启不自动展开）。
   *  面板始终停靠为主区第三栏：打开 = 布局变三栏，会话列让位、不被遮盖。 */
  workbenchOpen: boolean;
  setWorkbenchOpen: (v: boolean) => void;
- /** 工作台当前页签（文件 / 终端；localStorage 持久化，重开还是上次那一个）。 */
+ /** 工作台当前页签（文件 / 脚本 / 终端；localStorage 持久化，重开还是上次那一个）。 */
  workbenchTab: WorkbenchTab;
  setWorkbenchTab: (tab: WorkbenchTab) => void;
  /** 右栏工作台宽度（260–640，默认 320，localStorage 持久化；左缘可拖 / 焦点下 ←→ 微调）。 */
@@ -75,6 +73,25 @@ type AppState = {
   */
  terminalCwds: string[];
  rememberTerminalCwd: (cwd: string) => void;
+ /**
+  * 用户自定义脚本（V43，按项目目录分组）：只存**本应用偏好**（localStorage，不写用户仓库）。
+  * 后端识别出来的项目脚本不进这里——那是每次进面板重新扫描的只读结果。
+  */
+ customScripts: Record<string, CustomScript[]>;
+ addCustomScript: (cwd: string, name: string, command: string) => void;
+ updateCustomScript: (cwd: string, id: string, patch: { name?: string; command?: string }) => void;
+ removeCustomScript: (cwd: string, id: string) => void;
+ /**
+  * 待投递到终端的命令（V43）：脚本页签点「运行」时落这里，由该 cwd 的 `TerminalPane` 消费
+  * （等 shell 起来并收到首帧输出后写进 PTY）。运行期状态，不持久化。
+  */
+ pendingTerminalRun: { cwd: string; command: string; seq: number } | null;
+ /** 待运行命令的序号发生器：区分「同一条」与「又点了一次运行」。 */
+ terminalRunSeq: number;
+ /** 在指定目录的终端里跑一条命令（必要时展开右栏并切到终端页签；终端没起就等它起来）。 */
+ runInTerminal: (cwd: string, command: string) => void;
+ /** 消费掉一条待运行命令（`seq` 不符 = 已被更新的命令顶掉，不动）。 */
+ clearTerminalRun: (seq: number) => void;
 
  // ---------- 聊天形态（v1 起唯一形态） ----------
 
@@ -321,8 +338,62 @@ function loadSidebarWidth(): number {
  }
 }
 
-/** 右栏工作台的两个页签（V42）：文件目录树 / 终端。 */
-export type WorkbenchTab = "files" | "terminal";
+/** 右栏工作台的三个页签（V42 / V43）：文件目录树 / 项目脚本 / 终端。 */
+export type WorkbenchTab = "files" | "scripts" | "terminal";
+
+/** 用户自定义脚本（V43，按项目目录分组存本应用偏好）。 */
+export interface CustomScript {
+ id: string;
+ name: string;
+ command: string;
+}
+
+/** 自定义脚本的 id（本地生成，不要求跨设备稳定——只在本应用偏好里做行标识）。 */
+function newScriptId(): string {
+ return `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * 自定义脚本的初始值（`omp.scripts.v1`，按项目目录分组）。
+ *
+ * 存本应用偏好而不是写进用户仓库：脚本清单常常是「本机习惯」（用哪个包管理器、跑哪条本地命令），
+ * 往仓库里塞文件会污染提交；要团队共享的话用户自己写进 package.json / Makefile —— 那正好会被
+ * 后端的项目脚本识别读到。
+ */
+function loadCustomScripts(): Record<string, CustomScript[]> {
+ try {
+  if (typeof localStorage === "undefined") return {};
+  const raw = localStorage.getItem("omp.scripts.v1");
+  if (!raw) return {};
+  const parsed = JSON.parse(raw) as unknown;
+  if (typeof parsed !== "object" || parsed === null) return {};
+  const out: Record<string, CustomScript[]> = {};
+  for (const [cwd, list] of Object.entries(parsed as Record<string, unknown>)) {
+   if (!Array.isArray(list)) continue;
+   const items: CustomScript[] = [];
+   for (const item of list) {
+    const it = item as Partial<CustomScript>;
+    if (typeof it?.name === "string" && typeof it?.command === "string") {
+     items.push({ id: typeof it.id === "string" ? it.id : newScriptId(), name: it.name, command: it.command });
+    }
+   }
+   if (items.length > 0) out[cwd] = items;
+  }
+  return out;
+ } catch {
+  // 解析失败丢弃旧偏好不好，不阻断启动
+  return {};
+ }
+}
+
+/** 写回自定义脚本偏好（失败不阻断本次编辑）。 */
+function saveCustomScripts(map: Record<string, CustomScript[]>): void {
+ try {
+  localStorage.setItem("omp.scripts.v1", JSON.stringify(map));
+ } catch {
+  // 持久化失败（配额 / 无痕）只影响下次启动
+ }
+}
 
 /**
  * 右栏工作台宽度（V42）：可拖 260–640，默认 320（= `index.css` 的 `--w-panel`）。
@@ -353,7 +424,8 @@ function loadWorkbenchOpen(): boolean {
 function loadWorkbenchTab(): WorkbenchTab {
  try {
   if (typeof localStorage === "undefined") return "files";
-  return localStorage.getItem("omp.workbenchTab.v1") === "terminal" ? "terminal" : "files";
+  const raw = localStorage.getItem("omp.workbenchTab.v1");
+  return raw === "terminal" || raw === "scripts" ? raw : "files";
  } catch {
   return "files";
  }
@@ -461,6 +533,46 @@ export const useApp = create<AppState>((set, get) => ({
     ? s
     : { terminalCwds: [...s.terminalCwds, cwd].slice(-MAX_TERMINALS) },
   ),
+ customScripts: loadCustomScripts(),
+ addCustomScript: (cwd, name, command) => {
+  const s = get();
+  const list = s.customScripts[cwd] ?? [];
+  const next = { ...s.customScripts, [cwd]: [...list, { id: newScriptId(), name, command }] };
+  saveCustomScripts(next);
+  set({ customScripts: next });
+ },
+ updateCustomScript: (cwd, id, patch) => {
+  const s = get();
+  const list = s.customScripts[cwd];
+  if (!list) return;
+  const next = { ...s.customScripts, [cwd]: list.map((it) => (it.id === id ? { ...it, ...patch } : it)) };
+  saveCustomScripts(next);
+  set({ customScripts: next });
+ },
+ removeCustomScript: (cwd, id) => {
+  const s = get();
+  const list = s.customScripts[cwd];
+  if (!list) return;
+  const kept = list.filter((it) => it.id !== id);
+  const next = { ...s.customScripts };
+  // 空数组不留键：`customScripts` 里没有这个 cwd = 没有自定义脚本（前端判空只有一条口径）
+  if (kept.length > 0) next[cwd] = kept;
+  else delete next[cwd];
+  saveCustomScripts(next);
+  set({ customScripts: next });
+ },
+ pendingTerminalRun: null,
+ terminalRunSeq: 0,
+ runInTerminal: (cwd, command) => {
+  const s = get();
+  // 脚本在终端里跑：先把右栏与终端页签摆到用户眼前；终端没起来由 `TerminalPane` 起来后消费
+  s.setWorkbenchOpen(true);
+  s.setWorkbenchTab("terminal");
+  const seq = s.terminalRunSeq + 1;
+  set({ pendingTerminalRun: { cwd, command, seq }, terminalRunSeq: seq });
+ },
+ clearTerminalRun: (seq) =>
+  set((s) => (s.pendingTerminalRun?.seq === seq ? { pendingTerminalRun: null } : s)),
 
  // ---------- 聊天形态（v1 起唯一形态） ----------
 

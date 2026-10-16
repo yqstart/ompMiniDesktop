@@ -153,6 +153,8 @@ export const IPC = {
  terminalResize: "terminal_resize",
  /** 关闭终端（kill 子进程；已退出时是 no-op）。 */
  terminalKill: "terminal_kill",
+ /** 识别项目里的可跑脚本（右栏「脚本」页签；只读扫描清单文件，不执行任何命令）。 */
+ discoverScripts: "discover_scripts",
  // events
  /** 供应商登录进度（payload = 全量 ProviderLoginStatus 快照）。 */
  providerLogin: "omp-provider://login",

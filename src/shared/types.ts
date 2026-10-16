@@ -1151,3 +1151,23 @@ export interface TerminalSpawnOpts {
 
 /** 终端事件（Channel 回传）：PTY 输出 / shell 退出。 */
 export type TerminalEvent = { type: "data"; data: string } | { type: "exit"; code: number | null };
+
+// ---------- V43（右栏工作台）：项目脚本识别 ----------
+
+/** 识别到的一条候选脚本（`discover_scripts` 的返回项）。 */
+export interface ProjectScript {
+ /** 展示名（package.json 的脚本名 / Makefile target / just recipe…）。 */
+ name: string;
+ /** 可直接在终端里跑的命令原文。 */
+ command: string;
+ /** 来源（展示用）：`package.json` / `Cargo.toml` / `go.mod` / `manage.py` / `Makefile` …。 */
+ source: string;
+}
+
+/** 一次项目脚本识别结果。 */
+export interface ScriptCatalog {
+ cwd: string;
+ /** 识别到的生态（展示用，如 `Node (pnpm)` / `Rust` / `Go` / `Python`）；空 = 没识别到。 */
+ ecosystems: string[];
+ scripts: ProjectScript[];
+}

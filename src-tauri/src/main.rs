@@ -12,6 +12,7 @@ mod overlay;
 mod plugins;
 mod proc;
 mod project_files;
+mod project_scripts;
 mod provider_usage;
 mod providers;
 mod pty;
@@ -125,6 +126,8 @@ fn main() {
             pty::terminal_write,
             pty::terminal_resize,
             pty::terminal_kill,
+            // —— V43（右栏工作台）：项目脚本识别 ——
+            project_scripts::discover_scripts,
             plugins::list_plugins,
             plugins::set_plugin_enabled,
             plugins::set_plugin_features,
