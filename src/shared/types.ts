@@ -613,6 +613,19 @@ export type ModelsConfigFile = {
  hash: string;
 };
 
+/**
+ * 供应商探测到的一个模型（命令 `fetch_provider_models`）：界面「获取可用模型」的候选条目。
+ * 只带回端点自己声明过的字段——缺的（显示名 / 上下文窗口 / 最大输出 / 输入模态）留空，
+ * 由用户在弹窗里按需补，或交给 omp 的默认值（上下文 128000 / 最大输出 16384 / 纯文本）。
+ */
+export type DiscoveredModel = {
+ id: string;
+ name: string | null;
+ contextWindow: number | null;
+ maxTokens: number | null;
+ input: string[] | null;
+};
+
 // ---------- 会话标题语言（V18） ----------
 
 /** 标题语言档（壳的 `Locale` 归一：`zh-CN` → `zh`；只有中 / 英两档）。 */

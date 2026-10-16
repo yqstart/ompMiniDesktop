@@ -68,6 +68,8 @@ export const IPC = {
  // 自定义模型（设置 › 供应商）：omp `models.yml` 的读写——上游没有 CLI 写入口，写文件是唯一路径
  readModelsConfig: "read_models_config",
  writeModelsConfig: "write_models_config",
+ // 供应商模型发现（设置 › 供应商 ›「获取可用模型」）：直接问端点要模型清单（只读探测，不落盘）
+ fetchProviderModels: "fetch_provider_models",
  // 插件（设置 ›「插件」）：omp 插件清单 / 启停 / 特性 / 安装 / 卸载 / 体检（全部经 `omp plugin`）
  listPlugins: "list_plugins",
  setPluginEnabled: "set_plugin_enabled",

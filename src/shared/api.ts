@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
-import type { BtwRecord, ChangeSet, CheckoutView, CommitEvent, ContextBreakdown, DirListing, FallbackChainsInfo, GitInfo, Goal, GoalState, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, ScriptCatalog, SessionLiveStats, SessionPage, SessionRuntime, SessionStats, SessionView, SkillFileContent, SkillsView, TerminalEvent, TerminalSpawnOpts, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
+import type { BtwRecord, ChangeSet, CheckoutView, CommitEvent, ContextBreakdown, DirListing, DiscoveredModel, FallbackChainsInfo, GitInfo, Goal, GoalState, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, ScriptCatalog, SessionLiveStats, SessionPage, SessionRuntime, SessionStats, SessionView, SkillFileContent, SkillsView, TerminalEvent, TerminalSpawnOpts, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -345,6 +345,16 @@ export const api = {
  readModelsConfig: () => call<ModelsConfigFile>(IPC.readModelsConfig),
  writeModelsConfig: (text: string, expectHash: string | null) =>
   call<ModelsConfigFile>(IPC.writeModelsConfig, { text, expectHash }),
+ /**
+  * 探测某个端点提供的模型清单（设置 › 供应商 ›「获取可用模型」）：**只读探测，不落盘**。
+  *
+  * 口径对齐 DeepSeek Harness：OpenAI 系 `GET {接口地址}/models`（按前缀拼，不自动补 `/v1`）、
+  * Anthropic `GET {根}/v1/models?limit=1000`；认证分别用 `Bearer` 与 `x-api-key`
+  * （没填 apiKey 就不带认证头）。`apiKey` 传表单原样值：`!命令` 会执行取 stdout，
+  * 裸名字先当环境变量名查（命中用其值），其余按字面量。
+  */
+ fetchProviderModels: (baseUrl: string, api: string, apiKey: string | null) =>
+  call<DiscoveredModel[]>(IPC.fetchProviderModels, { baseUrl, api, apiKey }),
  /**
   * 插件（设置 ›「插件」）：omp 的插件管理（`omp plugin`）。
   *

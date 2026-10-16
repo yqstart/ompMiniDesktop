@@ -14,6 +14,7 @@ mod plugins;
 mod proc;
 mod project_files;
 mod project_scripts;
+mod provider_models;
 mod provider_usage;
 mod providers;
 mod pty;
@@ -162,6 +163,7 @@ fn main() {
             settings::reset_omp_setting,
             models_config::read_models_config,
             models_config::write_models_config,
+            provider_models::fetch_provider_models,
             title_prompt::sync_title_prompt,
             omp_update::check_omp_update,
             omp_update::start_omp_update,

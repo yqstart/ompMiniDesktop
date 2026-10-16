@@ -9,16 +9,25 @@ import { isMap, isScalar, isSeq, parseDocument, type Document, type YAMLMap, typ
  * （`omp models` 只有 ls / find / refresh），写文件是唯一路径——本文件负责把用户的 YAML 文本
  * 变成可编辑的表单模型，再原子地改回去。
  *
+ * **职责划分（供应商配置 与 模型清单 拆开，2026-10-17）**：
+ * - [`upsertProvider`] 只管**供应商本身**（名称 / 接口地址 / 接口类型 / API Key）——它**不碰
+ *   `models` 节点**，老配置里手工维护的模型列表在改地址 / 换密钥后原样保留；
+ * - [`setProviderModels`] 只管**模型清单**（「挑选模型」弹窗：从端点拉候选 → 勾选 → 逐项编辑
+ *   显示名 / 上下文窗口 / 最大输出 / 推理 / 输入模态）。
+ *   两个入口各写各的，互不覆盖。
+ *
  * **保真三原则**（npm `yaml` 包的 Document API，实测零修改往返逐字节一致）：
  * 1. 只改被编辑的节点：未触碰的键、注释、格式原样保留（`toString({ flowCollectionPadding: false,
  *    lineWidth: 0 })`——默认选项会把 `[text, image]` 重排成 `[ text, image ]`，必须关掉）；
  * 2. 界面不管理的键（provider 级 `headers` / `compat` / `discovery` / `modelOverrides`…，
  *    model 级 `cost` / `tokenizer`…）**原样保留**——它们只被展示为「其它字段」，绝不被编辑抹掉；
- * 3. 覆盖型供应商（没有 `models` 列表，只覆盖内置供应商）在界面上**只读**：界面无法完整表达
+ * 3. 覆盖型供应商（没有 `baseUrl`，只覆盖内置供应商）在界面上**只读**：界面无法完整表达
  *    那些覆盖语义，编辑它等于丢字段。
  *
  * 写入的最后一公里（预校验 / 备份 / 原子写 / 乐观锁）在后端 `src-tauri/src/models_config.rs`。
  */
+
+import type { DiscoveredModel } from "@shared/types";
 
 /** 界面提供的接口类型（三档，覆盖绝大多数自建端点）：`openai-completions` = OpenAI 兼容
  *  （/chat/completions，网关与本地推理引擎的通用协议）、`openai-responses` = OpenAI 的
@@ -49,7 +58,7 @@ export type CustomModelForm = {
  input: string[];
 };
 
-/** 一个自定义供应商的表单值。 */
+/** 一个自定义供应商的表单值（**只管供应商本身**；模型清单见 [`setProviderModels`]）。 */
 export type CustomProviderForm = {
  id: string;
  /** 编辑态 = 该块在 `providers` 里的**原键名**（新建时为 undefined）。用户改了 `id` 时，
@@ -59,13 +68,13 @@ export type CustomProviderForm = {
  api: string;
  /** 空串 = 无需鉴权（`auth: none`）；否则写 `apiKey`（环境变量名 / 字面量 / `!命令`，原样透传）。 */
  apiKey: string;
- models: CustomModelForm[];
 };
 
 /** 解析出的供应商条目（列表展示用）。 */
 export type CustomProviderView = {
  id: string;
- /** `custom` = 有 models 列表（界面可编辑）；`override` = 覆盖型（界面只读，手工维护）。 */
+ /** `custom` = 自己声明了 `baseUrl`（界面可编辑供应商 + 管理模型清单）；
+  *  `override` = 只覆盖内置供应商（没有 `baseUrl`，界面只读，手工维护）。 */
  kind: "custom" | "override";
  baseUrl: string | null;
  api: string | null;
@@ -135,8 +144,16 @@ function invalidShape(doc: Document): boolean {
  return doc.has("providers") && !isMap(doc.get("providers", true));
 }
 
+/** `models` 节点是否可由界面保真编辑：seq（可为空——实测 omp 接受 `models: []`）且每项是 map。
+ *  缺省（没有该键）也算可编辑——新建 / 还没挑过模型的供应商就是这个形状。 */
 function editableModels(node: unknown): node is YAMLSeq<YAMLMap> {
- return isSeq(node) && node.items.length > 0 && node.items.every(isMap);
+ return node == null || (isSeq(node) && node.items.every(isMap));
+}
+
+/** 供应商块是否由界面管理：自己声明了 `baseUrl` = 自定义端点（可编辑、可管理模型清单）；
+ *  只有覆盖字段（`headers` / `modelOverrides`…）的块界面表达不了，保持只读。 */
+function editableProvider(node: unknown): node is YAMLMap {
+ return isMap(node) && str(node.get("baseUrl", true)) !== "";
 }
 
 /** 解析当前文本里的全部供应商（含只读的覆盖型）。 */
@@ -175,7 +192,7 @@ export function parseModelsConfig(text: string): ModelsConfigParse {
    .filter((k) => k && !MANAGED_PROVIDER_KEYS.has(k));
   providers.push({
    id,
-   kind: modelCount > 0 ? "custom" : "override",
+   kind: editableProvider(value) ? "custom" : "override",
    baseUrl: str(value.get("baseUrl", true)) || null,
    api: str(value.get("api", true)) || null,
    authNone: str(value.get("auth", true)) === "none",
@@ -193,9 +210,53 @@ function emptyModel(): CustomModelForm {
  return { id: "", name: "", contextWindow: "", maxTokens: "", reasoning: false, input: ["text"] };
 }
 
-/** 新供应商的空白表单。 */
+/** 新供应商的空白表单（模型清单由「挑选模型」弹窗单独管，这里不带）。 */
 export function emptyProviderForm(): CustomProviderForm {
- return { id: "", baseUrl: "", api: API_OPTIONS[0], apiKey: "", models: [emptyModel()] };
+ return { id: "", baseUrl: "", api: API_OPTIONS[0], apiKey: "" };
+}
+
+/** 一个新模型条目的表单初值（弹窗里手工添加时用）。 */
+export function emptyModelForm(): CustomModelForm {
+ return emptyModel();
+}
+
+/** 探测到的候选 → 表单初值：端点声明过的字段预填，缺的留空（交给 omp 默认值）。 */
+export function modelFormFromDiscovered(m: DiscoveredModel): CustomModelForm {
+ const name = (m.name ?? "").trim();
+ return {
+  id: m.id,
+  name: name && name !== m.id ? name : "",
+  contextWindow: m.contextWindow && m.contextWindow > 0 ? String(m.contextWindow) : "",
+  maxTokens: m.maxTokens && m.maxTokens > 0 ? String(m.maxTokens) : "",
+  reasoning: false,
+  input: normalizeInput(m.input),
+ };
+}
+
+/** 输入模态归一：只认 text / image 两类界面能表达的值，其它模态原样保留（保真原则 2）。 */
+function normalizeInput(raw: string[] | null | undefined): string[] {
+ const items = (raw ?? []).map((s) => s.trim().toLowerCase()).filter(Boolean);
+ if (items.length === 0) return ["text"];
+ const known = items.filter((s) => s === "text" || s === "image");
+ const extra = items.filter((s) => s !== "text" && s !== "image");
+ // 只有未知模态时补一个 text（omp 的模型至少要能收文本）
+ const base = known.length > 0 ? known : ["text"];
+ return [...base, ...extra];
+}
+
+/**
+ * 勾选合并：已有同 id 的条目**保留用户已调过的值**（不改、不重复），只追加新 id。
+ * 与 DSH 一致（它的候选默认勾选项就是「当前清单里还没有的」）。
+ */
+export function mergeDiscoveredModels(
+ existing: CustomModelForm[],
+ picked: DiscoveredModel[],
+): CustomModelForm[] {
+ const known = new Set(existing.map((m) => m.id.trim()));
+ const added = picked
+  .filter((m) => m.id.trim() !== "" && !known.has(m.id.trim()))
+  .map((m) => modelFormFromDiscovered(m));
+ return [...existing, ...added];
 }
 
 function modelFormOf(m: YAMLMap, originalIndex?: number): CustomModelForm {
@@ -212,22 +273,34 @@ function modelFormOf(m: YAMLMap, originalIndex?: number): CustomModelForm {
  };
 }
 
-/** 读某个供应商的编辑表单；不存在（或块不是对象）时返回 null。 */
+/** 读某个供应商的供应商级表单；不存在（或块不是对象 / 是只读覆盖块）时返回 null。 */
 export function providerFormOf(text: string, id: string): CustomProviderForm | null {
  const parsed = readDoc(text);
  if ("error" in parsed || invalidShape(parsed.doc)) return null;
  const node = parsed.doc.getIn(["providers", id], true);
- if (!isMap(node)) return null;
- const modelsNode = node.get("models", true);
- if (!editableModels(modelsNode)) return null;
+ if (!editableProvider(node)) return null;
  return {
   id,
   originalId: id,
   baseUrl: str(node.get("baseUrl", true)),
   api: str(node.get("api", true)) || API_OPTIONS[0],
   apiKey: str(node.get("apiKey", true)),
-  models: modelsNode.items.map((m, i) => modelFormOf(m, i)),
  };
+}
+
+/**
+ * 读某个供应商当前的模型清单（表单形态；`originalIndex` 用于保真复用原节点）。
+ * 节点形状界面表达不了（非 seq / 含非 map 项）时返回 null——调用方据此禁用编辑入口。
+ */
+export function providerModelsOf(text: string, id: string): CustomModelForm[] | null {
+ const parsed = readDoc(text);
+ if ("error" in parsed || invalidShape(parsed.doc)) return null;
+ const node = parsed.doc.getIn(["providers", id], true);
+ if (!isMap(node)) return null;
+ const modelsNode = node.get("models", true);
+ if (!editableModels(modelsNode)) return null;
+ if (modelsNode == null) return [];
+ return modelsNode.items.map((m, i) => modelFormOf(m, i));
 }
 
 // ---------- 校验 ----------
@@ -273,15 +346,23 @@ export function modelFormComplete(m: CustomModelForm): boolean {
  );
 }
 
-/** 供应商表单是否可保存（id / baseUrl / api 必填；至少一个完整模型）。 */
+/** 供应商表单是否可保存（id / baseUrl / api 必填）。
+ *  **不再要求"至少一个模型"**：模型清单由「挑选模型」弹窗单独管；没有模型的供应商块
+ *  omp 照样接受（实测：只是不出现在模型目录里），等挑完模型再写 `models`。 */
 export function providerFormComplete(f: CustomProviderForm): boolean {
  return (
   isValidProviderId(f.id.trim()) &&
   isValidBaseUrl(f.baseUrl) &&
-  f.api.trim() !== "" &&
-  f.models.length > 0 &&
-  new Set(f.models.map((m) => m.id.trim())).size === f.models.length &&
-  f.models.every(modelFormComplete)
+  f.api.trim() !== ""
+ );
+}
+
+/** 模型清单是否可写：至少一个、id 唯一、限额字段合法（数字要么空、要么正整数）。 */
+export function modelsComplete(models: CustomModelForm[]): boolean {
+ return (
+  models.length > 0 &&
+  new Set(models.map((m) => m.id.trim())).size === models.length &&
+  models.every(modelFormComplete)
  );
 }
 
@@ -345,15 +426,16 @@ function buildModelsSeq(doc: Document, current: unknown, forms: CustomModelForm[
 
 /**
  * 新增 / 更新一个自定义供应商（返回新文本，原文本不动）。
- * 已有块里界面不管理的键与模型级字段原样保留；`apiKey` 与 `auth: none` 互斥。
+ * **只管供应商级字段**（`baseUrl` / `api` / `apiKey` / `auth`）：`models` 节点与界面不管理的键
+ * 原样保留（模型清单走 [`setProviderModels`]）；`apiKey` 与 `auth: none` 互斥。
  * 表单带 `originalId` 且与 `id` 不同 = **改名**：YAML 键就地替换（块的位置与键上的注释保留）。
- * 新建撞名、改名撞名或原节点已消失时拒绝编辑，绝不覆盖别的块。
+ * 新建撞名、改名撞名、原节点已消失或是只读覆盖块时拒绝编辑，绝不覆盖别的块。
  */
 export function upsertProvider(text: string, form: CustomProviderForm): EditResult {
  const parsed = readDoc(text);
  if ("error" in parsed) return { ok: false, error: parsed.error };
  if (invalidShape(parsed.doc)) return { ok: false, error: "Invalid models config structure" };
- if (!providerFormComplete(form)) return { ok: false, error: "Incomplete or duplicate model fields" };
+ if (!providerFormComplete(form)) return { ok: false, error: "Incomplete provider fields" };
  const doc = parsed.doc;
  const providers = ensureProviders(doc);
 
@@ -361,7 +443,7 @@ export function upsertProvider(text: string, form: CustomProviderForm): EditResu
  const from = (form.originalId ?? "").trim();
  if (id !== from && providers.has(id)) return { ok: false, error: "Provider name already exists" };
  const source: unknown = from ? providers.get(from, true) : undefined;
- if (from && (!isMap(source) || !editableModels(source.get("models", true)))) return { ok: false, error: "Provider is missing or read-only" };
+ if (from && !editableProvider(source)) return { ok: false, error: "Provider is missing or read-only" };
  if (from && from !== id) {
   const pair = providers.items.find((p) => str(p.key) === from);
   if (pair && isScalar(pair.key)) pair.key.value = id;
@@ -387,7 +469,35 @@ export function upsertProvider(text: string, form: CustomProviderForm): EditResu
    setField(doc, node, "auth", "none");
   }
  }
- node.set("models", buildModelsSeq(doc, node.get("models", true), form.models));
+ return { ok: true, text: serialize(doc) };
+}
+
+/**
+ * 写某个自定义供应商的模型清单（返回新文本，原文本不动）。
+ *
+ * 保真口径：逐个模型**复用原位置的原节点**（`originalIndex`），未触碰的模型级字段
+ * （`cost` / `tokenizer`…）与注释原样保留；清单为空时**删掉 `models` 键**（实测 omp 接受
+ * 没有 models 的自定义供应商块，只是它不出现在模型目录里——比留一个 `models: []` 干净）。
+ * 块不存在、或块不是对象时拒绝（模型清单必须先有供应商）。
+ */
+export function setProviderModels(text: string, id: string, models: CustomModelForm[]): EditResult {
+ const parsed = readDoc(text);
+ if ("error" in parsed) return { ok: false, error: parsed.error };
+ if (invalidShape(parsed.doc)) return { ok: false, error: "Invalid models config structure" };
+ const doc = parsed.doc;
+ const providers = doc.get("providers", true);
+ if (!isMap(providers)) return { ok: false, error: "Provider is missing" };
+ const node: unknown = providers.get(id, true);
+ if (!isMap(node)) return { ok: false, error: "Provider is missing" };
+ const forms = models.filter((m) => m.id.trim() !== "");
+ if (forms.length === 0) {
+  node.delete("models");
+  return { ok: true, text: serialize(doc) };
+ }
+ if (!modelsComplete(forms)) return { ok: false, error: "Incomplete or duplicate model fields" };
+ const current: unknown = node.get("models", true);
+ if (!editableModels(current)) return { ok: false, error: "Provider is read-only" };
+ node.set("models", buildModelsSeq(doc, current, forms));
  return { ok: true, text: serialize(doc) };
 }
 
@@ -400,7 +510,7 @@ export function removeProvider(text: string, id: string): EditResult {
  const providers = doc.get("providers", true);
  if (!isMap(providers)) return { ok: true, text };
  const current: unknown = providers.get(id, true);
- if (providers.has(id) && (!isMap(current) || !editableModels(current.get("models", true)))) return { ok: false, error: "Provider is read-only" };
+ if (providers.has(id) && !editableProvider(current)) return { ok: false, error: "Provider is read-only" };
  providers.delete(id);
  return { ok: true, text: serialize(doc) };
 }

@@ -21,6 +21,7 @@ import {
 import { useText } from "../../lib/useText";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { CustomProviderEditForm } from "./CustomProviderEditForm";
+import { CustomProviderModelsDialog } from "./CustomProviderModelsDialog";
 import { DialogShell } from "./DialogShell";
 import { ProviderModelsDialog, ProviderModelsList } from "./ProviderModelsDialog";
 import { PICK_CUSTOM, ProviderPicker } from "./ProviderPicker";
@@ -36,6 +37,11 @@ import { PICK_CUSTOM, ProviderPicker } from "./ProviderPicker";
  *   提问文案与流程随供应商变化，硬编码匹配会漂。登录成功立即刷新模型目录，就地挑选模型
  *   （星标 = 加入上面的「我的模型」，只影响本应用的选择器，不写 omp 的 `enabledModels`）。
  *
+ * **供应商配置与挑选模型分开（2026-10-17）**：自定义供应商的表单只配 名称 / 接口地址 /
+ * 接口类型 / API Key；模型清单一律到**已配置的供应商行**上点「挑选模型」管——
+ * 自定义端点走 `CustomProviderModelsDialog`（「获取可用模型」问端点要清单 → 勾选 → 逐项调参），
+ * 登录型仍是在 omp 目录里加星。两种「挑选」语义不同，入口文案相同（都在行上）。
+ *
  * 「已配置」= 该供应商出现在 omp 当前模型目录里（有凭证或免钥），这是壳侧能拿到的最接近
  * 「已登录」的真值，不去直读 omp 的凭证库；列表只列已配置的登录型供应商 + models.yml 里的块
  * （未配置的提供商在「添加供应商」的选择器里）。
@@ -49,8 +55,9 @@ export function ProvidersSection() {
  const [err, setErr] = useState<string | null>(null);
  const [busy, setBusy] = useState(false);
  const [pendingLogout, setPendingLogout] = useState<ProviderView | null>(null);
- /** 打开「挑选模型」弹窗的供应商（登录型或自定义块；null = 关闭）——只需要 id / 标题。 */
- const [picking, setPicking] = useState<{ id: string; name: string } | null>(null);
+ /** 打开「挑选模型」弹窗的供应商（null = 关闭）——`custom` 决定走哪种挑选：
+  *  自定义端点（`models.yml` 的块）= 拉候选 + 写模型清单；登录型 = omp 目录里的星标挑选。 */
+ const [picking, setPicking] = useState<{ id: string; name: string; custom: boolean } | null>(null);
  /** 添加面板：打开态 / 已选的登录型提供商（null = 还在选提供商）。 */
  const [addOpen, setAddOpen] = useState(false);
  const [addPick, setAddPick] = useState<string | null>(null);
@@ -273,8 +280,9 @@ export function ProvidersSection() {
    setAddPick(null);
    // 写入已通过 omp 预校验——目录里立刻能看到（有凭证或免钥时）
    await load(true);
-   // 与登录成功后的就地挑选对齐：保存完直接开该新供应商的挑模型弹窗
-   setPicking({ id: editedId, name: editedId });
+   // 与登录成功后的就地挑选对齐：保存完直接开该新供应商的挑模型弹窗（此时还没有模型，
+   // 弹窗里点「获取可用模型」即可列出该端点提供的清单）
+   setPicking({ id: editedId, name: editedId, custom: true });
   } catch (e) {
    setFormErr(e instanceof Error ? e.message : t.opFailed);
   } finally {
@@ -380,7 +388,7 @@ export function ProvidersSection() {
          </div>
          <span className="shrink-0 text-[13px] text-ok">{t.providerConfigured}</span>
          <button
-          onClick={() => setPicking(p)}
+          onClick={() => setPicking({ id: p.id, name: p.name, custom: false })}
           disabled={busy || closing}
           className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover"
          >
@@ -413,7 +421,7 @@ export function ProvidersSection() {
          pending={pendingRemove === v.id}
          editing={editing?.originalId === v.id}
          onEdit={() => beginEdit(v.id)}
-         onPick={() => setPicking({ id: v.id, name: v.id })}
+         onPick={() => setPicking({ id: v.id, name: v.id, custom: true })}
          onAskRemove={() => {
           setPendingRemove(v.id);
           setEditing(null);
@@ -434,15 +442,30 @@ export function ProvidersSection() {
     )}
    </section>
 
-   {/* 挑选模型：该供应商在目录里的全部模型（搜索 + 星标）——fixed 弹窗，数据多也能过滤 */}
-   {picking && (
-    <ProviderModelsDialog
-     provider={picking}
-     catalog={catalog}
-     myModels={myModels}
-     onChange={setMyModels}
-     onClose={() => setPicking(null)}
-    />
+   {/* 挑选模型：两套语义各走各的弹窗——
+       自定义端点 = 拉端点候选 + 写 `models.yml` 的模型清单；登录型 = omp 目录里的星标挑选 */}
+   {picking && file && (
+    picking.custom ? (
+     <CustomProviderModelsDialog
+      key={picking.id}
+      provider={picking}
+      file={file}
+      onClose={() => setPicking(null)}
+      onSaved={(next) => {
+       setFile(next);
+       setPicking(null);
+       void load(true);
+      }}
+     />
+    ) : (
+     <ProviderModelsDialog
+      provider={picking}
+      catalog={catalog}
+      myModels={myModels}
+      onChange={setMyModels}
+      onClose={() => setPicking(null)}
+     />
+    )
    )}
 
    {/* 添加供应商：一个弹窗换内容——选提供商 →（「自定义」表单 ｜ 提供商凭据流程） */}
@@ -512,7 +535,8 @@ export function ProvidersSection() {
  );
 }
 
-/** 一行自定义供应商（models.yml）：自定义块给挑选 / 编辑 / 删除；覆盖型块只读（手工维护的语义界面表达不了）。 */
+/** 一行自定义供应商（models.yml）：自己声明了 `baseUrl` 的块给挑选 / 编辑 / 删除；
+ *  只覆盖内置供应商的块（没有 `baseUrl`）只读——界面表达不了那些覆盖语义。 */
 function CustomRow({
  view,
  activeCount,

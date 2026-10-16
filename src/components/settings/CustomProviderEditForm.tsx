@@ -1,28 +1,30 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { ChevronDown, Loader, Plus, Trash2 } from "reicon-react";
+import { ChevronDown, Loader } from "reicon-react";
 import { useText } from "../../lib/useText";
 import {
  apiOptionsFor,
  isDuplicateProviderId,
  isValidProviderId,
  isValidBaseUrl,
- isValidModelLimit,
  providerFormComplete,
- type CustomModelForm,
  type CustomProviderForm,
 } from "../../lib/customModels";
-import { Switch } from "./Switch";
 
 /**
- * 自定义供应商的编辑表单（`models.yml` 的新建 / 编辑共用）——「添加供应商」弹窗里选「自定义」
+ * 自定义供应商的配置表单（`models.yml` 的新建 / 编辑共用）——「添加供应商」弹窗里选「自定义」
  * 后的内容（V12c 起是弹窗，标题由弹窗给，这里不再自带标题）。
  *
- * 表单只改本地态，保存时交给 `lib/customModels.ts` 的保真编辑（注释与界面之外的字段原样保留），
- * 再由后端预校验 / 备份 / 原子写。
+ * **只做供应商配置**（2026-10-17 拆分）：名称 / 接口地址 / 接口类型 / API Key。
+ * 模型清单不在这里编辑——保存后到「已配置」的供应商行上点「挑选模型」，用「获取可用模型」
+ * 从端点拉候选、勾选后逐项调参（见 `CustomProviderModelsDialog.tsx`）。
+ * 这样做的理由：手工敲模型 id 既容易写错，也拿不到端点真实提供的清单。
+ *
+ * 表单只改本地态，保存时交给 `lib/customModels.ts` 的保真编辑（注释与界面之外的字段原样保留，
+ * 含已有的 `models` 列表），再由后端预校验 / 备份 / 原子写。
  *
  * 口径：**名称可改**（`form.originalId` 记录原键名，保存时就地改名）；**接口类型三档**
- * （openai-completions / openai-responses / anthropic-messages，既有文件里的其它值原样列出）；**认证只有 API Key**
- * 一种（Key 常驻输入框；留空 = 该端点无需鉴权，落盘为 `auth: none`）。
+ * （openai-completions / openai-responses / anthropic-messages，既有文件里的其它值原样列出）；
+ * **认证只有 API Key** 一种（Key 常驻输入框；留空 = 该端点无需鉴权，落盘为 `auth: none`）。
  */
 export function CustomProviderEditForm({
  form,
@@ -53,15 +55,8 @@ export function CustomProviderEditForm({
  const invalidId = idTrim !== "" && !isValidProviderId(idTrim);
  const dupId = isDuplicateProviderId(form, existingIds);
  const invalidUrl = form.baseUrl.trim() !== "" && !isValidBaseUrl(form.baseUrl);
- const modelIds = form.models.map((m) => m.id.trim());
- const duplicateModel = modelIds.some((id, i) => id !== "" && modelIds.indexOf(id) !== i);
  const complete = providerFormComplete(form) && !dupId;
- const hint = invalidId ? t.customFormIdInvalid : dupId ? t.customFormDupId : invalidUrl ? t.customFormBaseUrlInvalid : duplicateModel ? t.customModelDuplicate : t.customFormIncomplete;
-
- const setModel = (i: number, next: Partial<CustomModelForm>) => {
-  const models = form.models.map((m, j) => (j === i ? { ...m, ...next } : m));
-  onChange({ ...form, models });
- };
+ const hint = invalidId ? t.customFormIdInvalid : dupId ? t.customFormDupId : invalidUrl ? t.customFormBaseUrlInvalid : t.customFormIncomplete;
 
  const inputCls =
   "min-w-0 w-full rounded-md border border-border bg-surface px-3 py-2 text-[13px] transition-colors duration-100 focus:border-accent aria-invalid:border-danger disabled:opacity-60";
@@ -143,114 +138,6 @@ export function CustomProviderEditForm({
     </div>
    )}
 
-   <div className="mt-6 border-t border-border-soft pt-4">
-    <div className="text-[13px] font-semibold">{t.customFormModels}</div>
-    {form.models.map((m, i) => {
-     const duplicate = m.id.trim() !== "" && modelIds.some((id, j) => j !== i && id === m.id.trim());
-     const invalidContext = !isValidModelLimit(m.contextWindow);
-     const invalidMaxTokens = !isValidModelLimit(m.maxTokens);
-     return (
-      <div key={i} className="mt-3 rounded-md bg-background p-3 sm:p-4">
-       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-        <input
-         value={m.id}
-         onChange={(e) => setModel(i, { id: e.target.value })}
-         placeholder="model-id"
-         aria-label={t.customModelId}
-         aria-invalid={duplicate || !m.id.trim()}
-         aria-describedby={duplicate || !m.id.trim() ? `${fieldId}-model-${i}-error` : undefined}
-         className={`${inputCls} col-span-2 font-mono sm:col-span-1`}
-        />
-        <input
-         value={m.name}
-         onChange={(e) => setModel(i, { name: e.target.value })}
-         placeholder={t.customModelName}
-         aria-label={t.customModelName}
-         className={inputCls}
-        />
-        <button
-         onClick={() => onChange({ ...form, models: form.models.filter((_, j) => j !== i) })}
-         disabled={form.models.length <= 1}
-         aria-label={t.customModelRemove}
-         title={t.customModelRemove}
-         className="flex min-h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-danger disabled:opacity-30"
-        >
-         <Trash2 size={11} aria-hidden />
-        </button>
-       </div>
-       {(duplicate || !m.id.trim()) && <p id={`${fieldId}-model-${i}-error`} className="mt-2 text-xs text-danger">{duplicate ? t.customModelDuplicate : t.customFormRequired}</p>}
-       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-3 text-[12px]">
-        <label className="flex items-center gap-1.5">
-         <span className="text-muted">{t.customModelContext}</span>
-         <input
-          value={m.contextWindow}
-          onChange={(e) => setModel(i, { contextWindow: e.target.value })}
-          inputMode="numeric"
-          placeholder="128000"
-          aria-label={t.customModelContext}
-          aria-invalid={invalidContext}
-          aria-describedby={invalidContext ? `${fieldId}-model-${i}-limits` : undefined}
-          className="w-24 rounded-md border border-border bg-surface px-2 py-1.5 text-right font-mono focus:border-accent"
-         />
-        </label>
-        <label className="flex items-center gap-1.5">
-         <span className="text-muted">{t.customModelMaxTokens}</span>
-         <input
-          value={m.maxTokens}
-          onChange={(e) => setModel(i, { maxTokens: e.target.value })}
-          inputMode="numeric"
-          placeholder="8192"
-          aria-label={t.customModelMaxTokens}
-          aria-invalid={invalidMaxTokens}
-          aria-describedby={invalidMaxTokens ? `${fieldId}-model-${i}-limits` : undefined}
-          className="w-24 rounded-md border border-border bg-surface px-2 py-1.5 text-right font-mono focus:border-accent"
-         />
-        </label>
-        <label className="flex items-center gap-1.5">
-         <span className="text-muted">{t.customModelReasoning}</span>
-         <Switch on={m.reasoning} disabled={busy} label={t.customModelReasoning} onToggle={() => setModel(i, { reasoning: !m.reasoning })} />
-        </label>
-        <div className="flex items-center gap-1.5">
-         <span className="text-muted">{t.customModelInput}</span>
-         {(["text", "image"] as const).map((mode) => {
-          const on = m.input.includes(mode);
-          return (
-           <button
-            key={mode}
-            onClick={() =>
-             setModel(i, {
-              input: on ? m.input.filter((x) => x !== mode) : [...m.input, mode],
-             })
-            }
-            aria-pressed={on}
-            disabled={on && m.input.length === 1}
-            className={`cursor-pointer rounded border px-1.5 py-0.5 transition-colors duration-100 hover:bg-hover ${on ? "border-accent/60 text-accent" : "border-border text-muted"
-             }`}
-           >
-            {mode === "text" ? t.customModelText : t.customModelImage}
-           </button>
-          );
-         })}
-        </div>
-       </div>
-       {(invalidContext || invalidMaxTokens) && <p id={`${fieldId}-model-${i}-limits`} className="mt-2 text-xs text-danger">{t.customModelLimitInvalid}</p>}
-      </div>
-     );
-    })}
-    <button
-     onClick={() =>
-      onChange({
-       ...form,
-       models: [...form.models, { id: "", name: "", contextWindow: "", maxTokens: "", reasoning: false, input: ["text"] }],
-      })
-     }
-     className="mt-3 flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-[13px] text-accent transition-colors duration-100 hover:bg-hover"
-    >
-     <Plus size={11} aria-hidden />
-     {t.customModelAdd}
-    </button>
-   </div>
-
    {error && (
     <p ref={errorRef} role="alert" tabIndex={-1} className="mt-3 font-mono text-xs whitespace-pre-wrap break-all text-danger">
      {error}
@@ -274,6 +161,7 @@ export function CustomProviderEditForm({
      {t.cancel}
     </button>
     {!complete && <span className="text-[11px] text-warn">{hint}</span>}
+    <span className="basis-full text-[11px] leading-relaxed text-faint">{t.customFormModelsMoved}</span>
     <span className="basis-full text-[11px] leading-relaxed text-faint">{t.customSaveHint}</span>
    </div>
   </fieldset>
