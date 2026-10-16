@@ -16,6 +16,7 @@ import {
 } from "../../lib/sessionLiveStats";
 import { hasUsageEntry } from "../../lib/usageLimits";
 import { useDropdown } from "../../lib/useDropdown";
+import { usePopoverAnchor } from "../../lib/usePopoverAnchor";
 import { useText } from "../../lib/useText";
 import { useApp } from "../../stores/app";
 import { UsageLimits } from "../composer/UsageLimits";
@@ -39,10 +40,17 @@ import { ContextMeter } from "./ContextMeter";
  *   沿用原有门槛（没有真值就不出现）；
  * - 收敛：打开会话拉一次；**运行中每 3 秒**回读（读数随步推进），终态翻转再拉一次拿终值
  *   ——omp 不推这类投影，只能这样收敛；失败保留旧值，不打断阅读。
- * - **浮层的包含块 = 本统计条根**（`relative` 在根上，四项的按钮包装器**不许**自带 `relative`）：
- *   窄窗口下统计条会 `flex-wrap` 换行，用量项可能落到行首——若浮层相对按钮定位，`right-0` 的宽浮层
- *   会向左溢出输入卡、被中列的 `overflow-hidden` 裁掉（用户实测：浮层左半截看不见）。统一贴整条
- *   右缘向左展开 + `max-w-full`（相对整条）就永远不会超出输入卡。
+ * - **独占一行、整条靠右**（2026-10-16 用户口径）：它是**卡片的直接子元素**（`Composer` 里挂在
+ *   工具行容器**之外**），`justify-end` 让四项贴整卡右缘排。**不许**塞进工具行那个
+ *   `flex flex-wrap` 容器——那样它只是行尾的又一个 flex item，会与模型 / 思考档 / 发送键**同行**，
+ *   `border-t` 也只剩自己那半截宽（用户实测的错位）。
+ * - **浮层的包含块 = 本统计条根**（`relative` 在根上，四项的按钮包装器**不许**自带 `relative`：
+ *   它一旦定位就成了浮层的包含块，`lib/usePopoverAnchor` 的实测也就失去基准），但**水平位置跟随被点的项**
+ *   （2026-10-16 用户口径）——只贴条缘展开的浮层离按钮很远（用户实测：点中间的容量环、浮层跑到卡片最右侧）；
+ *   纯 CSS 兜底（`right-0`）只在无布局环境下生效。
+ *   为什么不用「相对按钮 left-0」：窄窗口下统计条会 `flex-wrap` 换行、用量项可能落到行首，相对按钮的
+ *   宽浮层会向左溢出输入卡、被中列的 `overflow-hidden` 裁掉（用户实测：浮层左半截看不见）。
+ *   现在的做法两头兼顾：包含块仍是整条（`max-w-full` 保证不超出），水平位置由实测夹在 `[0, 条宽 − 浮层宽]`。
  */
 export function SessionStatsBar() {
  const sid = useApp((s) => s.activeSessionId);
@@ -71,7 +79,7 @@ export function SessionStatsBar() {
  if (!showStats && !showTokens && ctxPct == null && !showUsage) return null;
 
  return (
-  <div className="relative flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-border-soft px-2 pt-1 pb-1.5 text-[11px] text-faint">
+  <div className="relative flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5 border-t border-border-soft px-2 pt-1 pb-1.5 text-[11px] text-faint">
    {showStats && stats && <TurnStatsItem stats={stats} />}
    {showTokens && stats && <TokenStatsItem stats={stats} />}
    <ContextMeter />
@@ -86,6 +94,7 @@ function TurnStatsItem({ stats }: { stats: SessionLiveStats }) {
  const open = useApp((s) => s.composerMenu === "liveStats");
  const setOpen = (v: boolean) => useApp.setState({ composerMenu: v ? "liveStats" : null });
  const ref = useDropdown(open, () => setOpen(false));
+ const { anchorRef, panelRef } = usePopoverAnchor<HTMLButtonElement>(open);
  // 四行各自独立判断（上游同口径）：该聚合为 0 就不出那一行，全为 0 时整项不可点
  const rows: { label: string; value: string }[] = [];
  if (stats.modelMs > 0) rows.push({ label: t.liveStatsModelTime, value: fmtSpan(stats.modelMs, t) });
@@ -96,6 +105,7 @@ function TurnStatsItem({ stats }: { stats: SessionLiveStats }) {
  return (
   <div ref={ref}>
    <button
+    ref={anchorRef}
     onClick={() => clickable && setOpen(!open)}
     disabled={!clickable}
     className="flex shrink-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 whitespace-nowrap transition-colors duration-100 enabled:cursor-pointer enabled:hover:bg-hover disabled:cursor-default"
@@ -116,6 +126,7 @@ function TurnStatsItem({ stats }: { stats: SessionLiveStats }) {
    </button>
    {open && clickable && (
     <div
+     ref={panelRef}
      className="absolute right-0 bottom-full z-10 mb-1 w-72 max-w-full rounded-lg border border-border bg-elevated p-3 shadow-pop"
      aria-label={t.statsTitle}
     >
@@ -147,6 +158,7 @@ function TokenStatsItem({ stats }: { stats: SessionLiveStats }) {
  const open = useApp((s) => s.composerMenu === "liveTokens");
  const setOpen = (v: boolean) => useApp.setState({ composerMenu: v ? "liveTokens" : null });
  const ref = useDropdown(open, () => setOpen(false));
+ const { anchorRef, panelRef } = usePopoverAnchor<HTMLButtonElement>(open);
  const numLocale = locale === "zh-CN" ? "zh-CN" : "en-US";
  const n = (v: number) => v.toLocaleString(numLocale);
  const tok = stats.tokens;
@@ -162,6 +174,7 @@ function TokenStatsItem({ stats }: { stats: SessionLiveStats }) {
  return (
   <div ref={ref}>
    <button
+    ref={anchorRef}
     onClick={() => setOpen(!open)}
     className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-0.5 whitespace-nowrap transition-colors duration-100 hover:bg-hover"
     aria-label={fmt(t.liveStatsTokensAria, fmtTokens(billed + tok.output, numLocale), stats.cacheHitRate == null ? "—" : fmtHitRate(stats.cacheHitRate))}
@@ -181,6 +194,7 @@ function TokenStatsItem({ stats }: { stats: SessionLiveStats }) {
    </button>
    {open && (
     <div
+     ref={panelRef}
      className="absolute right-0 bottom-full z-10 mb-1 w-80 max-w-full rounded-lg border border-border bg-elevated p-3 shadow-pop"
      aria-label={t.liveStatsTokensTitle}
     >

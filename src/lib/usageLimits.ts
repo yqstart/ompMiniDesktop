@@ -6,7 +6,7 @@ import { levelOf } from "./providerUsage";
  *
  * 口径（2026-10-14 用户口径，2026-10-16 随统计条搬到卡底）：
  * - 看的是**我配置的供应商**，与当前会话在用哪个模型**无关**（别按 `currentModel` 过滤 / 排序 / 置灰）；
- * - 状态条上是**图标 + 最紧窗口的读数**（`tightest`；多窗口时补「+N」），点开才是全部窗口；
+ * - 状态条上**只有图标**（2026-10-16 修订用户口径）；配色档 `level` 由最紧的窗口定，读数只在浮层 / 悬停提示里；
  * - 图标配色档由最紧的一个窗口决定（`warn` / `danger`）。
  *
  * 数据层已统一在 `lib/providerUsage.ts`（模块级快照 + 节流单飞 + 设置页「供应商用量」弹窗共用）——
@@ -26,7 +26,7 @@ function urgency(limit: UsageLimit): [number, number] {
 
 /**
  * 入口的一眼摘要：全部已配置供应商的**全部窗口**（上游顺序）+ 最紧的一档（图标配色用）+
- * 最紧的那个窗口本身（状态条读数用，`extra` = 其余窗口数）。
+ * 最紧的那个窗口本身（`extra` = 其余窗口数；2026-10-16 起条上不再显示它的读数，读数在浮层里）。
  */
 export function entryGlance(usage: ProviderUsage | null): {
  level: "ok" | "warn" | "danger";

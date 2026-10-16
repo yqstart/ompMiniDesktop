@@ -4,6 +4,7 @@ import type { ContextBreakdown, ContextPartId } from "@shared/types";
 import { contextPercent, fmtPercent, fmtTokens } from "../../lib/ctxUsage";
 import { fmt, type Text } from "../../lib/locale";
 import { useDropdown } from "../../lib/useDropdown";
+import { usePopoverAnchor } from "../../lib/usePopoverAnchor";
 import { useText } from "../../lib/useText";
 import { useApp } from "../../stores/app";
 
@@ -77,6 +78,8 @@ export function ContextMeter() {
   [],
  );
  const ref = useDropdown(open, () => setOpen(false));
+ // 浮层贴**被点的项**（不是贴条缘——贴条缘会离靠左的项很远），见 `lib/usePopoverAnchor`
+ const { anchorRef, panelRef } = usePopoverAnchor<HTMLButtonElement>(open);
  // 分项按会话归属缓存：切走再回来不闪空、切到别的会话绝不串数据；
  // 每次点开都重拉一次（旧数据先显示着，拉回来再替换，不闪白）。
  // 失败也记一条 `data: null`，否则「读不到」会被当成「还在读」。
@@ -119,6 +122,7 @@ export function ContextMeter() {
  return (
   <div ref={ref}>
    <button
+    ref={anchorRef}
     onClick={() => useApp.setState({ composerMenu: open ? null : "context" })}
     className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-0.5 whitespace-nowrap transition-colors duration-100 hover:bg-hover"
     aria-label={fmt(t.ctxTriggerAria, fmtPercent(pct))}
@@ -132,6 +136,7 @@ export function ContextMeter() {
    </button>
    {open && (
     <div
+     ref={panelRef}
      className="absolute right-0 bottom-full z-10 mb-1 w-80 max-w-full rounded-lg border border-border bg-elevated p-3 shadow-pop"
      aria-label={t.ctxTitle}
     >

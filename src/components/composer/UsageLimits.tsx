@@ -14,13 +14,14 @@ import {
  windowNames,
 } from "../../lib/providerUsage";
 import { useDropdown } from "../../lib/useDropdown";
+import { usePopoverAnchor } from "../../lib/usePopoverAnchor";
 import { USAGE_REFRESH_MS, entryGlance, hasUsageEntry, usageEntryDisabled } from "../../lib/usageLimits";
 import { useText } from "../../lib/useText";
 import { useApp } from "../../stores/app";
 
 /**
  * 供应商用量（**输入卡底部统计条**的最后一项；2026-10-14 与上下文容量环一起从顶栏右端搬进输入卡，
- * 2026-10-16 从工具行挪进统计条）：条上是图标 + 最紧窗口读数，点开是各窗口的进度条与明细。
+ * 2026-10-16 从工具行挪进统计条）：条上**只有一个图标**（配色档跟着最紧的窗口），点开是各窗口的进度条与明细。
  *
  * 这里看的是 **opencode 网站那种 5 小时 / 每周 / 每月限额**（供应商配额），不是本地 token 统计
  * （那个在 设置 › 使用统计），也不是上下文窗口占用（那个是同排的 `ContextMeter`）。
@@ -29,8 +30,9 @@ import { useApp } from "../../stores/app";
  *
  * - 口径（2026-10-14 用户口径）：看的是**我配置的供应商**，与当前会话在用哪个模型无关——
  *   不再按 `currentModel` 的供应商过滤/排序；
- * - 条上读数：**图标 + 最紧窗口的读数 + 窗口名**（多窗口时补「+N」）；最紧的窗口到 warn / danger
- *   档时图标与读数一起换色（颜色之外还有数字，不作唯一信号），完整读数在悬停提示与浮层里；
+ * - 条上形态（2026-10-16 修订用户口径）：**只留图标**，读数与窗口名一律下沉——完整读数在**悬停提示**
+ *   与**浮层**里（浮层列出全部窗口的读数 + 重置倒计时 + 更新时间）。最紧的窗口到 warn / danger 档时
+ *   图标换色（条上不再有数字，颜色是这一项唯一的档位信号，所以图标必须始终可辨、不置灰以外的降级）；
  * - 展开态：按供应商分段列出全部窗口（上游顺序）+ 读数 + 重置倒计时 + 更新时间；
  *   读数口径与设置页弹窗共用 `limitReading`——有比例的显示百分比、余额型窗口显示「$X 剩余」。
  * - 一份配额都拿不到（一个供应商都没配）时**整块不渲染**；但「配了供应商、上游却拿不到用量」
@@ -50,6 +52,8 @@ export function UsageLimits() {
  const open = composerMenu === "usage";
  const setOpen = useCallback((v: boolean) => useApp.setState({ composerMenu: v ? "usage" : null }), []);
  const ref = useDropdown(open, () => setOpen(false));
+ // 浮层贴**被点的项**（不是贴条缘——贴条缘会离靠左的项很远），见 `lib/usePopoverAnchor`
+ const { anchorRef, panelRef } = usePopoverAnchor<HTMLButtonElement>(open);
  // 「现在」走 state：相对时间（更新于 N 前 / N 后重置）不在 render 里读时钟，
  // 每 30 秒推进一次——浮层开着时读数自己会走，`0` 表示还没校准过（首帧不显示相对时间）。
  const [now, setNow] = useState(0);
@@ -88,7 +92,7 @@ export function UsageLimits() {
  if (!hasUsageEntry(usage, error)) return null;
 
  // 全都按上游顺序直出：不按当前模型重排、不按当前模型过滤（那是 2026-10-14 修掉的老口径）
- const { level, items, tightest } = entryGlance(usage);
+ const { level, items } = entryGlance(usage);
  const reports = usage?.reports ?? [];
  const missing = providersWithoutUsage(usage);
  const resetIn = (at: number | null): string =>
@@ -106,21 +110,10 @@ export function UsageLimits() {
  const title = unavailable ? fmt(t.usageLimitsFailedTitle, error ?? "") : aria;
  // 图标配色：最紧的窗口到哪一档（<80% 中性、≥80% warn、用尽 danger）
  const iconTone = level === "danger" ? "text-danger" : level === "warn" ? "text-warn" : "";
- // 状态条读数：最紧窗口的读数 + 窗口名（重名窗口跟浮层同一条整组口径），其余窗口数走「+N」
- const tightReading = tightest ? limitReading(t, tightest.limit) : null;
- const tightReport = tightest ? reports.find((r) => r.limits.some((l) => l.id === tightest.limit.id)) : undefined;
- const tightName = tightest
-  ? (() => {
-     if (!tightReport) return windowName(t, tightest.limit);
-     const names = windowNames(t, tightReport.limits);
-     const i = tightReport.limits.findIndex((l) => l.id === tightest.limit.id);
-     return i >= 0 ? names[i] : windowName(t, tightest.limit);
-    })()
-  : "";
-
  return (
   <div ref={ref}>
    <button
+    ref={anchorRef}
     onClick={() => setOpen(!open)}
     disabled={unavailable}
     className={`flex shrink-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 whitespace-nowrap transition-colors duration-100 ${unavailable ? "cursor-default opacity-40" : "cursor-pointer hover:bg-hover"
@@ -129,20 +122,15 @@ export function UsageLimits() {
     aria-expanded={open}
     title={title}
    >
-    {/* 2026-10-16 口径：统计条上是「图标 + 最紧窗口读数」，点开才是全部窗口（读数在悬停提示里也给全） */}
+    {/* 2026-10-16 修订口径：条上**只有图标**（配色档由最紧的窗口定，warn / danger 换色）——
+        读数与窗口名不再铺在条上，只在悬停提示与浮层里 */}
     <Gauge size={13} aria-hidden className={`shrink-0 ${iconTone || "text-muted"}`} />
-    {tightReading && (
-     <>
-      <span className={`font-mono tabular-nums ${iconTone || "text-muted"}`}>{tightReading.text}</span>
-      <span className="max-w-24 truncate text-faint">{tightName}</span>
-      {tightest && tightest.extra > 0 && (
-       <span className="font-mono text-faint tabular-nums">{fmt(t.usageLimitsMore, tightest.extra)}</span>
-      )}
-     </>
-    )}
    </button>
    {open && (
-    <div className="absolute right-0 bottom-full z-10 mb-1 w-96 max-w-full rounded-lg border border-border bg-elevated p-2 shadow-pop">
+    <div
+     ref={panelRef}
+     className="absolute right-0 bottom-full z-10 mb-1 w-96 max-w-full rounded-lg border border-border bg-elevated p-2 shadow-pop"
+    >
      <div className="flex items-center gap-2 px-1 pb-1.5">
       <span className="flex-1 truncate text-[11px] text-muted" title={updated || t.usageLimitsTitle}>
        {t.usageLimitsTitle}

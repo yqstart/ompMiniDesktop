@@ -247,16 +247,15 @@ describe("Composer 工具行（v2）", () => {
   expect(perm?.textContent).toContain(TEXT["zh-CN"].permYolo);
  });
 
- it("供应商用量入口：条上给最紧窗口读数，点开列**全部已配置供应商**（与当前模型无关）", async () => {
+ it("供应商用量入口：条上只有图标，点开列**全部已配置供应商**（与当前模型无关）", async () => {
   // 当前模型属于一个根本没配的供应商 zzz：老口径下这里会一家都不显示
   useApp.setState({ currentModel: "zzz/some-model" });
   await mount(false);
   const usage = container.querySelector<HTMLButtonElement>('button[aria-label^="用量限额"]');
   expect(usage).not.toBeNull();
-  // 2026-10-16 用户口径：条上 = 最紧窗口的读数 + 窗口名 + 其余窗口数（ddd 的 78% 最紧）
-  expect(usage!.textContent).toContain("78%");
-  expect(usage!.textContent).toContain(TEXT["zh-CN"].usageLimitsWindow5h);
-  expect(usage!.textContent).toContain("+3");
+  // 2026-10-16 修订口径：条上**只有图标**——读数 / 窗口名 / 其余窗口数都不再铺在条上
+  expect(usage!.textContent?.trim()).toBe("");
+  expect(usage!.getAttribute("title")).toContain("78%");
   // 悬停提示（读屏同源）里带全部供应商的读数
   expect(usage!.getAttribute("title")).toContain("aaa");
   expect(usage!.getAttribute("title")).toContain("ddd");

@@ -119,7 +119,7 @@ async function render() {
 }
 
 describe("SessionStatsBar", () => {
- it("渲染四项读数：轮·步 + 吞吐 / 总量 + 缓存命中 / 上下文 / 供应商最紧窗口", async () => {
+ it("渲染四项读数：轮·步 + 吞吐 / 总量 + 缓存命中 / 上下文 / 供应商（条上只有图标）", async () => {
   await render();
   const text = container.textContent ?? "";
   expect(mock.getSessionLiveStats).toHaveBeenCalledWith("s1");
@@ -131,9 +131,13 @@ describe("SessionStatsBar", () => {
   expect(text).toContain("缓存命中 99%");
   // 上下文占用（容量环）
   expect(text).toContain("46%");
-  // 供应商用量：最紧窗口读数 + 窗口名
-  expect(text).toContain("41%");
-  expect(text).toContain("5 小时");
+  // 供应商用量：2026-10-16 修订口径——条上**只有图标**（按钮里没有任何文字），
+  // 读数与窗口名下沉到悬停提示（读屏同源）与浮层里
+  const usageBtn = container.querySelector<HTMLButtonElement>('button[aria-label^="用量限额"]');
+  expect(usageBtn).not.toBeNull();
+  expect(usageBtn!.textContent?.trim()).toBe("");
+  expect(usageBtn!.getAttribute("title")).toContain("41%");
+  expect(usageBtn!.getAttribute("title")).toContain("5 小时");
  });
 
  it("会话统计浮层：模型用时 / 工具调用用时 / TTFT 平均 / 输出速度（时长按 DH 口径格式化）", async () => {
