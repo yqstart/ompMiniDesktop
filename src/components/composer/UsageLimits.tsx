@@ -19,8 +19,8 @@ import { useText } from "../../lib/useText";
 import { useApp } from "../../stores/app";
 
 /**
- * 供应商用量（**输入框工具行右端**，2026-10-14 与上下文容量环一起从顶栏右端搬进输入卡）：
- * 供应商侧的配额进度条 + 点开的明细浮层。
+ * 供应商用量（**输入卡底部统计条**的最后一项；2026-10-14 与上下文容量环一起从顶栏右端搬进输入卡，
+ * 2026-10-16 从工具行挪进统计条）：条上是图标 + 最紧窗口读数，点开是各窗口的进度条与明细。
  *
  * 这里看的是 **opencode 网站那种 5 小时 / 每周 / 每月限额**（供应商配额），不是本地 token 统计
  * （那个在 设置 › 使用统计），也不是上下文窗口占用（那个是同排的 `ContextMeter`）。
@@ -29,8 +29,8 @@ import { useApp } from "../../stores/app";
  *
  * - 口径（2026-10-14 用户口径）：看的是**我配置的供应商**，与当前会话在用哪个模型无关——
  *   不再按 `currentModel` 的供应商过滤/排序；
- * - 收起态：**只有一个图标**（`Gauge`），读数不铺在工具行上；最紧的窗口到 warn / danger 档时
- *   图标换色（读数在悬停提示与浮层里，颜色不作唯一信号）；
+ * - 条上读数：**图标 + 最紧窗口的读数 + 窗口名**（多窗口时补「+N」）；最紧的窗口到 warn / danger
+ *   档时图标与读数一起换色（颜色之外还有数字，不作唯一信号），完整读数在悬停提示与浮层里；
  * - 展开态：按供应商分段列出全部窗口（上游顺序）+ 读数 + 重置倒计时 + 更新时间；
  *   读数口径与设置页弹窗共用 `limitReading`——有比例的显示百分比、余额型窗口显示「$X 剩余」。
  * - 一份配额都拿不到（一个供应商都没配）时**整块不渲染**；但「配了供应商、上游却拿不到用量」
@@ -88,7 +88,7 @@ export function UsageLimits() {
  if (!hasUsageEntry(usage, error)) return null;
 
  // 全都按上游顺序直出：不按当前模型重排、不按当前模型过滤（那是 2026-10-14 修掉的老口径）
- const { level, items } = entryGlance(usage);
+ const { level, items, tightest } = entryGlance(usage);
  const reports = usage?.reports ?? [];
  const missing = providersWithoutUsage(usage);
  const resetIn = (at: number | null): string =>
@@ -106,23 +106,43 @@ export function UsageLimits() {
  const title = unavailable ? fmt(t.usageLimitsFailedTitle, error ?? "") : aria;
  // 图标配色：最紧的窗口到哪一档（<80% 中性、≥80% warn、用尽 danger）
  const iconTone = level === "danger" ? "text-danger" : level === "warn" ? "text-warn" : "";
+ // 状态条读数：最紧窗口的读数 + 窗口名（重名窗口跟浮层同一条整组口径），其余窗口数走「+N」
+ const tightReading = tightest ? limitReading(t, tightest.limit) : null;
+ const tightReport = tightest ? reports.find((r) => r.limits.some((l) => l.id === tightest.limit.id)) : undefined;
+ const tightName = tightest
+  ? (() => {
+     if (!tightReport) return windowName(t, tightest.limit);
+     const names = windowNames(t, tightReport.limits);
+     const i = tightReport.limits.findIndex((l) => l.id === tightest.limit.id);
+     return i >= 0 ? names[i] : windowName(t, tightest.limit);
+    })()
+  : "";
 
  return (
-  <div className="relative" ref={ref}>
+  <div ref={ref}>
    <button
     onClick={() => setOpen(!open)}
     disabled={unavailable}
-    className={`flex shrink-0 items-center justify-center rounded-md p-1.5 transition-colors duration-100 ${unavailable ? "cursor-default opacity-40" : "cursor-pointer hover:bg-hover hover:text-foreground"
+    className={`flex shrink-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 whitespace-nowrap transition-colors duration-100 ${unavailable ? "cursor-default opacity-40" : "cursor-pointer hover:bg-hover"
      }`}
     aria-label={unavailable ? title : aria}
     aria-expanded={open}
     title={title}
    >
-    {/* 2026-10-14 用户口径：收起态只画图标，读数在浮层里（到阈值才换色，颜色不是唯一信号） */}
-    <Gauge size={16} aria-hidden className={iconTone || "text-muted"} />
+    {/* 2026-10-16 口径：统计条上是「图标 + 最紧窗口读数」，点开才是全部窗口（读数在悬停提示里也给全） */}
+    <Gauge size={13} aria-hidden className={`shrink-0 ${iconTone || "text-muted"}`} />
+    {tightReading && (
+     <>
+      <span className={`font-mono tabular-nums ${iconTone || "text-muted"}`}>{tightReading.text}</span>
+      <span className="max-w-24 truncate text-faint">{tightName}</span>
+      {tightest && tightest.extra > 0 && (
+       <span className="font-mono text-faint tabular-nums">{fmt(t.usageLimitsMore, tightest.extra)}</span>
+      )}
+     </>
+    )}
    </button>
    {open && (
-    <div className="absolute right-0 bottom-full z-10 mb-1 w-96 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-elevated p-2 shadow-pop">
+    <div className="absolute right-0 bottom-full z-10 mb-1 w-96 max-w-full rounded-lg border border-border bg-elevated p-2 shadow-pop">
      <div className="flex items-center gap-2 px-1 pb-1.5">
       <span className="flex-1 truncate text-[11px] text-muted" title={updated || t.usageLimitsTitle}>
        {t.usageLimitsTitle}

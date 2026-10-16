@@ -804,6 +804,56 @@ export type SessionStats = {
  contextUsage?: ContextUsage | null;
 };
 
+/**
+ * 会话累计统计（`get_session_live_stats` 原样透传；输入卡底部统计条用）。
+ *
+ * 数据源 = 单会话 jsonl 的逐行聚合（口径见后端 `live_stats.rs` 模块头）：
+ * 轮 / 步 / 工具调用条数、模型用时（Σ`duration`）、工具调用用时（同轮内相邻阶段的
+ * 时间差，估算）、首 token 平均（Σ`ttft` ÷ 步数）、输出速度（输出 token ÷ 生成耗时，
+ * 生成耗时 = 模型用时 − Σ`ttft`）、token 累计与缓存命中率。派生指标全在后端算好。
+ */
+export type LiveTokens = {
+ /** 未缓存输入。 */
+ input: number;
+ output: number;
+ reasoning: number;
+ cacheRead: number;
+ cacheWrite: number;
+ /** omp 的 `totalTokens` 累加（缺失时按四段之和兜底）。 */
+ total: number;
+ /** 带 usage 的 assistant 消息条数（参与累计的请求数）。 */
+ calls: number;
+};
+
+export type SessionLiveStats = {
+ /** 轮 = 用户消息条数。 */
+ turns: number;
+ /** 步 = assistant 消息条数（工具循环里的每一次模型调用）。 */
+ steps: number;
+ /** 工具调用条数（toolResult 条数）。 */
+ toolCalls: number;
+ /** 模型用时（毫秒）。 */
+ modelMs: number;
+ /** 工具调用用时（毫秒；按落盘时刻的相邻阶段估算）。 */
+ toolMs: number;
+ /** 首 token 平均（毫秒）；无样本为 null。 */
+ ttftMs: number | null;
+ /** 生成（解码）耗时 = 模型用时 − Σ`ttft`（毫秒）。 */
+ decodeMs: number;
+ /** 输出速度（tok/s）；生成耗时不可用时为 null。 */
+ tps: number | null;
+ tokens: LiveTokens;
+ /** 缓存命中率（0–1）；分母为 0 时为 null。 */
+ cacheHitRate: number | null;
+ /** 累计成本（Σ`usage.cost.total`）。 */
+ cost: number;
+ /** 会话里第一条 / 最后一条消息的时刻（毫秒；读不到为 null）。 */
+ startedAt: number | null;
+ lastAt: number | null;
+ /** 读不全（文件超过字节上限）：整条统计不可用。 */
+ truncated: boolean;
+};
+
 /** 旁问（`/btw`）的一次问答（omp `BtwHistoryTurn`）。 */
 export type BtwTurn = {
  question: string;

@@ -5,6 +5,7 @@ mod extra_usage;
 mod git_commit;
 mod git_info;
 mod git_ops;
+mod live_stats;
 mod memories;
 mod models_config;
 mod omp_update;
@@ -66,6 +67,7 @@ fn main() {
             delete_sessions,
             // 聊天形态（V32 恢复自 V1–V10）：RPC 会话命令面
             context::get_context_breakdown,
+            live_stats::get_session_live_stats,
             create_session,
             open_session,
             rename_session,

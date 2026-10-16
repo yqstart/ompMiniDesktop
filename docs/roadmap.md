@@ -15,6 +15,7 @@
 |---|---|---|---|
 | **0.1.0** | 首个版本（三部分一体交付） | 形态收敛 + 聊天对标 + 设置重构——终端形态整体下线；聊天形态按 Codex / ZCode 范式重做；设置改为独立视图 | [`v1-schedule.md`](v1-schedule.md) / [`v2-schedule.md`](v2-schedule.md) / [`v3-schedule.md`](v3-schedule.md) |
 | **0.2.0** | 右栏工作台 | 右栏从「上下文」面板换成**文件目录 + 项目脚本 + 多开终端**三页签（形态参照 DeepSeek Harness 的工作区文件 / 终端入口） | [`v4-schedule.md`](v4-schedule.md) |
+| **0.3.0** | 会话读数 | 输入卡底部新增**统计条**：会话统计 + Token 用量 + 上下文 + 供应商用量（形态参照 DeepSeek Harness 的 composer dock） | [`v5-schedule.md`](v5-schedule.md) |
 
 各排期的口径定格：
 
@@ -24,6 +25,7 @@
 | 排期 2 | 聊天对标 | 三栏布局、消息流表达、Composer、命令面按 Codex / ZCode 范式重做（**已实施**） | [`v2-schedule.md`](v2-schedule.md) |
 | 排期 3 | 设置重构 | 设置从「标签页」改为独立视图：四组导航 + 跨条目搜索 + 行式控件（**已实施**） | [`v3-schedule.md`](v3-schedule.md) |
 | 排期 4 | 右栏工作台 | 右栏改为文件目录 + 终端双页签；上下文面板四区块退场（**已实施**） | [`v4-schedule.md`](v4-schedule.md) |
+| 排期 5 | 会话读数 | 输入卡底部统计条（会话统计 / Token 用量 / 上下文 / 供应商用量）；工具行的容量环与供应商用量搬下来（**已实施**） | [`v5-schedule.md`](v5-schedule.md) |
 
 ## 版本号与发版约定
 
@@ -31,7 +33,7 @@
 - 发版：打 `v*` tag 推送 → `.github/workflows/release.yml` 四平台打包并生成 `latest.json`（应用内更新数据源）。
 - `CHANGELOG.md` 按 Keep a Changelog；版本节即 Release 说明（`scripts/changelog-notes.mjs` 抽取，缺失会挡发版）。
 
-## 现状交代（0.1.0 三方向已交付；0.2.0 右栏工作台已实施）
+## 现状交代（0.1.0 三方向已交付；0.2.0 右栏工作台、0.3.0 会话读数已实施）
 
 - **聊天是唯一形态**：终端形态（PTY + xterm + 工作区树）已按 `v1-schedule.md` 的清单删除，形态切换、终端左栏与标签栏、终端专属文案与字体资产全部退场。
 - 形态收敛是**做减法**：聊天形态承接全部有效能力（会话运行 / 流式 / 队列 / 审批 / fork / 归档 / 提交 / 设置面）；项目拖拽排序与「移除项目」入口迁移进聊天左栏。

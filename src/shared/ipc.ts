@@ -126,6 +126,8 @@ export const IPC = {
  /** goal 目标模式：get / create / resume / pause / drop。 */
  goalCommand: "goal_command",
  getSessionStats: "get_session_stats",
+ /** 会话累计统计（轮 / 步 / 用时 / 吞吐 / token 累计；输入卡底部统计条）。 */
+ getSessionLiveStats: "get_session_live_stats",
  btwAsk: "btw_ask",
  btwCancel: "btw_cancel",
  getBtwHistory: "get_btw_history",

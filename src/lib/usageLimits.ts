@@ -2,12 +2,12 @@ import type { ProviderUsage, UsageLimit } from "@shared/types";
 import { levelOf } from "./providerUsage";
 
 /**
- * 供应商配额·**入口侧**的判定（输入框工具行右端的 `Gauge` 键）：一眼摘要 / 渲染 / 置灰。
+ * 供应商配额·**入口侧**的判定（输入卡底部统计条上的 `Gauge` 项）：一眼摘要 / 读数 / 置灰。
  *
- * 口径（2026-10-14 用户口径）：
+ * 口径（2026-10-14 用户口径，2026-10-16 随统计条搬到卡底）：
  * - 看的是**我配置的供应商**，与当前会话在用哪个模型**无关**（别按 `currentModel` 过滤 / 排序 / 置灰）；
- * - 收起态**只画图标**，点开才看内容（浮层里是全部供应商的全部窗口）；
- * - 图标配色档由最紧的一个窗口决定（`warn` / `danger`），读数一律在浮层与悬停提示里。
+ * - 状态条上是**图标 + 最紧窗口的读数**（`tightest`；多窗口时补「+N」），点开才是全部窗口；
+ * - 图标配色档由最紧的一个窗口决定（`warn` / `danger`）。
  *
  * 数据层已统一在 `lib/providerUsage.ts`（模块级快照 + 节流单飞 + 设置页「供应商用量」弹窗共用）——
  * 本模块不自己拉取，只保留入口自己的纯函数。
@@ -16,22 +16,41 @@ import { levelOf } from "./providerUsage";
 /** 自动刷新间隔（页面可见时才走；omp 自身也有报告缓存，频率再高也是白跑）。 */
 export const USAGE_REFRESH_MS = 5 * 60_000;
 
+/** 窗口的紧迫序：档位优先（用尽 > 告警 > 正常），同档比已用比例（余额型没有比例，排在后面）。 */
+function urgency(limit: UsageLimit): [number, number] {
+ const level = levelOf(limit);
+ const rank = level === "danger" ? 2 : level === "warn" ? 1 : 0;
+ const fraction = Number.isFinite(limit.usedFraction) ? limit.usedFraction : -1;
+ return [rank, fraction];
+}
+
 /**
- * 入口的一眼摘要：全部已配置供应商的**全部窗口**（上游顺序）+ 最紧的一档（图标配色用）。
- * 收起态只画图标，读数在浮层里——items 供悬停提示与读屏播报，不做布局决策。
+ * 入口的一眼摘要：全部已配置供应商的**全部窗口**（上游顺序）+ 最紧的一档（图标配色用）+
+ * 最紧的那个窗口本身（状态条读数用，`extra` = 其余窗口数）。
  */
 export function entryGlance(usage: ProviderUsage | null): {
  level: "ok" | "warn" | "danger";
  items: { provider: string; limit: UsageLimit }[];
+ tightest: { provider: string; limit: UsageLimit; extra: number } | null;
 } {
  const items = (usage?.reports ?? []).flatMap((r) => r.limits.map((limit) => ({ provider: r.provider, limit })));
  let level: "ok" | "warn" | "danger" = "ok";
- for (const { limit } of items) {
-  const l = levelOf(limit);
-  if (l === "danger") return { level: "danger", items };
-  if (l === "warn") level = "warn";
+ let tightest: { provider: string; limit: UsageLimit; extra: number } | null = null;
+ for (const item of items) {
+  const l = levelOf(item.limit);
+  if (l === "danger") level = "danger";
+  else if (l === "warn" && level !== "danger") level = "warn";
+  if (
+   !tightest ||
+   urgency(item.limit)[0] > urgency(tightest.limit)[0] ||
+   (urgency(item.limit)[0] === urgency(tightest.limit)[0] &&
+    urgency(item.limit)[1] > urgency(tightest.limit)[1])
+  ) {
+   tightest = { provider: item.provider, limit: item.limit, extra: 0 };
+  }
  }
- return { level, items };
+ if (tightest) tightest = { ...tightest, extra: items.length - 1 };
+ return { level, items, tightest };
 }
 
 /** 有没有可显示的窗口（有配额数据的供应商）。 */

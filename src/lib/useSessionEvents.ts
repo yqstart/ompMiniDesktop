@@ -8,6 +8,7 @@ import { summarizeArgs, mentionFilesOf, diffStatOf, primaryPathOf, TOOL_OUTPUT_F
 import { fmt, TEXT, type Text } from "./locale";
 import { imagesFromContent } from "./attachments";
 import { normalizeCommands } from "./slashCommands";
+import { forgetSessionLiveStats } from "./sessionLiveStats";
 import { resolveThinking } from "./thinking";
 import { createStreamBuffer, mergeViewMsgs, type IncomingViewMsg } from "./mergeEvents";
 
@@ -666,13 +667,16 @@ export function trimSessionHistories(activeId: string | null, keep = KEEP_HISTOR
 }
 
 /**
- * 会话被归档 / 删除后清掉它的前端缓存（事件流 / 运行状态 / 计划 / 附件 / 折叠态 / LRU 名单）。
+ * 会话被归档 / 删除后清掉它的前端缓存（事件流 / 运行状态 / 计划 / 附件 / 折叠态 / LRU 名单 /
+ * 会话统计快照）。
  * 清掉是安全的：会话数据的真相在 jsonl，重新打开走 `get_history`。
  * 归档 / 删除都会先把长驻进程 kill 掉（后端），前端也就没有理由再留着这些。
  */
 export function forgetSession(sid: string): void {
  folds.delete(sid);
  recentHistoryIds = recentHistoryIds.filter((x) => x !== sid);
+ // 统计条的模块级快照（不在 store 里，得单独清）：不清的话，同名会话重新出现会先闪一次旧读数
+ forgetSessionLiveStats(sid);
  const st = useApp.getState();
  if (
   !(sid in st.eventsBySession) &&

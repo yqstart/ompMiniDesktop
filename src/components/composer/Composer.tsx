@@ -18,8 +18,7 @@ import { useText } from "../../lib/useText";
 import { ProjectPicker } from "../pickers/ProjectPicker";
 import { BranchPicker } from "../pickers/BranchPicker";
 import { CommitButton } from "./CommitButton";
-import { ContextMeter } from "../thread/ContextMeter";
-import { UsageLimits } from "./UsageLimits";
+import { SessionStatsBar } from "../thread/SessionStatsBar";
 import { CompactButton, QueueBadge } from "../thread/StatusBar";
 import { resolveContext } from "../../lib/context";
 import { useGitInfo } from "../../lib/useGitInfo";
@@ -38,9 +37,11 @@ const PASTE_FILE_MIN = 2000;
  * 会话输入卡（v2 §3 形态，对齐 Codex / ZCode 的输入卡）：
  * **卡顶行** = 项目 + 分支选择器内嵌（原外置的上下文条收缩进来；分支可点切、其后是提交入口）；
  * **输入区** = 附件条 + 提及芯片 + 待发区 + 自动增高输入框；
- * **卡底工具行** = 左「`+` 菜单（图片 / 引用文件）+ 执行模式菜单」，右「压缩行动点 / 上下文容量环 /
- * 供应商用量 + 模型 · 思考档 ▾ + 圆形发送 / 停止」。上下文与供应商用量 2026-10-14 从顶栏右端
- * 搬进输入卡——它们在「我要不要再开一轮」的决策现场（剩余额度、上下文余量），不在窗口 chrome 上；
+ * **卡底工具行** = 左「`+` 菜单（图片 / 引用文件）+ 执行模式菜单」，右「压缩行动点 + 模型 · 思考档 ▾ +
+ * 圆形发送 / 停止」；**卡底统计条** = `SessionStatsBar`（会话统计 / Token 用量 / 上下文占用 /
+ * 供应商用量，2026-10-16 对齐 DeepSeek Harness 的 composer dock）——「我要不要再开一轮」的读数
+ * （跑了多少步、烧了多少 token、上下文还剩多少、配额还剩多少）都在那一行里，点开各自给明细。
+ * 上下文容量环与供应商用量 2026-10-14 从顶栏右端搬进输入卡、2026-10-16 从工具行挪进统计条；
  * 提交入口 = 卡顶行的提交键（与右栏「变更」区块同一浮层链路）。
  * 待发区（V40）：omp 的队列真值（`queue_update`）——可撤回 / 编辑 / 提升，Esc 中断还原
  * （「排队」按钮 2026-10-13 按用户口径退场，排队只走 Tab / ⌘Ctrl+Enter）。
@@ -946,8 +947,6 @@ export function Composer() {
      <QueueBadge />
      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
       <CompactButton />
-      <ContextMeter />
-      <UsageLimits />
       {/* 模型与思考档是两个独立选择器（2026-10-14 拆分）：模型名 ▾ 与 档位 ▾ 各开各的浮层 */}
       <ModelMenu />
       <ThinkingMenu />
@@ -972,6 +971,9 @@ export function Composer() {
        </button>
       )}
      </div>
+     {/* 卡底统计条（2026-10-16，对齐 DeepSeek Harness 的 composer dock）：
+         会话统计 / Token 用量 / 上下文占用 / 供应商用量，各自点开明细 */}
+     <SessionStatsBar />
     </div>
    </div>
   </div >

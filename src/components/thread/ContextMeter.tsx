@@ -8,7 +8,8 @@ import { useText } from "../../lib/useText";
 import { useApp } from "../../stores/app";
 
 /**
- * 上下文容量（**输入框工具行右端**，2026-10-14 从顶栏右端搬回输入卡）：容量环 + 点开的分项面板。
+ * 上下文容量（**输入卡底部统计条**的第三项，2026-10-14 从顶栏右端搬进输入卡、2026-10-16 从工具行
+ * 挪进统计条）：容量环 + 点开的分项面板。
  *
  * 数据来自后端 `get_context_breakdown`（读一次会话文件 + 运行时的 `get_state` 真值），
  * 这里只做格式化与按比例画柱——**不自算 token**，分项与总量都由后端给。
@@ -116,22 +117,22 @@ export function ContextMeter() {
  const hit = data?.cache.hitRate ?? null;
 
  return (
-  <div className="relative" ref={ref}>
+  <div ref={ref}>
    <button
     onClick={() => useApp.setState({ composerMenu: open ? null : "context" })}
-    className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 whitespace-nowrap transition-colors duration-100 hover:bg-hover"
+    className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-0.5 whitespace-nowrap transition-colors duration-100 hover:bg-hover"
     aria-label={fmt(t.ctxTriggerAria, fmtPercent(pct))}
     aria-expanded={open}
     title={t.ctxTriggerTitle}
    >
     <Ring pct={pct} warn={warn} />
-    <span className={`font-mono text-[11px] tabular-nums ${warn ? "text-warn" : "text-faint"}`}>
+    <span className={`font-mono tabular-nums ${warn ? "text-warn" : "text-muted"}`}>
      {fmtPercent(pct)}
     </span>
    </button>
    {open && (
     <div
-     className="absolute right-0 bottom-full z-10 mb-1 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-elevated p-3 shadow-pop"
+     className="absolute right-0 bottom-full z-10 mb-1 w-80 max-w-full rounded-lg border border-border bg-elevated p-3 shadow-pop"
      aria-label={t.ctxTitle}
     >
      <div className="flex items-baseline justify-between gap-2">

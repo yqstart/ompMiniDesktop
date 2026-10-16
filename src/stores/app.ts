@@ -156,8 +156,21 @@ type AppState = {
  planCardBySession: Record<string, PlanCardState>;
  /** 会话级权限覆盖（覆盖层 `sessionApproval` 的水合；徽标显示用）。 */
  sessionApprovals: Record<string, string>;
- /** 输入卡内的下拉互斥槽：同一时刻只开一个（model/thinking/approval/plus/project/branch/context/usage）。 */
- composerMenu: "model" | "thinking" | "approval" | "plus" | "project" | "branch" | "context" | "usage" | null;
+ /** 输入卡内的下拉互斥槽：同一时刻只开一个（model/thinking/approval/plus/project/branch/context/usage/liveStats/liveTokens）。 */
+ composerMenu:
+  | "model"
+  | "thinking"
+  | "approval"
+  | "plus"
+  | "project"
+  | "branch"
+  | "context"
+  | "usage"
+  /** 卡底统计条的「会话统计」浮层（轮 / 步 / 用时 / 吞吐）。 */
+  | "liveStats"
+  /** 卡底统计条的「Token 用量」浮层（累计分项）。 */
+  | "liveTokens"
+  | null;
  /** 消息流「首屏增量」窗口：当前会话已渲染的消息条数（首屏 200 条）。 */
  threadLimitSid: string | null;
  threadLimit: number;

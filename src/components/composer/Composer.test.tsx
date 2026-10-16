@@ -8,7 +8,8 @@ import { TEXT } from "../../lib/locale";
 
 /**
  * Composer 三件事：
- * 1. 工具行的构成：`+` 菜单 / 执行模式 / 排队徽标 / 上下文容量环 / 供应商用量 / 模型·思考档 / 发送
+ * 1. 工具行的构成：`+` 菜单 / 执行模式 / 排队徽标 / 模型·思考档 / 发送；
+ *    卡底统计条（2026-10-16）= 会话统计 / Token 用量 / 上下文容量环 / 供应商用量
  *    （2026-10-14 容量环与用量从顶栏右端搬回输入卡，见 `docs/` 与 `design-system/MASTER.md`）；
  * 2. 发送语义（V39，对齐 omp 终端与 codex）：流式中 Enter = 插话（steer）、Tab / ⌘Ctrl+Enter = 排队
  *    （follow_up；运行中工具行的「排队」按钮 2026-10-13 按用户口径退场）；
@@ -182,7 +183,7 @@ const press = async (el: HTMLElement | null, init: KeyboardEventInit) => {
 };
 
 describe("Composer 工具行（v2）", () => {
- it("卡底工具行 = + 菜单 + 执行模式菜单 + 容量环 + 模型·思考档 + 圆形发送键", async () => {
+ it("卡底工具行 = + 菜单 + 执行模式菜单 + 模型·思考档 + 圆形发送键；统计条里有容量环", async () => {
   useApp.setState({
    sessions: [session()],
    activeSessionId: "s1",
@@ -195,7 +196,7 @@ describe("Composer 工具行（v2）", () => {
   });
   act(() => root.render(<Composer />));
   await act(async () => { });
-  // 上下文容量环在输入卡工具行（2026-10-14 从顶栏右端搬回）
+  // 上下文容量环在卡底统计条（2026-10-16 从工具行搬下来，与 DH 的 composer dock 同位置）
   const meter = container.querySelector<HTMLButtonElement>('button[aria-label^="上下文容量"]');
   expect(meter).not.toBeNull();
   expect(meter?.textContent).toContain("13%");
@@ -246,15 +247,16 @@ describe("Composer 工具行（v2）", () => {
   expect(perm?.textContent).toContain(TEXT["zh-CN"].permYolo);
  });
 
- it("供应商用量入口：收起态只一个图标，点开列**全部已配置供应商**（与当前模型无关）", async () => {
+ it("供应商用量入口：条上给最紧窗口读数，点开列**全部已配置供应商**（与当前模型无关）", async () => {
   // 当前模型属于一个根本没配的供应商 zzz：老口径下这里会一家都不显示
   useApp.setState({ currentModel: "zzz/some-model" });
   await mount(false);
   const usage = container.querySelector<HTMLButtonElement>('button[aria-label^="用量限额"]');
   expect(usage).not.toBeNull();
-  // 收起态不铺读数（2026-10-14 用户口径）：工具行里没有家名 / 百分比 / 进度条
-  expect(usage!.querySelectorAll("span").length).toBe(0);
-  expect(usage!.textContent?.trim()).toBe("");
+  // 2026-10-16 用户口径：条上 = 最紧窗口的读数 + 窗口名 + 其余窗口数（ddd 的 78% 最紧）
+  expect(usage!.textContent).toContain("78%");
+  expect(usage!.textContent).toContain(TEXT["zh-CN"].usageLimitsWindow5h);
+  expect(usage!.textContent).toContain("+3");
   // 悬停提示（读屏同源）里带全部供应商的读数
   expect(usage!.getAttribute("title")).toContain("aaa");
   expect(usage!.getAttribute("title")).toContain("ddd");
