@@ -7,11 +7,12 @@ import { useApp } from "../../stores/app";
 import { TEXT } from "../../lib/locale";
 
 /**
- * 右栏文件树（V42）：懒加载一层目录、变更标色、点文件交给系统打开、行尾「引用到输入框」。
+ * 右栏文件树（V42 / V43+）：懒加载一层目录、Material 类型图标、快速过滤（文件与文件夹）、
+ * 变更标色、点文件交给系统打开、行尾「引用到输入框」（**相对路径**）。
  * 后端与系统打开都替换成 mock——本用例只验证前端的取数口径与交互。
  */
 const { apiMock, openerMock } = vi.hoisted(() => ({
- apiMock: { listDir: vi.fn(), getChangeSet: vi.fn() },
+ apiMock: { listDir: vi.fn(), getChangeSet: vi.fn(), searchPaths: vi.fn() },
  openerMock: { openPath: vi.fn(async () => {}), revealItemInDir: vi.fn(async () => {}) },
 }));
 vi.mock("@shared/api", () => ({ api: apiMock }));
@@ -23,10 +24,21 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 const zh = TEXT["zh-CN"];
 const ROOT = "/w/alpha";
+/** 过滤防抖 180ms：推进得多一点，避免边界抖动。 */
+const DEBOUNCE = 200;
 
 const entry = (name: string, isDir: boolean): DirEntry => ({
  name,
  path: `${ROOT}/${name}`,
+ isDir,
+ isSymlink: false,
+ size: isDir ? null : 12,
+});
+
+/** 指定目录下的条目（深层目录要用它，`entry` 只拼根）。 */
+const entryAt = (dir: string, name: string, isDir: boolean): DirEntry => ({
+ name,
+ path: `${dir}/${name}`,
  isDir,
  isSymlink: false,
  size: isDir ? null : 12,
@@ -65,6 +77,10 @@ let root: Root;
 
 beforeEach(() => {
  vi.clearAllMocks();
+ // jsdom 没实现 scrollIntoView（定位到某一行后要滚过去），给个空实现即可
+ if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+ }
  useApp.setState({
   locale: "zh-CN",
   activeSessionId: "s1",
@@ -92,6 +108,13 @@ function rowByName(name: string): HTMLElement | null {
  return [...container.querySelectorAll<HTMLElement>("div.group")].find((d) => d.textContent?.includes(name)) ?? null;
 }
 
+/** 受控 input 的赋值：React 19 认的是原生 value setter + input 事件。 */
+function typeInto(input: HTMLInputElement, value: string) {
+ const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+ setter?.call(input, value);
+ input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 describe("FileTree", () => {
  it("树根加载：列目录、按仓库根给改动文件打徽标", async () => {
   apiMock.listDir.mockResolvedValue(listing(ROOT, [entry("src", true), entry("a.ts", false)]));
@@ -102,6 +125,18 @@ describe("FileTree", () => {
   expect(rowByName("a.ts")?.textContent).toContain("M");
   // 没有改动的目录不带徽标
   expect(rowByName("src")?.textContent).not.toContain("M");
+ });
+
+ it("行图标是 Material Icon（生成表里的 SVG，按扩展名取）", async () => {
+  apiMock.listDir.mockResolvedValue(listing(ROOT, [entry("src", true), entry("a.ts", false)]));
+  apiMock.getChangeSet.mockResolvedValue(changeSet([]));
+  await render();
+  const srcIcon = rowByName("src")?.querySelector("img")?.getAttribute("src") ?? "";
+  const tsIcon = rowByName("a.ts")?.querySelector("img")?.getAttribute("src") ?? "";
+  expect(srcIcon.startsWith("data:image/svg+xml")).toBe(true);
+  expect(tsIcon.startsWith("data:image/svg+xml")).toBe(true);
+  // 目录与文件、不同扩展名不是同一张图
+  expect(srcIcon).not.toBe(tsIcon);
  });
 
  it("展开目录才取它的内容（懒加载，第二次调用不再带仓库根）", async () => {
@@ -127,14 +162,23 @@ describe("FileTree", () => {
   expect(openerMock.openPath).toHaveBeenCalledWith(`${ROOT}/a.ts`);
  });
 
- it("行尾「引用到输入框」按 omp 提及语法写进当前会话草稿", async () => {
-  apiMock.listDir.mockResolvedValue(listing(ROOT, [entry("a.ts", false)]));
+ it("行尾「引用到输入框」写进草稿的是相对路径（不是绝对路径）", async () => {
+  apiMock.listDir.mockResolvedValue(listing(ROOT, [entry("a.ts", false), entry("src", true)]));
   apiMock.getChangeSet.mockResolvedValue(changeSet([]));
   await render();
   const btn = rowByName("a.ts")?.querySelector<HTMLButtonElement>(`button[aria-label="${zh.filesInsertRef}"]`);
   expect(btn).toBeTruthy();
   act(() => btn?.click());
-  expect(useApp.getState().drafts["s1"]).toBe(`@${ROOT}/a.ts `);
+  expect(useApp.getState().drafts["s1"]).toBe("@a.ts ");
+ });
+
+ it("目录也能引用（相对路径 + 尾空格）", async () => {
+  apiMock.listDir.mockResolvedValue(listing(ROOT, [entry("src", true)]));
+  apiMock.getChangeSet.mockResolvedValue(changeSet([]));
+  await render();
+  const btn = rowByName("src")?.querySelector<HTMLButtonElement>(`button[aria-label="${zh.filesInsertRef}"]`);
+  act(() => btn?.click());
+  expect(useApp.getState().drafts["s1"]).toBe("@src ");
  });
 
  it("目录读不到时显示失败行，不抛到界面上", async () => {
@@ -142,5 +186,149 @@ describe("FileTree", () => {
   apiMock.getChangeSet.mockResolvedValue(changeSet([]));
   await render();
   expect(container.textContent).toContain(zh.filesLoadFailed);
+ });
+
+ describe("快速过滤", () => {
+  beforeEach(() => {
+   apiMock.listDir.mockImplementation(async (path: string) =>
+    path === ROOT
+     ? listing(ROOT, [entry("src", true), entry("a.ts", false)])
+     : listing(path, [entryAt(path, "components", true)]),
+   );
+   apiMock.getChangeSet.mockResolvedValue(changeSet([]));
+   apiMock.searchPaths.mockResolvedValue({
+    hits: [
+     { name: "components", rel: "src/components", path: `${ROOT}/src/components`, isDir: true },
+     { name: "Composer.tsx", rel: "src/components/composer/Composer.tsx", path: `${ROOT}/src/components/composer/Composer.tsx`, isDir: false },
+    ],
+    truncated: false,
+   });
+  });
+
+  it("输入即搜（防抖后一次 IPC），文件与文件夹都在结果里，路径显示相对写法", async () => {
+   vi.useFakeTimers();
+   try {
+    await render();
+    const input = container.querySelector<HTMLInputElement>("input");
+    expect(input?.placeholder).toBe(zh.filesFilterPlaceholder);
+    await act(async () => {
+     typeInto(input!, "comp");
+    });
+    await act(async () => {
+     vi.advanceTimersByTime(DEBOUNCE);
+    });
+    expect(apiMock.searchPaths).toHaveBeenCalledWith(ROOT, "comp", 200);
+    expect(container.textContent).toContain("components");
+    expect(container.textContent).toContain("Composer.tsx");
+    // 次要文字是相对路径的父级（不是绝对路径）
+    expect(container.textContent).toContain("src/components");
+    expect(container.textContent).not.toContain(ROOT);
+    // 过滤态不渲染树体
+    expect(container.textContent).not.toContain("a.ts");
+   } finally {
+    vi.useRealTimers();
+   }
+  });
+
+  it("结果行尾「引用到输入框」同样是相对路径", async () => {
+   vi.useFakeTimers();
+   try {
+    await render();
+    const input = container.querySelector<HTMLInputElement>("input");
+    await act(async () => {
+     typeInto(input!, "comp");
+    });
+    await act(async () => {
+     vi.advanceTimersByTime(DEBOUNCE);
+    });
+    const btn = rowByName("Composer.tsx")?.querySelector<HTMLButtonElement>(
+     `button[aria-label="${zh.filesInsertRef}"]`,
+    );
+    act(() => btn?.click());
+    expect(useApp.getState().drafts["s1"]).toBe("@src/components/composer/Composer.tsx ");
+   } finally {
+    vi.useRealTimers();
+   }
+  });
+
+  it("点结果 → 清空过滤、逐级展开到该目录并高亮", async () => {
+   // 这个用例走真实定时器：定位是「await 一层 → 展开一层」的异步链，
+   // fake timers 会把 React 的调度批次一起冻住（其余用例只测同步交互，用 fake timers 更稳）
+   await render();
+   const input = container.querySelector<HTMLInputElement>("input");
+   await act(async () => {
+    typeInto(input!, "comp");
+   });
+   await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, DEBOUNCE));
+   });
+   // 点目录结果：过滤清空 + 展开 `src`（父级）后铺出 `components`
+   await act(async () => {
+    rowByName("components")?.querySelector("button")?.click();
+   });
+   await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+   });
+   expect(input?.value).toBe("");
+   expect(apiMock.listDir).toHaveBeenCalledWith(`${ROOT}/src`, false);
+   expect(container.textContent).toContain("components");
+   // 定位后行是选中底色
+   expect(rowByName("components")?.className).toContain("bg-active");
+   // 高亮一闪即散：行仍在树里，底色随定时器消失（不长期占位）
+   await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1800));
+   });
+   expect(container.textContent).toContain("components");
+   expect(rowByName("components")?.className).not.toContain("bg-active");
+  });
+
+  it("无匹配 / 搜索失败都如实说，不留空白", async () => {
+   vi.useFakeTimers();
+   try {
+    await render();
+    apiMock.searchPaths.mockResolvedValueOnce({ hits: [], truncated: false });
+    const input = container.querySelector<HTMLInputElement>("input");
+    await act(async () => {
+     typeInto(input!, "zzz");
+    });
+    await act(async () => {
+     vi.advanceTimersByTime(DEBOUNCE);
+    });
+    expect(container.textContent).toContain(zh.filesSearchEmpty);
+
+    apiMock.searchPaths.mockRejectedValueOnce(new Error("EACCES"));
+    await act(async () => {
+     typeInto(input!, "qqq");
+    });
+    await act(async () => {
+     vi.advanceTimersByTime(DEBOUNCE);
+    });
+    expect(container.textContent).toContain(zh.filesSearchFailed);
+   } finally {
+    vi.useRealTimers();
+   }
+  });
+
+  it("Esc 清空过滤回到树", async () => {
+   vi.useFakeTimers();
+   try {
+    await render();
+    const input = container.querySelector<HTMLInputElement>("input");
+    await act(async () => {
+     typeInto(input!, "comp");
+    });
+    await act(async () => {
+     vi.advanceTimersByTime(DEBOUNCE);
+    });
+    expect(container.textContent).not.toContain("a.ts");
+    await act(async () => {
+     input!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(input?.value).toBe("");
+    expect(container.textContent).toContain("a.ts");
+   } finally {
+    vi.useRealTimers();
+   }
+  });
  });
 });

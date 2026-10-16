@@ -93,7 +93,7 @@ function clickByText(text: string) {
 }
 
 describe("引用工作区文件浮层", () => {
- it("只列其他成员项目（当前项目排除）；目录树缩进；回车把 @绝对路径 追加进草稿并关闭", async () => {
+ it("只列其他成员项目（当前项目排除）；目录树缩进；回车把 @路径 追加进草稿并关闭", async () => {
   await open();
   // 只请求「其他项目」，当前项目（/p/fe）不发请求
   expect(mock.listProjectFiles).toHaveBeenCalledWith(["/p/be"]);
@@ -117,6 +117,7 @@ describe("引用工作区文件浮层", () => {
   expect(options.map((o) => o.textContent)).toEqual(["api.ts"]);
 
   press("Enter");
+  // 跨项目 = 会话目录（/p/fe）之外：按绝对路径注入（目录内的引用才走相对路径，见 workspaceFiles.test.ts）
   expect(useApp.getState().drafts.s1).toBe("@/p/be/src/api.ts ");
   expect(useApp.getState().refPickerTarget).toBeNull();
   expect(useApp.getState().composerFocusSeq).toBeGreaterThan(0);

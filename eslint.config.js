@@ -18,7 +18,16 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import globals from "globals";
 
 export default tseslint.config(
-  { ignores: ["dist/**", "node_modules/**", "src-tauri/**", "design-system/**"] },
+  {
+    // 生成产物不参与 lint（图标表是脚本产物，规则对它没有意义）
+    ignores: [
+      "dist/**",
+      "node_modules/**",
+      "src-tauri/**",
+      "design-system/**",
+      "src/lib/materialIcons.generated.ts",
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

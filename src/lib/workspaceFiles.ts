@@ -294,9 +294,12 @@ export function highlightName(name: string, terms: readonly string[]): { text: s
  * 注入文本：omp 提及语法（含空白 → `@"a b.md"`）加尾部空格。
  * 尾空格让 `@` 的补全查询立刻结束（路径完整粘贴后不残留补全浮层）。
  * 含双引号是已知极端边界，不做转义（上游不支持）。
+ *
+ * 传进来的应当是**注入路径**（见 `referenceTarget`）：会话目录内的条目给相对路径，
+ * 目录外（跨项目引用）才用绝对路径——omp 的 `@` 补全本身就产相对路径，两边同一口径。
  */
-export function referenceInsertText(absPath: string): string {
- const quoted = /[\s"]/.test(absPath) ? `"${absPath}"` : absPath;
+export function referenceInsertText(path: string): string {
+ const quoted = /[\s"]/.test(path) ? `"${path}"` : path;
  return `@${quoted} `;
 }
 
@@ -306,12 +309,50 @@ export function referenceInsertText(absPath: string): string {
  * （`lib/mentions.ts` 与上游 `extractFileMentions` 同一口径），否则那一行不会被展开
  * 成 fileMention（实测：`…是：@/tmp/x` 不算提及、`…是： @/tmp/x` 才算）。
  */
-export function appendReference(draft: string, absPath: string): string {
+export function appendReference(draft: string, path: string): string {
  const head = draft.length > 0 && !/\s$/.test(draft) ? `${draft} ` : draft;
- return `${head}${referenceInsertText(absPath)}`;
+ return `${head}${referenceInsertText(path)}`;
 }
 
 /** 项目根 + 仓库相对路径 → 绝对路径（POSIX；壳目标平台 macOS/Linux）。 */
 export function joinAbs(root: string, rel: string): string {
  return `${root.replace(/\/+$/, "")}/${rel}`;
+}
+
+/** 去掉末尾斜杠（比较 / 展示用；根 `/` 保留）。 */
+function trimTail(path: string): string {
+ const t = path.replace(/\/+$/, "");
+ return t.length > 0 ? t : "/";
+}
+
+/**
+ * 绝对路径 → 相对 `cwd` 的路径（POSIX 词法计算，不碰文件系统）。
+ * **只在条目确实在 `cwd` 之内时给值**（算出来带 `..` / 越界一律返回 null）——
+ * 会话目录之外的引用仍走绝对路径，绝不用 `../` 把用户带到别的目录去解析。
+ */
+export function relativeToCwd(cwd: string, abs: string): string | null {
+ if (!cwd || !abs) return null;
+ const base = trimTail(cwd);
+ const target = trimTail(abs);
+ if (target === base) return null;
+ if (!target.startsWith(`${base}/`)) return null;
+ const rel = target.slice(base.length + 1);
+ return rel.length > 0 && !rel.split("/").includes("..") ? rel : null;
+}
+
+/**
+ * 引用注入用的路径（唯一口径，右栏文件树与 ⌘⇧P 引用浮层共用）：
+ * 会话目录内的条目给**相对路径**（`src/components/FileTree.tsx`），目录外的给绝对路径。
+ */
+export function referenceTarget(cwd: string, abs: string): string {
+ return relativeToCwd(cwd, abs) ?? abs;
+}
+
+/**
+ * 芯片上的短名（`@` 后面那一段）：目录补尾斜杠，好和文件区分开。
+ * 完整路径仍在 `title` 里，读屏与悬停都拿得到。
+ */
+export function referenceLabel(path: string, isDir: boolean): string {
+ const name = trimTail(path).split("/").pop() || path;
+ return isDir ? `${name}/` : name;
 }

@@ -50,6 +50,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 ```bash
 pnpm tauri:build      # 本机发布构建（产物见 src-tauri/target/release/bundle/）
 pnpm icon             # 从 design-system/icon/omp-mini-icon.svg 重生成应用图标
+pnpm file-icons       # 从 material-icon-theme 重新生成右栏文件树的图标子集
 ```
 
 发布：更新 `CHANGELOG.md` 并升四处版本号（`package.json` / `src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml` / `Cargo.lock`）→ 打 `v*` tag 推送 → GitHub Actions 四平台打包并生成 `latest.json`（应用内更新的数据源）。macOS 签名证书见 `scripts/make-signing-cert.sh`。

@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
-import type { BtwRecord, ChangeSet, CheckoutView, CommitEvent, ContextBreakdown, DirListing, DiscoveredModel, FallbackChainsInfo, GitInfo, Goal, GoalState, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, ScriptCatalog, SessionLiveStats, SessionPage, SessionRuntime, SessionStats, SessionView, SkillFileContent, SkillsView, TerminalEvent, TerminalSpawnOpts, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
+import type { BtwRecord, ChangeSet, CheckoutView, CommitEvent, ContextBreakdown, DirListing, DiscoveredModel, FallbackChainsInfo, GitInfo, Goal, GoalState, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PathSearch, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, ScriptCatalog, SessionLiveStats, SessionPage, SessionRuntime, SessionStats, SessionView, SkillFileContent, SkillsView, TerminalEvent, TerminalSpawnOpts, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -430,6 +430,12 @@ export const api = {
   */
  listDir: (path: string, withRepoRoot?: boolean) =>
   call<DirListing>(IPC.listDir, { path, withRepoRoot: withRepoRoot ?? false }),
+ /**
+  * 文件页签的快速过滤：按名字（或带 `/` 的相对路径）递归搜索文件与文件夹。
+  * 只读、带扫描预算；返回相对路径与绝对路径，前端显示相对路径、引用注入用相对路径。
+  */
+ searchPaths: (root: string, query: string, limit?: number) =>
+  call<PathSearch>(IPC.searchPaths, { root, query, limit: limit ?? null }),
  /**
   * 打开终端（PTY 里的登录 shell）：输出 / 退出走 Channel（`onEvent`），
   * 与 `startOmpUpdate` 同一套「命令立刻返回、过程走通道」口径。

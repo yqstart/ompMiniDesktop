@@ -125,6 +125,7 @@ fn main() {
             project_files::list_project_files,
             // —— V42（右栏工作台）：文件目录树 + 终端 ——
             workspace_fs::list_dir,
+            workspace_fs::search_paths,
             pty::terminal_spawn,
             pty::terminal_write,
             pty::terminal_resize,

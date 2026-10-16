@@ -1,6 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, CodeFile, File, FileText, FileZip, Folder, FolderOpen, Image as ImageIcon } from "reicon-react";
-import type { IconComponent } from "reicon-react";
+import { ChevronDown, ChevronRight } from "reicon-react";
 import { api } from "@shared/api";
 import type { ProjectFiles } from "@shared/types";
 import { useApp } from "../stores/app";
@@ -16,40 +15,17 @@ import {
  rankRefItems,
  refQueryTerms,
  referenceScope,
+ referenceTarget,
  type RefItem,
  type RefRow,
 } from "../lib/workspaceFiles";
 import { DialogShell } from "./settings/DialogShell";
+import { FileIcon } from "./workbench/FileIcon";
 
 /** 每个项目的结果上限（文件基数可能上万，只渲染前这么多条；后端另有 5万/项目的硬上限）。 */
 const MAX_RESULTS = 200;
 /** 目录树每层缩进（像素）。 */
 const INDENT = 14;
-
-/** 扩展名 → 文件图标（少而清晰：代码 / 文档 / 图片 / 压缩包 / 默认）。 */
-const CODE_EXT: Record<string, true> = {
- ts: true, tsx: true, js: true, jsx: true, mjs: true, cjs: true, vue: true, svelte: true,
- rs: true, py: true, go: true, rb: true, java: true, kt: true, swift: true, c: true, h: true,
- cpp: true, hpp: true, cs: true, php: true, sh: true, bash: true, zsh: true, lua: true,
- sql: true, html: true, css: true, scss: true, less: true,
-};
-const DOC_EXT: Record<string, true> = { md: true, markdown: true, txt: true, rst: true, adoc: true };
-const IMAGE_EXT: Record<string, true> = {
- png: true, jpg: true, jpeg: true, gif: true, webp: true, ico: true, bmp: true, svg: true,
-};
-const ARCHIVE_EXT: Record<string, true> = {
- zip: true, gz: true, tar: true, tgz: true, bz2: true, xz: true, "7z": true, rar: true,
-};
-
-function fileIconFor(name: string): IconComponent {
- const dot = name.lastIndexOf(".");
- const ext = dot === -1 ? "" : name.slice(dot + 1).toLowerCase();
- if (CODE_EXT[ext]) return CodeFile;
- if (DOC_EXT[ext]) return FileText;
- if (IMAGE_EXT[ext]) return ImageIcon;
- if (ARCHIVE_EXT[ext]) return FileZip;
- return File;
-}
 
 /** 折叠 key（跨项目同名 `rel` 不能相撞）。 */
 function collapseKey(projectPath: string, rel: string): string {
@@ -190,8 +166,9 @@ export function ReferencePicker(): React.JSX.Element | null {
    close();
    return;
   }
-  // 追加进该会话的草稿（尾随空格让 omp 的提及解析立刻收口），焦点交还输入框
-  s.setDraft(sid, appendReference(s.draftOf(sid), item.abs));
+  // 追加进该会话的草稿（尾随空格让 omp 的提及解析立刻收口），焦点交还输入框。
+  // 路径口径与右栏文件树一致（`referenceTarget`）：会话目录内给相对路径，目录外才用绝对路径。
+  s.setDraft(sid, appendReference(s.draftOf(sid), referenceTarget(cwd ?? "", item.abs)));
   s.set({ refPickerTarget: null, composerFocusSeq: s.composerFocusSeq + 1 });
  };
 
@@ -283,7 +260,6 @@ export function ReferencePicker(): React.JSX.Element | null {
          if (row.kind === "dir") {
           const key = collapseKey(section.key, row.rel);
           const collapsed = collapsedKeys.has(key);
-          const FolderIcon = collapsed ? Folder : FolderOpen;
           return (
            <button
             key={`d:${row.rel}`}
@@ -295,7 +271,7 @@ export function ReferencePicker(): React.JSX.Element | null {
             {collapsed
              ? <ChevronRight size={12} className="shrink-0 text-faint" aria-hidden />
              : <ChevronDown size={12} className="shrink-0 text-faint" aria-hidden />}
-            <FolderIcon size={14} className="shrink-0 text-accent" aria-hidden />
+            <FileIcon name={row.name} isDir expanded={!collapsed} size={14} />
             <span className="min-w-0 flex-1 truncate">
              {highlightName(row.name, terms).map((part, partIndex) => (
               part.hit
@@ -306,7 +282,6 @@ export function ReferencePicker(): React.JSX.Element | null {
            </button>
           );
          }
-         const FileIcon = fileIconFor(row.name);
          return (
           <button
            key={`f:${row.item.abs}`}
@@ -320,7 +295,7 @@ export function ReferencePicker(): React.JSX.Element | null {
            className={`flex w-full cursor-pointer items-center gap-1.5 rounded-md py-[3px] pr-2 text-left transition-colors duration-100 ${activeIndex === row.index ? "bg-active" : "hover:bg-hover"}`}
           >
            <span className="w-3 shrink-0" aria-hidden />
-           <FileIcon size={14} className="shrink-0 text-muted" aria-hidden />
+           <FileIcon name={row.name} isDir={false} size={14} />
            <span className="min-w-0 flex-1 truncate text-[12px]">
             {highlightName(row.name, terms).map((part, partIndex) => (
              part.hit

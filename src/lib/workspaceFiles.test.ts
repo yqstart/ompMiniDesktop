@@ -10,7 +10,10 @@ import {
  joinAbs,
  rankRefItems,
  referenceInsertText,
+ referenceLabel,
  referenceScope,
+ referenceTarget,
+ relativeToCwd,
  type RefItem,
 } from "./workspaceFiles";
 
@@ -267,5 +270,37 @@ describe("聊天草稿追加（appendReference）", () => {
 
  it("路径含空白走引号形式（与注入终端同一份 referenceInsertText）", () => {
   expect(appendReference("", "/a/b c.ts")).toBe('@"/a/b c.ts" ');
+ });
+});
+
+describe("引用路径口径（相对优先，绝对兜底）", () => {
+ it("会话目录内的条目给相对路径", () => {
+  expect(relativeToCwd("/w/alpha", "/w/alpha/src/a.ts")).toBe("src/a.ts");
+  expect(relativeToCwd("/w/alpha/", "/w/alpha/src/a.ts")).toBe("src/a.ts");
+  expect(referenceTarget("/w/alpha", "/w/alpha/src/a.ts")).toBe("src/a.ts");
+  expect(appendReference("", referenceTarget("/w/alpha", "/w/alpha/src/a.ts"))).toBe("@src/a.ts ");
+ });
+
+ it("目录本身 / 目录外的条目：不给相对路径（保留绝对路径）", () => {
+  // 会话目录自己
+  expect(relativeToCwd("/w/alpha", "/w/alpha")).toBeNull();
+  expect(relativeToCwd("/w/alpha", "/w/alpha/")).toBeNull();
+  // 同前缀但不是子目录（`/w/alpha-2` 不是 `/w/alpha` 的子路径）
+  expect(relativeToCwd("/w/alpha", "/w/alpha-2/a.ts")).toBeNull();
+  // 上一层（跨项目）：绝不用 `../` 把解析引到别的目录
+  expect(relativeToCwd("/w/alpha", "/w/beta/a.ts")).toBeNull();
+  expect(referenceTarget("/w/alpha", "/w/beta/a.ts")).toBe("/w/beta/a.ts");
+ });
+
+ it("含空格 / 中文路径照样相对化，注入仍走引号形式", () => {
+  expect(referenceTarget("/w/alpha", "/w/alpha/docs/设计 稿.md")).toBe("docs/设计 稿.md");
+  expect(appendReference("", referenceTarget("/w/alpha", "/w/alpha/docs/设计 稿.md"))).toBe('@"docs/设计 稿.md" ');
+ });
+
+ it("芯片短名：文件给名字，目录补尾斜杠", () => {
+  expect(referenceLabel("src/components/FileTree.tsx", false)).toBe("FileTree.tsx");
+  expect(referenceLabel("src/components", true)).toBe("components/");
+  expect(referenceLabel("/abs/path/dir/", true)).toBe("dir/");
+  expect(referenceLabel("a.ts", false)).toBe("a.ts");
  });
 });

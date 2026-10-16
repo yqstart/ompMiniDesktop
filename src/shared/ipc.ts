@@ -151,6 +151,8 @@ export const IPC = {
  // —— V42（右栏工作台）：文件目录树 + 终端 ——
  /** 列一层目录（文件页签懒加载）；`withRepoRoot` 只在树根传（变更标色要仓库根）。 */
  listDir: "list_dir",
+ /** 文件页签的快速过滤：按名字 / 相对路径递归搜索文件与文件夹（只读，带扫描预算）。 */
+ searchPaths: "search_paths",
  /** 打开终端：PTY 里的登录 shell，输出经 Channel 回传（见 `pty.rs`）。 */
  terminalSpawn: "terminal_spawn",
  terminalWrite: "terminal_write",

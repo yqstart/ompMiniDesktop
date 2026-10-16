@@ -93,6 +93,9 @@ importers:
       jsdom:
         specifier: ^30.0.1
         version: 30.0.1
+      material-icon-theme:
+        specifier: 5.39.0
+        version: 5.39.0
       tailwindcss:
         specifier: ^4.1.11
         version: 4.3.3
@@ -1112,6 +1115,9 @@ packages:
     resolution: {integrity: sha512-PAJdDJusoxnwm1VwW07VWwUN1sl7smmC3OKggvndJFadxxDRyFJBX/ggnu/KE4kQAB7a3Dp8f/YXC1FlUprWmA==}
     engines: {node: '>= 16'}
 
+  chroma-js@3.2.0:
+    resolution: {integrity: sha512-os/OippSlX1RlWWr+QDPcGUZs0uoqr32urfxESG9U93lhUfbnlyckte84Q8P1UQY/qth983AS1JONKmLS4T0nw==}
+
   color-convert@2.0.1:
     resolution: {integrity: sha512-RRECPsj7iu/xb5oKYcsFHSppFNnsj/52OVTRKb4zP5onXwVF3zVmmToNcOfGC+CRDpfK/U584fMg38ZHCaElKQ==}
     engines: {node: '>=7.0.0'}
@@ -1598,6 +1604,10 @@ packages:
 
   markdown-table@3.0.4:
     resolution: {integrity: sha512-wiYz4+JrLyb/DqW2hkFJxP7Vd7JuTDm77fvbM8VfEQdmSMqcImWeeRbHwZjBjIFki/VaMK2BhFi7oUUZeM5bqw==}
+
+  material-icon-theme@5.39.0:
+    resolution: {integrity: sha512-6dUQXJgNBlklaILIOlCZXhSBTsBmLkt11XMoTY7Uyb4ZikelGgZHOY4AdOWBA+SXz51cVWfOVnTHrTwGM91eYw==}
+    engines: {vscode: ^1.55.0}
 
   mdast-util-find-and-replace@3.0.2:
     resolution: {integrity: sha512-Tmd1Vg/m3Xz43afeNxDIhWRtFZgM2VLyaf4vSTYwudTyeuTneoL3qtWMA5jeLyz/O1vDJmmV4QuScFCA2tBPwg==}
@@ -3117,6 +3127,8 @@ snapshots:
 
   check-error@2.1.3: {}
 
+  chroma-js@3.2.0: {}
+
   color-convert@2.0.1:
     dependencies:
       color-name: 1.1.4
@@ -3608,6 +3620,10 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.6.0
 
   markdown-table@3.0.4: {}
+
+  material-icon-theme@5.39.0:
+    dependencies:
+      chroma-js: 3.2.0
 
   mdast-util-find-and-replace@3.0.2:
     dependencies:

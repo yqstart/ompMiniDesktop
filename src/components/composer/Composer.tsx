@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { ArrowUp, FileText, Hourglass, PenLine, Timer, TriangleWarning, X } from "reicon-react";
+import { ArrowUp, Hourglass, PenLine, Timer, TriangleWarning, X } from "reicon-react";
 import type { AvailableCommand, Goal, ImageAttachment, ViewMsg } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { api } from "@shared/api";
 import { attachmentFromFile, attachmentFromOmpImage, dataUrl } from "../../lib/attachments";
 import { fmt } from "../../lib/locale";
 import { extractMentions } from "../../lib/mentions";
+import { referenceLabel } from "../../lib/workspaceFiles";
 import { LOCAL_COMMANDS, localCommandDescription, matchLocalCommand, type LocalCommand } from "../../lib/localCommands";
 import { cycleSessionApproval } from "../../lib/sessionApproval";
 import { loadHistory, pushHistory } from "../../lib/promptHistory";
@@ -17,6 +18,7 @@ import { openForkedSession, refreshTitleAfterFirstSend } from "../../lib/session
 import { useText } from "../../lib/useText";
 import { ProjectPicker } from "../pickers/ProjectPicker";
 import { BranchPicker } from "../pickers/BranchPicker";
+import { FileIcon } from "../workbench/FileIcon";
 import { CommitButton } from "./CommitButton";
 import { SessionStatsBar } from "../thread/SessionStatsBar";
 import { CompactButton, QueueBadge } from "../thread/StatusBar";
@@ -123,7 +125,11 @@ export function Composer() {
  const empty = useApp((s) => (s.activeSessionId ? (s.eventsBySession[s.activeSessionId]?.length ?? 0) === 0 : false));
  const mentions = useMemo(() => extractMentions(draft), [draft]);
  const mentionKey = `${cwd}\u0000${mentions.join("\u0000")}`;
- const [checks, setChecks] = useState<{ key: string; exists: Record<string, boolean> }>({ key: "", exists: {} });
+ /** 提及的存在性回执（`check_paths`）：芯片据此标「缺失 / 目录 / 文件」。 */
+ const [checks, setChecks] = useState<{ key: string; info: Record<string, { exists: boolean; isDir: boolean }> }>({
+  key: "",
+  info: {},
+ });
  const [attachError, setAttachError] = useState<string | null>(null);
  const [dragging, setDragging] = useState(false);
  // `@` 补全状态：mentionIdx 为高亮下标，-1 = 无补全；mentionToken 是 `@` 后的路径前缀。
@@ -139,7 +145,12 @@ export function Composer() {
    void api
     .checkPaths(cwd, mentions)
     .then((rs) => {
-     if (alive) setChecks({ key: mentionKey, exists: Object.fromEntries(rs.map((r) => [r.path, r.exists])) });
+     if (alive) {
+      setChecks({
+       key: mentionKey,
+       info: Object.fromEntries(rs.map((r) => [r.path, { exists: r.exists, isDir: r.isDir }])),
+      });
+     }
     })
     .catch(() => undefined);
   }, 300);
@@ -712,17 +723,24 @@ export function Composer() {
     {mentions.length > 0 && (
      <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2" aria-label={t.mentionsAria}>
       {mentions.map((p) => {
-       const exists = checks.key === mentionKey ? checks.exists[p] : undefined;
-       const missing = exists === false;
+       const check = checks.key === mentionKey ? checks.info[p] : undefined;
+       const missing = check?.exists === false;
+       // 芯片只显示**名字**（目录补尾斜杠）：草稿里已经是相对路径，整条路径仍挂在 title 上
+       const name = referenceLabel(p, false);
+       const isDir = check?.isDir === true;
        return (
         <span
          key={p}
-         title={missing ? t.mentionMissingTitle : p}
+         title={missing ? `${t.mentionMissingTitle}（${p}）` : p}
          className={`inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-0.5 font-mono text-xs ${missing ? "border-warn/50 text-warn" : "border-border text-muted"
           }`}
         >
-         {missing ? <TriangleWarning size={12} aria-hidden /> : <FileText size={12} aria-hidden />}
-         <span className="truncate">{p}</span>
+         {missing ? (
+          <TriangleWarning size={12} aria-hidden />
+         ) : (
+          <FileIcon name={name} isDir={isDir} size={13} />
+         )}
+         <span className="truncate">@{isDir ? `${name}/` : name}</span>
          <span className="sr-only">{missing ? t.pathMissing : t.pathExists}</span>
         </span>
        );

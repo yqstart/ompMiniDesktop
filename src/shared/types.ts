@@ -1207,6 +1207,24 @@ export interface DirListing {
  repoRoot: string | null;
 }
 
+/** 快速过滤的一条命中（`search_paths` 的返回项）。 */
+export interface PathHit {
+ /** 条目名（最后一段）。 */
+ name: string;
+ /** 相对搜索根（POSIX 分隔）：界面显示与引用注入都用它，不显示绝对路径。 */
+ rel: string;
+ /** 绝对路径（打开 / 展开到该目录用它）。 */
+ path: string;
+ isDir: boolean;
+}
+
+/** 一次快速过滤的结果。 */
+export interface PathSearch {
+ hits: PathHit[];
+ /** 结果被截断（命中 / 扫描预算用尽，或超出上限）。 */
+ truncated: boolean;
+}
+
 /** 终端 spawn 入参（`id` 由前端生成：写 / resize / kill 都用它寻址）。 */
 export interface TerminalSpawnOpts {
  id: string;
