@@ -30,6 +30,17 @@ const HISTORY_LINES = [
 
 vi.mock("@shared/api", () => ({
  api: {
+  createSession: vi.fn(async (cwd: string) => ({
+   id: "sess-new-1",
+   projectId: "p1",
+   title: "未命名会话",
+   cwd,
+   timestamp: 5,
+   archived: false,
+   corrupt: false,
+   note: null,
+   running: false,
+  })),
   openSession: vi.fn(async (id: string) => ({
    id,
    projectId: "p1",
@@ -51,7 +62,8 @@ vi.mock("@shared/api", () => ({
 
 import { api } from "@shared/api";
 import { useApp } from "../stores/app";
-import { fallbackTitleFromText, openSessionWithHistory, refreshTitleAfterFirstSend } from "./sessionOpen";
+import { TEXT } from "./locale";
+import { createChatIn, fallbackTitleFromText, openSessionWithHistory, refreshTitleAfterFirstSend } from "./sessionOpen";
 
 describe("打开会话：历史落库与去重", () => {
  beforeEach(() => {
@@ -279,5 +291,84 @@ describe("打开被别处持有的会话（身份漂移）", () => {
   expect(st.eventsBySession[FORKED_ID]?.some((m) => m.id === "fork-note")).toBe(true);
   // 历史也落在真实身份下
   expect((st.eventsBySession[FORKED_ID] ?? []).some((m) => m.kind === "user")).toBe(true);
+ });
+});
+
+/**
+ * 新建会话的降级说明（用户实测的现场）：项目里留着 omp 已改名 / 删除的模型，
+ * 后端清掉失效偏好、用默认档把会话建起来，并在回包里带回 `notice`。
+ * 这里验的是前端那一半：**说明必须落到会话流里**（否则用户只看到「模型自己变了」）。
+ */
+describe("新建会话：参数被 omp 拒绝后的降级说明", () => {
+ beforeEach(() => {
+  useApp.setState({ eventsBySession: {}, sessions: [], activeSessionId: null, statusBySession: {}, locale: "zh-CN" });
+  vi.mocked(api.getHistory).mockResolvedValue({ lines: [], truncated: false });
+ });
+
+ it("带回 notice 时在会话流尾追加一条本地说明", async () => {
+  vi.mocked(api.createSession).mockResolvedValueOnce({
+   id: "sess-new-1",
+   projectId: "p1",
+   title: "未命名会话",
+   cwd: "/a",
+   timestamp: 5,
+   archived: false,
+   corrupt: false,
+   note: null,
+   running: false,
+   notice: { model: "ccproxy/deepseek/deepseek-v4.1-flash-fast", thinking: "max", fallbackModel: true, detail: "Model \"x\" not found" },
+  });
+  const res = await createChatIn("/a", { projectName: "ompMiniDesktop" });
+  expect(res.ok).toBe(true);
+
+  const notes = (useApp.getState().eventsBySession["sess-new-1"] ?? []).filter((m) => m.kind === "command");
+  expect(notes).toHaveLength(1);
+  const text = notes[0].kind === "command" ? notes[0].output : "";
+  // 失效的模型与思考档都要点名（用户才知道是哪一项不成立）
+  expect(text).toContain("ccproxy/deepseek/deepseek-v4.1-flash-fast");
+  expect(text).toContain("max");
+  expect(text).toContain("默认档");
+ });
+
+ it("没有 notice（正常新建）就不落说明行", async () => {
+  await createChatIn("/a");
+  expect((useApp.getState().eventsBySession["sess-new-1"] ?? []).filter((m) => m.kind === "command")).toHaveLength(0);
+ });
+
+ it("omp 连默认档都没起起来（fallbackModel=false）时如实带上 omp 原话，不甩锅给项目偏好", async () => {
+  vi.mocked(api.createSession).mockResolvedValueOnce({
+   id: "sess-new-1",
+   projectId: "p1",
+   title: "未命名会话",
+   cwd: "/a",
+   timestamp: 5,
+   archived: false,
+   corrupt: false,
+   note: null,
+   running: false,
+   notice: { model: null, thinking: null, fallbackModel: false, detail: "No models available" },
+  });
+  await createChatIn("/a");
+  const rows = (useApp.getState().eventsBySession["sess-new-1"] ?? []).filter((m) => m.kind === "command");
+  const text = rows[0]?.kind === "command" ? rows[0].output : "";
+  expect(text).toContain("No models available");
+  expect(text).not.toContain("默认模型"); // 不是「模型被删」那一档
+ });
+
+ it("两次都失败：错误文案带出 omp 的真实原因（不再只说「进程意外退出」）", async () => {
+  vi.mocked(api.createSession).mockRejectedValueOnce(new Error('omp 在就绪前退出（omp 输出：Model "x" not found）'));
+  const res = await createChatIn("/a", { projectName: "ompMiniDesktop" });
+  expect(res.ok).toBe(false);
+  if (!res.ok) {
+   expect(res.message).toContain("ompMiniDesktop");
+   expect(res.message).toContain('Model "x" not found');
+  }
+ });
+
+ it("失败文案的空原因分支兜底（后端没给 message 时用短文案）", async () => {
+  vi.mocked(api.createSession).mockRejectedValueOnce("boom");
+  const res = await createChatIn("/a", { projectName: "ompMiniDesktop" });
+  expect(res.ok).toBe(false);
+  if (!res.ok) expect(res.message).toBe(TEXT["zh-CN"].createChatFailedInShort.replace("{0}", "ompMiniDesktop"));
  });
 });

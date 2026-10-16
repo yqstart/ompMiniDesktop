@@ -56,7 +56,7 @@ pub fn cmd_err(code: &str, message: String, hint: Option<String>) -> CmdError {
     CmdError { ok: false, code: code.into(), message, hint }
 }
 
-pub(crate) fn save_overlay(state: &State<AppState>) -> Result<(), String> {
+pub(crate) fn save_overlay(state: &AppState) -> Result<(), String> {
     let text = {
         let ov = state.overlay.try_lock().map_err(|_| "overlay 忙，请重试".to_string())?;
         serde_json::to_string_pretty(&*ov).map_err(|e| e.to_string())?
@@ -846,6 +846,27 @@ pub struct SessionView {
     pub note: Option<String>,
     /// 是否有长驻聊天进程（V32；终端形态不看这个字段，聊天形态列表行标记「运行中」）。
     pub running: bool,
+    /// 新建会话时**参数被 omp 拒绝而降级**的说明（`create_session` 专有；其余路径为 `None`）。
+    /// 之所以让它随视图回传：前端在会话内追加一条本地说明（消息流已有的反馈位），
+    /// 用户才知道「为什么这次没用上次的模型」（无提示的静默降级比报错更难排查）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notice: Option<FallbackNotice>,
+}
+
+/// 降级说明：哪些启动参数在 omp 侧已经不成立（覆盖层里留着的失效偏好）。
+///
+/// 判断依据是**新进程实际用什么起来**的：降级后进程没拿到模型 ⇒ omp 默认模型本身不可用，
+/// 此时不把责任推给参数（`fallback_model` 置否、`detail` 带上原始报错）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FallbackNotice {
+    /// 失效的模型（`--model` 被 omp 拒绝）。
+    pub model: Option<String>,
+    /// 失效的思考档（`--thinking` 被 omp 拒绝）。
+    pub thinking: Option<String>,
+    /// 降级后 omp 是否真的用上了模型（否 = 默认档也不可用，原因见 `detail`）。
+    pub fallback_model: bool,
+    /// omp 自己写的报错首行（诊断用）。
+    pub detail: Option<String>,
 }
 
 /// 显示标题的兜底链：备注 > omp 真标题 > 首条用户消息派生的短标题 > 「未命名会话 MM-DD」。
@@ -976,6 +997,7 @@ pub async fn list_sessions(
                     corrupt: true,
                     note: None,
                     running: false,
+                    notice: None,
                 });
                 continue;
             }
@@ -996,6 +1018,7 @@ pub async fn list_sessions(
                 corrupt: false,
                 note,
                 running: running.get(&head.id).copied().unwrap_or(false),
+                notice: None,
                 id: head.id.clone(),
             });
         }
@@ -1092,6 +1115,7 @@ pub fn list_archived_in(
                 corrupt: false,
                 note,
                 running: running.get(&head.id).copied().unwrap_or(false),
+                notice: None,
                 id: head.id.clone(),
             });
         }
@@ -1359,20 +1383,129 @@ pub fn unlanded_views(
                 corrupt: false,
                 note,
                 running: running.get(sid).copied().unwrap_or(false),
+                notice: None,
                 id: sid.clone(),
             }
         })
         .collect()
 }
 
+/// 「首发生成被 omp 拒绝」之后的走向（纯决策，不碰 IO；见 [`plan_after_rejected_params`]）。
+pub enum Plan {
+    /// 降级成功：用 omp 默认档建起来了，`forget` = 要从项目偏好里清掉的那对失效值。
+    Degraded { sid: String, sfile: String, meta: crate::runtime::SessionMeta, fallback: FallbackNotice, forget: Option<(String, String)> },
+    /// 两次都没起来：把两段原因合成一条错误。
+    GiveUp(CmdError),
+}
+
+/// 首发（带项目偏好的模型 / 思考档）被 omp 拒绝后的决策。
+///
+/// 三档口径：
+/// - 重试**成功且拿到了模型** → 偏好确实失效（omp 拒绝非法 `--model` / `--thinking` 时是
+///   直接退出），降级生效，并要求把这对失效偏好从项目上清掉（不自愈的话每次新建都要
+///   白失败一次）。
+/// - 重试成功但**仍没有模型** → 问题不在偏好上（omp 侧压根没有可用模型），如实说明，
+///   不动用户的项目偏好。
+/// - 重试也失败 → 两段原因合成一条错误回给用户（只报后者会把「参数被拒」这个真因藏掉）。
+fn plan_after_rejected_params(
+    first_err: &CmdError,
+    retry: Result<(String, String, crate::runtime::SessionMeta), CmdError>,
+    model: &Option<String>,
+    thinking: &Option<String>,
+) -> Plan {
+    match retry {
+        Ok((sid, sfile, meta)) => {
+            let detail = stderr_first_line(&first_err.message);
+            if meta.model.is_none() {
+                Plan::Degraded {
+                    sid,
+                    sfile,
+                    meta,
+                    fallback: FallbackNotice { model: None, thinking: None, fallback_model: false, detail },
+                    forget: None,
+                }
+            } else {
+                Plan::Degraded {
+                    sid,
+                    sfile,
+                    meta,
+                    fallback: FallbackNotice { model: model.clone(), thinking: thinking.clone(), fallback_model: true, detail },
+                    forget: Some((model.clone().unwrap_or_default(), thinking.clone().unwrap_or_default())),
+                }
+            }
+        }
+        Err(mut e2) => {
+            e2.message = format!(
+                "新建会话失败：{}；去掉项目偏好（模型 / 思考档）重试仍失败：{}",
+                first_err.message, e2.message
+            );
+            Plan::GiveUp(e2)
+        }
+    }
+}
+
+/// 按给定参数起一个新建会话的长驻进程（`create_session` 的首发与降级重试共用一份）。
+async fn spawn_new<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    state: &AppState,
+    bin: &str,
+    cwd: &str,
+    model: Option<&str>,
+    thinking: Option<&str>,
+) -> Result<(String, String, crate::runtime::SessionMeta), CmdError> {
+    crate::runtime::spawn_long_lived(
+        app,
+        state.runtime.clone(),
+        crate::runtime::SpawnOpts {
+            bin: bin.to_string(),
+            cwd: cwd.to_string(),
+            resume: None,
+            model: model.map(str::to_string),
+            thinking: thinking.map(str::to_string),
+            approval: None,
+        },
+    )
+    .await
+}
+
+/// 新建会话的返回：视图 + （可选的）降级说明。
+///
+/// 为什么不让 `create_session` 直接返回 `SessionView`：参数被 omp 拒绝而降级这件事
+/// 必须让用户看见（见 [`FallbackNotice`]），而 `SessionView` 是列表 / 顶栏 / 归档页
+/// 共用的行结构，只有这条路径需要承载说明——所以单开一层包装，`serde` 侧 `flatten` 成
+/// 平铺字段：前端拿到的仍是「视图 + `fallback`」，`SessionView` 的消费方（列表 / 顶栏）不用改。
+#[derive(Debug, serde::Serialize)]
+pub struct CreateSessionResult {
+    #[serde(flatten)]
+    pub view: SessionView,
+    pub fallback: Option<FallbackNotice>,
+}
+
 /// 新建聊天会话（V32：按目录开——左栏目录行 / 会话弹窗的「新建」都传 checkout 路径；
 /// 模型与思考档沿用所属项目上次的选择）。
+///
+/// **参数被 omp 拒绝时必须还能建起来**（用户实测的坑）：覆盖层记的 `last_model` /
+/// `last_thinking` 会在上游改名 / 删除模型后变成悬空值，而 omp 对非法 `--model` /
+/// `--thinking` 是**直接退出**（实测 `Error: Model "ccproxy/deepseek/deepseek-v4.1-flash-fast"
+/// not found`），于是「选项目 → 新建会话」整条路失败、报「omp 进程意外退出」。
+/// 这里的口径：带上项目偏好试一次；被拒就不带这两个参数重试（omp 用默认档），
+/// 成功即把项目里那对失效偏好清掉（不自愈的话每次新建都要多失败一次），
+/// 并把降级说明随视图回传。
 #[tauri::command]
-pub async fn create_session(
-    app: AppHandle,
+pub async fn create_session<R: tauri::Runtime>(
+    app: AppHandle<R>,
     state: State<'_, AppState>,
     cwd: String,
-) -> Result<SessionView, CmdError> {
+) -> Result<CreateSessionResult, CmdError> {
+    create_session_in(&app, &state, cwd).await
+}
+
+/// `create_session` 的泛型实现（命令壳只负责取 State）：单测用 mock runtime 直接调它。
+pub async fn create_session_in<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    state: &AppState,
+    cwd: String,
+) -> Result<CreateSessionResult, CmdError> {
     if !std::path::Path::new(&cwd).is_dir() {
         return Err(cmd_err("DIR_MISSING", "目录不存在".into(), None));
     }
@@ -1394,24 +1527,102 @@ pub async fn create_session(
     };
     // spawn 内部以会话 id 作 runtime 表的键（不再需要占位键换名——换名窗口会让
     // pump 的首批帧查不到表条目：命令面缓存丢、偏好回写跳过）
-    let (sid, sfile, _meta) = crate::runtime::spawn_long_lived(
-        &app,
-        state.runtime.clone(),
-        crate::runtime::SpawnOpts { bin, cwd: cwd.clone(), resume: None, model, thinking, approval: None },
-    )
-    .await?;
-    let head = parse_session_head(std::path::Path::new(&sfile));
-    // 刚建好的会话还没有 jsonl（omp 懒写盘）：归属退回 spawn 的 --cwd、时间用建会话这一刻
-    // ——文件头此时全空，直接透传 timestamp=0 会让左栏那一行显示成 1970 的「01-01」。
-    let session_cwd = owner_cwd(&head.cwd, &cwd);
+    let first = spawn_new(app, state, &bin, &cwd, model.as_deref(), thinking.as_deref()).await;
+    let (sid, sfile, _meta, fallback) = match first {
+        Ok((sid, sfile, meta)) => (sid, sfile, meta, None),
+        // 没带项目偏好就失败 → 不是参数的问题，原样上抛（错误里已含 omp 的 stderr 原因）
+        Err(e) if model.is_none() && thinking.is_none() => return Err(e),
+        Err(e) => match plan_after_rejected_params(&e, spawn_new(app, state, &bin, &cwd, None, None).await, &model, &thinking) {
+            Plan::GiveUp(e2) => return Err(e2),
+            Plan::Degraded { sid, sfile, meta, fallback: notice, forget } => {
+                if let Some((gone_model, gone_thinking)) = forget {
+                    forget_project_prefs(state, &cwd, &gone_model, &gone_thinking).await;
+                }
+                (sid, sfile, meta, Some(notice))
+            }
+        },
+    };
+    let view = build_new_session_view(state, &sid, &sfile, &cwd).await;
+    Ok(CreateSessionResult { view, fallback })
+}
+
+/// 清掉某项目里**已被 omp 拒绝**的模型 / 思考档偏好（只清仍等于失效值的那一项，
+/// 期间用户手动改过的不动）；`save_overlay` 走 `try_lock`，所以必须放在锁外调用。
+async fn forget_project_prefs(state: &AppState, cwd: &str, gone_model: &str, gone_thinking: &str) {
+    // 归属口径必须与 `create_session` 取偏好时一致（`owner_project` 的**路径前缀**语义）：
+    // 在子目录 / worktree 里建的会话，精确相等找不到项目，自愈就会静默失效。
+    let changed = {
+        let mut ov = state.overlay.lock().await;
+        let scope: Vec<(String, String)> =
+            ov.projects.iter().map(|p| (p.id.clone(), p.path.clone())).collect();
+        let pid = owner_project(&scope, cwd);
+        let target = pid.and_then(|id| ov.projects.iter_mut().find(|p| p.id == id));
+        match target {
+            Some(p) => {
+                let mut changed = false;
+                if !gone_model.is_empty() && p.last_model.as_deref() == Some(gone_model) {
+                    p.last_model = None;
+                    changed = true;
+                }
+                if !gone_thinking.is_empty() && p.last_thinking.as_deref() == Some(gone_thinking) {
+                    p.last_thinking = None;
+                    changed = true;
+                }
+                changed
+            }
+            None => false,
+        }
+    };
+    if changed {
+        let _ = save_overlay(state);
+    }
+}
+
+/// 从「omp 输出：xxx（yyy）」这类错误消息里取回 omp 自己写的首行（诊断用，取不到就 `None`）。
+///
+/// 剥的是**最外层**那对括号（可能套好几层），不是「第一个右括号」：omp 自己的报错
+/// 也常带括号（`Model "x" not found（Run `omp models`）`），按第一个 `）` 切会把原话截断。
+fn stderr_first_line(message: &str) -> Option<String> {
+    let mut raw = message.split_once("omp 输出：")?.1;
+    if let Some(nl) = raw.find('\n') {
+        raw = &raw[..nl];
+    }
+    raw = raw.trim();
+    // 只有**紧跟标记的那双括号**是壳自己加的（见 `with_stderr_reason` 的拼法），只脱这一层：
+    // omp 报错本身常带括号（`Model "x" not found（did you mean y?）`），循环剥会把原话里的
+    // 括号也吃掉、连尾部一起截断。
+    let body = match raw.strip_prefix('（') {
+        Some(b) => b,
+        None => raw,
+    };
+    raw = match body.strip_suffix('）') {
+        Some(b) => b,
+        None => body,
+    }
+    .trim();
+    if raw.is_empty() {
+        None
+    } else {
+        Some(raw.to_string())
+    }
+}
+
+/// 新建会话的视图：文件头此时全空（omp 懒写盘），归属退回 spawn 的 `--cwd`、
+/// 时间用建会话这一刻——直接透传 timestamp=0 会让左栏那一行显示成 1970 的「01-01」。
+async fn build_new_session_view(state: &AppState, sid: &str, sfile: &str, cwd: &str) -> SessionView {
+    let head = parse_session_head(std::path::Path::new(sfile));
+    let session_cwd = owner_cwd(&head.cwd, cwd);
     let session_ts = if head.timestamp == 0 { chrono::Utc::now().timestamp_millis() } else { head.timestamp };
-    let ov = state.overlay.lock().await;
-    let projects: Vec<(String, String)> = ov.projects.iter().map(|p| (p.id.clone(), p.path.clone())).collect();
-    let pid = owner_project(&projects, &session_cwd);
-    let note = ov.notes.get(&sid).cloned();
-    Ok(SessionView {
+    let (projects, note) = {
+        let ov = state.overlay.lock().await;
+        (
+            ov.projects.iter().map(|p| (p.id.clone(), p.path.clone())).collect::<Vec<(String, String)>>(),
+            ov.notes.get(sid).cloned(),
+        )
+    };
+    SessionView {
         title: display_title(note.as_ref(), &head.title, head.first_user_text.as_deref(), session_ts),
-        project_id: pid,
+        project_id: owner_project(&projects, &session_cwd),
         cwd: session_cwd,
         timestamp: session_ts,
         archived: false,
@@ -1420,8 +1631,9 @@ pub async fn create_session(
         // 新建 = 还没跑过任何一轮：运行标（任务在跑）为否；列表转圈只表示任务在跑，
         // 不是"进程开着"（见 running_snapshot）
         running: false,
-        id: sid,
-    })
+        notice: None,
+        id: sid.to_string(),
+    }
 }
 
 /// 打开（或聚焦）一个聊天会话：已有长驻进程直接返回视图；否则 `omp --resume` 拉起。
@@ -2138,6 +2350,7 @@ async fn build_session_view(
         corrupt: false,
         note,
         running,
+        notice: None,
         id: id.to_string(),
     }
 }
@@ -2583,10 +2796,85 @@ mod tests {
     use super::{
         apply_project_order, assign_members, catalog_fresh, clean_workspace_name, derived_title, display_title,
         discover_omp_path, get_global_approval, kill_runtime, list_archived_in, load_cached, load_state,
-        owner_project, rpc_request, scan_window, session_file_for, spawn_session_runtime, AppState, MODELS_TTL_MS,
+        owner_project, plan_after_rejected_params, rpc_request, scan_window, session_file_for,
+        spawn_session_runtime, stderr_first_line, AppState, Plan, MODELS_TTL_MS,
     };
     use crate::overlay::{Overlay, Project};
     use std::collections::HashMap;
+
+    /// `stderr_first_line`：从「omp 输出：xxx（yyy）」里取回 omp 的原话；
+    /// 没有那段标记（不是启动失败类错误）就回 `None`，不许瞎猜。
+    #[test]
+    fn stderr_first_line_extracts_omp_reason() {
+        assert_eq!(
+            stderr_first_line("omp 在就绪前退出（omp 输出：Model \"a/b\" not found（did you mean a/c?））").as_deref(),
+            Some("Model \"a/b\" not found（did you mean a/c?）"),
+            "只脱壳加的那一层：omp 原话里的括号要留着"
+        );
+        // 单层括号（单行 stderr）：括号是壳加的，一并剥掉
+        assert_eq!(
+            stderr_first_line("omp 在就绪前退出（omp 输出：No models available）").as_deref(),
+            Some("No models available")
+        );
+        // 消息里那层包裹括号与 omp 自己的括号同在：只脱壳加的那一层，
+        // omp 原话（含它自己的括号）完整留下
+        assert_eq!(
+            stderr_first_line("omp 在就绪前退出（omp 输出：Model \"x\" not found（Run omp models find））").as_deref(),
+            Some("Model \"x\" not found（Run omp models find）")
+        );
+        assert_eq!(stderr_first_line("目录不存在"), None);
+        assert_eq!(stderr_first_line("omp 输出：").as_deref(), None);
+    }
+
+    /// 参数被 omp 拒绝后的三档决策（用户实测的坑：覆盖层里的失效模型让新建会话整条失败）。
+    #[test]
+    fn rejected_params_decision_paths() {
+        let err = crate::commands::cmd_err(
+            "RPC_EOF",
+            "omp 在就绪前退出（omp 输出：Model \"ccproxy/deepseek/deepseek-v4.1-flash-fast\" not found）".into(),
+            None,
+        );
+        let model = Some("ccproxy/deepseek/deepseek-v4.1-flash-fast".to_string());
+        let thinking = Some("max".to_string());
+        let ok = |with_model: bool| {
+            let mut meta = crate::runtime::SessionMeta::default();
+            if with_model {
+                meta.model = Some(crate::runtime::ModelRef { provider: "deepseek".into(), id: "deepseek-flash".into(), name: None });
+            }
+            Ok(("sid-1".to_string(), "/tmp/x.jsonl".to_string(), meta))
+        };
+
+        // ① 重试成功且拿到模型 = 偏好失效：降级成立，且要求清掉那对失效偏好（自愈）
+        match plan_after_rejected_params(&err, ok(true), &model, &thinking) {
+            Plan::Degraded { fallback, forget, .. } => {
+                assert!(fallback.fallback_model, "拿到模型 ⇒ 是偏好被拒");
+                assert_eq!(fallback.model.as_deref(), Some("ccproxy/deepseek/deepseek-v4.1-flash-fast"));
+                assert_eq!(fallback.thinking.as_deref(), Some("max"));
+                assert!(fallback.detail.as_deref().unwrap_or("").contains("not found"), "说明里要带 omp 原话");
+                assert_eq!(forget, Some(("ccproxy/deepseek/deepseek-v4.1-flash-fast".to_string(), "max".to_string())));
+            }
+            _ => panic!("应判定为降级成功"),
+        }
+
+        // ② 重试成功但没模型 = 问题不在偏好上：不走「偏好失效」那档，也不动用户的项目偏好
+        match plan_after_rejected_params(&err, ok(false), &model, &thinking) {
+            Plan::Degraded { fallback, forget, .. } => {
+                assert!(!fallback.fallback_model, "omp 侧就没有可用模型 ⇒ 不能把责任推给项目偏好");
+                assert_eq!(forget, None, "不许清用户偏好");
+            }
+            _ => panic!("应判定为降级成功"),
+        }
+
+        // ③ 两次都失败：两段原因都要在（只报后者会把「参数被拒」这个真因藏掉）
+        let e2 = crate::commands::cmd_err("SPAWN_FAILED", "启动 omp 失败：权限不足".into(), None);
+        match plan_after_rejected_params(&err, Err(e2), &model, &thinking) {
+            Plan::GiveUp(e) => {
+                assert!(e.message.contains("not found"), "要带首发被拒的原因：{}", e.message);
+                assert!(e.message.contains("权限不足"), "要带重试失败的原因：{}", e.message);
+            }
+            _ => panic!("应判定为放弃"),
+        }
+    }
 
     /// 显示标题的兜底链（V44）：备注 > omp 真标题 > 首条用户消息派生（12 字 + 省略号）> 未命名 + 日期。
     /// 派生档服务的是 rpc-ui 会话——omp 在该模式强制 `PI_NO_TITLE=1`，从来没有自动标题。
@@ -2796,6 +3084,212 @@ mod tests {
             dir.join("--tmp-demo--").join(old_file)
         );
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 整条修复的端到端回归（用户实测的现场）：项目里留着 omp 已不认的模型，
+    /// 「选项目 → 新建会话」必须还能建起来。
+    ///
+    /// 桩 omp 精确复现现场：**带 `--model` 就拒绝并退出**（真实 omp 对非法模型就是这个行为，
+    /// `Error: Model "…" not found`，stdout 一帧都没有），不带就正常三行握手。
+    /// 断言三件事：① 会话真的建起来了（降级重试生效）；② 说明里带上失效的模型名（用户看得见）；
+    /// ③ 项目里那对失效偏好被清掉（下次新建不再白失败一次）。
+    ///
+    /// 隔离：`load_state` 的覆盖层默认落在 `app_data_dir()`，而 mock runtime 下那是**全局共享**
+    /// 路径（实测多个测试会互相抹掉对方的文件），所以这里把 `overlay_path` 也换到测试自己的
+    /// 临时目录——既不干扰别的测试，也绝不碰用户的真实配置。
+    #[ignore = "慢测试：起真实子进程（桩 omp，不调用 AI）"]
+    #[tokio::test]
+    async fn create_session_falls_back_when_model_rejected() {
+        use std::os::unix::fs::PermissionsExt;
+        use tauri::Manager;
+
+        let root = std::env::temp_dir().join(format!("omp-mini-fallback-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("sessions").join("--tmp-demo--")).unwrap();
+        let project_dir = root.join("proj");
+        // 用**子目录**建会话：自愈必须按归属（owner_project 前缀语义）找到项目，
+        // 按「路径精确相等」定位会静默失效（这个测试顺带钉住它）
+        let spawn_dir = project_dir.join("sub");
+        std::fs::create_dir_all(&spawn_dir).unwrap();
+        let sid = "01a13d6b-fc49-721f-af8b-6e90ac9aa97a";
+        // 会话文件得像真的一样（会话 id 从文件头读出来，视图与归属都靠它）
+        write_session(
+            &root.join("sessions"),
+            "2026-10-16T00-00-00-000Z_01a13d6b-fc49-721f-af8b-6e90ac9aa97a.jsonl",
+            sid,
+            "新建会话",
+            &[],
+        );
+        let sfile = root.join("sessions").join("--tmp-demo--").join(format!("2026-10-16T00-00-00-000Z_{sid}.jsonl"));
+
+        // 桩 omp：带 --model → 照真 omp 的样子把原因写 stderr 再退出；不带 → 回 ready + 身份
+        let argv_path = root.join("argv.txt");
+        let resp = serde_json::json!({
+            "id": "h-state",
+            "type": "response",
+            "success": true,
+            "data": {
+                "sessionId": sid,
+                "sessionFile": sfile.to_string_lossy(),
+                "model": {"provider": "deepseek", "id": "deepseek-flash", "name": "DeepSeek Flash"},
+                "thinkingLevel": "max",
+            },
+        })
+        .to_string();
+        let stub = root.join("stub-omp.sh");
+        std::fs::write(
+            &stub,
+            format!(
+                "#!/bin/sh\n\
+for a in \"$@\"; do\n\
+  case \"$a\" in --model) echo 'Error: Model \"ccproxy/deepseek/deepseek-v4.1-flash-fast\" not found' 1>&2; exit 1;; esac\n\
+done\n\
+printf '%s\\n' \"$@\" >> '{argv}'\n\
+printf '{{\"type\":\"ready\"}}\\n'\n\
+while IFS= read -r line; do\n\
+  case \"$line\" in *h-state*) printf '%s\\n' '{resp}' ;; esac\n\
+done\n",
+                argv = argv_path.display(),
+                resp = resp,
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        // 覆盖层落在测试自己的临时目录（默认路径是 mock 下全局共享的 app_data_dir）
+        let stale_model = "ccproxy/deepseek/deepseek-v4.1-flash-fast";
+        let overlay_path = root.join("overlay.json");
+        let seeded = serde_json::json!({
+            "version": 1,
+            "projects": [{
+                "id": "p-e2e",
+                "path": project_dir.to_string_lossy(),
+                "added_at": 1_791_000_000_000_i64,
+                "last_model": stale_model,
+                "last_thinking": "max",
+                "workspace_id": null,
+            }],
+            "workspaces": [],
+            "archived": {},
+            "notes": {},
+            "session_approval": {},
+            "omp_path": null,
+        });
+        std::fs::write(&overlay_path, serde_json::to_string_pretty(&seeded).unwrap()).unwrap();
+
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app 构建失败");
+        let state = load_state(app.handle());
+        let mut state = state;
+        state.overlay_path = overlay_path.clone();
+        let (ov, _) = super::load_overlay(&overlay_path);
+        state.overlay = tokio::sync::Mutex::new(ov);
+        *state.agent_dir.lock().await = root.clone();
+        *state.omp_path.lock().await = Some(stub.to_string_lossy().to_string());
+        let state = std::sync::Arc::new(state);
+        app.manage(state.clone());
+
+        let out = super::create_session_in(app.handle(), &state, spawn_dir.to_string_lossy().to_string()).await;
+        let out = out.expect("项目里的失效模型不该让新建会话整个失败（应降级重试）");
+
+        // 收尾：进程与临时目录
+        state.runtime.lock().await.clear();
+        let cleanup = || {
+            let _ = std::fs::remove_dir_all(&root);
+        };
+
+        assert_eq!(out.view.id, sid, "视图身份取自握手回包");
+        let fb = out.fallback.expect("降级时必须带回说明（用户要知道为什么换了模型）");
+        assert!(fb.fallback_model, "降级后进程拿到了模型 ⇒ 是项目偏好被 omp 拒绝");
+        assert_eq!(fb.model.as_deref(), Some(stale_model));
+        assert!(fb.detail.as_deref().unwrap_or("").contains("not found"), "说明里要带 omp 原话：{:?}", fb.detail);
+
+        // 自愈：失效偏好从项目上清掉（下次新建不必再多失败一次），且真的落盘
+        let saved = std::fs::read_to_string(&overlay_path).expect("自愈后覆盖层应已写回");
+        let p0 = &serde_json::from_str::<serde_json::Value>(&saved).unwrap()["projects"][0];
+        assert!(p0["last_model"].is_null(), "失效模型应被清掉，实际：{}", p0["last_model"]);
+
+        // 桩进程记录：第一次带 --model（被拒），第二次不带（成功）
+        let argv = std::fs::read_to_string(&argv_path).unwrap_or_default();
+        assert!(argv.lines().count() >= 2, "应有两次 spawn（首发 + 降级重试），实际记录：{argv:?}");
+        assert!(!argv.contains("--model"), "降级那一次不许再带 --model，实际：{argv:?}");
+
+        cleanup();
+    }
+
+    /// 真实 omp 的降级回归（慢测试，**默认忽略**）：不存在的模型 → 降级建起来。
+    ///
+    /// 与桩测试的区别：这里是真的 `omp --model <不存在>`（上游行为可能变），验证
+    /// 「用户那条路」在真机上也通。依赖本机 omp，覆盖层与 sessions 都落在临时目录。
+    /// 跑法：`cargo test --manifest-path src-tauri/Cargo.toml -- --ignored real_omp_fallback`
+    #[ignore = "慢测试：真实 omp（本地无 AI 调用，只走启动 + 握手）"]
+    #[tokio::test]
+    async fn real_omp_fallback_when_model_missing() {
+        use tauri::Manager;
+        // omp 定位与 `runtime.rs` 的真实 RPC 测试同一口径（OMP_BIN 覆盖 → HOME 常见路径）
+        let Some(bin) = ["/opt/homebrew/bin/omp", "/usr/local/bin/omp"]
+            .iter()
+            .map(|p| std::path::PathBuf::from(p))
+            .find(|p| p.is_file())
+            .or_else(|| std::env::var("OMP_BIN").ok().map(std::path::PathBuf::from))
+            .map(|p| p.to_string_lossy().to_string())
+        else {
+            eprintln!("[real_omp_fallback] 跳过：本机找不到 omp（可用 OMP_BIN 指定）");
+            return;
+        };
+        let root = std::env::temp_dir().join(format!("omp-real-fallback-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let agent = root.join("agent");
+        std::fs::create_dir_all(agent.join("sessions")).unwrap();
+        let project_dir = root.join("proj");
+        let spawn_dir = project_dir.join("sub"); // 子目录建会话：验证自愈按归属定位项目
+        std::fs::create_dir_all(&spawn_dir).unwrap();
+
+        let stale_model = "definitely/not-a-real-model-9f3a";
+        let overlay_path = root.join("overlay.json");
+        std::fs::write(
+            &overlay_path,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "version": 1,
+                "projects": [{
+                    "id": "p-real",
+                    "path": project_dir.to_string_lossy(),
+                    "added_at": 1_791_000_000_000_i64,
+                    "last_model": stale_model,
+                    "last_thinking": null,
+                    "workspace_id": null,
+                }],
+                "workspaces": [], "archived": {}, "notes": {}, "session_approval": {}, "omp_path": null,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app 构建失败");
+        let mut state = load_state(app.handle());
+        state.overlay_path = overlay_path.clone();
+        let (ov, _) = super::load_overlay(&overlay_path);
+        state.overlay = tokio::sync::Mutex::new(ov);
+        *state.agent_dir.lock().await = agent.clone();
+        *state.omp_path.lock().await = Some(bin);
+        let state = std::sync::Arc::new(state);
+        app.manage(state.clone());
+
+        let out = super::create_session_in(app.handle(), &state, spawn_dir.to_string_lossy().to_string()).await;
+        state.runtime.lock().await.clear();
+        let out = out.expect("失效模型不该让新建会话整个失败（真实 omp 也应降级重试）");
+        let fb = out.fallback.expect("降级要带回说明");
+        assert!(fb.fallback_model, "降级后应拿到 omp 默认模型，detail={:?}", fb.detail);
+        assert_eq!(fb.model.as_deref(), Some(stale_model));
+        let saved = std::fs::read_to_string(&overlay_path).unwrap();
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&saved).unwrap()["projects"][0]["last_model"].is_null(),
+            "失效模型应被清掉"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

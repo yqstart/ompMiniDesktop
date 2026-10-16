@@ -1,7 +1,8 @@
 import { api } from "@shared/api";
-import type { SessionView, ViewMsg } from "@shared/types";
+import type { FallbackNotice, SessionView, ViewMsg } from "@shared/types";
 import { useApp } from "../stores/app";
 import { fmt, TEXT } from "./locale";
+import { appendLocalNote } from "./localNote";
 import { viewMsgsFromJsonlLines } from "./viewmsg";
 import { syncSessionRuntime } from "./useSessionEvents";
 
@@ -88,6 +89,9 @@ export async function createChatIn(
    sidebarOpen: false,
   });
   await openSessionWithHistory(created.id, created);
+  // 后端在「项目偏好的模型 / 思考档被 omp 拒了、这次改用默认档」时会带说明回来：
+  // 落到消息流尾的本地说明行（会话内反馈位），否则用户只会觉得「模型怎么自己变了」。
+  if (created.notice) appendLocalNote(created.id, fallbackNoticeText(created.notice));
   return { ok: true, id: created.id };
  } catch (e) {
   const t = TEXT[useApp.getState().locale];
@@ -101,6 +105,22 @@ export async function createChatIn(
     : t.createChatFailedShort;
   return { ok: false, message };
  }
+}
+
+/**
+ * 降级说明的文案（`FallbackNotice` → 一条本地说明）。
+ *
+ * 分支口径：omp 连默认模型都没拿到（`fallbackModel` 为否）= 问题不在项目偏好上，
+ * 如实说明并带上 omp 原话，别让用户以为是「模型被删了」；拿到了才按「模型 / 思考档
+ * 哪个失效」给出具体那条。
+ */
+function fallbackNoticeText(n: FallbackNotice): string {
+ const t = TEXT[useApp.getState().locale];
+ if (!n.fallbackModel) return fmt(t.createChatFallbackNoModel, n.detail ?? "-");
+ if (n.model && n.thinking) return fmt(t.createChatFallbackModelThinking, n.model, n.thinking);
+ if (n.model) return fmt(t.createChatFallbackModel, n.model);
+ if (n.thinking) return fmt(t.createChatFallbackThinking, n.thinking);
+ return fmt(t.createChatFallbackNoModel, n.detail ?? "-");
 }
 /**
  * 重读一个会话的视图（备注改名后用）：`open_session` 对已运行的会话只读回视图、不重复 spawn。

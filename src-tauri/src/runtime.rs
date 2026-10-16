@@ -483,6 +483,93 @@ impl ChunkAsm {
     }
 }
 
+/// stdout/stderr 拿不到（进程刚起就消失）时的统一说明：带上 stderr 里 omp 自己写的原因。
+fn spawn_fail_msg(what: &str, err: &StderrBuf) -> String {
+    match err.note() {
+        Some(note) => format!("{what}；omp 输出：{note}"),
+        None => format!("{what}：omp 进程意外退出"),
+    }
+}
+
+/// 采集上限：omp 的报错都很短（一行原因 + 一行提示）；封顶防止异常进程刷爆内存。
+const STDERR_KEEP_BYTES: usize = 4096;
+
+/// omp 的 stderr 采集缓冲（spawn 时开一条后台读取，失败时取用）。
+///
+/// 采集任务的句柄一并留着：失败路径要 `join` 它再读，否则读到的可能是「还没采完」的空缓冲
+/// （omp 写完就退，读任务被调度到什么时候不确定——靠 sleep 猜时间是不稳的）。
+/// 成功路径不 join（进程常驻，任务跟着活）。
+#[derive(Clone, Default)]
+struct StderrBuf {
+    text: Arc<std::sync::Mutex<String>>,
+    task: Arc<std::sync::Mutex<Option<tauri::async_runtime::JoinHandle<()>>>>,
+}
+
+impl StderrBuf {
+    /// 后台逐行采集（进程退出时读到 EOF 自然收工）。
+    fn spawn_collect(&self, err: tokio::process::ChildStderr) {
+        let me = self.clone();
+        let handle = tauri::async_runtime::spawn(async move {
+            let mut lines = BufReader::new(err).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let mut b = me.text.lock().unwrap();
+                if b.len() >= STDERR_KEEP_BYTES {
+                    break;
+                }
+                b.push_str(&line);
+                b.push('\n');
+            }
+        });
+        *self.task.lock().unwrap() = Some(handle);
+    }
+
+    /// 等采集任务收工（进程已退出 ⇒ 读很快到 EOF；已在别的路径 join 过就直接过）。
+    async fn settle(&self) {
+        let handle = self.task.lock().unwrap().take();
+        if let Some(h) = handle {
+            let _ = h.await;
+        }
+    }
+
+    /// (首行, 其余行)——`None` = 采集为空（进程没来得及写任何东西）。
+    fn parts(&self) -> Option<(String, String)> {
+        let text = self.text.lock().unwrap().clone();
+        let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
+        let first = lines.next()?.to_string();
+        let rest = lines.collect::<Vec<_>>().join("\n");
+        Some((first, rest))
+    }
+
+    /// 单行形式的说明（无输出回 `None`）。
+    fn note(&self) -> Option<String> {
+        self.parts().map(|(first, rest)| combine_note(first, rest))
+    }
+}
+
+/// 首行 + 其余行拼成一条诊断说明（纯函数：单测覆盖换行折叠与空白裁剪）。
+fn combine_note(first: String, rest: String) -> String {
+    if rest.is_empty() {
+        first
+    } else {
+        format!("{first}（{rest}）")
+    }
+}
+
+/// 在 spawn / 握手失败的错误上补一句 omp 自己写的原因。
+///
+/// 现场：用户的覆盖层里留着上游已改名 / 删除的模型（`ccproxy/deepseek/deepseek-v4.1-flash-fast`），
+/// `omp --model <它>` 在 ready 之前就退出、stdout 一帧都没有，壳只能报「omp 进程意外退出」——
+/// 真正的原因（`Model "…" not found`）此前被 `Stdio::null()` 扔了。这里把 stderr 采样接上去。
+fn with_stderr_reason(mut e: crate::commands::CmdError, err: &StderrBuf) -> crate::commands::CmdError {
+    if let Some((first, rest)) = err.parts() {
+        e.message = format!("{}（omp 输出：{}）", e.message, first);
+        if !rest.is_empty() && e.hint.is_none() {
+            e.hint = Some(rest);
+        }
+    }
+    e
+}
+
 /// spawn 长驻进程并完成握手，登记进 `RuntimeMap`（**键 = 会话 id**）并启动 pump。
 /// 成功返回 `(session_id, session_file, 运行时真值)`。
 ///
@@ -491,26 +578,58 @@ impl ChunkAsm {
 /// 命令面缓存 / 偏好回写）**从第一帧起**就得按会话 id 走——占位键会把新建会话的帧发到
 /// 无人订阅的通道（实测见 `docs/v34-schedule.md` §1.3）。这里统一以 sid 为键，
 /// 调用方拿到的返回值即最终身份、无需换名。
+///
+/// 失败时会把 omp 写在 stderr 的原因接进错误（见 [`with_stderr_reason`]）。
 pub async fn spawn_long_lived<R: tauri::Runtime>(
     app: &AppHandle<R>,
     map: RuntimeMap,
     opts: SpawnOpts,
 ) -> Result<(String, String, SessionMeta), crate::commands::CmdError> {
+    let err = StderrBuf::default();
+    match spawn_long_lived_inner(app, map, opts, &err).await {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            err.settle().await;
+            Err(with_stderr_reason(e, &err))
+        }
+    }
+}
+
+async fn spawn_long_lived_inner<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    map: RuntimeMap,
+    opts: SpawnOpts,
+    err_buf: &StderrBuf,
+) -> Result<(String, String, SessionMeta), crate::commands::CmdError> {
     let mut child = tokio::process::Command::new(&opts.bin)
         .args(opts.args())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
+        // stderr 收进管道而不是丢掉：omp 起不来时**原因只写在 stderr**
+        // （实测 `--model` / `--thinking` 取值非法 → `Error: Model "x" not found` 后立刻退出，
+        // stdout 一帧都没有）。早先接 `Stdio::null()` 时，壳只能报「omp 进程意外退出」，
+        // 真正的原因被扔掉了（用户实测：新建会话失败，看不出为什么）。
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| cmd_err("SPAWN_FAILED", format!("启动 omp 失败：{e}"), None))?;
 
-    let stdin: ChildStdin = child.stdin.take().unwrap();
-    let reader = BufReader::new(child.stdout.take().unwrap()).lines();
+    // stderr 就地开一条采集（逐行、封顶 [`STDERR_KEEP_BYTES`]）——留给失败路径做诊断。
+    // 成功路径不消费它，采集任务随进程退出自然结束（omp 常驻期间 stderr 通常无输出）。
+    if let Some(se) = child.stderr.take() {
+        err_buf.spawn_collect(se);
+    }
+
+    let mut stdin: ChildStdin = child.stdin.take().ok_or_else(|| {
+        cmd_err("SPAWN_FAILED", spawn_fail_msg("无法接管 omp 的输入流（stdin）", &err_buf), None)
+    })?;
+    let stdout = child.stdout.take().ok_or_else(|| {
+        cmd_err("SPAWN_FAILED", spawn_fail_msg("无法接管 omp 的输出流（stdout）", &err_buf), None)
+    })?;
+    let reader = BufReader::new(stdout).lines();
     let (tx, rx) = mpsc::unbounded_channel::<String>();
 
     // 先做同步握手拿身份（30s 超时）
     let mut reader = reader;
-    let mut stdin_opt = Some(stdin);
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
     // 握手期间到达的帧先攒着，等 pump 起来后原序回放（见 pump 启动处的说明）
     let mut leftover: Vec<String> = Vec::new();
@@ -528,11 +647,11 @@ pub async fn spawn_long_lived<R: tauri::Runtime>(
                 }
                 leftover.push(l);
             }
-            None => return Err(cmd_err("RPC_EOF", "omp 进程意外退出".into(), None)),
+            None => return Err(cmd_err("RPC_EOF", spawn_fail_msg("omp 在就绪前退出", err_buf), None)),
         }
     }
     {
-        let s = stdin_opt.as_mut().unwrap();
+        let s = &mut stdin;
         s.write_all(b"{\"id\":\"h-neg\",\"type\":\"negotiate_protocol\",\"protocolVersion\":2}\n")
             .await
             .map_err(|e| cmd_err("RPC_IO", format!("写入失败：{e}"), None))?;
@@ -559,7 +678,7 @@ pub async fn spawn_long_lived<R: tauri::Runtime>(
             .map_err(|_| cmd_err("RPC_TIMEOUT", "等待 omp 状态超时".into(), None))?
             .map_err(|e| cmd_err("RPC_IO", format!("读取 omp 输出失败：{e}"), None))?;
         let Some(l) = line else {
-            return Err(cmd_err("RPC_EOF", "omp 进程意外退出".into(), None));
+            return Err(cmd_err("RPC_EOF", spawn_fail_msg("omp 在返回会话状态前退出", err_buf), None));
         };
         if l.trim().is_empty() {
             continue;
@@ -621,7 +740,6 @@ pub async fn spawn_long_lived<R: tauri::Runtime>(
     // 通道名与 map 查询键都用 **sid**（会话 id）：前端从订阅建立那一刻起听的永远是
     // `omp-*://<会话 id>`——用占位键会把新建会话的所有帧发到无人订阅的通道
     // （V34 探针实证：占位键通道收到全部帧、sid 通道一条都没有）。
-    let stdin = stdin_opt.take().unwrap();
     start_pump(
         app.clone(),
         sid.clone(),
@@ -1863,6 +1981,65 @@ mod real_rpc_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stderr_note_folds_lines() {
+        // 单行：原样；多行：首行 + 括号里的其余行（诊断信息不丢）
+        assert_eq!(combine_note("Model \"x\" not found".into(), String::new()), "Model \"x\" not found");
+        assert_eq!(
+            combine_note("Model \"x\" not found".into(), "Run `omp models` to list all.".into()),
+            "Model \"x\" not found（Run `omp models` to list all.）"
+        );
+    }
+
+    /// 起不来的 omp：原因只写在 stderr，stdout 一帧都没有。
+    ///
+    /// 现场（用户实测）：覆盖层里留着上游已删除的模型，`omp --model <它>` 在 ready 之前就退出，
+    /// 壳原先接 `Stdio::null()` 只能报「omp 进程意外退出」——真正的原因全丢了。
+    /// 这里用假 omp 复现同一条路径，断言壳把 stderr 带了出来。
+    #[tokio::test]
+    async fn spawn_failure_surfaces_stderr_reason() {
+        let dir = std::env::temp_dir().join(format!("omp-mini-rt-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("fake-omp.sh");
+        std::fs::write(
+            &bin,
+            "#!/bin/sh\necho 'Error: Model \"nope/x\" not found' 1>&2\necho 'Run `omp models find <pattern>` to search' 1>&2\nexit 1\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app 构建失败");
+        let state = crate::commands::load_state(app.handle());
+        let map = state.runtime.clone();
+        app.manage(state);
+
+        let e = spawn_long_lived(
+            app.handle(),
+            map,
+            SpawnOpts {
+                bin: bin.to_string_lossy().to_string(),
+                cwd: dir.to_string_lossy().to_string(),
+                resume: None,
+                model: Some("nope/x".into()),
+                thinking: None,
+                approval: None,
+            },
+        )
+        .await
+        .expect_err("假 omp 立刻退出，不该握手成功");
+        println!("[stderr-reason] {}", e.message);
+        assert!(
+            e.message.contains("Model \"nope/x\" not found"),
+            "错误里必须带上 omp 自己写的原因，实际：{}",
+            e.message
+        );
+        // 第二行（提示）进 hint，别把首行消息撑长
+        assert_eq!(e.hint.as_deref(), Some("Run `omp models find <pattern>` to search"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn b64encode_roundtrip() {

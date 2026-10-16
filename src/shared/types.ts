@@ -26,6 +26,17 @@ export type ProjectView = {
  workspaceId: string | null;
 };
 
+/**
+ * 新建会话时**参数被 omp 拒绝而降级**的说明（`create_session` 专有；其余路径没有这个字段）。
+ * `fallbackModel` 为否 = 降级后 omp 连默认模型都没拿到，问题不在项目偏好上（`detail` 是 omp 原话）。
+ */
+export type FallbackNotice = {
+ model: string | null;
+ thinking: string | null;
+ fallbackModel: boolean;
+ detail: string | null;
+};
+
 export type SessionView = {
  id: string;
  projectId: string | null;
@@ -36,6 +47,8 @@ export type SessionView = {
  corrupt: boolean;
  note: string | null;
  running: boolean;
+ /** 只在「新建会话」回包里出现：项目里留着的模型 / 思考档已被 omp 拒绝，这次用默认档。 */
+ notice?: FallbackNotice;
 };
 
 /**
