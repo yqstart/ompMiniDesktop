@@ -66,7 +66,7 @@ describe("DraftEditor", () => {
    ref.current?.insertReference({ path: "src/views/components", label: "components", isDir: true });
   });
   // 全文 = 发给 omp 的形态（真路径 + 尾部空格）
-  expect(ref.current?.getText()).toBe("@src/views/components/ ");
+  expect(ref.current?.getText()).toBe("@src/views/components/");
   // 屏幕上是短标签 + 图标
   const chip = container.querySelector("[data-mention-chip]");
   expect(chip?.textContent).toBe("@components/");
@@ -91,8 +91,48 @@ describe("DraftEditor", () => {
   await act(async () => {
    ref.current?.replaceMention("components/", { path: "src/views/components", label: "components", isDir: true });
   });
-  expect(ref.current?.getText()).toBe("@src/views/components/ ");
+  expect(ref.current?.getText()).toBe("@src/views/components/");
   expect(container.querySelector("[data-mention-chip]")?.textContent).toBe("@components/");
+ });
+
+ it("选中目录后接着打：取词把芯片的 `@dist/` 接在前面（继续往里钻）", async () => {
+  await render("");
+  await act(async () => {
+   ref.current?.insertReference({ path: "dist", label: "dist", isDir: true });
+  });
+  // 目录引用不补尾空格：光标就贴在芯片后面
+  expect(ref.current?.getText()).toBe("@dist/");
+  await act(async () => {
+   ref.current?.insertText("src");
+  });
+  expect(ref.current?.getText()).toBe("@dist/src");
+  // 取词带上芯片那一截，补全才能列出 dist/src 下的东西
+  expect(ref.current?.getTextBeforeCaret()).toBe("@dist/src");
+ });
+
+ it("目录芯片后继续打，再选中文件：连芯片一起换掉（跨节点兜底）", async () => {
+  await render("");
+  await act(async () => {
+   // 右栏文件树注入的目录引用是芯片（补全里的目录走纯文本下钻）
+   ref.current?.insertReference({ path: "dist", label: "dist", isDir: true });
+  });
+  await act(async () => {
+   ref.current?.insertText("app");
+  });
+  expect(ref.current?.getTextBeforeCaret()).toBe("@dist/app");
+  await act(async () => {
+   ref.current?.replaceMention("dist/app", { path: "dist/app.js", label: "app.js", isDir: false });
+  });
+  expect(ref.current?.getText()).toBe("@dist/app.js ");
+  expect(container.querySelector("[data-mention-chip]")?.textContent).toBe("@app.js");
+ });
+
+ it("文件引用仍然在空格处收口", async () => {
+  await render("");
+  await act(async () => {
+   ref.current?.insertReference({ path: "dist/a.ts", label: "a.ts", isDir: false });
+  });
+  expect(ref.current?.getText()).toBe("@dist/a.ts ");
  });
 
  it("insertText 在光标处插入（`#N` 占位口径）", async () => {

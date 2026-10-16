@@ -240,12 +240,15 @@ export function Composer() {
   };
  }, [mentionQueryKey, mentionToken, cwd, activeSessionId, mentionEmpty]);
 
- // 选中一条候选：把光标前的 `@前缀` 换成一枚**引用芯片**（`ReferenceChipNode`）。
- // 芯片显示短标签（`@components/`），序列化出去的是真路径（`c.real`）——发送链路因此不需要改写。
- // 点击、Tab、Enter 三个入口共用它。
+ // 选中一条候选（点击、Tab、Enter 三个入口共用）：
+ // - **文件** → 换成引用芯片（`ReferenceChipNode`）：显示短标签，序列化出去的是真路径 `c.real`；
+ // - **目录** → 换成一段**路径文本** `@<短标签>/`（光标停在其后）：这就是「往下钻一层」——
+ //   浮层立刻接着列该目录里的东西，想引用整个目录时直接发送这段文本即可。
+ //   （插成芯片的话光标被原子节点挡住、打不出下一段路径，用户实测「进不了文件夹」。）
  const pickMention = (c: PathCandidate) => {
   const token = mentionToken ?? "";
-  editorRef.current?.replaceMention(token, { path: c.real, label: c.label, isDir: c.isDir });
+  if (c.isDir) editorRef.current?.replaceMentionWithText(token, `@${c.label}/`);
+  else editorRef.current?.replaceMention(token, { path: c.real, label: c.label, isDir: false });
   setMentionIdx(-1);
   setMentionCands([]);
  };

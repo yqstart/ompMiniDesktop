@@ -20,12 +20,18 @@ import {
  $getRoot,
  $getSelection,
  $insertNodes,
+ $isElementNode,
  $isRangeSelection,
  $isTextNode,
- $setSelection,
  type LexicalNode,
+ type RangeSelection,
 } from "lexical";
-import { $createReferenceChipNode, ReferenceChipNode, type ReferenceChipPayload } from "./ReferenceChipNode";
+import {
+ $createReferenceChipNode,
+ $isReferenceChipNode,
+ ReferenceChipNode,
+ type ReferenceChipPayload,
+} from "./ReferenceChipNode";
 
 /**
  * 输入卡的草稿编辑器（Lexical，plain-text 口径）——照 DeepSeek Harness 的
@@ -68,8 +74,10 @@ export type DraftEditorHandle = {
  insertLineBreak: () => void;
  /** 在光标处插入一枚引用芯片（前后按需补空格）。 */
  insertReference: (payload: ReferenceChipPayload) => void;
- /** 把光标前的 `@token` 换成引用芯片（补全选中）。 */
+ /** 把光标前的 `@token` 换成引用芯片（补全里选中**文件**）。 */
  replaceMention: (token: string, payload: ReferenceChipPayload) => void;
+ /** 把光标前的 `@token` 换成一段路径文本（补全里选中**目录** = 往下钻一层）。 */
+ replaceMentionWithText: (token: string, text: string) => void;
  focus: () => void;
 };
 
@@ -85,12 +93,36 @@ function $draftText(): string {
  return $getRoot().getTextContent();
 }
 
-/** 在 `editorState.read()` / `editor.update()` 里调用：光标所在文本节点里光标之前的内容。 */
+/**
+ * 在 `editorState.read()` / `editor.update()` 里调用：**光标前的那一段取词文本**。
+ *
+ * 不只是当前文本节点——光标紧跟一枚**目录芯片**时（选中 `dist` 后接着打 `src`），
+ * 芯片的 `@dist/` 要接在前面，补全才能继续往下钻（这正是「进入文件夹」的那一步）。
+ */
 function $textBeforeCaret(): string {
  const selection = $getSelection();
  if (!$isRangeSelection(selection)) return "";
- const node = selection.anchor.getNode();
- return $isTextNode(node) ? node.getTextContent().slice(0, selection.anchor.offset) : "";
+ const { anchor } = selection;
+ const node = anchor.getNode();
+ let before = "";
+ let sibling: LexicalNode | null;
+ if ($isTextNode(node)) {
+  before = node.getTextContent().slice(0, anchor.offset);
+  if (/[@\s]/.test(before)) return before; // 自己这段已经含 token 起点或空白：不用往前找
+  sibling = node.getPreviousSibling();
+ } else if ($isElementNode(node)) {
+  // 光标落在元素边界（紧跟芯片之后就是这种：目录引用不补空格，光标贴在芯片后面）
+  sibling = node.getChildAtIndex(anchor.offset - 1);
+ } else {
+  // 其余节点类型（换行 / 装饰节点）当锚点：直接看它前面是不是芯片
+  sibling = (node as LexicalNode).getPreviousSibling();
+ }
+ while (sibling !== null && $isReferenceChipNode(sibling)) {
+  before = sibling.getTextContent() + before;
+  if (/[@\s]/.test(before)) break;
+  sibling = sibling.getPreviousSibling();
+ }
+ return before;
 }
 
 /** 往前找是否还有任何叶子节点（决定插入引用前要不要补一个空格）。 */
@@ -156,27 +188,62 @@ function $insertReferenceAtCaret(payload: ReferenceChipPayload): void {
  }
  const lead = $needsLeadingSpace();
  selection.insertText(lead ? " " : "");
- $insertNodes([$createReferenceChipNode(payload), $createTextNode(" ")]);
+ // 文件引用在空格处收口；**目录引用不补空格**——接着打就是继续往里钻（`@dist/` + `src`）
+ const tail = payload.isDir ? [] : [$createTextNode(" ")];
+ $insertNodes([$createReferenceChipNode(payload), ...tail]);
+}
+
+/**
+ * 光标前提及 token 的选区：从 `@` 起、到光标止。
+ *
+ * token 可能**跨节点**——`@dist/` 是目录芯片（右栏引用注入）时，`@` 在芯片里、
+ * 光标在后面的文本节点里；所以这里从光标往前按字符数凑，凑够 `token` + `@` 就是起点。
+ */
+function $mentionRange(token: string): RangeSelection | null {
+ const selection = $getSelection();
+ if (!$isRangeSelection(selection)) return null;
+ const anchorNode = selection.anchor.getNode();
+ if (!$isTextNode(anchorNode)) return null;
+ const caret = Math.min(selection.anchor.offset, anchorNode.getTextContent().length);
+ let remaining = token.length + 1; // 连同 `@`
+ let node: LexicalNode | null = anchorNode;
+ while (node !== null && remaining > 0) {
+  const size = node.getTextContent().length;
+  if (size >= remaining) {
+   const offset = size - remaining;
+   const range = selection.clone();
+   if ($isTextNode(node)) {
+    range.anchor.set(node.getKey(), Math.max(0, offset), "text");
+   } else {
+    // 起点落在**装饰节点（芯片）**上：point 不能指向芯片内部，改用「父元素 + 子索引」
+    const parent = node.getParent();
+    if (parent === null) return null;
+    range.anchor.set(parent.getKey(), node.getIndexWithinParent() + (offset > 0 ? 1 : 0), "element");
+   }
+   range.focus.set(anchorNode.getKey(), caret, "text");
+   return range;
+  }
+  remaining -= size;
+  node = node.getPreviousSibling();
+ }
+ return null;
+}
+
+/** 把光标前的 `@token` 整段换成一段**文本**（补全里选中目录 = 往下钻一层）。 */
+function $replaceMentionWithToken(token: string, text: string): void {
+ const range = $mentionRange(token);
+ if (range === null) return;
+ range.insertText(text); // 替换选区；光标落到插入文本之后，浮层接着取词
 }
 
 /** 把光标前的 `@token` 整段换成引用芯片。 */
 function $replaceMentionWithReference(token: string, payload: ReferenceChipPayload): void {
- const selection = $getSelection();
- if (!$isRangeSelection(selection)) return;
- const node = selection.anchor.getNode();
- if (!$isTextNode(node)) return;
- const text = node.getTextContent();
- const caret = Math.min(selection.anchor.offset, text.length);
- const start = caret - token.length - 1;
- if (start < 0 || text[start] !== "@") return;
- // 选中 `@token` → 交给 Lexical 删掉（它会同步好 selection），再按常规插入引用
- const range = selection.clone();
- range.anchor.set(node.getKey(), start, "text");
- range.focus.set(node.getKey(), caret, "text");
- range.removeText();
- $setSelection(range);
+ const range = $mentionRange(token);
+ if (range === null) return;
+ range.removeText(); // 整段（含跨节点的目录芯片）一次删掉，节点回收交给 Lexical
  $insertReferenceAtCaret(payload);
 }
+
 
 /** 跟随 `editable` 切换编辑器只读（等审批回应时输入框不该还能打字）。 */
 function EditableToggle({ editable }: { editable: boolean }) {
@@ -230,6 +297,8 @@ function EditorBridge({
     editor.update(() => $insertReferenceAtCaret(payload), { tag: TAG_INSERT }),
    replaceMention: (token: string, payload: ReferenceChipPayload) =>
     editor.update(() => $replaceMentionWithReference(token, payload), { tag: TAG_INSERT }),
+   replaceMentionWithText: (token: string, text: string) =>
+    editor.update(() => $replaceMentionWithToken(token, text), { tag: TAG_INSERT }),
    focus: () => editor.focus(),
   }),
   [editor],

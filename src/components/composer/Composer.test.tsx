@@ -660,8 +660,39 @@ describe("Composer `@` 路径补全", () => {
   await act(async () => {
    dirOpt?.click();
   });
-  expect(useApp.getState().drafts["s1"]).toBe("@src/components/ ");
-  expect(container.querySelector("[data-mention-chip]")?.textContent).toBe("@components/");
+  // 目录 = 下钻：草稿里是**短标签路径文本**（不是芯片），光标停在其后继续取词
+  expect(useApp.getState().drafts["s1"]).toBe("@components/");
+  // 目录下钻是纯文本：屏幕上没有芯片（文件才会变成芯片，见上面的断言）
+  expect(container.querySelector("[data-mention-chip]")).toBeNull();
+ });
+
+ it("选中目录后**能进到目录里**：浮层接着列该目录下的内容（用户实测的坑）", async () => {
+  // 第一层：`@` → 列项目根下的目录
+  apiMock.completePath.mockResolvedValueOnce([
+   { path: "dist", real: "dist", isDir: true, label: "dist" },
+  ]);
+  const ta = await mount(false);
+  await typeInto(ta!, "@");
+  await afterDebounce();
+  const dist = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((b) =>
+   b.textContent?.includes("dist"),
+  );
+  await act(async () => {
+   dist?.click();
+  });
+  expect(useApp.getState().drafts["s1"]).toBe("@dist/");
+
+  // 第二层：光标停在目录芯片后面，取词带上 `@dist/` → 再问后端要 dist 里的东西
+  apiMock.completePath.mockResolvedValueOnce([
+   { path: "dist/app.js", real: "dist/app.js", isDir: false, label: "app.js" },
+  ]);
+  await afterDebounce();
+  expect(apiMock.completePath).toHaveBeenLastCalledWith("/w/alpha", "dist/");
+  expect(
+   [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].some((b) =>
+    b.textContent?.includes("app.js"),
+   ),
+  ).toBe(true);
  });
 
  it("发送前把短标签还原成完整相对路径（回显 / 历史仍是用户写的短标签）", async () => {
