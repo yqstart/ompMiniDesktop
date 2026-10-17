@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Link } from "reicon-react";
 import { api } from "@shared/api";
 import type { ProjectFiles } from "@shared/types";
@@ -50,7 +50,8 @@ type Section = { key: string; name: string; count: number; rows: RefRow[] };
  * **文件夹同样可引用**（条目树里的目录行尾悬停出链接键，与右栏文件树同一口径）——注入 `@<目录>/`，
  * 语义 = omp 的目录提及（整个目录进上下文）。
  * 结果按项目分组、以资源管理器式目录树展示（chevron 折叠 / 目录与文件类型图标 / ↑↓ 走每一行，
- * **默认落点 = 第一条文件行**——打字后 Enter 仍是引用文件，要引用文件夹就 ↑↓ 停到目录行）。
+ * **默认落点 = 第一条文件行**——打字后 Enter 仍是引用文件，要引用文件夹就 ↑↓ 停到目录行）；
+ * **浏览态目录默认折叠**（只铺顶层，点着往下展开），**搜索态默认展开**（命中的深层文件必须可见）。
  *
  * 数据只在打开时拉一次（后端 60s 缓存）——输入不触发 IPC。
  */
@@ -70,9 +71,10 @@ export function ReferencePicker(): React.JSX.Element | null {
  const [cursor, setCursor] = useState<number | null>(null);
  const [reloadSeq, setReloadSeq] = useState(0);
  const [loaded, setLoaded] = useState<{ key: string; groups: ProjectFiles[]; error: string | null } | null>(null);
- const [collapseState, setCollapseState] = useState<{ query: string; keys: ReadonlySet<string> }>({
+ /** 目录开合：`keys` = 用户点过的**例外**目录（浏览态记「展开的」、搜索态记「折叠的」；null = 全是默认态），随查询作废。 */
+ const [collapseState, setCollapseState] = useState<{ query: string; keys: ReadonlySet<string> | null }>({
   query: "",
-  keys: EMPTY_COLLAPSED,
+  keys: null,
  });
 
  /** 引用来源目录：该会话的 cwd（据此解析「当前项目」）。 */
@@ -123,13 +125,28 @@ export function ReferencePicker(): React.JSX.Element | null {
   if (cwd === null) useApp.getState().set({ refPickerTarget: null });
  }, [cwd]);
 
- // 查询一变，之前的折叠状态自动失效（命中链路必须可见）——不需要 effect。
- const collapsedKeys = collapseState.query === query ? collapseState.keys : EMPTY_COLLAPSED;
+ /**
+  * 目录开合口径：
+  * - **浏览态（没打字）默认折叠**——打开只铺顶层，想看哪层点哪层，不被几百条淹掉；
+  * - **搜索态默认展开**——命中的深层文件必须看得见（把命中藏进折叠里就等于没搜到）；
+  * - 用户点过的目录记成「与默认相反的例外」（`flipped`），**查询一变即作废**——不需要 effect。
+  */
+ const browsing = terms.length === 0;
+ const flipped = collapseState.query === query ? collapseState.keys : null;
+ const dirCollapsed = useCallback(
+  (key: string): boolean => {
+   const hit = flipped?.has(key) ?? false;
+   return browsing ? !hit : hit;
+  },
+  [browsing, flipped],
+ );
  const toggleDir = (key: string) => {
-  const current = collapseState.query === query ? collapseState.keys : EMPTY_COLLAPSED;
-  const next = new Set(current);
-  if (next.has(key)) next.delete(key);
-  else next.add(key);
+  const next = new Set(flipped ?? EMPTY_COLLAPSED);
+  // 点一下 = 取反；例外集合存的是「与默认相反」的那些（浏览态存展开的、搜索态存折叠的）
+  const willCollapse = !dirCollapsed(key);
+  const isException = browsing ? !willCollapse : willCollapse;
+  if (isException) next.add(key);
+  else next.delete(key);
   setCollapseState({ query, keys: next });
  };
 
@@ -139,14 +156,14 @@ export function ReferencePicker(): React.JSX.Element | null {
   */
  const sections = useMemo<Section[]>(() => {
   if (load.state !== "ready") return [];
-  const searching = refQueryTerms(query).length > 0;
+  const searching = !browsing;
   const out: Section[] = [];
   for (const group of load.groups) {
    if (group.error !== null) continue;
    const matched = rankRefItems(query, buildRefItems([group], projects), MAX_RESULTS);
    const rows = flattenRefTree(
     buildRefTree(matched, searching),
-    (rel) => collapsedKeys.has(collapseKey(group.path, rel)),
+    (rel) => dirCollapsed(collapseKey(group.path, rel)),
    );
    const project = projects.find((p) => p.path === group.path);
    out.push({
@@ -157,7 +174,7 @@ export function ReferencePicker(): React.JSX.Element | null {
    });
   }
   return out;
- }, [load, projects, query, collapsedKeys]);
+ }, [load, projects, query, browsing, dirCollapsed]);
  /** ↑↓ 的导航序列（目录行与文件行都在里面）：同时记住该行属于哪个项目（目录引用要用项目根算绝对路径）。 */
  const entries = useMemo(
   () => sections.flatMap((section) => section.rows.map((row) => ({ row, projectRoot: section.key }))),
@@ -296,7 +313,7 @@ export function ReferencePicker(): React.JSX.Element | null {
         {section.rows.map((row) => {
          if (row.kind === "dir") {
           const key = collapseKey(section.key, row.rel);
-          const collapsed = collapsedKeys.has(key);
+          const collapsed = dirCollapsed(key);
           return (
            <div
             key={`d:${row.rel}`}

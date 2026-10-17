@@ -98,25 +98,22 @@ function clickByText(text: string) {
 }
 
 describe("引用工作区文件浮层", () => {
- it("只列其他成员项目（当前项目排除）；目录树缩进；回车把 @路径 追加进草稿并关闭", async () => {
+ it("只列其他成员项目（当前项目排除）；目录默认折叠；回车把 @路径 追加进草稿并关闭", async () => {
   await open();
   // 只请求「其他项目」，当前项目（/p/fe）不发请求
   expect(mock.listProjectFiles).toHaveBeenCalledWith(["/p/be"]);
-  // 目录树：目录行（图标 + 名字，无 `/` 后缀）+ 文件末段
+  // 浏览态目录默认折叠：只铺顶层（目录行 `src` + 顶层文件 README.md）
   const dirNames = [...container.querySelectorAll("button")]
    .filter((b) => b.getAttribute("role") !== "option")
    .map((b) => b.textContent)
    .filter((text): text is string => text !== null && text.length > 0);
-  expect(dirNames).toEqual(["src", "db"]);
-  expect(container.textContent).toContain("index.ts");
+  expect(dirNames).toEqual(["src"]);
+  expect(container.textContent).not.toContain("index.ts");
   expect(container.textContent).toContain("README.md");
   // 文件行只显示末段名（不再是整条路径平铺）
-  expect([...container.querySelectorAll('[role="option"]')].map((o) => o.textContent)).toEqual([
-   "index.ts",
-   "api.ts",
-   "README.md",
-  ]);
+  expect([...container.querySelectorAll('[role="option"]')].map((o) => o.textContent)).toEqual(["README.md"]);
 
+  // 打字进入搜索态：命中的目录自动展开，深层文件看得见
   typeQuery("api");
   const options = [...container.querySelectorAll('[role="option"]')];
   expect(options.map((o) => o.textContent)).toEqual(["api.ts"]);
@@ -136,13 +133,13 @@ describe("引用工作区文件浮层", () => {
 
  it("键盘：默认停在第一条文件行，↑ 能停到文件夹行、Enter 引用整个文件夹", async () => {
   await open();
-  // 树的行序：src(0) → src/db(1) → index.ts(2) → api.ts(3) → README.md(4)
-  press("ArrowUp"); // 从默认落点（index.ts）上移到 src/db
+  // 默认折叠下的行序：src(0) → README.md(1)
+  press("ArrowUp"); // 从默认落点（README.md）上移到 src
   press("Enter");
   expect(useApp.getState().pendingReference).toMatchObject({
    sessionId: "s1",
-   path: "/p/be/src/db",
-   label: "db/",
+   path: "/p/be/src",
+   label: "src/",
    isDir: true,
   });
   expect(useApp.getState().refPickerTarget).toBeNull();
@@ -157,25 +154,36 @@ describe("引用工作区文件浮层", () => {
   expect(useApp.getState().pendingReference).toMatchObject({ path: "/p/be/src/api.ts", seq: expect.any(Number) });
  });
 
- it("目录行可折叠：子树隐藏、目录行保留、再点恢复", async () => {
+ it("目录默认折叠：顶层先铺出来；点目录展开一层（下一层仍折叠）、再点折回", async () => {
   await open();
-  const before = [...container.querySelectorAll('[role="option"]')].map((o) => o.textContent);
-  expect(before).toEqual(["index.ts", "api.ts", "README.md"]);
-
-  clickByText("src");
   expect([...container.querySelectorAll('[role="option"]')].map((o) => o.textContent)).toEqual(["README.md"]);
-  expect([...container.querySelectorAll("button")].some((b) => b.textContent === "src")).toBe(true);
 
-  clickByText("src");
-  expect([...container.querySelectorAll('[role="option"]')].map((o) => o.textContent)).toEqual(before);
+  clickByText("src"); // 展开 src：db 仍是折叠的（每层各自默认折叠），所以只见 api.ts
+  expect([...container.querySelectorAll('[role="option"]')].map((o) => o.textContent)).toEqual(["api.ts", "README.md"]);
+  expect([...container.querySelectorAll("button")].some((b) => b.textContent === "db")).toBe(true);
+
+  clickByText("db");
+  expect([...container.querySelectorAll('[role="option"]')].map((o) => o.textContent)).toEqual([
+   "index.ts",
+   "api.ts",
+   "README.md",
+  ]);
+
+  clickByText("src"); // 折回
+  expect([...container.querySelectorAll('[role="option"]')].map((o) => o.textContent)).toEqual(["README.md"]);
  });
 
  it("文件夹可引用：目录行尾的链接键投递目录引用（isDir、短名带尾斜杠、路径不带）", async () => {
   await open();
-  // 行尾链接键按树的前序排列：src、src/db
-  const buttons = [...container.querySelectorAll("button")].filter(
+  // 默认折叠：可见的行尾链接键只有顶层目录 src
+  const topLevel = () => [...container.querySelectorAll("button")].filter(
    (b) => b.getAttribute("aria-label") === t.refPickDirRef,
   );
+  expect(topLevel()).toHaveLength(1);
+
+  // 展开 src 后露出嵌套目录 src/db 的链接键
+  clickByText("src");
+  const buttons = topLevel();
   expect(buttons).toHaveLength(2);
 
   act(() => {
@@ -218,6 +226,7 @@ describe("引用工作区文件浮层", () => {
 
   clickByText(t.refPickRetry);
   await settle();
-  expect([...container.querySelectorAll('[role="option"]')].length).toBe(3);
+  // 恢复后仍是浏览态：只铺顶层
+  expect([...container.querySelectorAll('[role="option"]')].map((o) => o.textContent)).toEqual(["README.md"]);
  });
 });
