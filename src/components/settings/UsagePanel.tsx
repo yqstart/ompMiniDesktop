@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Loader, Refresh } from "reicon-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
@@ -252,7 +251,8 @@ export function UsagePanel() {
 
  return (
   <section aria-label={t.tabUsage} className="shrink-0">
-   {/* 页头：右侧「范围切换 + 刷新」（2026-10-19 用户口径：口径说明文字不再上界面，页头只留操作） */}
+   {/* 页头只留范围切换这一个输入控件（2026-10-19 用户口径：说明与刷新钮都不再上界面）；
+       重读时机 = 切范围 / 切走页签再回来（重挂） */}
    <div className="flex flex-wrap items-center justify-end gap-2">
     <div className="flex shrink-0 flex-wrap items-center gap-0.5">
      <div role="radiogroup" aria-label={t.usageRangeAria} className="flex flex-wrap gap-1 rounded-md bg-surface p-1">
@@ -271,21 +271,22 @@ export function UsagePanel() {
        </button>
       ))}
      </div>
-     <button
-      onClick={() => setReloadKey((k) => k + 1)}
-      disabled={busy}
-      className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
-      aria-label={t.refresh}
-      title={t.refresh}
-     >
-      {busy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
-     </button>
     </div>
    </div>
    {error && (
-    <p role="alert" className="mt-2 text-[13px] text-danger">
-     {error}
-    </p>
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+     <p role="alert" className="text-[13px] text-danger">
+      {error}
+     </p>
+     {/* 刷新钮退场后（2026-10-19），失败就地给一次重试——不然只能切走页签再回来 */}
+     <button
+      onClick={() => setReloadKey((k) => k + 1)}
+      disabled={busy}
+      className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+     >
+      {t.retry}
+     </button>
+    </div>
    )}
    {data?.truncated && (
     <p className="mt-2 text-[13px] text-warn">{fmt(t.usageTruncated, data.scannedFiles)}</p>

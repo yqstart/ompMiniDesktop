@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { Check, ChevronRight, Copy, FolderOpen, Loader, Refresh } from "reicon-react";
+import { Check, ChevronRight, Copy, FolderOpen } from "reicon-react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api } from "@shared/api";
 import { MarkdownLink } from "../MarkdownLink";
@@ -10,6 +10,7 @@ import type { SkillFileContent, SkillItem, SkillWarning, SkillsView } from "@sha
 import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
+import { useVisibleRefresh } from "../../lib/useVisibleRefresh";
 import { scopeChoices, scopeValue } from "../../lib/panelScope";
 import { groupSkills, skillSourceLabel, sortDisabled } from "../../lib/skills";
 import { EnumSelect } from "./EnumSelect";
@@ -79,6 +80,10 @@ export function SkillsPanel() {
     if (version === loadVersion.current) setRefreshing(false);
    });
  }, [activeScope, reloadKey]);
+
+ // 页头刷新钮退场后（2026-10-19）：窗口重新获得焦点 / 转回可见时重拉一次——技能可能是在
+ // 终端里新装或改过的（本页只读 omp 的发现结果，没有自己的写入能触发重读）。
+ useVisibleRefresh(() => setReloadKey((k) => k + 1));
 
  /** 停用时要收起的预览 key（停用行没有路径，只有「已发现」的行会展开）。 */
  const prevKeyOf = (name: string) => data?.skills.find((s) => s.name === name)?.filePath ?? name;
@@ -243,26 +248,8 @@ export function SkillsPanel() {
 
  return (
   <section aria-label={t.tabSkills} className="shrink-0">
-   {/* 页头：计数 + 刷新（2026-10-19 用户口径：口径说明文字不再上界面） */}
-   <div className="flex flex-wrap items-center justify-end gap-2">
-    {data !== null && (
-     <span className="shrink-0 font-mono text-[11px] text-faint">{fmt(t.skillsCount, total)}</span>
-    )}
-    <div className="flex shrink-0 items-center gap-0.5">
-     <button
-      onClick={() => {
-       setRefreshing(true);
-       setReloadKey((k) => k + 1);
-      }}
-      disabled={busy || refreshing}
-      className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
-      aria-label={t.refresh}
-      title={t.refresh}
-     >
-      {refreshing ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
-     </button>
-    </div>
-   </div>
+   {/* 页头整行已按用户口径退场（2026-10-19）：说明 / 计数 / 刷新钮都不再上界面；
+       外部改动（在终端里装了技能）靠焦点回读与重挂补上 */}
 
    {/* 发现范围（项目级技能由 omp 从该项目目录向上发现；全局 = 只看用户级） */}
    <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -278,11 +265,6 @@ export function SkillsPanel() {
      }}
     />
    </div>
-   <p className="mt-1 text-xs leading-5 text-faint">
-    {t.skillsScopeHint}
-    {data && <span className="ml-1 font-mono">{data.cwd}</span>}
-   </p>
-   <p className="mt-1 text-xs leading-5 text-faint">{t.skillsToggleHint}</p>
 
    {error && (
     <p role="alert" className="mt-2 rounded border border-danger/40 bg-danger/5 px-3 py-2 text-[13px] text-danger">

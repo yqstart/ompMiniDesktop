@@ -218,10 +218,6 @@ describe("设置页的编辑器辅助", () => {
 
  it("面板用到的界面文案都在字典里", () => {
   const keys = [
-   "allSettingsHint",
-   "allSettingsExpandAll",
-   "allSettingsCollapseAll",
-   "allSettingsCount",
    "allSettingsNotSet",
    "allSettingsRedacted",
    "allSettingsRedactedHint",

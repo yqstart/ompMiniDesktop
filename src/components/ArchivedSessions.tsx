@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Archive, ChevronRight, FolderError, Loader, Refresh, Trash2, Undo } from "reicon-react";
+import { Archive, ChevronRight, FolderError, Trash2, Undo } from "reicon-react";
 import { api } from "@shared/api";
 import { useApp } from "../stores/app";
 import { groupSessionsByProject } from "../lib/sessions";
@@ -8,6 +8,7 @@ import { sessionTitleForDisplay } from "../lib/sessionTitle";
 import { resumeSessionInApp } from "../lib/checkouts";
 import { fmt } from "../lib/locale";
 import { useText } from "../lib/useText";
+import { useVisibleRefresh } from "../lib/useVisibleRefresh";
 import { ConfirmDialog } from "./ConfirmDialog";
 import type { SessionView } from "@shared/types";
 
@@ -58,6 +59,10 @@ export function ArchivedSessions() {
    alive = false;
   };
  }, [reloadKey, t]);
+
+ // 页头刷新钮退场后（2026-10-19）：窗口重新获得焦点 / 转回可见时重拉一次（左栏或别的窗口
+ // 那边归档 / 恢复了会话，本页跟着变）。
+ useVisibleRefresh(() => setReloadKey((k) => k + 1));
 
  /** 恢复 / 删除：只传真正成功的 id 去清前端痕迹，失败的那些保持可读。 */
  const act = async (kind: "delete" | "unarchive", ids: string[]) => {
@@ -114,21 +119,8 @@ export function ArchivedSessions() {
 
  return (
   <section aria-label={t.tabArchived} className="shrink-0">
-   {/* 页头：右侧「计数 + 刷新」（2026-10-19 用户口径：口径说明文字不再上界面，页头只留操作） */}
-   <div className="flex flex-wrap items-center justify-end gap-2">
-    <div className="flex shrink-0 items-center gap-2">
-     {rows !== null && <span className="font-mono text-[11px] text-faint">{total}</span>}
-     <button
-      onClick={() => setReloadKey((k) => k + 1)}
-      disabled={busy || rows === null}
-      className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
-      aria-label={t.archivedRefresh}
-      title={t.archivedRefresh}
-     >
-      {busy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
-     </button>
-    </div>
-   </div>
+   {/* 页头整行已按用户口径退场（2026-10-19）：说明 / 计数 / 刷新钮都不再上界面；
+       外部改动（别的窗口里归档了会话）靠焦点回读与重挂补上 */}
    {error && (
     <p role="alert" className="mt-3 text-[13px] text-danger">
      {error}

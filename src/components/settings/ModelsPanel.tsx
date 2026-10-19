@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader, Refresh } from "reicon-react";
+import { Loader } from "reicon-react";
 import { api } from "@shared/api";
 import type { FallbackChainsInfo, ModelInfo, ModelRolesInfo } from "@shared/types";
 import { useApp } from "../../stores/app";
@@ -34,7 +34,9 @@ import { StarToggle } from "./StarToggle";
  *   档位候选按该模型声明的档裁剪。
  * - **omp 侧改完切回来就该看到**：角色与转移链在挂载时拉一次、**每次设置视图重新激活时重读**
  *   （在别处（omp TUI / CLI）改过 `modelRoles` 后，回到设置视图即刷新）；模型目录不额外重拉——
- *   `get_models` 后端有 5 分钟缓存，页头的「刷新」按钮才走 `refresh_models` 强制重拉。
+ *   `get_models` 后端有 5 分钟缓存，只有页内动作（挑选模型 / 改供应商）才走 `refresh_models`
+ *   强制重拉；页头的刷新钮已按用户口径退场（2026-10-19），且本页要跑 `omp` 子进程，
+ *   不挂焦点回读（一次 alt-tab 就是一次秒级子进程）。
  * - **Ctrl+P 快速切换环**（`cycleOrder`）没有手动编辑面（用户口径 2026-10-10）：环 = 模型
  *   角色的派生投影——后端 `sync_cycle_order` 按角色展示顺序取已配置模型、按模型基名保序
  *   去重（`:思考档` 后缀不算另一个模型；重复模型保留第一个出现的角色），已是目标值就不写。
@@ -187,19 +189,9 @@ export function ModelsPanel() {
 
  return (
   <>
-   {/* 页头：只有刷新钮（2026-10-19 用户口径：口径说明文字不再上界面） */}
-   <div className="flex flex-wrap items-center justify-end gap-2">
-    {/* 页级唯一刷新：角色 / 环 / 转移 / 目录 / 供应商（经 modelsRefreshed 广播）都靠它 */}
-    <button
-     onClick={() => void refreshAll()}
-     disabled={busy}
-     className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
-     aria-label={t.modelsRefresh}
-     title={t.modelsRefresh}
-    >
-     {busy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
-    </button>
-   </div>
+   {/* 页头整行已按用户口径退场（2026-10-19）：说明 / 刷新钮都不再上界面；重读时机 =
+       切走页签再回来（重挂）+ 页内自身动作（保存供应商 / 挑选模型走 refreshAll，
+       经 modelsRefreshed 广播） */}
    {err && (
     <p role="alert" className="mt-3 rounded border border-danger/40 bg-danger/5 px-3 py-2 text-[13px] text-danger">
      {err}

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Loader, Refresh, Undo } from "reicon-react";
+import { ChevronDown, ChevronRight, Loader, Undo } from "reicon-react";
 import { api } from "@shared/api";
 import type { OmpCatalogItem, OmpSetting, OmpSettingsCatalog } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { useText } from "../../lib/useText";
 import { OMP_SETTING_NAMES } from "../../lib/ompSettingNames";
 import { fmt } from "../../lib/locale";
+import { useVisibleRefresh } from "../../lib/useVisibleRefresh";
 import type { SettingsFocusRequest } from "../../lib/settingsTabs";
 import { EnumSelect } from "./EnumSelect";
 import { Switch } from "./Switch";
@@ -46,6 +47,9 @@ import { SETTINGS_LIST_SET, SETTING_NOTES, SETTING_SECTION_OVERRIDES } from "../
  * - **行内标注**（`SETTING_NOTES`）：`仅 TUI 生效`（plan / goal 功能总闸）/ 值为 `-1` 时的
  *   「-1 = 默认」（temperature / compaction.thresholdPercent）；
  * - 分组默认展开（可见性优先，折叠是用户的选择）；
+ * - **页头没有说明文字、计数、展开 / 收起与刷新钮**（2026-10-19 用户口径）：分组标题自己
+ *   可点开合；外部改动（别的终端改了 config.yml）靠**窗口重新获得焦点 / 转回可见**时的静默回读
+ *   补上，切走页签再回来本来就会重挂重读。
  * - 枚举下拉的选项 label 走 `OPTION_LABELS`（普通词翻界面语言、专有名词与档位名原样；多个键共享公共取值键）；
  *   上游没有取值表（或非 enum）的键退化成文本输入框；
  * - array / record 走 JSON 文本编辑（**本地先解析校验**，不合法根本不发请求）——当前清单没有
@@ -85,28 +89,38 @@ export function GeneralSettingsPanel({
  const flashTimer = useRef<number | null>(null);
  const handledSeq = useRef(0);
 
- const load = useCallback(() => {
-  return api
-   .getOmpSettingsCatalog()
-   .then((c) => {
-    setCatalog(c);
-    setLoadError(null);
-    setStaleError(null);
-    setErr(null);
-    // 目录换了（刷新 / omp 升级）：打开中的编辑器与旧草稿一起作废，不给陈旧值续命
-    setJsonDrafts({});
-    setJsonErrors({});
-    setDrafts({});
-   })
-   .catch((e: unknown) => {
-    const message = e instanceof Error ? e.message : t.ompSettingsLoadFailed;
-    setCatalog((prev) => {
-     if (!prev) setLoadError(message);
-     else setStaleError(message);
-     return prev;
+ /**
+  * 读目录。`keepDrafts` = 后台静默回读（窗口重新获得焦点那条路）：只换读数，**不动用户手头的
+  * 行内草稿**——他可能正打到一半切出去看一眼；显式刷新 / 首次挂载才连草稿一起作废（目录换了，
+  * 陈旧值不再续命）。
+  */
+ const load = useCallback(
+  (keepDrafts = false) => {
+   return api
+    .getOmpSettingsCatalog()
+    .then((c) => {
+     setCatalog(c);
+     setLoadError(null);
+     setStaleError(null);
+     setErr(null);
+     // 目录换了（刷新 / omp 升级）：打开中的编辑器与旧草稿一起作废，不给陈旧值续命
+     if (!keepDrafts) {
+      setJsonDrafts({});
+      setJsonErrors({});
+      setDrafts({});
+     }
+    })
+    .catch((e: unknown) => {
+     const message = e instanceof Error ? e.message : t.ompSettingsLoadFailed;
+     setCatalog((prev) => {
+      if (!prev) setLoadError(message);
+      else setStaleError(message);
+      return prev;
+     });
     });
-   });
- }, [t.ompSettingsLoadFailed]);
+  },
+  [t.ompSettingsLoadFailed],
+ );
 
  useEffect(() => {
   void load();
@@ -320,44 +334,14 @@ export function GeneralSettingsPanel({
 
  const missingOmp = health?.ok === false;
 
+ // 外部改动没有事件可等（别的终端 / 别的应用里改了 config.yml、跑了 omp config set）：
+ // 窗口重新获得焦点、从后台转回可见时静默回读一次（`load(true)`：只换读数，**不动**
+ // 用户行内打到一半的草稿）。页头的刷新钮已按用户口径退场，这就是它的替代。
+ useVisibleRefresh(() => void load(true));
+
  return (
   <section ref={rootRef} aria-label={t.tabGeneral} className="shrink-0">
-   <div className="flex flex-wrap items-start gap-2">
-    <p className="min-w-0 flex-1 text-xs leading-5 text-muted">
-     {t.allSettingsHint}
-     {catalog && (
-      <span className="ml-2 font-mono text-[11px] text-faint">{fmt(t.allSettingsCount, total)}</span>
-     )}
-    </p>
-    <div className="flex shrink-0 items-center gap-0.5">
-     <button
-      onClick={() => setClosedSections(new Set())}
-      disabled={closedSections.size === 0}
-      title={t.allSettingsExpandAll}
-      className="flex h-7 cursor-pointer items-center rounded-md px-2 text-[12px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
-     >
-      {t.allSettingsExpandAll}
-     </button>
-     <button
-      onClick={() => setClosedSections(new Set(groups.map((g) => g.section)))}
-      disabled={groups.length > 0 && closedSections.size >= groups.length}
-      title={t.allSettingsCollapseAll}
-      className="flex h-7 cursor-pointer items-center rounded-md px-2 text-[12px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
-     >
-      {t.allSettingsCollapseAll}
-     </button>
-     <button
-      onClick={refresh}
-      disabled={refreshing || catalog === null}
-      className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
-      aria-label={t.ompSettingsRefresh}
-      title={t.ompSettingsRefresh}
-     >
-      {refreshing ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
-     </button>
-    </div>
-   </div>
-   {missingOmp && <p className="mt-3 text-[13px] text-warn">{t.ompSettingsMissing}</p>}
+   {missingOmp && <p className="mt-1 text-[13px] text-warn">{t.ompSettingsMissing}</p>}
    {err && (
     <p role="alert" className="mt-3 rounded border border-danger/40 bg-danger/5 px-3 py-2 text-[13px] text-danger">
      {err}

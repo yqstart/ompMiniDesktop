@@ -9,6 +9,7 @@ import { useApp } from "../../stores/app";
 import { fmt, type Text } from "../../lib/locale";
 import type { SettingsFocusRequest } from "../../lib/settingsTabs";
 import { useText } from "../../lib/useText";
+import { useVisibleRefresh } from "../../lib/useVisibleRefresh";
 import { isMacKeyboard } from "../../lib/platform";
 import {
   buildRuleText,
@@ -348,6 +349,10 @@ export function ConstraintsPanel({
     return () => window.clearTimeout(timer);
   }, [settingsTabActive, load]);
 
+  // 页头刷新钮退场后（2026-10-19），外部改动（在别的编辑器里改了这些文件）靠焦点回读补上：
+  // 本页编辑的正是 `~/.omp/agent` 下的文件，被外部改动的概率不低。`load()` 不动草稿。
+  useVisibleRefresh(() => void load());
+
   useEffect(
     () => () => {
       if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
@@ -594,24 +599,10 @@ export function ConstraintsPanel({
 
   return (
     <div ref={panelRef} className="mt-1">
-      {/* 页头：只有刷新钮（2026-10-19 用户口径：口径说明文字不再上界面，目录读数留在下面一行） */}
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
-          aria-label={t.constraintsRefresh}
-          title={t.constraintsRefresh}
-        >
-          <Refresh size={12} aria-hidden />
-        </button>
-      </div>
-      {view && (
-        <p className="mt-1 font-mono text-[11px] break-all text-faint" title={view.agentDir}>
-          {view.agentDir}
-        </p>
-      )}
-      {staleError && (
+     {/* 页头整行已按用户口径退场（2026-10-19）：说明 / 刷新钮 / agentDir 读数都不再上界面
+         （当前文件的全路径在编辑器标题行里本来就有）；重读时机 = 切走页签再回来（重挂）、
+         窗口重新获得焦点（`useVisibleRefresh`）与编辑器工具行的「重新加载」 */}
+     {staleError && (
         <p role="alert" className="mt-3 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
           {t.listRefreshFailed}：{staleError}
         </p>

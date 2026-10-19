@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { ChevronRight, FolderError, Loader, Notebook, Refresh, Trash2 } from "reicon-react";
+import { ChevronRight, FolderError, Notebook, Trash2 } from "reicon-react";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
+import { useVisibleRefresh } from "../../lib/useVisibleRefresh";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { MarkdownLink } from "../MarkdownLink";
 import type { MemoryFileContent, MemoryFileKind, MemoryFileView, MemoryProjectView } from "@shared/types";
@@ -81,6 +82,10 @@ export function MemoryPanel() {
    alive = false;
   };
  }, [reloadKey, t]);
+
+ // 页头刷新钮退场后（2026-10-19）：窗口重新获得焦点 / 转回可见时重拉一次——omp 的后台整理
+ // 会在会话跑完后写出新记忆，那时页面可能一直开着。
+ useVisibleRefresh(() => setReloadKey((k) => k + 1));
 
  /** 点文件行：展开预览（懒加载），已展开的再点一次收起。 */
  const togglePreview = async (dir: string, file: string) => {
@@ -219,19 +224,8 @@ export function MemoryPanel() {
 
  return (
   <section aria-label={t.tabMemories} className="shrink-0">
-   {/* 页头：只放计数与刷新钮（2026-10-19 用户口径：口径说明文字不再上界面） */}
-   <div className="flex flex-wrap items-center justify-end gap-2">
-    {rows !== null && <span className="shrink-0 font-mono text-[11px] text-faint">{fmt(t.memoryProjectCount, total)}</span>}
-    <button
-     onClick={() => setReloadKey((k) => k + 1)}
-     disabled={busy}
-     className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
-     aria-label={t.memoryRefresh}
-     title={t.memoryRefresh}
-    >
-     {busy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
-    </button>
-   </div>
+   {/* 页头整行已按用户口径退场（2026-10-19）：说明 / 计数 / 刷新钮都不再上界面；
+       外部改动（omp 后台整理写了新记忆）靠焦点回读与重挂补上 */}
    {error && (
     <p role="alert" className="mt-2 text-[13px] text-danger">
      {error}

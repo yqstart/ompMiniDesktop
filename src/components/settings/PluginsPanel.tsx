@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Loader, Plus, Refresh, Stethoscope, Trash2 } from "reicon-react";
+import { Check, Loader, Plus, Stethoscope, Trash2 } from "reicon-react";
 import { api } from "@shared/api";
 import type { MarketPluginItem, PluginDoctorFinding, PluginItem, PluginsView } from "@shared/types";
 import { useApp } from "../../stores/app";
@@ -252,9 +252,9 @@ export function PluginsPanel() {
 
  return (
   <section aria-label={t.tabPlugins} className="shrink-0">
-   {/* 页头：计数 + 操作（2026-10-19 用户口径：口径说明文字不再上界面） */}
+   {/* 页头整行已按用户口径退场（2026-10-19）：说明 / 计数 / 刷新钮都不再上界面；
+       只剩两个功能入口（体检 / 安装插件——安装没有第二个入口），重读时机 = 重挂 + 页内动作 */}
    <div className="flex flex-wrap items-center justify-end gap-2">
-    {data !== null && <span className="shrink-0 font-mono text-[11px] text-faint">{fmt(t.pluginsCount, total)}</span>}
     <div className="flex shrink-0 items-center gap-0.5">
      <button
       onClick={() => void doDoctor(false)}
@@ -274,18 +274,6 @@ export function PluginsPanel() {
       <Plus size={12} aria-hidden />
       {t.pluginsInstall}
      </button>
-     <button
-      onClick={() => {
-       setRefreshing(true);
-       setReloadKey((k) => k + 1);
-      }}
-      disabled={busy || refreshing}
-      className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
-      aria-label={t.refresh}
-      title={t.refresh}
-     >
-      {refreshing ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
-     </button>
     </div>
    </div>
 
@@ -303,10 +291,6 @@ export function PluginsPanel() {
      }}
     />
    </div>
-   <p className="mt-1 text-xs leading-5 text-faint">
-    {t.pluginsScopeHint}
-    {data && <span className="ml-1 font-mono">{data.cwd}</span>}
-   </p>
 
    {error && (
     <p role="alert" className="mt-2 rounded border border-danger/40 bg-danger/5 px-3 py-2 text-[13px] text-danger">
