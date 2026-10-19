@@ -4,6 +4,7 @@ import { openPath } from "@tauri-apps/plugin-opener";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
+import { isWindows } from "../../lib/platform";
 import { useText } from "../../lib/useText";
 import { refreshSessionView } from "../../lib/sessionOpen";
 import { appendLocalNote } from "../../lib/localNote";
@@ -98,7 +99,7 @@ export function TopBar() {
   // Overlay 标题栏：左侧留 72px 给 macOS 红绿灯；标题靠左（2026-10-19），右端只剩工作台开关
   <header
    data-tauri-drag-region
-   className="relative flex h-(--h-chrome) shrink-0 items-center gap-1 border-b border-border bg-background pr-2 pl-[72px]"
+   className={`relative flex h-(--h-chrome) shrink-0 items-center gap-1 border-b border-border bg-background pr-2 ${isWindows() ? "pl-3" : "pl-[72px]"}`}
   >
    {/* 窄窗（<768px）左栏收起为抽屉：这里必须有打开入口，否则项目列表与设置不可达 */}
    <button

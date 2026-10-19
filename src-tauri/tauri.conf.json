@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "",
+        "title": "ompMiniDesktop",
         "width": 1200,
         "height": 800,
         "minWidth": 375,

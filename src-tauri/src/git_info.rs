@@ -65,25 +65,34 @@ pub async fn git_bin() -> Option<String> {
         return hit.clone();
     }
     let mut candidates: Vec<String> = vec!["git".into()];
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-    let fut = tokio::process::Command::new(&shell)
-        .args(["-ilc", "command -v git"])
-        .stdin(Stdio::null())
-        .output();
-    if let Ok(Ok(out)) = tokio::time::timeout(SHELL_TIMEOUT, fut).await {
-        if out.status.success() {
-            if let Some(found) = String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .map(str::trim)
-                .filter(|l| l.starts_with('/'))
-                .next_back()
-            {
-                candidates.push(found.to_string());
+    // Windows 的 GUI 进程从 Explorer 继承注册表 PATH，直接探 `git` 即可；
+    // 不要跑 `$SHELL -ilc`（系统默认没有 SHELL，Git Bash 的输出还是 MSYS 路径）。
+    #[cfg(not(windows))]
+    {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+        let fut = tokio::process::Command::new(&shell)
+            .args(["-ilc", "command -v git"])
+            .stdin(Stdio::null())
+            .output();
+        if let Ok(Ok(out)) = tokio::time::timeout(SHELL_TIMEOUT, fut).await {
+            if out.status.success() {
+                if let Some(found) = String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .map(str::trim)
+                    .filter(|l| l.starts_with('/'))
+                    .next_back()
+                {
+                    candidates.push(found.to_string());
+                }
             }
         }
+        for c in ["/usr/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"] {
+            candidates.push(c.to_string());
+        }
     }
-    for c in ["/usr/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"] {
-        candidates.push(c.to_string());
+    #[cfg(windows)]
+    if let Ok(pf) = std::env::var("ProgramFiles") {
+        candidates.push(std::path::Path::new(&pf).join("Git/cmd/git.exe").to_string_lossy().into_owned());
     }
     let mut found = None;
     for c in candidates {

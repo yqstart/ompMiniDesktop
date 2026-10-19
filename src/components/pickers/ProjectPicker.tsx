@@ -5,6 +5,7 @@ import { fmt } from "../../lib/locale";
 import { useDropdown } from "../../lib/useDropdown";
 import { startChatInProject } from "../../lib/projects";
 import { useText } from "../../lib/useText";
+import { wslDistroOf } from "../../lib/wsl";
 import type { ProjectView } from "@shared/types";
 
 /**
@@ -27,6 +28,8 @@ export function ProjectPicker({ project }: { project: ProjectView | null }) {
  );
  const ref = useDropdown(open, () => setOpen(false));
  const label = project?.name ?? (activeSessionId ? t.unassigned : t.selectProject);
+ // WSL 项目：入口处就把边界说清楚（终端能进发行版，聊天会话不跨发行版启动 omp）
+ const wsl = wslDistroOf(project?.path);
 
  return (
   <div className="relative" ref={ref}>
@@ -41,6 +44,14 @@ export function ProjectPicker({ project }: { project: ProjectView | null }) {
     title={project?.path ?? t.notInProject}
    >
     <span className="whitespace-nowrap">{label}</span>
+    {wsl && (
+     <span
+      className="shrink-0 rounded bg-active px-1 py-px text-[10px] text-muted"
+      title={fmt(t.wslProjectHint, wsl)}
+     >
+      {t.wslBadge}
+     </span>
+    )}
     <ChevronDown size={14} aria-hidden className="shrink-0 opacity-60" />
    </button>
    {error && (

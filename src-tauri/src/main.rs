@@ -26,6 +26,7 @@ mod skills;
 mod title_prompt;
 mod usage;
 mod workspace_fs;
+mod wsl;
 
 use commands::*;
 use tauri::Manager;

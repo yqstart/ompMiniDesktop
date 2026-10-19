@@ -137,14 +137,91 @@ pub struct SpawnedTerminal {
     pub child: Box<dyn Child + Send + Sync>,
 }
 
-/// 用户登录 shell（`$SHELL` 存在才用，否则 /bin/zsh）。
-pub fn login_shell() -> String {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-    if Path::new(&shell).is_file() {
-        shell
-    } else {
-        "/bin/zsh".into()
+/// Windows 默认 shell：pwsh 7 → Windows PowerShell 5.1 → cmd.exe。
+///
+/// 为什么不是 WSL 的 bash：终端打开的是**当前项目目录**。项目在 Windows 盘上时，
+/// WSL 看不到用户期望的路径映射，反而多一层 `wslpath`；项目在 WSL 里时由
+/// [`wsl_shell`] 单独接管（见 P1）。这里只负责原生 Windows。
+#[cfg(windows)]
+fn windows_shell() -> String {
+    let mut candidates: Vec<String> = Vec::new();
+    for key in ["ProgramFiles", "ProgramW6432"] {
+        if let Ok(dir) = std::env::var(key) {
+            candidates.push(Path::new(&dir).join("PowerShell/7/pwsh.exe").to_string_lossy().into_owned());
+        }
     }
+    if let Ok(path) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path) {
+            candidates.push(dir.join("pwsh.exe").to_string_lossy().into_owned());
+        }
+    }
+    if let Ok(root) = std::env::var("SystemRoot") {
+        candidates.push(
+            Path::new(&root)
+                .join("System32/WindowsPowerShell/v1.0/powershell.exe")
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
+    if let Ok(comspec) = std::env::var("ComSpec") {
+        candidates.push(comspec);
+    }
+    candidates
+        .into_iter()
+        .find(|p| Path::new(p).is_file())
+        .unwrap_or_else(|| "cmd.exe".into())
+}
+
+/// 终端默认 shell：POSIX 用登录 shell（`$SHELL`）；Windows 见 [`windows_shell`]。
+pub fn login_shell() -> String {
+    #[cfg(windows)]
+    {
+        windows_shell()
+    }
+    #[cfg(not(windows))]
+    {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+        if Path::new(&shell).is_file() {
+            shell
+        } else {
+            "/bin/zsh".into()
+        }
+    }
+}
+
+/// 每种 shell 的启动参数：只有 POSIX 登录 shell 吃 `-l`。
+///
+/// `cmd.exe` 不认 `-l`（会把它当命令名）；PowerShell 用 `-NoLogo` 少打版权横幅。
+/// Git Bash / zsh / fish 仍然 `-l`，与用户真实终端一致。
+pub fn shell_args(shell: &str) -> Vec<String> {
+    let name = Path::new(shell)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if name == "cmd" || name == "cmd.exe" {
+        return Vec::new();
+    }
+    if name == "pwsh" || name == "pwsh.exe" || name == "powershell" || name == "powershell.exe" {
+        return vec!["-NoLogo".into()];
+    }
+    vec!["-l".into()]
+}
+
+/// shell 是否可启动：POSIX 必须是真实文件；Windows 允许裸名字（`cmd.exe` 由
+/// CreateProcess 按 PATH / 系统目录解析，`Path::is_file()` 对它不成立）。
+fn shell_exists(shell: &str) -> bool {
+    Path::new(shell).is_file() || (cfg!(windows) && !shell.contains('\\') && !shell.contains('/'))
+}
+
+/// WSL 项目：终端直接进该发行版（bash 登录 shell）。
+///
+/// 只用于**终端**——聊天会话不跨发行版启动 omp（`create_session` 会明确拒绝），
+/// 所以这里不需要关心 omp 的 PATH / 会话文件落点。命令的构造见
+/// [`crate::wsl::bash_launch`]（`cd` 到 Linux 路径后 `exec bash -l`）。
+fn wsl_shell(cwd: &str) -> Option<(String, Vec<String>)> {
+    let w = crate::wsl::parse_unc(cwd)?;
+    Some(crate::wsl::bash_launch(&w.distro, &w.linux, "bash", &["-l".to_string()]))
 }
 
 /// 建 PTY 并启动一个子进程。抽成纯函数以便在真实 PTY 上做单测（见文末）。
@@ -176,7 +253,8 @@ pub fn spawn_terminal(bin: &str, args: &[String], cwd: &str, size: PtySize) -> R
 
 /// 打开一个终端（右栏「终端」页签首次显示某目录时调用）。
 ///
-/// 登录 shell 用 `-l` 起（读 .zprofile / .zshrc 等），与用户真实终端环境对齐。
+/// 启动参数按 shell 分叉（见 [`shell_args`]）：POSIX 登录 shell 用 `-l`，
+/// Windows 的 PowerShell 用 `-NoLogo`、cmd 不带参数。
 #[tauri::command]
 pub async fn terminal_spawn(
     state: State<'_, AppState>,
@@ -192,12 +270,26 @@ pub async fn terminal_spawn(
             return Err(cmd_err("ALREADY_EXISTS", "终端已存在".into(), None));
         }
     }
-    let shell = opts.shell.clone().unwrap_or_else(login_shell);
-    if !Path::new(&shell).is_file() {
+    // shell 选择顺序：显式指定 → WSL 项目（进发行版）→ 平台默认。
+    // WSL 判定只看 cwd：`\\wsl$\<distro>\...` 是 Windows 能看到的 UNC 路径。
+    let (shell, args, process_cwd) = if let Some(s) = opts.shell.clone() {
+        let a = shell_args(&s);
+        (s, a, opts.cwd.clone())
+    } else if let Some((bin, wsl_args)) = wsl_shell(&opts.cwd) {
+        // 不要把 `\\wsl$\...` 设成 wsl.exe 的 Windows 工作目录（WSL 映射不回去）；
+        // 用系统临时目录，真正的 `cd` 在 bash 脚本里按 Linux 路径执行。
+        let tmp = std::env::temp_dir().to_string_lossy().into_owned();
+        (bin, wsl_args, tmp)
+    } else {
+        let s = login_shell();
+        let a = shell_args(&s);
+        (s, a, opts.cwd.clone())
+    };
+    if !shell_exists(&shell) {
         return Err(cmd_err("SHELL_MISSING", format!("找不到 shell：{shell}"), None));
     }
     let size = PtySize { rows: opts.rows.max(2), cols: opts.cols.max(2), pixel_width: 0, pixel_height: 0 };
-    let spawned = spawn_terminal(&shell, &["-l".to_string()], &opts.cwd, size)
+    let spawned = spawn_terminal(&shell, &args, &process_cwd, size)
         .map_err(|e| cmd_err("TERMINAL_SPAWN", e, None))?;
     let SpawnedTerminal { reader, writer, master, killer, mut child } = spawned;
     let pid = child.process_id();

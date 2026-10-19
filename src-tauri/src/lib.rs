@@ -21,3 +21,4 @@ pub mod settings;
 pub mod skills;
 pub mod usage;
 pub mod workspace_fs;
+pub mod wsl;

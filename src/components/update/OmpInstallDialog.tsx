@@ -108,6 +108,7 @@ export function OmpInstallDialog() {
       </button>
      </div>
      <p className="mt-2 text-[12px] leading-relaxed text-faint">{t.ompInstallFooter}</p>
+     {isWindows() && <p className="mt-2 text-[12px] leading-relaxed text-warn">{t.ompInstallWslHint}</p>}
     </div>
    )}
 

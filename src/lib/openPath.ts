@@ -2,6 +2,7 @@ import { useState } from "react";
 import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useApp } from "../stores/app";
 import { fmt } from "./locale";
+import { joinPath } from "./paths";
 import { useText } from "./useText";
 
 /**
@@ -21,8 +22,8 @@ export function useOpenPath(cwd: string) {
    setNotice(fmt(t.openInBrowserNotice, p));
    return;
   }
-  // 相对路径按会话 cwd 解析
-  const full = p.startsWith("/") ? p : `${cwd}/${p}`;
+  // 相对路径按会话 cwd 解析；Windows 盘符 / UNC 本身就是绝对路径
+  const full = joinPath(cwd, p);
   try {
    await openPath(full);
    setNotice(null);

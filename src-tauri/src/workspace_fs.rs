@@ -226,6 +226,11 @@ pub fn entries_for(root: &str) -> Arc<Vec<(String, bool)>> {
     fresh
 }
 
+/// 标签体系统一用 `/` 分隔：Windows 传来的 `\` 先归一，后续切段 / 前缀比较只认一种写法。
+fn normalize_slashes(s: &str) -> String {
+    s.replace('\\', "/")
+}
+
 /// 路径的各级后缀（`a/b/c` → `["c", "b/c", "a/b/c"]`，短的在前；`/` 是 ASCII，切字节安全）。
 fn suffixes(rel: &str) -> Vec<&str> {
     let mut out = Vec::new();
@@ -246,8 +251,10 @@ fn suffixes(rel: &str) -> Vec<&str> {
 /// 唯一性看全库：段数从 1 开始增长，取第一个只对应这一个条目的后缀；都不唯一 → 完整相对路径
 /// （它本身必然唯一）。`all` = 同一棵树的全量条目（`entries_for`）。
 pub fn unique_labels(all: &[(String, bool)], targets: &[String]) -> HashMap<String, String> {
+    // Windows 的 `rel` 可能带 `\`：归一后再切后缀；输出 key 仍是调用方给的原字符串。
+    let targets_norm: Vec<String> = targets.iter().map(|t| normalize_slashes(t)).collect();
     let mut need: HashSet<String> = HashSet::new();
-    for target in targets {
+    for target in &targets_norm {
         for suffix in suffixes(target) {
             if !suffix.is_empty() {
                 need.insert(suffix.to_string());
@@ -258,7 +265,8 @@ pub fn unique_labels(all: &[(String, bool)], targets: &[String]) -> HashMap<Stri
     // 的条目一个 need 后缀都贡献不了，可以整体跳过——这让全库扫描基本只做一次哈希查询。
     let mut counts: HashMap<String, usize> = HashMap::new();
     for (rel, _) in all {
-        let segs = suffixes(rel);
+        let rel = normalize_slashes(rel);
+        let segs = suffixes(&rel);
         if !segs.first().is_some_and(|tail| need.contains(*tail)) {
             continue;
         }
@@ -269,11 +277,11 @@ pub fn unique_labels(all: &[(String, bool)], targets: &[String]) -> HashMap<Stri
         }
     }
     let mut out = HashMap::new();
-    for target in targets {
-        let label = suffixes(target)
+    for (target, target_norm) in targets.iter().zip(&targets_norm) {
+        let label = suffixes(target_norm)
             .into_iter()
             .find(|suffix| counts.get(*suffix).copied().unwrap_or(0) == 1)
-            .unwrap_or(target.as_str());
+            .unwrap_or(target_norm.as_str());
         out.insert(target.clone(), label.to_string());
     }
     out
@@ -282,36 +290,49 @@ pub fn unique_labels(all: &[(String, bool)], targets: &[String]) -> HashMap<Stri
 /// 后缀反解：`components/` → 全库里**唯一**以它结尾的条目；不唯一（歧义）或没有 → None。
 /// 芯片的存在性、发送前的短标签展开共用它（同一套规则，两边不会各说各话）。
 pub fn resolve_suffix(all: &[(String, bool)], token: &str) -> Option<(String, bool)> {
-    let needle = token.trim_end_matches('/');
+    let needle = normalize_slashes(token);
+    let needle = needle.trim_end_matches('/');
     if needle.is_empty() || needle.contains("..") {
         return None;
     }
     let tail = format!("/{needle}");
     let mut hit: Option<(String, bool)> = None;
     for (rel, is_dir) in all {
+        let rel = normalize_slashes(rel);
         if rel == needle || rel.ends_with(&tail) {
             if hit.is_some() {
                 return None; // 歧义：不猜
             }
-            hit = Some((rel.clone(), *is_dir));
+            // 返回归一后的相对路径（前端芯片 / 发送前展开都用正斜杠）
+            hit = Some((rel, *is_dir));
         }
     }
     hit
 }
 
-/// 绝对路径 → 相对 `base` 的路径（词法计算，POSIX）：不在 `base` 之内（含等于）→ None。
+/// 绝对路径 → 相对 `base` 的路径：不在 `base` 之内（含等于）→ None。
 /// 与前端 `lib/workspaceFiles.ts` 的 `relativeToCwd` 同一口径。
+///
+/// 输入先归一成 `/`：Windows 的 `C:\proj` 与 `C:\proj\src` 不能靠字符串前缀直接切
+/// （`strip_prefix` 会留下 `\src`）；盘符大小写不敏感（`C:` / `c:` 视为同一盘）。
 pub fn rel_to(base: &str, path: &str) -> Option<String> {
+    let base = normalize_slashes(base);
+    let path = normalize_slashes(path);
     let base = base.trim_end_matches('/');
     let base = if base.is_empty() { "/" } else { base };
     let path = path.trim_end_matches('/');
-    if path.is_empty() || path == base {
+    if path.is_empty() || path.eq_ignore_ascii_case(base) {
         return None;
     }
     let rest = if base == "/" {
         path.strip_prefix('/')?
     } else {
-        path.strip_prefix(base)?.strip_prefix('/')?
+        // 用 get(..len) 而不是直接切片：用户目录可能含非 ASCII，切在字符中间会 panic。
+        let head = path.get(..base.len())?;
+        if !head.eq_ignore_ascii_case(base) || path.as_bytes().get(base.len()) != Some(&b'/') {
+            return None;
+        }
+        &path[base.len() + 1..]
     };
     (!rest.is_empty() && !rest.split('/').any(|part| part == "..")).then(|| rest.to_string())
 }
@@ -606,5 +627,26 @@ mod tests {
         assert_eq!(rel_to("/w/alpha", "/w/beta/a.ts"), None);
         assert_eq!(rel_to("/", "/etc/hosts").as_deref(), Some("etc/hosts"));
         assert_eq!(rel_to("/w/alpha", "/w/alpha/../x"), None, "越界不认");
+    }
+
+    /// Windows 的 `\` 与盘符大小写：标签体系仍输出 `/`（前端 split("/") 与 omp 的 `@` 都认它）。
+    #[test]
+    fn rel_to_accepts_windows_separators() {
+        assert_eq!(rel_to(r"C:\proj", r"C:\proj\src\a.ts").as_deref(), Some("src/a.ts"));
+        assert_eq!(rel_to(r"c:\proj", r"C:\proj\src").as_deref(), Some("src"), "盘符大小写不敏感");
+        assert_eq!(rel_to(r"C:\proj\", r"C:\proj\src\a.ts").as_deref(), Some("src/a.ts"));
+        assert_eq!(rel_to(r"C:\proj", r"D:\other\a.ts"), None);
+        assert_eq!(rel_to(r"C:\proj", r"C:\proj2\a.ts"), None, "同前缀但不是子目录");
+        assert_eq!(
+            rel_to(r"\\wsl$\Ubuntu\home\u", r"\\wsl$\Ubuntu\home\u\a.ts").as_deref(),
+            Some("a.ts"),
+            "WSL UNC 也与普通 Windows 路径同口径"
+        );
+    }
+
+    #[test]
+    fn resolve_suffix_accepts_windows_token() {
+        let all = vec![("src/a.ts".to_string(), false), ("src/b.ts".to_string(), false)];
+        assert_eq!(resolve_suffix(&all, r"src\a.ts"), Some(("src/a.ts".to_string(), false)));
     }
 }

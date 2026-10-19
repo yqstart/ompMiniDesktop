@@ -115,6 +115,11 @@ const ZH = {
  dismissError: "关闭错误提示",
  missingFolder: "目录缺失",
  missingFolderHint: "目录已不存在，会话仍可回放",
+ wslBadge: "WSL",
+ wslProjectHint:
+  "该项目位于 WSL（{0}）：右栏终端会直接进入该发行版；聊天会话请在 WSL 内运行 omp，或把项目放到 Windows 盘。",
+ ompInstallWslHint:
+  "如果 omp 装在 WSL 里：这里装的是 Windows 原生版。WSL 项目请在 WSL 内运行 omp（右栏终端可直接进入该发行版），两边的会话文件不共享。",
  relocate: "重定位",
  relocateAria: "重定位项目 {0}",
  relocateTitle: "重新选择该项目的目录（只改绑定路径，不动会话文件）",
@@ -1565,6 +1570,11 @@ const EN: Record<TextKey, string> = {
  dismissError: "Dismiss error",
  missingFolder: "Folder missing",
  missingFolderHint: "Folder is gone; chats can still be replayed",
+ wslBadge: "WSL",
+ wslProjectHint:
+  "This project lives in WSL ({0}). The right-hand terminal opens that distro; run omp inside WSL for chat, or move the project to a Windows drive.",
+ ompInstallWslHint:
+  "If omp lives in WSL: this installs the native Windows build. Run omp inside WSL for WSL projects (the right-hand terminal opens that distro); the two sides do not share session files.",
  relocate: "Relocate",
  relocateAria: "Relocate project {0}",
  relocateTitle: "Choose the folder again (rebinds the path only; chat files stay untouched)",

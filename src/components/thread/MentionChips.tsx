@@ -1,5 +1,6 @@
 import { FileText, TriangleWarning } from "reicon-react";
 import { fmt } from "../../lib/locale";
+import { joinPath } from "../../lib/paths";
 import { useText } from "../../lib/useText";
 import type { ViewMsg } from "@shared/types";
 
@@ -24,7 +25,7 @@ export function MentionChips({ m, cwd }: { m: Extract<ViewMsg, { kind: "files" }
      <button
       key={f.path}
       onClick={() => {
-       const full = f.path.startsWith("/") ? f.path : cwd ? `${cwd}/${f.path}` : f.path;
+       const full = joinPath(cwd ?? "", f.path);
        void import("@tauri-apps/plugin-opener").then((mod) => mod.openPath(full).catch(() => undefined));
       }}
       title={skipped ? meta : `${f.path}${meta ? ` · ${meta}` : ""}`}

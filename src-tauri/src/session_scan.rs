@@ -20,8 +20,24 @@ pub fn resolve_agent_dir(config_path_out: Option<String>) -> PathBuf {
     dirs_home().join(".omp").join("agent")
 }
 
+/// 用户主目录：Windows 先 `USERPROFILE`（系统默认没有 `HOME`，只有 Git Bash 之类会设），
+/// 其余平台先 `HOME`；都拿不到时退回系统临时目录（不再硬编码 `/tmp`——Windows 上它
+/// 是当前盘根下的 `\tmp`，不是用户目录，会把会话扫描带到一个不存在的地方）。
 fn dirs_home() -> PathBuf {
-    std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/tmp"))
+    #[cfg(windows)]
+    {
+        if let Ok(p) = std::env::var("USERPROFILE") {
+            if !p.trim().is_empty() {
+                return PathBuf::from(p);
+            }
+        }
+    }
+    if let Ok(p) = std::env::var("HOME") {
+        if !p.trim().is_empty() {
+            return PathBuf::from(p);
+        }
+    }
+    std::env::temp_dir()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

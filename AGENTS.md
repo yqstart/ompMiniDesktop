@@ -15,6 +15,7 @@ oh-my-pi（`omp`）的桌面端：**聊天形态的 omp 工作台**（Tauri v2 +
 | `docs/v4-schedule.md` | 排期 4：右栏工作台——文件目录 + 项目脚本 + 多开终端（**已实施**）|
 | `docs/v5-schedule.md` | 排期 5：会话读数——输入卡底部统计条（会话统计 / Token 用量 / 上下文 / 供应商用量）（**已实施**）|
 | `docs/v6-schedule.md` | 排期 6：设置 ›「omp 约束」——全局 AGENTS.md / RULES.md / rules/*.md 的可视化编辑（**已实施**）|
+| `docs/windows.md` | Windows 支持：原生链路 / WSL 桥接 / 平台分叉表 / 验证与已知边界（**P0+P1 已实施**，2026-10-19）|
 | `docs/benchmark-codex-desktop.md` | Codex Desktop 对标调研（含截图证据与设计语言合约）|
 | `docs/benchmark-zcode-desktop.md` | Zcode Desktop 对标调研 |
 | `design-system/MASTER.md` | 设计系统（颜色 / 布局 / 组件 / 层级真相；改 UI 先读）|
@@ -22,7 +23,7 @@ oh-my-pi（`omp`）的桌面端：**聊天形态的 omp 工作台**（Tauri v2 +
 
 ## 技术基线
 
-- 壳：Tauri v2（`src-tauri/`，identifier `com.omnidesktop.mini`；自绘标题栏用 `data-tauri-drag-region` + `core:window:allow-start-dragging` 权限；macOS 产物走自签名证书，见 `scripts/`）。
+- 壳：Tauri v2（`src-tauri/`，identifier `com.omnidesktop.mini`；自绘标题栏用 `data-tauri-drag-region` + `core:window:allow-start-dragging` 权限；macOS 产物走自签名证书，见 `scripts/`；Windows 保留系统标题栏、不做 72px 红绿灯留白，见 `docs/windows.md`）。
 - 前端：React 19 + Vite + Tailwind v4 + Zustand。
 - 后端：Rust + tokio + serde；`reqwest`（供应商用量补充探针）。
 - 工具链：Node 22 + pnpm 11；Rust stable。上游运行时：`omp` 18.x（不随仓库分发）。
@@ -47,6 +48,7 @@ src-tauri/src/
   runtime.rs                 # 会话的 RPC 运行时（spawn 握手 → pump → kill_all；事件面泛型）
   pty.rs                     # 右栏终端：PTY 里的登录 shell（spawn / write / resize / kill / kill_all，输出走 Channel）
   proc.rs                    # 进程与环境工具（登录 shell PATH 探测 / 进程组强杀；runtime / pty / git_commit / commit_msg / omp_update 复用）
+  wsl.rs                     # WSL UNC 识别 + wsl.exe 终端启动（P1；不跨发行版驱动 omp，见 docs/windows.md）
   commands/mod.rs            # RPC 命令面 + 项目 / 工作区 / 会话 / git 命令
   context.rs session_scan.rs overlay.rs git_info.rs git_commit.rs git_ops.rs project_files.rs workspace_fs.rs project_scripts.rs
   plugins.rs skills.rs settings.rs themes.rs models_config.rs constraints.rs title_prompt.rs omp_update.rs

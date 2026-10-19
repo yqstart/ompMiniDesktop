@@ -3,6 +3,7 @@ import { Bolt, Command, Folder, Plus, X } from "reicon-react";
 import { WORKBENCH_MAX, WORKBENCH_MIN, useApp } from "../../stores/app";
 import { resolveContext } from "../../lib/context";
 import { useText } from "../../lib/useText";
+import { wslDistroOf } from "../../lib/wsl";
 import { FileTree } from "./FileTree";
 import { ScriptsPanel } from "./ScriptsPanel";
 import { TerminalPane } from "./TerminalPane";
@@ -198,7 +199,7 @@ export function WorkbenchPanel() {
          <button
           onClick={() => setActiveTerminal(term.id)}
           className="max-w-[96px] cursor-pointer truncate"
-          title={`${term.title} — ${term.cwd}`}
+          title={`${term.title} — ${term.cwd}${wslDistroOf(term.cwd) ? ` (WSL: ${wslDistroOf(term.cwd)})` : ""}`}
          >
           {term.title}
          </button>

@@ -1,5 +1,9 @@
 use serde::Serialize;
-use std::{collections::HashMap, future::Future, path::PathBuf};
+use std::{
+    collections::HashMap,
+    future::Future,
+    path::{Path, PathBuf},
+};
 use tokio::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -101,7 +105,35 @@ fn run_cmd(file: &str, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
-/// omp 可执行文件的定位（**唯一入口**）：覆盖层显式路径 → 已发现的缓存 → 登录 shell → 常见安装位置。
+/// Windows 上按 PATH 找 omp：先手动扫 PATH（`std::env::split_paths` 是 Unicode 安全的），
+/// 再用 `where omp` 兜底（PATHEXT / App Paths 的少量差异；它的 stdout 走系统 OEM 代码页，
+/// 中文用户名目录可能解成乱码，所以只放在兜底）。
+///
+/// 不走 `$SHELL -ilc`：Windows 默认没有 `SHELL`，而 Git Bash 给出的 `/c/...`
+/// 是 MSYS 路径，`Path::is_file()` 不认。
+#[cfg(windows)]
+fn find_omp_in_path() -> Option<String> {
+    if let Ok(path) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path) {
+            for name in ["omp.exe", "omp.cmd", "omp.bat", "omp"] {
+                let p = dir.join(name);
+                if p.is_file() {
+                    return Some(p.to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+    if let Ok(out) = run_cmd("where", &["omp"]) {
+        for line in out.lines().map(str::trim).filter(|l| !l.is_empty()) {
+            if std::path::Path::new(line).is_file() {
+                return Some(line.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// omp 可执行文件的定位（**唯一入口**）：覆盖层显式路径 → 已发现的缓存 → PATH → 常见安装位置。
 ///
 /// **别改读 `state.omp_path`**：那个只在诊断（`locate_omp`）跑完才非空——启动时前端的配置读取
 /// （权限档 / 默认思考档）与健康检查并发发出，读它拿到的是空值（档位永远卡在「读取中…」，
@@ -122,17 +154,24 @@ pub fn discover_omp_path(state: &State<AppState>) -> Option<String> {
             }
         }
     }
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-    if let Ok(out) = run_cmd(&shell, &["-ilc", "command -v omp"]) {
-        if let Some(found) = out.lines().map(str::trim).filter(|l| l.starts_with('/')).last() {
-            if std::path::Path::new(found).is_file() {
-                return Some(found.to_string());
+    #[cfg(windows)]
+    if let Some(found) = find_omp_in_path() {
+        return Some(found);
+    }
+    #[cfg(not(windows))]
+    {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+        if let Ok(out) = run_cmd(&shell, &["-ilc", "command -v omp"]) {
+            if let Some(found) = out.lines().map(str::trim).filter(|l| l.starts_with('/')).last() {
+                if std::path::Path::new(found).is_file() {
+                    return Some(found.to_string());
+                }
             }
         }
-    }
-    for c in ["/opt/homebrew/bin/omp", "/usr/local/bin/omp"] {
-        if std::path::Path::new(c).is_file() {
-            return Some(c.to_string());
+        for c in ["/opt/homebrew/bin/omp", "/usr/local/bin/omp"] {
+            if std::path::Path::new(c).is_file() {
+                return Some(c.to_string());
+            }
         }
     }
     // 官方安装脚本的落点（`omp.sh/install`：bun 可用时装到 bun 的全局 bin，
@@ -495,9 +534,10 @@ pub async fn add_project(state: State<'_, AppState>, path: String) -> Result<Pro
     if !md.is_dir() {
         return Err(cmd_err("NOT_DIR", "所选路径不是目录".into(), None));
     }
-    if let Ok(home) = std::env::var("HOME") {
+    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).ok();
+    if let Some(home) = home {
         if normalize_path(&home) == norm {
-            return Err(cmd_err("HOME_ROOT", "不能把 $HOME 根目录作为项目".into(), None));
+            return Err(cmd_err("HOME_ROOT", "不能把用户主目录作为项目".into(), None));
         }
     }
     {
@@ -1533,6 +1573,19 @@ pub async fn create_session_in<R: tauri::Runtime>(
     if !std::path::Path::new(&cwd).is_dir() {
         return Err(cmd_err("DIR_MISSING", "目录不存在".into(), None));
     }
+    // WSL 项目：Windows 壳只把**终端**接进发行版，不跨发行版启动 omp。
+    // 硬跑 Windows omp 会得到 UNC 工作目录 + 两套工具链（半坏且难排查），
+    // 所以这里明确拒绝并给出两条可走的路，而不是静默降级。
+    if let Some(w) = crate::wsl::parse_unc(&cwd) {
+        return Err(cmd_err(
+            "WSL_PROJECT",
+            format!(
+                "项目在 WSL（{}）里：Windows 壳不会跨发行版启动 omp。请在 WSL 内运行 omp（或 DSH）聊天，或把项目放到 Windows 盘；右栏终端可直接进入该发行版。",
+                w.distro
+            ),
+            Some("若只是想在 WSL 里跑命令，用右栏终端；omp 的会话文件在 WSL 自己的 ~/.omp 下，不与 Windows 侧共享。".into()),
+        ));
+    }
     let (model, thinking) = {
         let ov = state.overlay.lock().await;
         let projects: Vec<(String, String)> = ov.projects.iter().map(|p| (p.id.clone(), p.path.clone())).collect();
@@ -1702,6 +1755,14 @@ async fn spawn_session_runtime<R: tauri::Runtime>(
         return Err(cmd_err("OMP_MISSING", "未找到 omp".into(), None));
     };
     let spawn_cwd = if head.cwd.is_empty() { "/tmp".into() } else { head.cwd.clone() };
+    // 防御：历史里若残留 WSL UNC 的会话（正常路径不会建出来），不要在 Windows omp 上半跑。
+    if let Some(w) = crate::wsl::parse_unc(&spawn_cwd) {
+        return Err(cmd_err(
+            "WSL_PROJECT",
+            format!("该会话的项目在 WSL（{}）里，Windows 壳不跨发行版启动 omp", w.distro),
+            Some("请在 WSL 内打开该会话；右栏终端可直接进入该发行版".into()),
+        ));
+    }
     let approval = state.overlay.lock().await.session_approval.get(id).cloned();
     // `--resume` 必须给**完整会话 id**（终端侧 resume 一直是全 id 口径）：omp 对前缀的
     // 解析取「最新匹配的那个」（实测），8 字符前缀在同一分钟建的两个会话间会拉起**另一个
@@ -2290,10 +2351,12 @@ pub async fn export_session_html(
     });
     let out = rpc_request(&app, &state, &id, req, 60_000).await?;
     let name = out.get("path").and_then(|p| p.as_str()).unwrap_or("").to_string();
-    let abs = if name.starts_with('/') || name.is_empty() {
+    // 绝对路径按平台判断（`C:\...` 不以 `/` 开头），相对路径用 `Path::join`
+    // 拼——字符串拼 `/` 在 Windows 上会得到 `C:\proj/C:\...`。
+    let abs = if name.is_empty() || Path::new(&name).is_absolute() {
         name
     } else {
-        format!("{}/{}", base.trim_end_matches('/'), name)
+        Path::new(&base).join(&name).to_string_lossy().into_owned()
     };
     Ok(serde_json::json!({ "path": abs }))
 }
@@ -2574,7 +2637,11 @@ pub struct PathCheck {
 /// 相对路径按 base 解析并做**词法归一**（不触碰文件系统）：`.` 丢弃、`..` 回退一层。
 /// 绝对路径原样使用。
 pub fn resolve_path(base: &str, p: &str) -> PathBuf {
-    let raw = if p.starts_with('/') { PathBuf::from(p) } else { PathBuf::from(base).join(p) };
+    // 绝对路径的三种写法：POSIX `/...`、Windows 盘符 `C:\...` / `C:/...`、
+    // UNC `\\server\share`。`Path::is_absolute()` 在 Windows 上认后两种，
+    // 但 POSIX 风格在 Windows 上不是 absolute（没有盘符），所以显式补 `/`。
+    let absolute = Path::new(p).is_absolute() || p.starts_with('/') || p.starts_with('\\');
+    let raw = if absolute { PathBuf::from(p) } else { PathBuf::from(base).join(p) };
     let mut out = PathBuf::new();
     for c in raw.components() {
         match c {
@@ -2710,7 +2777,7 @@ pub async fn mention_label(base: String, path: String) -> String {
     if base.is_empty() || path.is_empty() {
         return path;
     }
-    let abs = if path.starts_with('/') {
+    let abs = if Path::new(&path).is_absolute() || path.starts_with('/') || path.starts_with('\\') {
         path.clone()
     } else {
         resolve_path(&base, &path).to_string_lossy().into_owned()
