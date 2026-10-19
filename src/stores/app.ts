@@ -63,7 +63,7 @@ type AppState = {
  /** 左侧栏宽度（292–480，默认 292，持久化 localStorage）。 */
  sidebarWidth: number;
  setSidebarWidth: (w: number) => void;
- /** 右侧工作台面板是否展开（V42 三栏；localStorage 持久化，**默认收起**——首启不自动展开）。
+ /** 右侧工作台面板是否展开（V42 三栏）：**每次启动都收起**（用户 2026-10-19 口径：不恢复上次的展开态，开合只在本次运行内有效）。
   *  面板始终停靠为主区第三栏：打开 = 布局变三栏，会话列让位、不被遮盖。 */
  workbenchOpen: boolean;
  setWorkbenchOpen: (v: boolean) => void;
@@ -466,16 +466,6 @@ function dirName(path: string): string {
  return trimmed.split("/").pop() || trimmed || "终端";
 }
 
-/** 右栏工作台面板的初始展开态（V42）：**默认收起**（首次启动不自动占位），用户展开后记住。 */
-function loadWorkbenchOpen(): boolean {
- try {
-  if (typeof localStorage === "undefined") return false;
-  return localStorage.getItem("omp.workbench.v1") === "1";
- } catch {
-  return false;
- }
-}
-
 /** 工作台页签的初始值（默认「文件」）。 */
 function loadWorkbenchTab(): WorkbenchTab {
  try {
@@ -555,13 +545,9 @@ export const useApp = create<AppState>((set, get) => ({
   }
   set({ sidebarWidth: v });
  },
- workbenchOpen: loadWorkbenchOpen(),
+ workbenchOpen: false,
  setWorkbenchOpen: (v) => {
-  try {
-   localStorage.setItem("omp.workbench.v1", v ? "1" : "0");
-  } catch {
-   // 持久化失败不阻断本次切换
-  }
+  // 开合不持久化：每次启动都从收起开始（旧键 `omp.workbench.v1` 已作废、不再读写）
   set({ workbenchOpen: v });
  },
  workbenchTab: loadWorkbenchTab(),
