@@ -1,5 +1,10 @@
-//! omp 运行时的更新：**检查**（`omp update --check`）与**执行**（`omp update`）。
-//! 界面入口 = 左栏字标行上的版本 chip + 它的详情弹窗。
+//! omp 运行时的三条链路：**安装**（omp 缺失时跑官方安装脚本）、**检查**（`omp update --check`）
+//! 与**执行**（`omp update`）。界面入口 = 左栏字标行上的版本 chip + 它的详情弹窗；omp 缺失时
+//! 同一位置换成「安装 omp」chip + 安装弹窗（本地识别由 `get_health` 完成，识别不到才给安装入口）。
+//!
+//! **安装**走官方脚本（`https://omp.sh/install`，Windows 为 `install.ps1`）——壳侧不自己拼
+//! brew / npm 命令：bun 可用时装 bun 版、否则装预编译二进制（带 sha256 校验），装完的路径
+//! 落在 `~/.local/bin/omp` 或 `~/.bun/bin/omp`，两种都在 `discover_omp_path` 的兜底里。
 //!
 //! 上游事实（omp 18.3.5 实测，明细与取舍见 `docs/v24-schedule.md`）：
 //!
@@ -180,7 +185,7 @@ static UPDATE_SEQ: AtomicU64 = AtomicU64::new(1);
 fn acquire(slot: &UpdateSlot) -> Result<(u64, Arc<CancelToken>), CmdError> {
     let mut guard = slot.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_some() {
-        return Err(cmd_err("BUSY", "已有 omp 更新在进行".into(), None));
+        return Err(cmd_err("BUSY", "已有 omp 安装或更新在进行".into(), None));
     }
     let seq = UPDATE_SEQ.fetch_add(1, Ordering::Relaxed);
     let cancel = CancelToken::new();
@@ -305,16 +310,114 @@ pub async fn start_omp_update(
 }
 
 /// 取消进行中的更新：发取消信号（杀进程组由读流循环做，见 [`UpdateTask`]）。
+///
+/// 安装与更新共用同一个单槽，所以这条命令也负责取消安装。
 #[tauri::command]
 pub async fn cancel_omp_update(state: State<'_, AppState>) -> Result<(), CmdError> {
     let cancel = {
         let guard = state.omp_update_task.lock().unwrap_or_else(|e| e.into_inner());
         match guard.as_ref() {
             Some(t) => t.cancel.clone(),
-            None => return Err(cmd_err("NOT_RUNNING", "当前没有进行中的 omp 更新".into(), None)),
+            None => return Err(cmd_err("NOT_RUNNING", "当前没有进行中的 omp 安装或更新".into(), None)),
         }
     };
     cancel.cancel();
+    Ok(())
+}
+
+// ==================== 安装（omp 缺失时的首次安装） ====================
+
+/// omp 官方安装脚本的**唯一来源**（`https://omp.sh/install`，见上游 README 的 Install 段）。
+/// 壳侧不自己拼 brew / npm 命令：安装方式（bun / 预编译二进制）由官方脚本识别，
+/// 与 `omp update` 同一条原则。
+#[cfg(not(windows))]
+pub(crate) const INSTALL_SCRIPT: &str = "curl -fsSL https://omp.sh/install | sh";
+/// Windows 走官方的 PowerShell 脚本（上游 README：`irm https://omp.sh/install.ps1 | iex`）。
+#[cfg(windows)]
+pub(crate) const INSTALL_SCRIPT: &str = "irm https://omp.sh/install.ps1 | iex";
+
+/// 安装脚本的硬超时。官方脚本在 bun 可用时走 `bun install -g`、否则下载预编译二进制
+/// （约 200MB，带 sha256 校验）——给足一小时，真正的逃生口是界面上的「取消安装」。
+const INSTALL_TIMEOUT: Duration = Duration::from_secs(3600);
+
+/// spawn 官方安装脚本：`/bin/sh -c "<脚本命令>"`（Windows 走 PowerShell）、新进程组
+/// （取消时连带收掉脚本派生的 curl / bun 子进程）、继承登录 shell 的 PATH（脚本要用
+/// curl / bun / git）、两路管道、kill_on_drop。
+pub(crate) fn spawn_install_script(script: &str) -> std::io::Result<tokio::process::Child> {
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut c = tokio::process::Command::new("powershell");
+        c.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script]);
+        c
+    };
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let mut c = tokio::process::Command::new("/bin/sh");
+        c.arg("-c").arg(script);
+        c
+    };
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    if let Some(path) = login_path() {
+        cmd.env("PATH", path);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.as_std_mut().process_group(0);
+    }
+    cmd.spawn()
+}
+
+/// 跑一次安装脚本并读流（假脚本可测：成功 / 失败 / 取消三条路径都锁着）。
+/// `Err` = 进程起不来 / 超时；正常结束（含非零退出与取消）回 [`RunSignals`]。
+pub(crate) async fn run_install_script(
+    script: &str,
+    cancel: Arc<CancelToken>,
+    on_line: &mut (impl FnMut(&str) + Send),
+) -> Result<RunSignals, String> {
+    let child = spawn_install_script(script).map_err(|e| format!("启动 omp 安装脚本失败：{e}"))?;
+    let pid = child.id();
+    let pump = pump_child(child, pid, Some(cancel.as_ref()), |l, _s: OutStream| on_line(l));
+    match tokio::time::timeout(INSTALL_TIMEOUT, pump).await {
+        Ok(signals) => Ok(signals),
+        Err(_) => {
+            if let Some(pid) = pid {
+                force_kill_group(pid);
+            }
+            Err(format!("omp 安装超时（{} 分钟）", INSTALL_TIMEOUT.as_secs() / 60))
+        }
+    }
+}
+
+/// 安装 omp（官方安装脚本）：omp 缺失时左栏版本处的「安装 omp」入口。
+///
+/// 与 `start_omp_update` 同一套口径：命令立刻返回，输出行与终局走 Channel；
+/// 与更新**共用一个全局单槽**（机器级操作，同一时刻只能有一个）；成功后的路径 / 版本
+/// 不在这里探——由前端调用 `get_health` 重新识别（`~/.local/bin`、`~/.bun/bin` 都在
+/// `discover_omp_path` 的兜底里）。
+#[tauri::command]
+pub async fn install_omp(state: State<'_, AppState>, on_event: Channel<OmpUpdateEvent>) -> Result<(), CmdError> {
+    let slot = state.omp_update_task.clone();
+    let (seq, cancel) = acquire(&slot)?;
+    tokio::spawn(async move {
+        let _ = on_event.send(OmpUpdateEvent::Line { text: format!("$ {INSTALL_SCRIPT}") });
+        let mut emit = |line: &str| {
+            let _ = on_event.send(OmpUpdateEvent::Line { text: line.to_string() });
+        };
+        let outcome = match run_install_script(INSTALL_SCRIPT, cancel, &mut emit).await {
+            Err(e) => OmpUpdateOutcome { phase: OmpUpdatePhase::Failed, from: None, error: Some(e) },
+            Ok(signals) => {
+                let (phase, error) = classify_update(&signals);
+                OmpUpdateOutcome { phase, from: None, error }
+            }
+        };
+        // 先放槽再发终局事件（与更新同口径：前端收到失败后立刻重试不会撞 BUSY）
+        release(&slot, seq);
+        let _ = on_event.send(OmpUpdateEvent::Exit { outcome });
+    });
     Ok(())
 }
 
@@ -459,6 +562,59 @@ mod update_tests {
         });
         let started = std::time::Instant::now();
         let signals = run_update(bin.to_str().unwrap(), Some(&dir), cancel, &mut |_| {}).await.unwrap();
+        assert!(signals.canceled, "取消标志必须落到 RunSignals");
+        assert!(started.elapsed() < Duration::from_secs(10), "取消后应立刻返回，实际 {:?}", started.elapsed());
+        assert_eq!(classify_update(&signals).0, OmpUpdatePhase::Canceled);
+    }
+
+    // ---------- 安装（官方安装脚本，用假脚本代替、不联网） ----------
+
+    /// 成功路径：脚本两路输出都进日志，退出码 0 → Done（与更新共用终态判定）。
+    #[tokio::test]
+    async fn install_script_streams_lines_and_reports_success() {
+        let mut lines: Vec<String> = vec![];
+        let signals = run_install_script(
+            "echo 'Installing via bun...'\necho '✓ Installed omp via bun'\necho 'warning: 来自 stderr 的一行' >&2",
+            CancelToken::new(),
+            &mut |l| lines.push(l.to_string()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(signals.code, Some(0));
+        assert!(lines.iter().any(|l| l.contains("Installing via bun")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("来自 stderr")), "{lines:?}");
+        let (phase, error) = classify_update(&signals);
+        assert_eq!(phase, OmpUpdatePhase::Done);
+        assert!(error.is_none());
+    }
+
+    /// 失败路径：非零退出 → Failed，错误摘要取输出尾行（脚本的报错在 stderr）。
+    #[tokio::test]
+    async fn install_script_reports_failure_tail() {
+        let signals = run_install_script(
+            "echo 'Fetching latest release...'\necho 'Failed to resolve an omp build' >&2\nexit 1",
+            CancelToken::new(),
+            &mut |_| {},
+        )
+        .await
+        .unwrap();
+        assert_eq!(signals.code, Some(1));
+        let (phase, error) = classify_update(&signals);
+        assert_eq!(phase, OmpUpdatePhase::Failed);
+        assert!(error.unwrap().contains("Failed to resolve an omp build"), "错误摘要应带 stderr 尾行");
+    }
+
+    /// 取消路径：安装脚本长睡，200ms 后取消——进程组被杀、终态是 Canceled。
+    #[tokio::test]
+    async fn install_script_cancel_kills_process_group() {
+        let cancel = CancelToken::new();
+        let trigger = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            trigger.cancel();
+        });
+        let started = std::time::Instant::now();
+        let signals = run_install_script("echo '开始安装'\nsleep 30", cancel, &mut |_| {}).await.unwrap();
         assert!(signals.canceled, "取消标志必须落到 RunSignals");
         assert!(started.elapsed() < Duration::from_secs(10), "取消后应立刻返回，实际 {:?}", started.elapsed());
         assert_eq!(classify_update(&signals).0, OmpUpdatePhase::Canceled);

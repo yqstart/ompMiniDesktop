@@ -179,8 +179,10 @@ export async function cancelOmpUpdate(): Promise<void> {
   await api.cancelOmpUpdate();
  } catch (e) {
   // 后端回「没有进行中的任务」= 前端这份 running 状态已经过期（任务刚结束、或应用重载过）：
-  // 落成失败态并带上原因，别让界面卡在「正在更新…」上。
+  // 落成失败态并带上原因，别让界面卡在「正在更新…」上。`updating` 必须一起复位，
+  // 否则后续点「再次更新」会被前端单飞闸门永久拦住。
   const message = e instanceof Error ? e.message : String(e);
+  updating = false;
   const run = useApp.getState().ompUpdateRun;
   if (run?.phase === "running") {
    useApp.getState().set({ ompUpdateRun: { ...run, phase: "failed", error: message } });

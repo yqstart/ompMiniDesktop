@@ -8,6 +8,8 @@
 
 ### Added
 
+- **omp 缺失时，左栏版本处可以直接安装**：启动的 `get_health` 识别不到 omp 时，字标行那颗版本 chip 换成「安装 omp」——点开弹窗由本应用代跑 **oh-my-pi 官方安装脚本**（macOS / Linux `curl -fsSL https://omp.sh/install | sh`，Windows `irm https://omp.sh/install.ps1 | iex`），安装方式（bun 全局 / 预编译二进制）与落点交给官方脚本，壳侧不自己拼 brew / npm 命令。脚本输出流式进弹窗日志、随时可取消，关掉弹窗也不中断；安装成功后自动重新识别 omp（官方脚本的 `~/.local/bin/omp` 与 `~/.bun/bin/omp` 两处落点都进了 `discover_omp_path` 的兜底），同一颗 chip 变回版本号；脚本跑完仍未识别到时，弹窗就地给「重新检测 / 手动指定路径」。后端 `install_omp` 与 `omp update` 共用一个全局单槽，两者不会并发。
+
 - **设置 ›「omp 约束」：可视化编辑 omp 的全局约束与规则文件**。设置左导航通用组新增第八个条目，只碰 `<agentDir>` 下的全局层三处：`AGENTS.md`（会话启动时注入的上下文约束）、`RULES.md`（每轮重挂的 sticky 硬规则）、`rules/*.{md,mdc}`（独立规则，文件名即规则名，`enabled: false` 停用）；项目级 `.omp/` 仍由 omp 自己发现，本页不碰。左侧文件列表按「全局约束 / 全局硬规则 / 独立规则」分组，规则行显示类型（总是生效 / 实时注入 / 规则手册）与描述；右侧编辑器给 `AGENTS.md` 整份 Markdown 编辑 + 预览，给规则一份**表单 + 正文**：描述 / 启用 / 总是生效，以及可折叠的触发条件与作用范围（`globs` / `condition` / `astCondition` / `question` / `scope` / `agents` / `interruptMode`）逐个编辑，正文支持编辑 / 预览切换，也可切到「源码」直接改整份 Markdown。新建规则（输入规则名，缺扩展名自动补 `.md`）与删除规则（`ConfirmDialog` 二次确认，后端先备份再删）；规则草稿在切设置页签 / 关设置视图后仍保留，「重新加载」才丢弃。
 - **写入可靠性与保真**：后端 `constraints.rs` 统一走「`expectHash` 乐观锁 → 备份到 `<appData>/omp-mini/backups/constraints/`（按文件名留最近 10 份）→ 原子写 → 回读」；文件被外部改过时保存被拒，界面就地给「重新加载 / 强制覆盖」两条路。表单保存以打开时的 frontmatter 文档为底，只改**值确实变了**的字段（`yaml` 的 `Document` API），注释、键序与不认识的顶层字段尽量原样保留；保存前本地校验大小（≤ 2 MiB）/ NUL / YAML 可解析，失败不发请求。文件名白名单限制在 `rules/` 下单层 `.md` / `.mdc`，项目级文件与内置规则都改不到。
 - 设置搜索接入「omp 约束」：搜条目名、文件名、完整路径或规则描述都能命中，点击跳转并选中对应文件；`⌘S` 在当前面板内保存。

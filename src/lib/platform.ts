@@ -10,3 +10,12 @@ export function isMacKeyboard(): boolean {
  const ua = navigator.userAgent;
  return /Mac|iPhone|iPad|iPod/.test(ua);
 }
+
+/**
+ * 是否 Windows（**只用于平台相关的命令 / 文案分叉**，如 omp 官方安装脚本的 PowerShell 版）。
+ * 快捷键仍只认 [`isMacKeyboard`]（Windows 与 Linux 都是 Ctrl）。
+ */
+export function isWindows(): boolean {
+ if (typeof navigator === "undefined") return false;
+ return /Windows|Win32|Win64/.test(navigator.userAgent);
+}

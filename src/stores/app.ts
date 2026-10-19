@@ -44,6 +44,13 @@ type AppState = {
   * 失败 / 取消可以直接重试。
   */
  ompUpdateRun: OmpUpdateRun | null;
+ /**
+  * 正在跑 / 刚跑完的 omp **首次安装**（omp 缺失时左栏版本处的「安装 omp」chip；null = 本次运行
+  * 还没发起过）。与 `ompUpdateRun` 同构（同一套事件与日志上限），后端两条任务共用一个单槽。
+  */
+ ompInstallRun: OmpUpdateRun | null;
+ /** 「安装 omp」弹窗显隐（App 常驻挂载；由 omp 缺失时的「安装 omp」chip 打开）。 */
+ ompInstallDialogOpen: boolean;
  /** 界面语言偏好三档（跟随系统 / 简体中文 / English；只作用于本应用展示，localStorage 持久化）。 */
  localeMode: LocaleMode;
  /** 实际生效的语言（`localeMode` 解析后的结果；字典与 `<html lang>` 用它）。 */
@@ -516,6 +523,8 @@ export const useApp = create<AppState>((set, get) => ({
  ompUpdate: { status: "idle", current: null, latest: null, channel: null, message: null, checkedAt: null },
  ompUpdateDialogOpen: false,
  ompUpdateRun: null,
+ ompInstallRun: null,
+ ompInstallDialogOpen: false,
  localeMode: INITIAL_LOCALE_MODE,
  locale: resolveLocale(INITIAL_LOCALE_MODE, systemLang()),
  setLocaleMode: (mode) => {

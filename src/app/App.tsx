@@ -15,6 +15,7 @@ import { ChatView } from "../components/thread/ChatView";
 import { WorkbenchPanel } from "../components/workbench/WorkbenchPanel";
 import { UpdateDialog } from "../components/update/UpdateDialog";
 import { OmpUpdateDialog } from "../components/update/OmpUpdateDialog";
+import { OmpInstallDialog } from "../components/update/OmpInstallDialog";
 import { ProviderUsageDialog } from "../components/usage/ProviderUsageDialog";
 import { newChatInDefaultCheckout } from "../lib/checkouts";
 import { openSessionWithHistory } from "../lib/sessionOpen";
@@ -281,7 +282,7 @@ function SidebarShell({
  );
 }
 export function App() {
- const { settingsTabOpen, settingsTabActive, set, sidebarWidth, setSidebarWidth, updateDialogOpen, ompUpdateDialogOpen, sidebarOpen, providerUsageOpen, refPickerTarget } = useApp();
+ const { settingsTabOpen, settingsTabActive, set, sidebarWidth, setSidebarWidth, updateDialogOpen, ompUpdateDialogOpen, ompInstallDialogOpen, sidebarOpen, providerUsageOpen, refPickerTarget } = useApp();
  const t = useText();
  useTheme();
  useLocale();
@@ -380,6 +381,7 @@ export function App() {
    <CommitTaskPanel />
    {updateDialogOpen && <UpdateDialog />}
    {ompUpdateDialogOpen && <OmpUpdateDialog />}
+ {ompInstallDialogOpen && <OmpInstallDialog />}
    {providerUsageOpen && <ProviderUsageDialog />}
    {refPickerTarget && <ReferencePicker />}
   </div>

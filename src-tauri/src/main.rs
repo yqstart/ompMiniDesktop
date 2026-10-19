@@ -174,6 +174,7 @@ fn main() {
             provider_models::fetch_provider_models,
             title_prompt::sync_title_prompt,
             omp_update::check_omp_update,
+            omp_update::install_omp,
             omp_update::start_omp_update,
             omp_update::cancel_omp_update
         ])

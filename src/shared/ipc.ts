@@ -92,6 +92,8 @@ export const IPC = {
  checkOmpUpdate: "check_omp_update",
  startOmpUpdate: "start_omp_update",
  cancelOmpUpdate: "cancel_omp_update",
+ // omp 缺失时的首次安装（官方安装脚本；与更新共用后端单槽与取消命令）
+ installOmp: "install_omp",
  // 会话命令面（per-会话长驻 `omp --mode rpc-ui`）
  createSession: "create_session",
  openSession: "open_session",

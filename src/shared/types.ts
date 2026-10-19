@@ -380,12 +380,12 @@ export type OmpUpdateOutcome = {
  error: string | null;
 };
 
-/** `start_omp_update` → 前端事件（与 Rust `omp_update::OmpUpdateEvent` 同构，tag 为 `type`）。 */
+/** `start_omp_update` / `install_omp` → 前端事件（与 Rust `omp_update::OmpUpdateEvent` 同构，tag 为 `type`）。 */
 export type OmpUpdateEvent =
  | { type: "line"; text: string }
  | { type: "exit"; outcome: OmpUpdateOutcome };
 
-/** 前端持有的更新任务（store 里的 `ompUpdateRun`；日志有上限，见 `lib/ompUpdate.ts`）。 */
+/** 前端持有的 omp 任务（store 里的 `ompUpdateRun` / `ompInstallRun`；日志有上限，见 `lib/ompUpdate.ts`）。 */
 export type OmpUpdateRun = {
  phase: OmpUpdatePhase;
  lines: string[];

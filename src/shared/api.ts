@@ -436,6 +436,13 @@ export const api = {
   * 同一时刻只允许一个更新（后端返回 BUSY）。
   */
  startOmpUpdate: (onEvent: Channel<OmpUpdateEvent>) => call<void>(IPC.startOmpUpdate, { onEvent }),
+ /**
+  * 安装 omp（omp 缺失时的「安装 omp」入口）：跑 **omp 官方安装脚本**
+  * （`curl -fsSL https://omp.sh/install | sh`；Windows 走 `install.ps1`）。命令立刻返回，
+  * 输出与终局走 Channel（与 `startOmpUpdate` 同形）；与更新共用单槽，并发返回 BUSY。
+  * 安装完成后的路径 / 版本由调用方重新 `getHealth` 识别。
+  */
+ installOmp: (onEvent: Channel<OmpUpdateEvent>) => call<void>(IPC.installOmp, { onEvent }),
  /** 取消进行中的更新（杀进程组；终局经 Channel 的 `exit` 到达，phase = canceled）。 */
  cancelOmpUpdate: () => call<void>(IPC.cancelOmpUpdate),
 

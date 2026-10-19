@@ -135,8 +135,24 @@ pub fn discover_omp_path(state: &State<AppState>) -> Option<String> {
             return Some(c.to_string());
         }
     }
-    if let Ok(home) = std::env::var("HOME") {
-        let p = format!("{home}/.local/bin/omp");
+    // 官方安装脚本的落点（`omp.sh/install`：bun 可用时装到 bun 的全局 bin，
+    // 否则把预编译二进制放进 `~/.local/bin`）——两者都可能不在 GUI 进程的 PATH 里。
+    // Windows 的脚本落在 `%LOCALAPPDATA%\omp\omp.exe` 或 bun 的全局 bin（`%USERPROFILE%`）。
+    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).ok();
+    if let Some(home) = home {
+        #[cfg(windows)]
+        let candidates = [format!("{home}\\.bun\\bin\\omp.exe")];
+        #[cfg(not(windows))]
+        let candidates = [format!("{home}/.local/bin/omp"), format!("{home}/.bun/bin/omp")];
+        for p in candidates {
+            if std::path::Path::new(&p).is_file() {
+                return Some(p);
+            }
+        }
+    }
+    #[cfg(windows)]
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        let p = format!("{local}\\omp\\omp.exe");
         if std::path::Path::new(&p).is_file() {
             return Some(p);
         }
