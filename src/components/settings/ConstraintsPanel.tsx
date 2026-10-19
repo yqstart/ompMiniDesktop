@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { RefObject } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -165,6 +166,44 @@ function MarkdownPreview({ text, empty }: { text: string; empty: string }) {
   );
 }
 
+/**
+ * Markdown 编辑框高度跟着内容走：编辑框内部不滚动，整页的滚动只发生在设置页内容区
+ * （2026-10-19 用户口径）。值变化（输入 / 切换文件 / 重新加载）与宽度变化（窗口 / 分栏 /
+ * 设置页重新显示）都会改变换行数，两种都要重算；`active` 用来覆盖「编辑 ↔ 预览」切换
+ * 造成的重新挂载——那时 ref 换了元素但值可能没变。
+ */
+function useAutoGrowTextarea(
+  ref: RefObject<HTMLTextAreaElement | null>,
+  value: string,
+  active: boolean,
+) {
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let width = -1;
+    const fit = () => {
+      // 设置页隐藏时（display: none）量不到尺寸，跳过，别把高度压成 0
+      if (el.clientWidth === 0) return;
+      width = el.clientWidth;
+      const style = window.getComputedStyle(el);
+      // scrollHeight 不含边框：border-box 下不补回来底部会差一行（又出现内部滚动）
+      const border =
+        (Number.parseFloat(style.borderTopWidth) || 0) +
+        (Number.parseFloat(style.borderBottomWidth) || 0);
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight + border}px`;
+    };
+    fit();
+    // 宽度变化要重算高度；jsdom（单测）没有 ResizeObserver，按项目惯例跳过观察
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth !== width) fit();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref, value, active]);
+}
+
 /** 一条规则触发条件 / 作用范围列表（表单里的多行文本输入）。 */
 function StringListField({
   label,
@@ -299,6 +338,8 @@ export function ConstraintsPanel({
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const sourceRef = useRef<HTMLTextAreaElement>(null);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
   const loadSeq = useRef(0);
   const loadedOnce = useRef(false);
   const flashTimer = useRef<number | null>(null);
@@ -389,6 +430,14 @@ export function ConstraintsPanel({
   const rulesFile = files.find((file) => file.kind === "rules") ?? null;
   const currentFile = files.find((file) => constraintKey(file.kind, file.name) === selected) ?? null;
   const currentState = currentFile ? states[selected] ?? stateFromFile(currentFile) : null;
+
+  // 编辑框高度随内容展开（两个编辑面：整份 Markdown / 规则正文），滚动交给设置页内容区
+  const sourceEditing =
+    currentFile !== null && (currentFile.kind === "agents" || currentState?.mode === "source") && !preview;
+  const bodyEditing =
+    currentFile !== null && currentFile.kind !== "agents" && currentState?.mode === "form" && !preview;
+  useAutoGrowTextarea(sourceRef, currentState?.source ?? "", sourceEditing);
+  useAutoGrowTextarea(bodyRef, currentState?.body ?? "", bodyEditing);
 
   const patchState = useCallback(
     (key: string, file: ConstraintFile, patch: (state: EditorState) => EditorState) => {
@@ -910,12 +959,13 @@ export function ConstraintsPanel({
                       </div>
                     ) : (
                       <textarea
+                        ref={sourceRef}
                         value={currentState.source}
                         onChange={(event) => updateSource(event.target.value)}
                         spellCheck={false}
                         autoComplete="off"
                         aria-label={currentTitle}
-                        className="mt-2 min-h-[380px] w-full resize-y rounded-md border border-border bg-surface p-2.5 font-mono text-[12.5px] leading-5 outline-none transition-colors duration-100 focus:border-accent"
+                        className="mt-2 min-h-[380px] w-full resize-none overflow-hidden rounded-md border border-border bg-surface p-2.5 font-mono text-[12.5px] leading-5 outline-none transition-colors duration-100 focus:border-accent"
                       />
                     )}
                   </div>
@@ -1100,12 +1150,13 @@ export function ConstraintsPanel({
                         </div>
                       ) : (
                         <textarea
+                          ref={bodyRef}
                           value={currentState.body}
                           onChange={(event) => updateBody(event.target.value)}
                           spellCheck={false}
                           autoComplete="off"
                           aria-label={t.constraintsBody}
-                          className="mt-2 min-h-[260px] w-full resize-y rounded-md border border-border bg-surface p-2.5 font-mono text-[12.5px] leading-5 outline-none transition-colors duration-100 focus:border-accent"
+                          className="mt-2 min-h-[260px] w-full resize-none overflow-hidden rounded-md border border-border bg-surface p-2.5 font-mono text-[12.5px] leading-5 outline-none transition-colors duration-100 focus:border-accent"
                         />
                       )}
                     </div>
