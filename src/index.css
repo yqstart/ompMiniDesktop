@@ -321,6 +321,98 @@ summary::-webkit-details-marker {
  }
 }
 
+/* ---- 会话行状态点（2026-10-19，形态照 DeepSeek Harness 的 StateDot）----
+   三档可见状态：运行中 = 中性灰转圈环（淡轨道 + 一段转动的弧）、已完成未查看 = 绿实心点、
+   待处理 = 橙实心点；空闲不渲染（行首 16px 槽位仍占位，标题列不错行）。
+   参数逐项对齐上游：环 14px SVG / 弧 `stroke-width 2` / 轨道 `opacity .25` /
+   弧 `dasharray 12 150`、1.5s 匀速旋转 + 1.5s 弧长伸缩；实心点 = 10px 容器里 `inset 20%`
+   的圆（视觉 6px）。颜色只给「要你关注」的档位（完成 / 待处理），进行中保持中性灰。 */
+.status-dot {
+ position: relative;
+ display: inline-block;
+ flex: none;
+}
+
+.status-dot::after {
+ content: "";
+ position: absolute;
+ inset: 20%;
+ border-radius: 50%;
+ background: currentColor;
+}
+
+.status-dot[data-state="done"] {
+ color: var(--ok);
+}
+
+.status-dot[data-state="awaiting"] {
+ color: var(--warn);
+}
+
+.status-spinner {
+ flex: none;
+ color: var(--faint);
+}
+
+.status-spinner-track,
+.status-spinner-arc {
+ fill: none;
+ stroke: currentColor;
+ stroke-width: 2;
+ stroke-linecap: round;
+}
+
+.status-spinner-track {
+ opacity: 0.25;
+}
+
+.status-spinner-arc {
+ stroke-dasharray: 12 150;
+ animation: status-dot-dash 1.5s ease-in-out infinite;
+}
+
+.status-spinner-motion {
+ transform-origin: center;
+ animation: status-dot-spin 1.5s linear infinite;
+}
+
+@keyframes status-dot-spin {
+ to {
+  transform: rotate(360deg);
+ }
+}
+
+@keyframes status-dot-dash {
+ 0% {
+  stroke-dasharray: 12 150;
+  stroke-dashoffset: 0;
+ }
+
+ 50% {
+  stroke-dasharray: 24 150;
+  stroke-dashoffset: -6;
+ }
+
+ 100% {
+  stroke-dasharray: 12 150;
+  stroke-dashoffset: 0;
+ }
+}
+
+/* 降低动效偏好：环不转，但仍是一枚完整的环（上游同款静态弧 18/150、offset -3） */
+@media (prefers-reduced-motion: reduce) {
+
+ .status-spinner-motion,
+ .status-spinner-arc {
+  animation: none;
+ }
+
+ .status-spinner-arc {
+  stroke-dasharray: 18 150;
+  stroke-dashoffset: -3;
+ }
+}
+
 /* ---- Markdown 正文（AssistantText）----
    渲染走 react-markdown（不注入原始 HTML），这里只补排版。 */
 .md-body {

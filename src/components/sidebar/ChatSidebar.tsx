@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Archive, BranchUp, Check, ChevronRight, Download, Folder, FolderError, FolderMinus, FolderPlus, Inbox, Layers, LinkOff, Loader, PenLine, Plus, Trash2, X } from "reicon-react";
+import { AlertTriangle, Archive, BranchUp, ChevronRight, Download, Folder, FolderError, FolderMinus, FolderPlus, Inbox, Layers, LinkOff, Loader, PenLine, Plus, Trash2, X } from "reicon-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "@shared/api";
 import type { ProjectView, SessionView, WorkspaceView } from "@shared/types";
@@ -14,6 +14,7 @@ import { loadLastSession } from "../../lib/lastSession";
 import { openSessionWithHistory } from "../../lib/sessionOpen";
 import { runSessionBatch } from "../../lib/sessionBatch";
 import { formatSessionFullTime, formatSessionTime } from "../../lib/sessionTime";
+import { sessionRowStatus, sessionRowStatusLabel } from "../../lib/sessionRowStatus";
 import { sessionTitleForDisplay } from "../../lib/sessionTitle";
 import { isCommitTaskRunning, pushWorkspace } from "../../lib/commitTasks";
 import { pullWorkspace } from "../../lib/pull";
@@ -21,6 +22,7 @@ import { useText } from "../../lib/useText";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { DropLine } from "./DropLine";
 import { RowAction } from "./RowAction";
+import { SessionStatusDot } from "./SessionStatusDot";
 import { SidebarBottom } from "./SidebarBottom";
 import { SidebarTop } from "./SidebarTop";
 import { WorkspaceGroupDialog } from "./WorkspaceGroupDialog";
@@ -57,12 +59,15 @@ type DragSession = {
 /**
  * 会话行（V1–V10 的形状）：`● 标题 … 时间 [归档 · 删除]`。
  *
+ * - 行首 = **状态点**（2026-10-19，形态照 DeepSeek Harness 的会话行）：运行中 = 中性灰转圈环、
+ *   已完成未查看 = 绿点、待处理（等审批 / 等回答）= 橙点、空闲不显示点（槽位仍占位，标题列不错行）；
+ *   档位与优先级见 `lib/sessionRowStatus.ts`。**状态只有这一处**（原行尾的转圈 / 对勾已收敛到这里）；
  * - 标题单行省略；右侧等宽短时间 = **紧凑相对时间**（刚刚 / N分 / N小时 / N天，对齐 ZCode 任务
  *   列表行；2026-10-13 前是固定 68px 的 `10/13 09:12`，窄侧栏里必截）——完整绝对时间在悬停
- *   `title` 上；
+ *   `title` 上；**待处理档**行尾换成状态标签（照 DSH：等待用户操作时状态取代时间，完整时间仍在悬停里）；
  * - **行级动作 = 悬浮图标（V43）**：行 hover / 聚焦时在时间右侧浮现「归档会话」/「删除对话」
  *   两枚裸图标键（删除先走 `ConfirmDialog`，真删 jsonl 会话文件）；
- * - 行首绿点 = 该会话的聊天进程在跑（后端 `running` 快照）；已损坏的会话标题落 `t.corrupt`；
+ * - 已损坏的会话标题落 `t.corrupt`；
  * - 点击 = 打开会话（`openSessionWithHistory`：起 / 聚焦长驻 RPC 并拉历史）。
  */
 function SessionRow({
@@ -79,9 +84,13 @@ function SessionRow({
  const activeSessionId = useApp((st) => st.activeSessionId);
  const locale = useApp((st) => st.locale);
  const unread = useApp((st) => !!st.unreadBySession[s.id]);
+ /** 本会话的实时状态（只有打开过的会话有记录）；没记录时退回行自带的扫描快照，见 `sessionRowStatus`。 */
+ const liveState = useApp((st) => st.statusBySession[s.id]?.state);
  const t = useText();
  const [confirmDelete, setConfirmDelete] = useState(false);
  const active = s.id === activeSessionId;
+ const rowStatus = sessionRowStatus({ live: liveState, running: s.running, unread });
+ const statusLabel = sessionRowStatusLabel(rowStatus, t);
  // 行内 = 紧凑相对时间（ZCode 口径）；完整时间进悬停 title。
  const time = s.corrupt ? t.corrupt : formatSessionTime(s.timestamp, t);
  const fullTime = formatSessionFullTime(s.timestamp, locale);
@@ -101,30 +110,31 @@ function SessionRow({
      className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
      aria-label={fmt(t.chatAria, title)}
     >
+     {/* 行首状态槽（16px，照 DSH 的 leading cell）：空闲也留白，标题列不错行 */}
+     <span className="flex w-4 shrink-0 items-center justify-center">
+      {statusLabel !== null && <SessionStatusDot status={rowStatus} label={statusLabel} />}
+     </span>
      <span className={`min-w-0 flex-1 truncate text-sm ${active ? "font-semibold" : ""}`}>{title}</span>
     </button>
-    {/* 互斥槽（V43 二次口径）：不悬浮时显示「状态标 + 时间」，悬浮 / 聚焦整行时淡出、动作键淡入——
-        按钮常驻占位（决定槽宽，标题零重排），状态与时间是绝对定位的覆盖层（pointer-events-none）；
+    {/* 互斥槽（V43 二次口径）：不悬浮时显示时间，悬浮 / 聚焦整行时淡出、动作键淡入——
+        按钮常驻占位（决定槽宽，标题零重排），时间是绝对定位的覆盖层（pointer-events-none）；
         聚焦判定 = `group-has-focus-visible`（键盘 Tab 到按钮才显形）。 */}
     <span className="relative flex shrink-0 items-center justify-end">
      <span className="flex items-center gap-0.5 opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-has-focus-visible:opacity-100">
       <RowAction label={s.running ? t.archiveChatRunning : t.archiveChat} icon={Archive} disabled={busy} onClick={() => onArchive([s.id])} />
       <RowAction label={t.deleteChat} title={t.sessDeleteConfirm} icon={Trash2} danger disabled={busy} onClick={() => setConfirmDelete(true)} />
      </span>
-     <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-1 transition-opacity duration-100 group-hover:opacity-0 group-has-focus-visible:opacity-0">
-      {/* 运行状态标（v2 §1.1）：running 转圈 / 后台跑完未读给勾；都没有时不占位 */}
-      {s.running ? (
-       <span className="flex shrink-0 text-accent" title={t.statusRunning} aria-label={t.statusRunning}>
-        <Loader size={11} className="animate-spin" aria-hidden />
+     <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center transition-opacity duration-100 group-hover:opacity-0 group-has-focus-visible:opacity-0">
+      {/* 待处理（等审批 / 等回答）：状态取代时间（照 DSH 的紧凑标签口径），完整时间留在悬停里 */}
+      {rowStatus === "awaiting" ? (
+       <span className="text-[11px] text-warn" title={`${statusLabel} · ${fullTime}`} aria-hidden>
+        {t.statusAwaitingTag}
        </span>
-      ) : unread ? (
-       <span className="flex shrink-0 text-ok" title={t.statusDone} aria-label={t.statusDone}>
-        <Check size={11} aria-hidden />
+      ) : (
+       <span className="font-mono text-[11px] text-faint" title={fullTime}>
+        {time}
        </span>
-      ) : null}
-      <span className="font-mono text-[11px] text-faint" title={fullTime}>
-       {time}
-      </span>
+      )}
      </span>
     </span>
    </div>

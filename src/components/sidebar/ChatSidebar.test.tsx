@@ -116,6 +116,9 @@ beforeEach(() => {
   commitTasks: {},
   pullStates: {},
   pullConflictCwd: null,
+  // 会话行状态点由这两份运行期状态派生：默认清掉，用例自己造（否则用例之间互相污染）
+  statusBySession: {},
+  unreadBySession: {},
  });
  container = document.createElement("div");
  document.body.append(container);
@@ -344,8 +347,12 @@ describe("项目分组头的行内悬浮图标（V43）", () => {
  });
 });
 
-describe("会话行的运行状态标（与状态收敛同源）", () => {
- it("打开过的会话：running 由实时状态派生——任务跑完转圈立即消失，不被打开时的快照钉死", async () => {
+describe("会话行的状态点（DeepSeek Harness 口径：待处理 > 运行中 > 已完成 > 空闲）", () => {
+ /** 行内定位：标题所在的那一行（`div.h-8` 是会话行 / 项目头的行高）。 */
+ const rowOf = (title: string): HTMLElement | undefined =>
+  [...container.querySelectorAll<HTMLElement>("div.h-8")].find((el) => (el.textContent ?? "").includes(title));
+
+ it("打开过的会话：running 由实时状态派生——任务跑完转圈环立即消失，不被打开时的快照钉死", async () => {
   const t = TEXT["zh-CN"];
   // 场景：会话打开时没在跑（store 行落 open 时刻的 running=false 快照），随后任务开跑。
   useApp.setState({
@@ -354,12 +361,12 @@ describe("会话行的运行状态标（与状态收敛同源）", () => {
    statusBySession: { s1: { state: "running" } },
   });
   await open();
-  expect(container.querySelector(`[aria-label="${t.statusRunning}"]`), "任务在跑：转圈亮").not.toBeNull();
+  expect(container.querySelector(`[aria-label="${t.statusRunning}"]`), "任务在跑：转圈环亮").not.toBeNull();
   // 任务完成：状态收敛 idle（omp-status 推送）——store 行的 running 快照没人更新
   act(() => {
    useApp.setState({ statusBySession: { s1: { state: "idle" } } });
   });
-  expect(container.querySelector(`[aria-label="${t.statusRunning}"]`), "跑完：转圈必须消失").toBeNull();
+  expect(container.querySelector(`[aria-label="${t.statusRunning}"]`), "跑完：转圈环必须消失").toBeNull();
  });
 
  it("没打开过的会话：照旧用扫描行的 running 快照", async () => {
@@ -371,7 +378,45 @@ describe("会话行的运行状态标（与状态收敛同源）", () => {
   });
   useApp.setState({ statusBySession: {} });
   await open();
-  expect(container.querySelector(`[aria-label="${t.statusRunning}"]`), "扫描快照的转圈不受影响").not.toBeNull();
+  expect(container.querySelector(`[aria-label="${t.statusRunning}"]`), "扫描快照的转圈环不受影响").not.toBeNull();
+ });
+
+ it("等审批 / 等回答：主状态是待处理（橙点），行尾时间换成「待处理」标签", async () => {
+  const t = TEXT["zh-CN"];
+  useApp.setState({
+   sessions: [session("s1", "p1", "登录页重构")],
+   activeSessionId: "s1",
+   statusBySession: { s1: { state: "awaiting-approval" } },
+  });
+  await open();
+  expect(container.querySelector(`[aria-label="${t.statusAwaiting}"]`), "待处理点亮").not.toBeNull();
+  expect(container.querySelector(`[aria-label="${t.statusRunning}"]`), "待处理压过运行中：不同时显示转圈环").toBeNull();
+  const row = rowOf("登录页重构");
+  const tag = [...(row?.querySelectorAll("span") ?? [])].find((el) => el.textContent === t.statusAwaitingTag && el.children.length === 0);
+  expect(tag, "行尾换成待处理标签").not.toBeUndefined();
+  expect(tag?.className, "待处理标签走 warn 色").toContain("text-warn");
+  expect(tag?.getAttribute("title"), "悬停里仍能看到完整时间").toContain(String(new Date(NOW - 5 * MIN).getFullYear()));
+  expect(row?.textContent, "行内相对时间被状态取代").not.toContain("5分");
+ });
+
+ it("后台跑完未读：给绿点（不再是行尾的对勾），位置在标题之前的行首槽里", async () => {
+  const t = TEXT["zh-CN"];
+  await open();
+  act(() => {
+   useApp.setState({ unreadBySession: { s1: true } });
+  });
+  const row = rowOf("登录页重构");
+  const dot = row?.querySelector<HTMLElement>(`[aria-label="${t.statusDone}"]`);
+  expect(dot, "完成未读点渲染").not.toBeNull();
+  expect(dot?.dataset.state, "绿点走 done 档").toBe("done");
+  const title = [...(row?.querySelectorAll("span") ?? [])].find((el) => el.textContent === "登录页重构");
+  expect(title, "标题仍在").not.toBeUndefined();
+  const order = dot !== null && dot !== undefined && title !== undefined ? dot.compareDocumentPosition(title) : 0;
+  expect(order & Node.DOCUMENT_POSITION_FOLLOWING, "状态点在标题之前（行首槽）").toBeTruthy();
+  act(() => {
+   useApp.setState({ unreadBySession: {} });
+  });
+  expect(container.querySelector(`[aria-label="${t.statusDone}"]`), "清掉未读即无点").toBeNull();
  });
 });
 
