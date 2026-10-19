@@ -15,6 +15,11 @@ import { StarToggle } from "./StarToggle";
  *
  * 数据多（网关 / 订阅计划动辄几十个模型）：顶部搜索按 id 与名称过滤；「全选 / 清空」作用于
  * **当前过滤结果**（先搜到一撮再全选，符合直觉；无过滤时就是全部）；计数 = 已挑 / 全部。
+ *
+ * 布列 = 一列：搜索框与计数行 `shrink-0` 钉在顶部，**只有模型清单滚**（`flex-1 min-h-0
+ * overflow-y-auto`）——弹窗外壳（`DialogShell`）在这条路上关掉整体滚动（2026-10-19 用户口径：
+ * 几十个模型滚下去，过滤输入框跟着滚出视野就没法接着筛了）。就地内嵌的场合（登录成功后那段）
+ * 父级不是 flex 列容器，`flex-1` 自然失效，清单随内容铺开、滚动回到外层——同一份代码两处都对。
  */
 export function ProviderModelsList({
  providerId,
@@ -38,15 +43,15 @@ export function ProviderModelsList({
  const picked = models.filter((m) => selected.has(m.selector)).length;
 
  return (
-  <>
+  <div className="flex min-h-0 flex-1 flex-col">
    <input
     value={q}
     onChange={(e) => setQ(e.target.value)}
     placeholder={t.providersPickSearch}
     aria-label={t.providersPickSearch}
-    className="w-full rounded-md border border-border bg-background px-3 py-2.5 text-[13px]"
+    className="w-full shrink-0 rounded-md border border-border bg-background px-3 py-2.5 text-[13px]"
    />
-   <div className="mt-3 flex flex-wrap items-center gap-2">
+   <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2">
     <span className="text-[11px] text-faint">{fmt(t.providersPickCount, String(picked), String(models.length))}</span>
     {query && <span className="text-[11px] text-faint">{fmt(t.providersPickMatches, String(shown.length))}</span>}
     <button
@@ -65,11 +70,11 @@ export function ProviderModelsList({
     </button>
    </div>
    {models.length === 0 ? (
-    <p className="mt-3 text-[13px] text-muted">{t.providersPickEmpty}</p>
+    <p className="mt-3 shrink-0 text-[13px] text-muted">{t.providersPickEmpty}</p>
    ) : shown.length === 0 ? (
-    <p className="mt-3 text-[13px] text-muted">{t.noModelMatch}</p>
+    <p className="mt-3 shrink-0 text-[13px] text-muted">{t.noModelMatch}</p>
    ) : (
-    <div className="mt-3">
+    <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
      {shown.map((m) => (
       <div
        key={m.selector}
@@ -82,7 +87,7 @@ export function ProviderModelsList({
      ))}
     </div>
    )}
-  </>
+  </div>
  );
 }
 
@@ -102,7 +107,7 @@ export function ProviderModelsDialog({
 }) {
  const t = useText();
  return (
-  <DialogShell title={fmt(t.providersPickTitle, provider.name)} onClose={onClose} width="max-w-2xl">
+  <DialogShell title={fmt(t.providersPickTitle, provider.name)} onClose={onClose} width="max-w-2xl" bodyScroll={false}>
    <ProviderModelsList providerId={provider.id} catalog={catalog} myModels={myModels} onChange={onChange} />
   </DialogShell>
  );

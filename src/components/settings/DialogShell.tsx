@@ -17,6 +17,7 @@ export function DialogShell({
  children,
  width = "max-w-xl",
  initialFocusRef,
+ bodyScroll = true,
 }: {
  title: string;
  onClose: () => void;
@@ -25,6 +26,12 @@ export function DialogShell({
  width?: string;
  /** 初始焦点（如模型挑选的搜索框）；缺省时聚焦卡片。 */
  initialFocusRef?: React.RefObject<HTMLElement | null>;
+ /**
+  * 内容区是否整体滚动（默认 `true`）。`false` = 内容区按列排布且自身不滚，由子内容
+  * 自己挑哪一块滚（子块写 `flex-1 min-h-0 overflow-y-auto`）——长列表的挑选弹窗要的是
+  * 「过滤框 / 计数行固定，只有列表滚」（2026-10-19 用户口径），整体滚会把输入框滚出视野。
+  */
+ bodyScroll?: boolean;
 }) {
  const t = useText();
  const cardRef = useRef<HTMLDivElement>(null);
@@ -53,7 +60,13 @@ export function DialogShell({
       <X size={12} aria-hidden />
      </button>
     </div>
-    <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 [overflow-wrap:anywhere] sm:p-5">{children}</div>
+    <div
+     className={`min-h-0 min-w-0 flex-1 overflow-x-hidden p-4 [overflow-wrap:anywhere] sm:p-5 ${
+      bodyScroll ? "overflow-y-auto" : "flex flex-col overflow-y-hidden"
+     }`}
+    >
+     {children}
+    </div>
    </div>
   </div>
  );
