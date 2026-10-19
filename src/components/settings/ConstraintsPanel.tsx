@@ -594,8 +594,8 @@ export function ConstraintsPanel({
 
   return (
     <div ref={panelRef} className="mt-1">
-      <div className="flex flex-wrap items-start gap-2">
-        <p className="min-w-0 flex-1 text-xs leading-5 text-muted">{t.constraintsIntro}</p>
+      {/* 页头：只有刷新钮（2026-10-19 用户口径：口径说明文字不再上界面，目录读数留在下面一行） */}
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <button
           type="button"
           onClick={() => void load()}

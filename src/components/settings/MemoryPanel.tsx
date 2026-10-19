@@ -219,7 +219,7 @@ export function MemoryPanel() {
 
  return (
   <section aria-label={t.tabMemories} className="shrink-0">
-   {/* 页头：本条目没有 `tabMemoriesHint` 键，页头只放计数与刷新钮；页级说明留在下面一行 */}
+   {/* 页头：只放计数与刷新钮（2026-10-19 用户口径：口径说明文字不再上界面） */}
    <div className="flex flex-wrap items-center justify-end gap-2">
     {rows !== null && <span className="shrink-0 font-mono text-[11px] text-faint">{fmt(t.memoryProjectCount, total)}</span>}
     <button
@@ -232,7 +232,6 @@ export function MemoryPanel() {
      {busy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
     </button>
    </div>
-   <p className="mt-2 text-xs leading-5 text-muted">{t.memoryHint}</p>
    {error && (
     <p role="alert" className="mt-2 text-[13px] text-danger">
      {error}

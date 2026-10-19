@@ -243,13 +243,11 @@ export function SkillsPanel() {
 
  return (
   <section aria-label={t.tabSkills} className="shrink-0">
-   <div className="flex flex-wrap items-start gap-2">
-    <p className="min-w-0 flex-1 text-xs leading-5 text-muted">
-     {t.tabSkillsHint}
-     {data !== null && (
-      <span className="ml-2 font-mono text-[11px] text-faint">{fmt(t.skillsCount, total)}</span>
-     )}
-    </p>
+   {/* 页头：计数 + 刷新（2026-10-19 用户口径：口径说明文字不再上界面） */}
+   <div className="flex flex-wrap items-center justify-end gap-2">
+    {data !== null && (
+     <span className="shrink-0 font-mono text-[11px] text-faint">{fmt(t.skillsCount, total)}</span>
+    )}
     <div className="flex shrink-0 items-center gap-0.5">
      <button
       onClick={() => {

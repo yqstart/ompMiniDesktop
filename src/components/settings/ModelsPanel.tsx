@@ -187,8 +187,8 @@ export function ModelsPanel() {
 
  return (
   <>
-   <div className="flex flex-wrap items-start gap-2">
-    <p className="min-w-0 flex-1 text-xs leading-5 text-muted">{t.tabModelsHint}</p>
+   {/* 页头：只有刷新钮（2026-10-19 用户口径：口径说明文字不再上界面） */}
+   <div className="flex flex-wrap items-center justify-end gap-2">
     {/* 页级唯一刷新：角色 / 环 / 转移 / 目录 / 供应商（经 modelsRefreshed 广播）都靠它 */}
     <button
      onClick={() => void refreshAll()}

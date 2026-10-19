@@ -260,8 +260,6 @@ const ZH = {
  tabGeneralHint: "omp 的常用设置一览，按上游分组",
  tabConstraints: "omp 约束",
  tabConstraintsHint: "编辑全局约束与规则文件",
- constraintsIntro:
-  "omp 在会话启动时读取这里的全局文件：AGENTS.md 是上下文约束，RULES.md 是每轮重挂的硬规则，rules/ 下是独立规则。项目级 .omp/ 文件由 omp 自己发现，本页不碰。",
  constraintsRefresh: "刷新",
  constraintsLoading: "读取中…",
  constraintsLoadFailed: "读取全局约束失败",
@@ -339,7 +337,6 @@ const ZH = {
  constraintsTooLarge: "内容过大（{0} 字节，上限 2 MiB）",
  constraintsNul: "内容不能包含 NUL 字符",
  tabModels: "模型",
- tabModelsHint: "连接供应商，安排模型角色与切换顺序",
  tabArchived: "已归档对话",
  tabArchivedHint: "恢复或删除已归档的对话",
  ompSettingsNoMatch: "没有匹配的设置",
@@ -362,8 +359,6 @@ const ZH = {
 
  // 设置 › 记忆（omp 项目记忆：查看 / 删除；写记忆一律归 omp，本应用不写）
  tabMemories: "记忆",
- memoryHint:
-  "omp 会在会话运行后的后台整理里写出项目记忆（长期记忆 / 摘要 / 原始记忆 / 会话摘要 / 技能包），按项目的 cwd 分开存放，不在项目仓库里。这里只做查看与删除——记忆由 omp 生成、本应用从不写入；删除不可撤销，omp 下次整理时可能重新生成。",
  memoryRefresh: "刷新",
  memoryLoading: "读取中…",
  memoryEmpty: "还没有任何项目记忆。omp 在会话运行后后台整理生成；从未跑过整理的项目这里就是空的。",
@@ -806,7 +801,6 @@ const ZH = {
 
  // 设置 ›「插件」（V23）：omp 插件清单 / 启停 / 特性 / 安装 / 卸载 / 体检
  tabPlugins: "插件",
- tabPluginsHint: "omp 插件（`omp plugin`）：装了什么、启用状态、可选特性、安装与卸载、体检。插件是能跑代码的受信任组件——只装你信任的来源。",
  pluginsScope: "可见范围",
  pluginsScopeGlobal: "全局（用户级）",
  pluginsScopeHint: "范围决定 omp 从哪里发现插件（项目 package.json 里的依赖、项目级市场安装）；全局 = 只看用户级。当前目录：",
@@ -865,7 +859,6 @@ const ZH = {
 
  // 设置 ›「技能」（V23）：omp 技能发现结果 + 逐项启停 + SKILL.md 预览
  tabSkills: "技能",
- tabSkillsHint: "omp 技能（`omp skill list`）：按范围列出发现到的技能，展开看 SKILL.md 正文，逐项停用或启用。",
  skillsScope: "发现范围",
  skillsScopeGlobal: "全局（用户级）",
  skillsScopeHint: "项目级技能由 omp 从该项目目录向上发现（.omp/skills、.agents/skills、.claude/skills 等）；全局 = 只看用户级技能。当前目录：",
@@ -1715,8 +1708,6 @@ const EN: Record<TextKey, string> = {
  tabGeneralHint: "The omp settings at a glance, grouped as upstream",
  tabConstraints: "OMP rules",
  tabConstraintsHint: "Edit global context and rule files",
- constraintsIntro:
-  "omp reads these global files when a session starts: AGENTS.md is the context file, RULES.md is the sticky rule re-applied every turn, and rules/ holds independent rules. Project-level .omp/ files are discovered by omp itself and are not touched here.",
  constraintsRefresh: "Refresh",
  constraintsLoading: "Loading…",
  constraintsLoadFailed: "Failed to read global constraints",
@@ -1794,7 +1785,6 @@ const EN: Record<TextKey, string> = {
  constraintsTooLarge: "Content is too large ({0} bytes; limit 2 MiB)",
  constraintsNul: "Content cannot contain NUL characters",
  tabModels: "Models",
- tabModelsHint: "Connect providers and arrange roles and switch order",
  tabArchived: "Archived chats",
  tabArchivedHint: "Restore or delete archived chats",
  ompSettingsNoMatch: "No matching settings",
@@ -1816,8 +1806,6 @@ const EN: Record<TextKey, string> = {
  archivedOrphan: "Unassigned",
 
  tabMemories: "Memory",
- memoryHint:
-  "omp writes project memory in a background pass after sessions run (long-term memory, summary, raw memories, rollout summaries, skills), one directory per project cwd, outside the project repo. This page only views and deletes — memory is written by omp and never by this app; deletion cannot be undone and omp may regenerate it on the next pass.",
  memoryRefresh: "Refresh",
  memoryLoading: "Loading…",
  memoryEmpty: "No project memory yet. omp generates it in a background pass after sessions run; projects that never went through that pass show nothing here.",
@@ -2251,7 +2239,6 @@ const EN: Record<TextKey, string> = {
 
  // Settings › Plugins (V23)
  tabPlugins: "Plugins",
- tabPluginsHint: "omp plugins (`omp plugin`): what is installed, enabled state, optional features, install / uninstall, and a health check. Plugins are trusted code that runs on your behalf — install only from sources you trust.",
  pluginsScope: "Visible scope",
  pluginsScopeGlobal: "Global (user)",
  pluginsScopeHint: "Scope decides where omp discovers plugins (project package.json dependencies, project-scope marketplace installs); Global shows user scope only. Current directory:",
@@ -2310,7 +2297,6 @@ const EN: Record<TextKey, string> = {
 
  // Settings › Skills (V23)
  tabSkills: "Skills",
- tabSkillsHint: "omp skills (`omp skill list`): every skill discovered for the selected scope, with SKILL.md preview and per-skill enable / disable.",
  skillsScope: "Discovery scope",
  skillsScopeGlobal: "Global (user)",
  skillsScopeHint: "Project skills are discovered from that directory up to the repository root (.omp/skills, .agents/skills, .claude/skills, …); Global shows user skills only. Current directory:",
