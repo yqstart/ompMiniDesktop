@@ -23,7 +23,7 @@ export function DialogShell({
  children: React.ReactNode;
  /** 卡片最大宽度（默认 `max-w-xl`；表单类给 `max-w-2xl`）。 */
  width?: string;
- /** 初始焦点（如快速切换的搜索框）；缺省时聚焦卡片。 */
+ /** 初始焦点（如模型挑选的搜索框）；缺省时聚焦卡片。 */
  initialFocusRef?: React.RefObject<HTMLElement | null>;
 }) {
  const t = useText();

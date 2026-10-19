@@ -2,6 +2,7 @@
 
 > **状态：已实施**（2026-10-14），随 0.1.0 发布。本文是落地口径的定格版；实现细节与逐项变更见 `CHANGELOG.md` 的 0.1.0 节。
 > 唯一未落地项：§1.1 的「ZCode 式能力候选（置顶 / 分组色标 / 视图切换）」按原文属「按需，不默认全上」，本期未引入。
+> **后续修订（2026-10-19，用户口径）**：§1.1 的常驻命令行只剩「新建会话」；§5 的 **⌘K 命令中心 / 左栏「快速切换」已整条删除**（`components/CommandPalette.tsx`、`lib/commandPalette.ts`、`store.paletteOpen`、⌘K 快捷键与 16 个文案键一并移除）——会话搜索与那批动作各回原有入口（左栏会话树、`⌘F` 查找、输入卡菜单等）。当前形态见 `../design-system/MASTER.md` §3 / §4.7。
 
 > 目标：聊天形态的**布局、样式、流式对话、聊天框**按 Codex Desktop / Zcode Desktop 范式重做。
 > 对标依据：`benchmark-codex-desktop.md`、`benchmark-zcode-desktop.md`；视觉规范：`../design-system/MASTER.md`。

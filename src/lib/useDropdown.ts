@@ -23,7 +23,7 @@ export function topDialog() {
  return null;
 }
 
-/** 是否有可见的模态弹窗（含快速切换与抽屉等对话框）。 */
+/** 是否有可见的模态弹窗（含各设置弹窗、抽屉等对话框）。 */
 export function hasOpenDialog(): boolean {
  return topDialog() !== null;
 }

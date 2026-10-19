@@ -8,7 +8,6 @@ import { IPC } from "@shared/ipc";
 import type { ModelCatalog } from "@shared/types";
 import { ChatSidebar } from "../components/sidebar/ChatSidebar";
 import { ReferencePicker } from "../components/ReferencePicker";
-import { CommandPalette } from "../components/CommandPalette";
 import { CommitTaskPanel } from "../components/git/CommitTaskPanel";
 import { HealthBanner } from "../components/HealthBanner";
 import { SettingsPage } from "../components/SettingsPage";
@@ -102,7 +101,7 @@ function useWorkspaceGitRefresh() {
 
 /**
  * 全局快捷键（v2；非 mac 平台用 Ctrl）：⌘, 打开设置 / ⌘T 新建聊天 / ⌘W 关设置 /
- * ⌘F 会话内查找（设置视图内 = 聚焦设置搜索）/ ⌘K 命令中心 / ⌘⇧G 上下文面板 /
+ * ⌘F 会话内查找（设置视图内 = 聚焦设置搜索）/ ⌘⇧G 上下文面板 /
  * ⌘[ ⌘] 会话导航 / ⌘⇧P 引用工作区文件。
  */
 function useHotkeys() {
@@ -113,7 +112,7 @@ function useHotkeys() {
    if (!mod) return;
    const key = e.key.toLowerCase();
    const s = useApp.getState();
-   // ⌘F / ⌘K / ⌘[ / ⌘]（会话内动作）、⌘⇧P（引用浮层）与 ⌘,（打开设置）即使焦点在输入框里也要生效——
+   // ⌘F / ⌘[ / ⌘]（会话内动作）、⌘⇧P（引用浮层）与 ⌘,（打开设置）即使焦点在输入框里也要生效——
    // 聊天常态就是在 Composer 里打字，被 typing 守卫吞掉等于入口断掉；
    // 其余组合键（⌘T / ⌘W）输入中只阻断不执行。
    const chatKey = key === "f" || key === "[" || key === "]" || key === "k" || (key === "g" && e.shiftKey);
@@ -149,7 +148,7 @@ function useHotkeys() {
     s.set({ refPickerTarget: { sessionId: s.activeSessionId } });
     return;
    }
-   // 设置视图内（v3）：⌘F = 展开并聚焦设置搜索；⌘K / ⌘[ / ⌘] 等会话内动作不抢这几个键
+   // 设置视图内（v3）：⌘F = 展开并聚焦设置搜索；⌘[ / ⌘] 等会话内动作不抢这几个键
    if (s.settingsTabActive) {
     if (key === "f") s.set({ settingsSearchOpen: true });
     return;
@@ -157,9 +156,6 @@ function useHotkeys() {
    if (key === "f") {
     // 会话内查找：没有会话时无处可查，不打开横条
     if (s.activeSessionId) s.setFindOpen(true);
-   } else if (key === "k") {
-    // 命令中心（V41）：再按一次收起（toggle）
-    s.setPaletteOpen(!s.paletteOpen);
    } else if (key === "g" && e.shiftKey) {
     // 右栏工作台开关（⌘⇧G）：面板始终停靠为第三栏，切换只影响这一栏在不在
     s.setWorkbenchOpen(!s.workbenchOpen);
@@ -285,7 +281,7 @@ function SidebarShell({
  );
 }
 export function App() {
- const { settingsTabOpen, settingsTabActive, set, sidebarWidth, setSidebarWidth, updateDialogOpen, ompUpdateDialogOpen, sidebarOpen, providerUsageOpen, refPickerTarget, paletteOpen } = useApp();
+ const { settingsTabOpen, settingsTabActive, set, sidebarWidth, setSidebarWidth, updateDialogOpen, ompUpdateDialogOpen, sidebarOpen, providerUsageOpen, refPickerTarget } = useApp();
  const t = useText();
  useTheme();
  useLocale();
@@ -384,8 +380,6 @@ export function App() {
    <CommitTaskPanel />
    {updateDialogOpen && <UpdateDialog />}
    {ompUpdateDialogOpen && <OmpUpdateDialog />}
-   {/* 命令中心（⌘K，V41）：聊天动作 + 会话搜索面板；打开才挂载、关闭即卸载 */}
-   {paletteOpen && <CommandPalette />}
    {providerUsageOpen && <ProviderUsageDialog />}
    {refPickerTarget && <ReferencePicker />}
   </div>

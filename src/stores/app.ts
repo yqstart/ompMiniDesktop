@@ -239,9 +239,6 @@ type AppState = {
   *  免得「点了没反应」（`null` = 无提示；成功或用户关掉即清）。 */
  newChatError: string | null;
  setNewChatError: (message: string | null) => void;
- /** 命令中心（⌘K，V41）：聊天形态的全局动作面板开关。 */
- paletteOpen: boolean;
- setPaletteOpen: (v: boolean) => void;
  appendEvents: (sid: string, msgs: ViewMsg[]) => void;
  /** 展开更早的消息（按页递增）；打开新会话时由 openSessionWithHistory 重置。 */
  growThreadLimit: (by: number) => void;
@@ -667,7 +664,6 @@ export const useApp = create<AppState>((set, get) => ({
  statsOpen: false,
  diffPath: null,
  newChatError: null,
- paletteOpen: false,
  currentModel: null,
  currentThinking: null,
  currentEfforts: null,
@@ -799,7 +795,6 @@ export const useApp = create<AppState>((set, get) => ({
  setStatsOpen: (v) => set({ statsOpen: v }),
  setDiffPath: (path) => set({ diffPath: path }),
  setNewChatError: (message) => set({ newChatError: message }),
- setPaletteOpen: (v) => set({ paletteOpen: v }),
  appendEvents: (sid, msgs) =>
   set((s) => ({ eventsBySession: { ...s.eventsBySession, [sid]: [...(s.eventsBySession[sid] ?? []), ...msgs] } })),
  growThreadLimit: (by) => set((s) => ({ threadLimit: s.threadLimit + by })),

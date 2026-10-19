@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Archive, BranchDown, BranchUp, Check, ChevronRight, Folder, FolderError, FolderMinus, FolderPlus, Inbox, Layers, LinkOff, Loader, PenLine, Plus, Search, Trash2, X } from "reicon-react";
+import { AlertTriangle, Archive, BranchDown, BranchUp, Check, ChevronRight, Folder, FolderError, FolderMinus, FolderPlus, Inbox, Layers, LinkOff, Loader, PenLine, Plus, Trash2, X } from "reicon-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "@shared/api";
 import type { ProjectView, SessionView, WorkspaceView } from "@shared/types";
@@ -15,7 +15,6 @@ import { runSessionBatch } from "../../lib/sessionBatch";
 import { formatSessionFullTime, formatSessionTime } from "../../lib/sessionTime";
 import { sessionTitleForDisplay } from "../../lib/sessionTitle";
 import { isCommitTaskRunning, pushWorkspace } from "../../lib/commitTasks";
-import { isMacKeyboard } from "../../lib/platform";
 import { useText } from "../../lib/useText";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { DropLine } from "./DropLine";
@@ -757,7 +756,8 @@ export function ChatSidebar() {
    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
     {/* 顶部固定区（v2 §1.1 常驻命令行 + 工作区标题行）：sticky 钉在列表上方，
         `-mx-3 px-3` 让底色铺满容器，滚过去的会话行不会从两侧露出。
-        命令行两枚行钮 = 新建会话（主命令，视觉最重）/ 快速切换（⌘K；会话搜索与动作合成一栏）。 */}
+        命令行只剩一枚行钮 = 新建会话（主命令，视觉最重）；原「快速切换」（⌘K 命令中心）
+        已按用户口径整条删除（2026-10-19）。 */}
     <div className="sticky top-0 z-10 -mx-3 bg-sidebar px-3 pt-1 pb-2">
      <div className="flex flex-col gap-0.5">
       <button
@@ -770,16 +770,6 @@ export function ChatSidebar() {
       >
        <Plus size={14} aria-hidden className="shrink-0" />
        <span className="min-w-0 flex-1 truncate text-left">{t.newSession}</span>
-      </button>
-      <button
-       onClick={() => useApp.getState().set({ paletteOpen: true })}
-       className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
-       aria-label={t.quickSwitch}
-       title={t.quickSwitch}
-      >
-       <Search size={14} aria-hidden className="shrink-0" />
-       <span className="min-w-0 flex-1 truncate text-left">{t.quickSwitch}</span>
-       <kbd className="shrink-0 text-[10px] text-faint">{isMacKeyboard() ? "⌘K" : "Ctrl+K"}</kbd>
       </button>
      </div>
      {/* 工作区标题行（标题在左、两枚键在右）：`Layers` = 新建工作区（`WorkspaceGroupDialog`）、

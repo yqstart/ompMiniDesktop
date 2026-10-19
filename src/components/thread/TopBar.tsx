@@ -1,28 +1,27 @@
 import { useEffect, useRef, useState } from "react";
-import { Archive, CheckListNotes, Export, Menu, More2, PenLine, SidebarRight } from "reicon-react";
+import { Download, Menu, SidebarRight } from "reicon-react";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { api } from "@shared/api";
 import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
-import { useDropdown } from "../../lib/useDropdown";
 import { refreshSessionView } from "../../lib/sessionOpen";
-import { runSessionBatch } from "../../lib/sessionBatch";
 import { appendLocalNote } from "../../lib/localNote";
 import { sessionTitleForDisplay } from "../../lib/sessionTitle";
 
 /**
- * 中列顶部标题栏（v2 §1.2 形态）：标题居中 + 左侧 `···` 菜单 + 右侧面板开关。
- * 高度走 `--h-chrome` 语义档。
- *
- * 右上角只剩「窗口 chrome」：上下文容量环与供应商用量 2026-10-14 搬进输入卡工具行
- * （它们是「要不要再开一轮」的决策读数，跟输入框待在一起才有用）。
+ * 中列顶部标题栏（v2 §1.2 形态；2026-10-19 按用户口径重排）：
+ * **标题靠左**、紧跟一枚「导出会话」图标钮，右端只剩右栏工作台开关。高度走 `--h-chrome` 语义档。
  *
  * - 标题点击仍是就地改名（v1 口径保留：点标题改名的肌肉记忆不该被 v2 打断）：输入框回显
  *   **显示名**（`sessionTitleForDisplay`，omp 标题卡的图标 / 短码不进输入框），提交 = Enter
  *   或**点输入框外**（改过才写 omp 真名），Esc 取消；
- * - `···` 菜单收会话级动作：重命名 / 会话统计 / 导出会话 / 归档会话
- *   （删除会话仍只在左栏行操作里，不在这里再开一条危险入口）；
+ * - **左侧 `···` 菜单已退场**（2026-10-19 用户口径）：菜单里的动作各回原有入口——重命名 = 点标题
+ *   （同一条链路）、归档会话 = 左栏行操作、会话统计 = `/status` 与卡底统计条；只有**导出会话**
+ *   没有等价入口，留成标题右侧的图标钮（与输入框 `/export` 同一条后端命令）。图标用 `Download`
+ *   系（下箭头 + 托盘）：2026-10-19 用户反馈 `Export` 的向上箭头看着像「上传」；
+ * - 右端只剩「窗口 chrome」：上下文容量环与供应商用量 2026-10-14 搬进输入卡工具行
+ *   （它们是「要不要再开一轮」的决策读数，跟输入框待在一起才有用）；
  * - 左端窄屏（<768px）保留抽屉入口，否则项目列表与设置不可达。
  */
 export function TopBar() {
@@ -31,8 +30,6 @@ export function TopBar() {
  const cur = sessions.find((s) => s.id === activeSessionId);
  /** 改名草稿：`original` = 打开时的回显值（**显示口径**，标题卡前缀已剥）——原样提交 = 没改名，不写 omp。 */
  const [draft, setDraft] = useState<{ text: string; original: string } | null>(null);
- const [menuOpen, setMenuOpen] = useState(false);
- const menuRef = useDropdown(menuOpen, () => setMenuOpen(false));
  const title = sessionTitleForDisplay(cur?.title?.trim() || "") || t.unnamedChat;
  const inputRef = useRef<HTMLInputElement | null>(null);
  /** 一次编辑只结算一次：同一次点击里 pointerdown 提交之后，blur 还会再来一发。 */
@@ -51,7 +48,6 @@ export function TopBar() {
   const raw = cur.note?.trim() ? cur.note : cur.title ?? "";
   const text = sessionTitleForDisplay(raw);
   setDraft({ text, original: text });
-  setMenuOpen(false);
  };
 
  /**
@@ -87,7 +83,6 @@ export function TopBar() {
  /** 导出会话 HTML（与 `/export` 同一条后端命令）：结果落一条本地 command 行，随后系统打开。 */
  const exportSession = async () => {
   if (!activeSessionId) return;
-  setMenuOpen(false);
   try {
    const { path } = await api.exportSessionHtml(activeSessionId);
    if (path) {
@@ -99,31 +94,8 @@ export function TopBar() {
   }
  };
 
- /** 归档当前会话（与左栏行操作同一条批量链路；归档可恢复，不设二次确认）。 */
- const archiveSession = async () => {
-  if (!activeSessionId) return;
-  setMenuOpen(false);
-  const sid = activeSessionId;
-  try {
-   await runSessionBatch("archive", [sid]);
-   await refreshSessionView(sid);
-  } catch {
-   // 批量链路的失败信息由左栏列表刷新后的状态表达，这里不弹错
-  }
- };
-
- const menuButton = (icon: React.ReactNode, label: string, onClick: () => void) => (
-  <button
-   onClick={onClick}
-   className="flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-[13px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
-  >
-   {icon}
-   {label}
-  </button>
- );
-
  return (
-  // Overlay 标题栏：左侧留 72px 给 macOS 红绿灯，标题在整栏居中（绝对定位，不受左右按钮宽度影响）
+  // Overlay 标题栏：左侧留 72px 给 macOS 红绿灯；标题靠左（2026-10-19），右端只剩工作台开关
   <header
    data-tauri-drag-region
    className="relative flex h-(--h-chrome) shrink-0 items-center gap-1 border-b border-border bg-background pr-2 pl-[72px]"
@@ -137,36 +109,8 @@ export function TopBar() {
    >
     <Menu size={16} aria-hidden />
    </button>
-   {/* 左端 `···` 菜单：会话级动作（对齐 Codex 标题栏左侧的菜单入口） */}
-   <div className="relative" ref={menuRef}>
-    <button
-     onClick={() => setMenuOpen((v) => !v)}
-     disabled={!cur}
-     className={`flex cursor-pointer items-center justify-center rounded-md p-1.5 transition-colors duration-100 disabled:cursor-default disabled:opacity-40 ${menuOpen ? "bg-active text-foreground" : "text-muted hover:bg-hover hover:text-foreground"}`}
-     aria-label={t.sessionMenuAria}
-     aria-expanded={menuOpen}
-     title={t.sessionMenuAria}
-    >
-     <More2 size={16} aria-hidden />
-    </button>
-    {menuOpen && cur && (
-     <div className="absolute top-full left-0 z-10 mt-1 w-52 rounded-lg border border-border bg-elevated p-1 shadow-pop">
-      {menuButton(<PenLine size={13} aria-hidden />, t.sessionMenuRename, startEdit)}
-      {menuButton(
-       <CheckListNotes size={13} aria-hidden />,
-       t.statsTitle,
-       () => {
-        setMenuOpen(false);
-        set({ statsOpen: true });
-       },
-      )}
-      {menuButton(<Export size={13} aria-hidden />, t.sessionMenuExport, () => void exportSession())}
-      {menuButton(<Archive size={13} aria-hidden />, t.archiveChat, () => void archiveSession())}
-     </div>
-    )}
-   </div>
-   {/* 中：标题（居中；点击就地改名，编辑框在同一个位置上浮出） */}
-   <div className="pointer-events-none absolute inset-y-0 left-0 right-0 flex items-center justify-center px-24">
+   {/* 左：标题（点击就地改名）+ 导出会话（标题右侧的图标钮） */}
+   <div className="flex min-w-0 flex-1 items-center gap-0.5">
     {draft && cur ? (
      <input
       ref={inputRef}
@@ -181,22 +125,31 @@ export function TopBar() {
        if (e.key === "Escape") settleEdit(false);
       }}
       aria-label={t.renameNoteAria}
-      className="pointer-events-auto w-56 max-w-full rounded-md border border-border bg-background px-2 py-1 text-center text-[13px] outline-none focus:border-accent/70"
+      className="w-64 max-w-full rounded-md border border-border bg-background px-2 py-1 text-[13px] outline-none focus:border-accent/70"
      />
     ) : (
      <button
       onClick={startEdit}
       disabled={!cur}
-      className="pointer-events-auto max-w-full cursor-pointer truncate rounded-md px-2 py-0.5 text-[13px] font-semibold transition-colors duration-100 hover:bg-hover disabled:cursor-default"
+      className="min-w-0 max-w-full cursor-pointer truncate rounded-md px-2 py-0.5 text-left text-[13px] font-semibold transition-colors duration-100 hover:bg-hover disabled:cursor-default"
       aria-label={cur ? fmt(t.chatTitleAria, title) : t.unnamedChat}
       title={cur ? t.chatTitleTitle : ""}
      >
       {title}
      </button>
     )}
+    <button
+     onClick={() => void exportSession()}
+     disabled={!activeSessionId}
+     className="flex shrink-0 cursor-pointer items-center justify-center rounded-md p-1.5 text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:cursor-default disabled:opacity-40"
+     aria-label={t.sessionMenuExport}
+     title={t.sessionMenuExport}
+    >
+     <Download size={15} aria-hidden />
+    </button>
    </div>
    {/* 右端图标组（v2）：右栏工作台开关（文件 / 终端；用量与上下文容量环在输入卡工具行） */}
-   <div className="ml-auto flex items-center gap-0.5">
+   <div className="flex shrink-0 items-center gap-0.5">
     <button
      onClick={() => setWorkbenchOpen(!workbenchOpen)}
      className={`flex cursor-pointer items-center justify-center rounded-md p-1.5 transition-colors duration-100 ${workbenchOpen ? "bg-active text-foreground" : "text-muted hover:bg-hover hover:text-foreground"}`}

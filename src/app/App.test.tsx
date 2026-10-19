@@ -100,9 +100,6 @@ vi.mock("../components/SettingsPage", () => ({
   </div>
  ),
 }));
-vi.mock("../components/CommandPalette", () => ({
- CommandPalette: () => <div data-testid="palette">palette</div>,
-}));
 vi.mock("../components/git/CommitTaskPanel", () => ({
  CommitTaskPanel: () => null,
 }));
@@ -166,8 +163,7 @@ beforeEach(() => {
   sidebarOpen: false,
   providerUsageOpen: false,
   refPickerTarget: null,
-  paletteOpen: false,
-  activeSessionId: null,
+   activeSessionId: null,
   sessions: [],
   localeMode: "system",
   locale: "zh-CN",
@@ -257,14 +253,6 @@ describe("应用外壳：左栏、设置视图与快捷键", () => {
    await new Promise((resolve) => setTimeout(resolve, 0));
   });
   expect(vi.mocked(api.createSession)).toHaveBeenCalledWith("/a/main");
- });
-
- it("⌘K 切换命令中心（再按一次收起）", () => {
-  press({ key: "k", ...mod });
-  expect(useApp.getState().paletteOpen).toBe(true);
-  expect(container.querySelector('[data-testid="palette"]')).not.toBeNull();
-  press({ key: "k", ...mod });
-  expect(useApp.getState().paletteOpen).toBe(false);
  });
 });
 
