@@ -39,6 +39,10 @@ import { ConfirmDialog } from "../ConfirmDialog";
  * 数据面：清单来自 `get_omp_constraints`（固定两份文件 + rules/ 下的文件，一次读全）；
  * 保存 / 新建 / 删除走后端（乐观锁 + 备份 + 原子写）。草稿在**模块级缓存**里跨设置页签 /
  * 设置视图保留（切到模型页看一眼再回来不会丢未保存内容），「重新加载」才丢弃。
+ *
+ * 视图口径（2026-10-19 用户口径）：**选中文件默认展示预览**——这里主要是看约束内容，
+ * 打开就落到可编辑的裸文本既不好读、也容易误改；点「编辑」才换成整份 Markdown 编辑框。
+ * 唯一的例外是**新建规则**：刚建出来的文件是空的，用户下一步就是写内容，直接进编辑态。
  */
 
 type EditorState = {
@@ -232,7 +236,8 @@ export function ConstraintsPanel({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
-  const [preview, setPreview] = useState(false);
+  // 默认预览：打开设置页看到的是渲染后的 Markdown，不是可编辑的裸文本。
+  const [preview, setPreview] = useState(true);
   const [creating, setCreating] = useState(false);
   const [newStem, setNewStem] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
@@ -308,7 +313,8 @@ export function ConstraintsPanel({
     setConflict(false);
     setSaveError(null);
     setSavedFlash(false);
-    setPreview(false);
+    // 切换文件回到预览（默认视图）；要改内容再点「编辑」。
+    setPreview(true);
     setDeleteTarget(null);
     setDeleteError(null);
   }, []);
@@ -449,8 +455,13 @@ export function ConstraintsPanel({
     try {
       const created = await api.createOmpRule(check.name);
       setView((prev) => (prev ? { ...prev, files: [...prev.files, created] } : prev));
-      updateStates((prev) => ({ ...prev, [constraintKey("rule", created.name)]: stateFromFile(created) }));
+      updateStates((prev) => ({
+        ...prev,
+        [constraintKey("rule", created.name)]: stateFromFile(created),
+      }));
       selectFile(constraintKey("rule", created.name));
+      // 新建出来的文件是空的：下一步就是写内容，跳过预览直接进编辑态。
+      setPreview(false);
       setNewStem("");
       setCreating(false);
     } catch (error) {

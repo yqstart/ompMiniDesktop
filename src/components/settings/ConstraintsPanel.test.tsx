@@ -84,6 +84,13 @@ const setTextareaValue = (el: HTMLTextAreaElement, value: string) => {
   el.dispatchEvent(new Event("input", { bubbles: true }));
 };
 
+/** 受控 input：同上。 */
+const setInputValue = (el: HTMLInputElement, value: string) => {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+  setter?.call(el, value);
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+};
+
 let container: HTMLDivElement;
 let root: Root;
 
@@ -109,7 +116,7 @@ afterEach(() => {
 });
 
 describe("omp 约束面板", () => {
-  it("三种文件都在，且都是整份 Markdown 直接编辑（没有「表单 / 源码」切换）", async () => {
+  it("md 文件默认展示预览，点「编辑」才进整份 Markdown 编辑态（没有「表单 / 源码」切换）", async () => {
     act(() => {
       root.render(<ConstraintsPanel />);
     });
@@ -125,19 +132,71 @@ describe("omp 约束面板", () => {
     expect(labels).not.toContain("表单");
     expect(labels).not.toContain("源码");
 
-    // 默认选中的 AGENTS.md：编辑框里就是整份文本
+    // 默认选中的 AGENTS.md：先给渲染后的预览，没有编辑框
+    const previewBody = container.querySelector(".md-body");
+    expect(previewBody?.querySelector("h1")?.textContent).toBe("全局约束");
+    expect(container.querySelector("textarea")).toBeNull();
+    expect(buttonByText(container, "预览")?.getAttribute("aria-pressed")).toBe("true");
+
+    // 点「编辑」→ 整份文本（含 frontmatter 的规则也一样）
+    act(() => buttonByText(container, "编辑")?.click());
+    await flush();
     const agentsArea = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="AGENTS.md"]');
     expect(agentsArea?.value).toBe(agentsFile.content);
 
-    // RULES.md 同样是整份文本（frontmatter 一起显示），不再有字段表单
+    // 切到 RULES.md：回到预览视图；再点「编辑」拿到整份文本（frontmatter 一起显示，没有字段表单）
     act(() => buttonContaining(container, "RULES.md")?.click());
+    await flush();
+    expect(container.querySelector("textarea")).toBeNull();
+    expect(container.querySelector(".md-body")?.textContent).toContain("规则");
+    expect(buttonByText(container, "预览")?.getAttribute("aria-pressed")).toBe("true");
+
+    act(() => buttonByText(container, "编辑")?.click());
     await flush();
     const rulesArea = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="RULES.md"]');
     expect(rulesArea?.value).toBe(rulesFile.content);
     expect(container.querySelector('input[id^="constraint-description-"]')).toBeNull();
   });
 
-  it("选中规则直接改整份 Markdown，保存原样写回并带乐观锁", async () => {
+  it("新建规则直接进编辑态（空文件不用先点「编辑」）", async () => {
+    const created: ConstraintFile = {
+      kind: "rule",
+      name: "no-console.md",
+      path: "/a/rules/no-console.md",
+      exists: true,
+      content: "",
+      hash: "created-hash",
+      modifiedMs: 1,
+      size: 0,
+      error: null,
+    };
+    vi.mocked(api.createOmpRule).mockResolvedValue(created);
+
+    act(() => {
+      root.render(<ConstraintsPanel />);
+    });
+    await flush();
+
+    act(() => buttonContaining(container, "新建规则")?.click());
+    await flush();
+    const nameInput = container.querySelector<HTMLInputElement>(
+      'input[placeholder="规则名（如 no-any）"]',
+    );
+    expect(nameInput).toBeTruthy();
+    act(() => setInputValue(nameInput as HTMLInputElement, "no-console"));
+    await flush();
+
+    act(() => buttonByText(container, "创建")?.click());
+    await flush();
+
+    expect(api.createOmpRule).toHaveBeenCalledWith("no-console.md");
+    expect(container.querySelector(".md-body")).toBeNull();
+    const area = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="no-console"]');
+    expect(area).toBeTruthy();
+    expect(area?.value).toBe("");
+  });
+
+  it("选中规则先预览，点「编辑」后改整份 Markdown，保存原样写回并带乐观锁", async () => {
     act(() => {
       root.render(<ConstraintsPanel />);
     });
@@ -148,6 +207,12 @@ describe("omp 约束面板", () => {
     act(() => ruleButton?.click());
     await flush();
 
+    // 默认预览：frontmatter 不进正文渲染，正文只有「正文」
+    expect(container.querySelector("textarea")).toBeNull();
+    expect(container.querySelector(".md-body")?.textContent).toContain("正文");
+
+    act(() => buttonByText(container, "编辑")?.click());
+    await flush();
     const area = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="no-any"]');
     expect(area?.value).toBe(ruleFile.content);
 
