@@ -143,6 +143,8 @@ const mod = isMacKeyboard() ? { metaKey: true } : { ctrlKey: true };
 
 beforeEach(() => {
  vi.clearAllMocks();
+ // 「上次选中的会话」（启动恢复的数据源）：默认清掉，恢复用例自己造
+ localStorage.removeItem("omp.lastSession.v1");
  Object.defineProperty(window, "matchMedia", {
   value: (query: string) => ({
    matches: query.includes("767") ? false : true,
@@ -312,6 +314,53 @@ describe("引用工作区文件快捷键（V22）", () => {
   press({ key: "p", ...mod, shiftKey: true });
   expect(vi.mocked(api.createSession)).not.toHaveBeenCalled();
   expect(useApp.getState().refPickerTarget).toEqual({ sessionId: "s-1" });
+ });
+});
+
+/**
+ * 上次选中的会话（2026-10-19 用户口径）：关闭 app 当时正在看的那个对话，下次打开接着看。
+ * 记录随选中 / 改名写入（`lib/lastSession.ts`），冷启动读它走唯一的打开实现恢复。
+ */
+describe("上次选中的会话（关闭 app 时正在看的那个）", () => {
+ const KEY = "omp.lastSession.v1";
+
+ /** 重挂一次 App：恢复只在冷启动跑一趟（mount 时的 effect）。 */
+ async function remount(): Promise<void> {
+  act(() => root.unmount());
+  act(() => useApp.setState({ activeSessionId: null, sessions: [] }));
+  root = createRoot(container);
+  act(() => root.render(<App />));
+  await act(async () => {
+   await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+ }
+
+ it("选中会话时写入记录（项目 / 标题 / 目录一并带上）", async () => {
+  act(() => useApp.setState({ activeSessionId: "s-1", sessions: [SESSION] }));
+  await act(async () => {
+   await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(JSON.parse(localStorage.getItem(KEY) ?? "null")).toEqual({
+   id: "s-1",
+   projectId: "p1",
+   title: "会话",
+   cwd: "/a/main",
+  });
+ });
+
+ it("冷启动按记录恢复打开；open 的真值整行收敛（记录里的旧标题被换掉）", async () => {
+  localStorage.setItem(KEY, JSON.stringify({ id: "s-1", projectId: "p1", title: "旧标题", cwd: "/a" }));
+  await remount();
+  expect(vi.mocked(api.openSession)).toHaveBeenCalledWith("s-1");
+  expect(useApp.getState().activeSessionId).toBe("s-1");
+  expect(useApp.getState().sessions.find((s) => s.id === "s-1")?.title).toBe("会话");
+ });
+
+ it("记录里的会话打不开（已被删）：回到空态，不把死会话选在那儿", async () => {
+  vi.mocked(api.openSession).mockRejectedValueOnce(new Error("会话文件不存在"));
+  localStorage.setItem(KEY, JSON.stringify({ id: "gone-1", projectId: "p1", title: "已删除", cwd: "/a" }));
+  await remount();
+  expect(useApp.getState().activeSessionId).toBeNull();
  });
 });
 

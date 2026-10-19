@@ -207,10 +207,18 @@ export async function openForkedSession(view: SessionView, opts: { draft?: strin
  * 还会一直缺席——只拿 id 打开就会先显示「未归属 / 未命名会话」（用户实测：「点击已经存在的
  * 会话，输入框上方的项目有时展示不出来」）。hint 先顶上，`open_session` 返回后按真值收敛。
  *
+ * `opts.trustView`（**只有「恢复上次选中的会话」用**）：这次的 hint 来自上一次运行的快照
+ * （`lib/lastSession.ts`），标题 / 备注可能已经陈旧，`open_session` 返回的真值**整行收敛**
+ * （默认口径是保留本地行标题——那是给「刚发首条消息的乐观标题」用的，恢复态不适用）。
+ *
  * 全程不抛错：会话打不开（文件被删 / omp 缺失）时仍允许看旧缓存，
- * 状态胶囊会报 exited / omp 不可用，不由这里弹错。
+ * 状态胶囊会报 exited / omp 不可用，不由这里弹错——结果由返回值表达，恢复路径据此回到空态。
  */
-export async function openSessionWithHistory(id: string, hint?: SessionHint): Promise<void> {
+export async function openSessionWithHistory(
+ id: string,
+ hint?: SessionHint,
+ opts: { trustView?: boolean } = {},
+): Promise<{ ok: boolean; id: string }> {
  // 换会话＝换消息流：把「首屏增量」窗口重置回第一页（否则沿用上一个会话的展开量）
  useApp.getState().resetThreadLimit(id);
  // 真实身份：open 返回前先按请求 id 走（失败时也用它读旧缓存）；open 成功后收敛为
@@ -228,6 +236,7 @@ export async function openSessionWithHistory(id: string, hint?: SessionHint): Pr
  useApp.getState().set({ activeSessionId: id, sidebarOpen: false, settingsTabActive: false });
  // 切换即读底：新会话消息先落位，Thread 才有可滚内容
  scrollThreadToBottom();
+ let ok = false;
  try {
   const opened = await api.openSession(id);
   // 身份漂移（omp 的保护性 fork：见后端 spawn_session_runtime 的 open-elsewhere 注释）：
@@ -240,10 +249,18 @@ export async function openSessionWithHistory(id: string, hint?: SessionHint): Pr
   // 已有行（hint / 扫描行 / 之前打开过）只收敛后端说了算的四个字段——标题留给
   // open / title_change / 首条回退那几条既有路径（本地乐观标题不能被「未命名会话」顶掉）；
   // 搜索命中的会话可能落在扫描窗口之外（列表里没有这一行）：把它补进列表。
+  // `trustView`（恢复上次会话）是例外：hint 是上一次运行的快照，标题与备注都按真值收敛。
   const rows = cur.sessions.some((s) => s.id === opened.id)
    ? cur.sessions.map((s) =>
     s.id === opened.id
-     ? { ...s, running: opened.running, archived: opened.archived, projectId: opened.projectId, cwd: opened.cwd }
+     ? {
+       ...s,
+       running: opened.running,
+       archived: opened.archived,
+       projectId: opened.projectId,
+       cwd: opened.cwd,
+       ...(opts.trustView ? { title: opened.title, note: opened.note } : {}),
+      }
      : s,
    )
    : [opened, ...cur.sessions];
@@ -274,6 +291,7 @@ export async function openSessionWithHistory(id: string, hint?: SessionHint): Pr
   // 里 spawn 的，订阅建立时那次补拉必然早于它完成（拉不到），于是模型 / 思考档 /
   // 上下文占用一直空着，直到用户手动切一次模型。这里补拉时进程一定已在。
   await syncSessionRuntime(opened.id);
+  ok = true;
  } catch {
   // 打不开时保留旧缓存可读，状态胶囊会报 exited / 不可用
  }
@@ -358,4 +376,7 @@ export async function openSessionWithHistory(id: string, hint?: SessionHint): Pr
  } catch {
   // 历史加载失败不阻塞选中
  }
+ // 结果口径：`ok` 反映**打开本身**成不成（spawn / 握手），历史加载失败不算打开失败；
+ // 身份漂移时返回真实身份（调用方要按它继续，见上面的说明）。
+ return { ok, id: realId };
 }

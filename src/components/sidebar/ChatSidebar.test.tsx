@@ -104,6 +104,8 @@ beforeEach(() => {
  mock.moveProject.mockResolvedValue([]);
  mock.pullWorkspace.mockReset();
  mock.pullWorkspace.mockResolvedValue({ status: "up-to-date", conflicts: [], detail: "" });
+ // 「上次选中的会话」（启动展开口径的数据源）：默认清掉，用例自己造
+ localStorage.removeItem("omp.lastSession.v1");
  useApp.setState({
   projects: [P1, P2],
   workspaceGroups: [W1],
@@ -193,6 +195,63 @@ describe("聊天侧栏的工作区分段（V21 容器在聊天形态的投影）
   expect(container.querySelector("details.group\\/ws")).toBeNull();
   expect(text).toContain("alpha");
   expect(text).toContain("登录页重构");
+ });
+});
+
+/**
+ * 顶层分组的启动展开口径（2026-10-19 用户口径）：app 打开时**只展开第一个**工作区 / 项目，
+ * 其余收着；上次关闭时选中的会话所在的那一个优先（记录与启动恢复同源：`lib/lastSession.ts`）。
+ * 开合是受控的（`open` + `onToggle`）：系统只播种一次，之后随用户点击。
+ */
+describe("顶层分组的启动展开口径", () => {
+ const P4: ProjectView = { id: "p4", path: "/w/data", name: "delta", missing: false, sessionCount: 0, workspaceId: "w2" };
+ const W2 = { id: "w2", name: "数据组", createdAt: 0, projectIds: ["p4"] };
+
+ /** 两个工作区（w1 = 全栈：alpha / beta；w2 = 数据组：delta）——用来区分「第一个」与「上次会话所在」。 */
+ function twoSections(): void {
+  act(() => {
+   useApp.setState({ projects: [P1, P2, P4], workspaceGroups: [W1, W2] });
+  });
+  mock.listWorkspaces.mockResolvedValue([W1, W2]);
+ }
+
+ const sectionStates = (): boolean[] =>
+  [...container.querySelectorAll<HTMLDetailsElement>("details.group\\/ws")].map((s) => s.open);
+ const sectionHeads = (): HTMLElement[] => [...container.querySelectorAll<HTMLElement>("details.group\\/ws > summary")];
+
+ it("有工作区：只展开第一个段，其余收着", async () => {
+  twoSections();
+  await open();
+  expect(sectionStates()).toEqual([true, false]);
+ });
+
+ it("上次关闭时选中的会话在第二个段：展开的是那一个（不是第一个）", async () => {
+  localStorage.setItem(
+   "omp.lastSession.v1",
+   JSON.stringify({ id: "s7", projectId: "p4", title: "数据迁移", cwd: "/w/data" }),
+  );
+  twoSections();
+  await open();
+  expect(sectionStates()).toEqual([false, true]);
+ });
+
+ it("平铺（没有工作区）：只展开第一个项目块", async () => {
+  act(() => {
+   useApp.setState({ workspaceGroups: [], projects: [{ ...P1, workspaceId: null }, { ...P4, workspaceId: null }] });
+  });
+  mock.listWorkspaces.mockResolvedValue([]);
+  await open();
+  const states = ["p1", "p4"].map((id) => container.querySelector<HTMLDetailsElement>(`[data-proj-row="${id}"]`)?.open);
+  expect(states).toEqual([true, false]);
+ });
+
+ it("用户点击：收起第一个段、展开第二个段（受控开合跟着点击走）", async () => {
+  twoSections();
+  await open();
+  await click(sectionHeads()[0]);
+  expect(sectionStates(), "点段头即收起").toEqual([false, false]);
+  await click(sectionHeads()[1]);
+  expect(sectionStates(), "点另一个段头即展开").toEqual([false, true]);
  });
 });
 

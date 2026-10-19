@@ -20,6 +20,7 @@ import { OmpInstallDialog } from "../components/update/OmpInstallDialog";
 import { ProviderUsageDialog } from "../components/usage/ProviderUsageDialog";
 import { newChatInDefaultCheckout } from "../lib/checkouts";
 import { openSessionWithHistory } from "../lib/sessionOpen";
+import { loadLastSession, saveLastSession } from "../lib/lastSession";
 import { refreshWorkspaceGitState, startWorkspaceGitPolling } from "../lib/commitTasks";
 import { autoCheckOnBoot } from "../lib/appUpdate";
 import { autoCheckOmpUpdate } from "../lib/ompUpdate";
@@ -69,6 +70,49 @@ function useTitlePromptSync() {
   if (!agentDir) return;
   void syncTitlePromptLanguage(locale);
  }, [agentDir, locale]);
+}
+
+/**
+ * 上次选中的会话（2026-10-19 用户口径）：关闭 app 时正在看的那个对话，下次打开接着看。
+ *
+ * - **记录**：选中会话变化、或它在 `store.sessions` 里的行变化（改名 / 归属迁移）时写
+ *   localStorage（`lib/lastSession.ts`；内容没变不写）。记的是**上一次运行的快照**，
+ *   只当 hint 用，真值以 `open_session` 为准。
+ * - **恢复**：冷启动（本次运行还没有选中会话）读记录，交给唯一的打开实现——hint 用记录里
+ *   的字段（恢复期间标题 / 项目 / cwd 立刻是对的），`trustView` 让 open 的真值整行收敛
+ *   （记录里的标题可能已被外部改过）。左栏另读同一份记录，把它所在的工作区 / 项目展开
+ *   （其余分组在 app 打开时是收着的，见 `ChatSidebar`）。
+ * - **打不开**（会话被删 / omp 不可用）：回到空态，不把死会话选在那儿；记录留着，
+ *   下次环境好了照样能恢复。
+ */
+function useLastSessionRestore() {
+ const activeSessionId = useApp((s) => s.activeSessionId);
+ const sessions = useApp((s) => s.sessions);
+
+ useEffect(() => {
+  if (!activeSessionId) return;
+  const row = sessions.find((s) => s.id === activeSessionId);
+  saveLastSession({
+   id: activeSessionId,
+   projectId: row?.projectId ?? null,
+   title: row?.title ?? "",
+   cwd: row?.cwd ?? "",
+  });
+ }, [activeSessionId, sessions]);
+
+ useEffect(() => {
+  const last = loadLastSession();
+  if (!last || useApp.getState().activeSessionId) return;
+  void openSessionWithHistory(
+   last.id,
+   { id: last.id, projectId: last.projectId, title: last.title, cwd: last.cwd },
+   { trustView: true },
+  ).then((res) => {
+   if (!res.ok && useApp.getState().activeSessionId === res.id) {
+    useApp.getState().set({ activeSessionId: null });
+   }
+  });
+ }, []);
 }
 
 /**
@@ -290,6 +334,7 @@ export function App() {
  useHotkeys();
  useWorkspaceGitRefresh();
  useTitlePromptSync();
+ useLastSessionRestore();
 
  useEffect(() => {
   // 启动静默检查应用更新：检查中转轮、结论落 chip（已最新绿点 / 有新版本 accent / 失败 warn）；

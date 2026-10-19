@@ -10,6 +10,7 @@ import { loadCheckouts, newChatInDefaultCheckout, refreshSidebar } from "../../l
 import { pickDropTarget, planProjectMove, type ProjectDropHit, type ProjectDropTarget } from "../../lib/projectDrag";
 import { pickAndAddProject, startChatInProject } from "../../lib/projects";
 import { groupSessionsByProject } from "../../lib/sessions";
+import { loadLastSession } from "../../lib/lastSession";
 import { openSessionWithHistory } from "../../lib/sessionOpen";
 import { runSessionBatch } from "../../lib/sessionBatch";
 import { formatSessionFullTime, formatSessionTime } from "../../lib/sessionTime";
@@ -28,6 +29,15 @@ import { WorkspaceGroupDialog } from "./WorkspaceGroupDialog";
 const SCAN_STEP = 500;
 /** 扫描窗口上限：再大也不该一次解析上万个文件（后端同样夹到 5000）。 */
 const SCAN_MAX = 5000;
+
+/**
+ * 顶层分组（工作区分段 / 平铺模式下的项目块）在开合表里的键：
+ * 工作区段用段 key（workspace id / `__ungrouped`），平铺模式用 `p:<项目 id>` 前缀，
+ * 两套 key 不会撞车，同一份开合表两种排布共用。
+ */
+const topKeyOfProject = (projectId: string) => `p:${projectId}`;
+/** 还没定下启动默认（数据未到 / 用户先点了）时的空开合表。 */
+const EMPTY_TOP: ReadonlySet<string> = new Set();
 
 /**
  * 拖拽会话（V26）：指针按下后先进「待定」，移动超过 4px 才激活（不影响点击）。
@@ -150,6 +160,11 @@ function SessionRow({
  *   插入线指示落点，松开 → 一次 `move_project`（全局顺序 + 归属一次写）。落点判定读 DOM 矩形
  *   （`data-group-drop` 容器 / `data-proj-row` 项目块）与 `lib/projectDrag.ts` 的纯规则；
  *   拖到「未分组」= 移出工作区；贴上下缘自动滚动；
+ * - **顶层分组的开合（2026-10-19 用户口径，受控 details）**：app 打开时**只展开第一个**分组
+ *   （有工作区 = 第一个工作区段；平铺 = 第一个项目块），其余收着；上次关闭时选中的会话所在的
+ *   那一个优先（与启动恢复读同一份记录 `lib/lastSession.ts`）。默认值是派生的（`seededTop`，
+ *   不写 state、不用 effect），用户第一次点击后由 `openTop` 接管、之后只随点击变；不持久化——
+ *   每次打开 app 都重新摆一次。工作区段内的项目块不占开合表（展开了工作区，里面的项目就该看得见）；
  * - **常驻挂载**：切去设置视图只是被覆盖，卸载会丢掉列表、搜索词与滚动位置。
  *
  * 边界：搜索只过滤**标题 / 目录**（V2 M7b 的正文搜索随 V11 的左栏会话列表删除，
@@ -591,6 +606,47 @@ export function ChatSidebar() {
   return out.length > 0 ? out : null;
  }, [workspaceGroups, projects, dragging]);
 
+ /**
+  * 顶层分组的开合（受控 details，2026-10-19 用户口径）：**app 打开时只展开第一个**分组——
+  * 有工作区时 = 第一个工作区段，平铺时 = 第一个项目；上次关闭时选中的会话所在的那一个优先
+  * （记录见 `lib/lastSession.ts`，与启动恢复读同一份），用户一进来就能看到自己刚才的对话。
+  * 默认值是**派生的**（`seededTop`，不写 state、不用 effect）：用户第一次点击后由 `openTop`
+  * 接管，之后只随点击变；不持久化——每次打开 app 都重新按这个口径摆一次。
+  */
+ const [openTop, setOpenTop] = useState<ReadonlySet<string> | null>(null);
+ const topKeys = useMemo(
+  () => (sections === null ? groups.map((g) => topKeyOfProject(g.project.id)) : sections.map((s) => s.key)),
+  [sections, groups],
+ );
+ /** 上次选中的会话落在哪个顶层分组（定位不到 / 未归属 → `__ungrouped` 段；平铺时未归属没有段）。 */
+ const preferredTop = useMemo(() => {
+  const projectId = loadLastSession()?.projectId ?? null;
+  if (!projectId) return sections === null ? null : "__ungrouped";
+  const project = projects.find((p) => p.id === projectId);
+  if (!project) return null;
+  return project.workspaceId ?? (sections === null ? topKeyOfProject(project.id) : "__ungrouped");
+ }, [projects, sections]);
+ /** 启动默认（第一个 / 上次会话所在的那一个）；分组还没出现时是空表。 */
+ const seededTop = useMemo<ReadonlySet<string>>(() => {
+  if (topKeys.length === 0) return EMPTY_TOP;
+  return new Set([preferredTop !== null && topKeys.includes(preferredTop) ? preferredTop : topKeys[0]]);
+ }, [topKeys, preferredTop]);
+ const openTopKeys = openTop ?? seededTop;
+ /** 顶层分组开合的唯一写入面（受控 details 的 `toggle` 事件；值没变不写——程序化改 open 也会触发它）。 */
+ const toggleTop = useCallback(
+  (key: string, open: boolean) => {
+   setOpenTop((prev) => {
+    const base = prev ?? seededTop;
+    if (base.has(key) === open) return prev;
+    const next = new Set(base);
+    if (open) next.add(key);
+    else next.delete(key);
+    return next;
+   });
+  },
+  [seededTop],
+ );
+
  /** 项目分组头的 git 状态徽章（dirty 点 / 待推送（可点）/ 落后（只读）/ 上游缺失标记 / 任务态（可点开面板））：按项目主目录的快照取。无快照时不占位。 */
  const gitBadgesFor = (project: ProjectView) => {
   if (project.missing) return null;
@@ -712,14 +768,23 @@ export function ChatSidebar() {
   );
  };
  /** 一个项目分组（分组头 + 进行中会话列表）：平铺与工作区分段两种排布共用同一份；
-  *  `dragging` = 拖拽控制器正压暗这一行（落点由插入线表达）。 */
- const projectBlock = (project: ProjectView, active: SessionView[], dragging: boolean) => {
+  *  `dragging` = 拖拽控制器正压暗这一行（落点由插入线表达）；
+  *  `top` = 顶层分组的受控开合（只给平铺模式的项目块传——那时项目块就是顶层分组）。
+  *  工作区段内的项目块不传：不占开合表，硬编码展开（用户主动展开了这个工作区，
+  *  里面的项目就该看得见）。 */
+ const projectBlock = (
+  project: ProjectView,
+  active: SessionView[],
+  dragging: boolean,
+  top?: { open: boolean; onToggle: (open: boolean) => void },
+ ) => {
   return (
    <details
     key={project.id}
     data-proj-row={project.id}
     className={`group/proj mt-1 transition-opacity duration-100 ${dragging ? "opacity-40" : ""}`}
-    open
+    open={top?.open ?? true}
+    onToggle={top ? (e) => top.onToggle(e.currentTarget.open) : undefined}
    >
     {/* 项目头没有折叠箭头——点击整行即展开 / 收起；`data-project-drag` 区 = 拖拽手柄
         （按下后移动超过 4px 才真的开始拖，见拖拽控制器）。行级操作为 hover 悬浮图标（V43）：
@@ -854,15 +919,22 @@ export function ChatSidebar() {
        <div className="rounded-lg border border-dashed border-border px-3 py-3 text-sm text-muted">{t.noProjectsAdd}</div>
       )}
       {sections === null ? (
-       /* 平铺模式（没有自定义工作区）：全部项目同属「未分组」容器——整段是拖拽落区 */
+       /* 平铺模式（没有自定义工作区）：全部项目同属「未分组」容器——整段是拖拽落区；
+          项目块自己就是顶层分组，开合受控（app 打开时只展开第一个 / 上次会话所在的那个） */
        <div data-group-drop="">
-        {groups.map(({ project, active }) => (
-         <Fragment key={project.id}>
-          {/* 拖拽落点正好在这一行之前 → 画插入线（零高度，不推挤列表） */}
-          {dragTarget?.containerId === null && dragTarget.beforeId === project.id && <DropLine />}
-          {projectBlock(project, active, draggingId === project.id)}
-         </Fragment>
-        ))}
+        {groups.map(({ project, active }) => {
+         const key = topKeyOfProject(project.id);
+         return (
+          <Fragment key={project.id}>
+           {/* 拖拽落点正好在这一行之前 → 画插入线（零高度，不推挤列表） */}
+           {dragTarget?.containerId === null && dragTarget.beforeId === project.id && <DropLine />}
+           {projectBlock(project, active, draggingId === project.id, {
+            open: openTopKeys.has(key),
+            onToggle: (open) => toggleTop(key, open),
+           })}
+          </Fragment>
+         );
+        })}
         {dragTarget?.containerId === null && dragTarget.beforeId === null && groups.length > 0 && <DropLine />}
        </div>
       ) : (
@@ -876,7 +948,13 @@ export function ChatSidebar() {
          .filter((g): g is (typeof groups)[number] => g !== undefined);
         const countLabel = fmt(t.wsGroupCount, String(members.length));
         return (
-         <details key={section.key} data-group-drop={section.key === "__ungrouped" ? "" : section.key} className="group/ws mt-2" open>
+         <details
+          key={section.key}
+          data-group-drop={section.key === "__ungrouped" ? "" : section.key}
+          className="group/ws mt-2"
+          open={openTopKeys.has(section.key)}
+          onToggle={(e) => toggleTop(section.key, e.currentTarget.open)}
+         >
           {/* 工作区头：没有折叠箭头——点击整行即展开 / 收起，裸 `Layers` 图标（展开时上正文色），
               行尾是成员计数灰字；行级操作为 hover 悬浮图标（「编辑工作区」/「删除工作区」） */}
           <summary className="group/wshead flex cursor-pointer items-center gap-1.5 rounded-md px-1 py-1.5 text-[13px] text-muted transition-colors duration-100 hover:bg-hover [&::-webkit-details-marker]:hidden">
