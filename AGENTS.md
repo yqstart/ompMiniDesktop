@@ -8,11 +8,13 @@ oh-my-pi（`omp`）的桌面端：**聊天形态的 omp 工作台**（Tauri v2 +
 
 | 文档 | 说明 |
 |---|---|
-| `docs/roadmap.md` | 版本规划总纲（首个版本 0.1.0 = 形态收敛 + 聊天对标 + 设置重构）|
+| `docs/roadmap.md` | 版本规划总纲（首个版本 0.1.0 = 形态收敛 + 聊天对标 + 设置重构；0.2.0 = 右栏工作台 + 会话读数 + omp 约束）|
 | `docs/v1-schedule.md` | 排期 1：终端形态删除清单 / 迁移清单 / 验收（**已实施**，2026-10-14）|
 | `docs/v2-schedule.md` | 排期 2：布局 / 流式 / 聊天框对标 Codex、ZCode |
 | `docs/v3-schedule.md` | 排期 3：设置重构（功能保留、形态重做）|
 | `docs/v4-schedule.md` | 排期 4：右栏工作台——文件目录 + 项目脚本 + 多开终端（**已实施**）|
+| `docs/v5-schedule.md` | 排期 5：会话读数——输入卡底部统计条（会话统计 / Token 用量 / 上下文 / 供应商用量）（**已实施**）|
+| `docs/v6-schedule.md` | 排期 6：设置 ›「omp 约束」——全局 AGENTS.md / RULES.md / rules/*.md 的可视化编辑（**已实施**）|
 | `docs/benchmark-codex-desktop.md` | Codex Desktop 对标调研（含截图证据与设计语言合约）|
 | `docs/benchmark-zcode-desktop.md` | Zcode Desktop 对标调研 |
 | `design-system/MASTER.md` | 设计系统（颜色 / 布局 / 组件 / 层级真相；改 UI 先读）|
@@ -35,7 +37,7 @@ src/
   components/thread/         # 消息列：ChatView / TopBar / Thread / AssistantText / ToolRow / ToolRunRow / TurnRow / ApprovalCard / UiRequestCard / ChatEmptyState / PlanCard（任务清单浮卡）/ FindBar / BtwPanel / SessionStatsBar（卡底统计条）/ ContextMeter / SessionStatsDialog / DiffDialog…
   components/composer/       # 输入卡（v2）：Composer（卡顶行项目/分支 + 提交键 → 卡底工具行：`+`/执行模式/压缩/模型/思考档/发送 → 卡底统计条：SessionStatsBar = 会话统计/Token 用量/上下文/供应商用量）/ CommitButton / ApprovalModeMenu / ModelMenu / ThinkingMenu / PlusMenu / GoalRow / MentionList / SlashMenu / UsageLimits
   components/pickers/        # 选择器：ProjectPicker / BranchPicker（内嵌输入卡顶行；分支清单点选即切）
-  components/settings/       # GeneralSettingsPanel / ModelsPanel / PluginsPanel / SkillsPanel / ProvidersSection（供应商：登录型 + 自定义）/ CustomProviderEditForm（只配供应商字段）/ CustomProviderModelsDialog（自定义端点的模型清单：获取可用模型 + 勾选 + 调参）/ ProviderModelsDialog（登录型的星标挑选）/ MemoryPanel / UsagePanel / SettingsSearch（v3 顶部搜索）/ Highlight（命中高亮）…
+  components/settings/       # GeneralSettingsPanel / ConstraintsPanel（omp 约束：全局 AGENTS.md / RULES.md / rules/*.md 的可视化编辑）/ ModelsPanel / PluginsPanel / SkillsPanel / ProvidersSection（供应商：登录型 + 自定义）/ CustomProviderEditForm（只配供应商字段）/ CustomProviderModelsDialog（自定义端点的模型清单：获取可用模型 + 勾选 + 调参）/ ProviderModelsDialog（登录型的星标挑选）/ MemoryPanel / UsagePanel / SettingsSearch（v3 顶部搜索）/ Highlight（命中高亮）…
   components/usage/ update/ git/   # 供应商用量 / 更新弹窗 / 提交面板
   components/CommandPalette.tsx / SettingsPage.tsx / ReferencePicker.tsx / HealthBanner.tsx …
   lib/                       # viewmsg / mergeEvents / threadLayout / termTheme（终端配色）/ useSessionEvents / sessionOpen / streamReveal / mdBlocks / streamCaret / usePopoverAnchor（卡内浮层锚到被点的项）/ useGitInfo / localNote / promptHistory / commandPalette / btw / checkouts / workspaceGroups / projectDrag / useElapsed / useText / locale / theme / platform / settingsTabs / settingsSearch / useSettingsSearchSources / …
@@ -47,7 +49,7 @@ src-tauri/src/
   proc.rs                    # 进程与环境工具（登录 shell PATH 探测 / 进程组强杀；runtime / pty / git_commit / commit_msg / omp_update 复用）
   commands/mod.rs            # RPC 命令面 + 项目 / 工作区 / 会话 / git 命令
   context.rs session_scan.rs overlay.rs git_info.rs git_commit.rs git_ops.rs project_files.rs workspace_fs.rs project_scripts.rs
-  plugins.rs skills.rs settings.rs themes.rs models_config.rs title_prompt.rs omp_update.rs
+  plugins.rs skills.rs settings.rs themes.rs models_config.rs constraints.rs title_prompt.rs omp_update.rs
   providers.rs memories.rs usage.rs provider_usage.rs extra_usage.rs provider_models.rs live_stats.rs   # usage.rs = 使用统计（jsonl 聚合 + 壳侧账本）；live_stats.rs = 单会话累计统计（卡底统计条）；provider_models.rs = 端点模型探测（「获取可用模型」）
 scripts/                     # e2e-ipc-selfcheck / generate-icons / generate-material-icons（文件树图标子集）/ changelog-notes / fixup-latest-json / make-signing-cert / tauri-build
 ```
@@ -96,12 +98,17 @@ scripts/                     # e2e-ipc-selfcheck / generate-icons / generate-mat
   - **去重键唯一口径 = `usage.rs` 的 `usage_key`**：`sid|responseId` 优先，`responseId` 缺失（失败 / 重试调用）退回 `sid|时间戳|四段用量`；jsonl 解析与账本记录共用这一处，口径不一致就会重复计数。实测同一轮在实时帧与 jsonl 里的 `responseId` / `message.timestamp` / `usage` **完全一致**（探针：`rid=e4445cd1… ts=1792128700867 total=4260` 两边同值），**两路都有时以 jsonl 为准**（jsonl 先扫、先占键；账本随后扫，去重剩下的就是「jsonl 里已经没有的」）。两路都不看对方的状态，只认这一个全局键——**不许**再加时间窗口 / 「会话文件在不在」之类的额外判据（试过：老会话后来追加过消息时按 mtime 判会误杀，按数据时间窗判要么重复要么漏）。
   - 派生指标（命中率 / 活跃天数 / 连续天数 / 热力图）与 jsonl 同一条口径：账本事件同样进活跃日与热力图；返回的 `extras` = 只由账本补上、jsonl 里已经没有的条数，设置页据此明说数据来源。账本读不完（超预算）与 jsonl 预算一样置 `truncated`，不假装统计完了。
   - 记账失败（磁盘满 / 权限）只影响「已删除会话的补记」，**不许拖累会话线程**；本应用只读 omp，账本写在自己的应用数据目录里。
-- **设置写入口径**：omp 侧只经 `omp` CLI（`config set/reset`、`auth-broker`…）；**唯一例外**：`models.yml` 直接写文件（hash 乐观锁 + 预校验 + 备份 + 原子写）。本应用偏好不写 omp 配置。
+- **设置写入口径**：omp 侧只经 `omp` CLI（`config set/reset`、`auth-broker`…）；**直接写文件的例外**：`models.yml`（hash 乐观锁 + 预校验 + 备份 + 原子写）与「omp 约束」的 `AGENTS.md` / `RULES.md` / `rules/*.md`（同款乐观锁 + 备份 + 原子写；上游没有写这些文件的 CLI）。本应用偏好不写 omp 配置。
+- **omp 约束（设置 ›「omp 约束」，2026-10-19）**：可视化编辑 omp 的**全局**约束与规则文件——只碰 `<agentDir>` 下三处：`AGENTS.md`（native 用户级上下文文件，每次会话启动注入）、`RULES.md`（sticky 规则，始终 always-apply、每轮重挂）、`rules/*.{md,mdc}`（独立规则，文件名即规则名，`enabled: false` 停用）；项目级 `.omp/` 由 omp 自己发现，本页不碰。
+  - **数据面**（`constraints.rs`）：`get_omp_constraints`（固定两份文件 + rules/ 列表，一次读全）/ `write_omp_constraint`（`expectHash` 乐观锁 → 备份到 `<appData>/omp-mini/backups/constraints/` → 原子写 → 回读）/ `create_omp_rule` / `delete_omp_rule`（先备份再删）。文件名白名单：`rules/` 下单层 `.md` / `.mdc`、不以 `.` 开头、无路径分隔符 / 控制字符 / Windows 非法字符；内容上限 2 MiB；规则 frontmatter 必须有结束行。`expectHash = ""` 表示「打开时文件不存在」——外部创建了也算冲突；`null` = 冲突对话框里的显式强制覆盖。
+  - **编辑面**（`lib/constraints.ts`，`yaml` 的 `Document` API）：规则拆成 frontmatter 字段 + 正文——表单只改已知字段（description / enabled / alwaysApply / globs / condition / astCondition / question / scope / agents / interruptMode），**值没变的字段不重写**（尽量保住注释与写法），不认识的顶层字段原样保留；另有「源码」模式直接编辑整份 Markdown。保存前本地校验（大小 / NUL / YAML 可解析），失败不发请求。草稿在模块级缓存里跨设置页签 / 设置视图保留，「重新加载」才丢弃。
+  - **生效**：omp 在会话启动 / `/clear` / `/new` 时重新发现规则与上下文文件，界面只说「新建的会话一定读到」；已打开会话是否热读未实测。
+  - **设置搜索**：`constraints` 是独立数据源（条目名 / 文件名 / 路径 / 规则描述），命中跳转用 `focusKey = kind:name` 选中对应文件。
 - **自定义供应商：供应商配置 与 模型清单 拆开（2026-10-17 用户口径）**：`CustomProviderEditForm` 只配 名称 / 接口地址 / 接口类型 / API Key（**不再内嵌模型编辑区**）；模型清单一律在**已配置的供应商行**上点「挑选模型」管——自定义端点走 `CustomProviderModelsDialog`（「获取可用模型」→ 候选勾选 → 逐项调参 → 保存），登录型仍是 omp 目录里的星标挑选（`ProviderModelsDialog`）。数据层两个写入面**各写各的、互不覆盖**：`customModels.ts` 的 `upsertProvider`（供应商级字段，**不碰 `models` 节点**）与 `setProviderModels`（模型清单，逐条复用原节点保真改，**空清单删掉 `models` 键**）。
   - **探测走壳侧**（`provider_models.rs` 的 `fetch_provider_models`，只读、不落盘）：口径对齐 DeepSeek Harness 的 `discoverModels`——只认三档 wire API（`openai-completions` / `openai-responses` / `anthropic-messages`，其余不猜，猜错会把鉴权失败报成「供应商没有模型」）；OpenAI 系 `GET {接口地址 去尾斜杠}/models`（**按前缀拼、不自动补 `/v1`**，保住 `/openai/v1` 这类部署路径）、Anthropic `GET {去掉末尾一个 /v1 的根}/v1/models?limit=1000`（只读一页，不跟 `has_more`）；认证 Anthropic 用 `x-api-key` + `anthropic-version: 2023-06-01`、其余 `Bearer`、**没填 key 就不带认证头**；解析 `data[]` 优先、其次 `models`（对象按 map，键名优先于条目 `id`），容量字段多别名兜底（`contextWindow` / `context_length` / `max_input_tokens` / `max_model_len`、`maxOutputTokens` / `max_completion_tokens`…），坏行跳过、缺名回退 id。**DSH 链路里没有超时**（UI 不传 signal、host 不加 AbortSignal），壳侧自加 20s 超时；响应体上限 4 MiB，**超限报错不截断**（截断的清单不可解析）。
   - **apiKey 三种写法**（omp 18.11 实测，探测与 omp 同口径）：`!命令` 执行取 stdout、裸名字**先当环境变量名查**（命中用其值）、其余按字面量；`${VAR}` 不展开。密钥只在本进程内用，不落盘、不进日志、不回传前端。
   - **omp 侧实测事实**（写入形状的依据）：没有 `models` 的自定义块**被 omp 接受**（`omp models --json` 退出码 0、stderr 空，只是该供应商不出现在目录里）——所以「先存供应商、后挑模型」成立；模型条目只给 `id`（或 `id`+`name`）时 omp 用默认值（上下文 128000 / 最大输出 16384 / 非推理 / 纯文本）；`models: []` 同样合法（界面仍选删键，文件更干净）；`models` 静态列表与 provider 级 `discovery` 共存时目录取并集（壳侧本轮未用 `discovery`——勾选即启用是用户口径，全靠静态 `models` 表达）。
-- **设置视图（v3 设置重构）**：`SettingsPage` 覆盖主区（`store.settingsTabOpen/settingsTabActive`；打开 = 左栏「设置」/ `⌘,`，关闭 = 顶部返回 / `⌘W` / 再点一次）——顶部条（返回 + 当前条目名 + 搜索钮）+ 左导航**四组七条目**（通用 / 模型 / 扩展 / 数据；窄窗 44px 图标档，容器查询）+ 内容区唯一滚动。搜索 = `store.settingsSearchOpen`（`⌘F`），数据源走 `lib/settingsSearch.ts`（模块级缓存 + 懒加载，设置视图卸载即清；参数 = 常用设置目录 / 模型目录 / 插件 / 技能 / 记忆 / 归档），四档打分复用 `filterCatalog`；结果点击经 `navigateTo` 跳条目，常用设置项带 `SettingsFocusRequest{key,seq}` 定位（通用页展开分组 → 滚动到行 → 一次闪烁；seq 防重放、消费后回调清空）。
+- **设置视图（v3 设置重构）**：`SettingsPage` 覆盖主区（`store.settingsTabOpen/settingsTabActive`；打开 = 左栏「设置」/ `⌘,`，关闭 = 顶部返回 / `⌘W` / 再点一次）——顶部条（返回 + 当前条目名 + 搜索钮）+ 左导航**四组八条目**（通用 / 模型 / 扩展 / 数据；通用组 = 常用设置 + omp 约束；窄窗 44px 图标档，容器查询）+ 内容区唯一滚动。搜索 = `store.settingsSearchOpen`（`⌘F`），数据源走 `lib/settingsSearch.ts`（模块级缓存 + 懒加载，设置视图卸载即清；参数 = 常用设置目录 / omp 约束 / 模型目录 / 插件 / 技能 / 记忆 / 归档），四档打分复用 `filterCatalog`；结果点击经 `navigateTo` 跳条目，常用设置项与约束文件带 `SettingsFocusRequest{key,seq}` 定位（通用页展开分组 → 滚动到行 → 一次闪烁；约束页选中文件；seq 防重放、消费后回调清空）。
 - **提交 / 推送**：两轨（快速 = 一次 `omp -p` 生成信息 + `git commit/push`；完整 = `omp commit`）；按 cwd 建任务表（并行 + BUSY + 取消 + 超时）；入口 = **卡顶行提交键**（V42 起右栏「变更」区块随上下文面板退场，这里是唯一入口；同一浮层链路、同一状态口径：运行中转圈 / 失败红点）+ 左栏任务徽章。**提交键的可用性 = 有没有东西可提交或推送**（2026-10-17）：判定取 `store.workspaceGitStates[cwd]`——**与提交面板同源**（完整 `git status --porcelain -b`，含未跟踪新文件；提交走 `add -A`，口径一致），工作区干净且 `ahead === 0` 才置灰禁用（提示「没有可提交或推送的改动」），有改动则键尾一个 warn 圆点；**快照未知（还没回来）不置灰**（不把真实改动挡在门外，真裁决在后端预检）；任务在跑 / 失败一律可点（要能看进度与错误）。改动状态要**跟得上**：会话 `running → idle` 翻转那一下（= agent 刚写完文件）就重读本会话目录的快照（`scheduleWorkspaceGitRefresh`，2s 防抖 + 合并，只刷该目录；重复 idle 帧不触发），别等下一轮 30s 兜底轮询。
 - **卡顶行 git 区（分支切换）**：`BranchPicker` 展开清单**点分支即切**（后端 `switch_branch` = `git switch <branch>`，只认分支、不会被同名路径抢语义）——脏工作区交给 git 裁决（带得走就带着走，冲突整条拒绝、错误原文就地显示，壳侧不 stash / 不 force）；切换成功走 `refreshWorkspaceGitState([cwd])`——它是 **git 状态的统一刷新入口**（刷新时机 = 启动 / 焦点 / 30s 轮询 / **会话一轮收敛到 idle** / 提交任务结束 / 分支切换），每次刷新自增 store 的 `gitInfoSeq`，`useGitInfo` 的全部挂载实例（输入卡顶行）一起重读、ahead/behind 快照同步刷新。只读查询仍是 `get_git_info`（4s 超时、降级不报错），写命令用 30s 超时。
 - **更新链路两条独立**：本应用（Tauri updater，`latest.json`）与 omp 运行时（`omp update`）互不相干；入口 = 左栏顶栏两枚 chip。
@@ -142,6 +149,6 @@ pnpm file-icons             # 从 material-icon-theme 重新生成右栏文件�
 
 ## 范围边界
 
-- **做**：聊天唯一形态（v1 已实施）、Codex / ZCode 对标（v2 已实施）、设置重构（v3 已实施）、**右栏工作台**——文件目录 + 项目脚本 + 多开终端（V42 / V43 / V44 已实施，口径见 `docs/v4-schedule.md`）。
-- **不做**：编辑器（文件只读浏览，打开交给系统默认程序）/ 内置浏览器 / SSH / 移动端 / PR 集成；分屏 / 多窗口；worktree 生命周期管理；云同步 / 定时任务。
+- **做**：聊天唯一形态（v1 已实施）、Codex / ZCode 对标（v2 已实施）、设置重构（v3 已实施）、**右栏工作台**——文件目录 + 项目脚本 + 多开终端（V42 / V43 / V44 已实施，口径见 `docs/v4-schedule.md`）、**会话读数**——输入卡底部统计条（排期 5 已实施，口径见 `docs/v5-schedule.md`）、**omp 约束**——全局 `AGENTS.md` / `RULES.md` / `rules/*.md` 的可视化编辑（0.2.0 / 排期 6 已实施，口径见 `docs/v6-schedule.md`）。
+- **不做**：编辑器（文件只读浏览，打开交给系统默认程序；**omp 约束页只编辑 omp 的全局约束 / 规则 Markdown，不是通用文件编辑器**）/ 内置浏览器 / SSH / 移动端 / PR 集成；分屏 / 多窗口；worktree 生命周期管理；云同步 / 定时任务。
 - 终端**只作为右栏工作台的页签**存在：同一页签内允许多开（标签行切换，V44 用户口径），但不许长出终端形态的会话模型（π 标题解析 / 目录行 / 覆盖层注入 / 独立窗口 / 任意分屏）；也不许把文件树升级成编辑器或全屏工作区（`docs/v1-schedule.md` §1 的删除清单仍然有效，`docs/v4-schedule.md` 是唯一例外口）。

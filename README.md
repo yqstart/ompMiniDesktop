@@ -4,18 +4,20 @@
 
 把 omp 的编码代理会话带进一个专注的桌面聊天界面——项目与会话管理、流式对话、工具与审批、队列与插话、归档与统计，全部在聊天形态内完成。**不做终端仿真**。
 
-> **状态（2026-10-14）**：首个版本 **v0.1.0** 已发布，三部分一体交付：
+> **状态（2026-10-19）**：**v0.2.0** 已发布。首个版本 **v0.1.0** 三部分一体交付：
 > 1. **只保留聊天形态**——终端形态（PTY / xterm / 工作区树）整体退场；
 > 2. **聊天形态对标 Codex Desktop、Zcode Desktop**——样式、布局、流式对话、聊天框；
 > 3. **设置重构**——功能全量保留，操作方式与展现形式重新设计。
 >
-> 变更记录见 [`CHANGELOG.md`](CHANGELOG.md) 的 `0.1.0` 节；规划见 [`docs/roadmap.md`](docs/roadmap.md)。
+> `0.2.0` 同样三部分一体交付：**右栏工作台**（文件目录 / 项目脚本 / 多开终端三页签）、**卡底会话读数**（会话统计 / Token 用量 / 上下文 / 供应商用量）、**设置 ›「omp 约束」**（全局 `AGENTS.md` / `RULES.md` / `rules/*.md` 的可视化编辑）。
+>
+> 变更记录见 [`CHANGELOG.md`](CHANGELOG.md) 的 `0.2.0` 节；规划见 [`docs/roadmap.md`](docs/roadmap.md)。
 
 ## 它长什么样
 
 - **左栏**：工作区 → 项目 → 会话树（搜索 / 归档 / 拖拽排序 / git 徽章）；
 - **中列**：会话消息流（Markdown / 工具卡 / 审批卡 / 子代理 / 流式渲染）＋ 输入卡（模型 / 思考档 / 执行模式 / 队列）；
-- **设置**：常用设置（`omp config` 目录）/ 模型与供应商 / 插件 / 技能 / 记忆 / 使用统计 / 已归档对话；
+- **设置**：常用设置（`omp config` 目录）/ omp 约束（全局 `AGENTS.md` / `RULES.md` / `rules/*.md`）/ 模型与供应商 / 插件 / 技能 / 记忆 / 使用统计 / 已归档对话；
 - **周边**：应用与 omp 运行时更新、供应商用量、跨项目文件引用、命令中心（⌘K）、提交与推送。
 
 （界面视觉与布局按 [`design-system/MASTER.md`](design-system/MASTER.md) 对齐 Codex / ZCode 范式。）
@@ -63,6 +65,9 @@ pnpm file-icons       # 从 material-icon-theme 重新生成右栏文件树的�
 | [`docs/v1-schedule.md`](docs/v1-schedule.md) | 排期 1：形态收敛（终端形态下线）|
 | [`docs/v2-schedule.md`](docs/v2-schedule.md) | 排期 2：聊天对标（Codex / ZCode）|
 | [`docs/v3-schedule.md`](docs/v3-schedule.md) | 排期 3：设置重构 |
+| [`docs/v4-schedule.md`](docs/v4-schedule.md) | 排期 4：右栏工作台 |
+| [`docs/v5-schedule.md`](docs/v5-schedule.md) | 排期 5：会话读数（卡底统计条）|
+| [`docs/v6-schedule.md`](docs/v6-schedule.md) | 排期 6：omp 约束（全局约束 / 规则文件编辑）|
 | [`docs/benchmark-codex-desktop.md`](docs/benchmark-codex-desktop.md) / [`benchmark-zcode-desktop.md`](docs/benchmark-zcode-desktop.md) | 对标调研 |
 | [`design-system/MASTER.md`](design-system/MASTER.md) | 设计系统 |
 
