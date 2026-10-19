@@ -139,9 +139,7 @@ export function WorkspaceGroupDialog({
        {t.wsGroupAddDirectory}
       </button>
      </div>
-     {projects.length === 0 ? (
-      <p className="mt-2 text-[12px] leading-relaxed text-faint">{t.wsGroupMembersEmpty}</p>
-     ) : (
+     {projects.length > 0 && (
       <ul className="mt-1 max-h-64 space-y-0.5 overflow-y-auto">
        {projects.map((p) => (
         <li key={p.id}>
