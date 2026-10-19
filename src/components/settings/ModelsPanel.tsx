@@ -9,7 +9,7 @@ import { splitSelector, withLevel } from "../../lib/modelSelector";
 import { roleLabel } from "../../lib/roleNames";
 import { thinkingLevelsOf, THINKING_ORDER } from "../../lib/thinking";
 import { useText } from "../../lib/useText";
-import { useDropdown } from "../../lib/useDropdown";
+import { EnumSelect, LEVEL_TRIGGER_CLASS } from "./EnumSelect";
 import { FallbackChainsSection } from "./FallbackChains";
 import { ModelPickerDialog } from "./ModelPickList";
 import { ProvidersSection } from "./ProvidersSection";
@@ -242,12 +242,10 @@ export function ModelsPanel() {
     </div>
    </section>
 
-   {/* 模型角色：角色行 = 选模型 / 档位；Ctrl+P 轮换序自动取这里的已配置模型（行序即轮换序） */}
+   {/* 模型角色：角色行 = 选模型 / 档位；Ctrl+P 轮换序自动取这里的已配置模型（行序即轮换序）——
+       标题旁的 Ctrl+P 快捷键徽章按用户口径退场（2026-10-19），轮换逻辑不变 */}
    <section aria-label={t.rolesSection} className="mt-6 shrink-0">
-    <div className="flex flex-wrap items-center gap-2">
-     <h3 className="text-xs font-medium text-muted">{t.rolesSection}</h3>
-     <kbd className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted">Ctrl+P</kbd>
-    </div>
+    <h3 className="text-xs font-medium text-muted">{t.rolesSection}</h3>
     {roles?.storage === "project" && (
      <p className="mt-2 rounded border border-warn/40 bg-warn/5 px-2 py-1.5 text-[13px] text-warn">
       {t.roleStorageProject}
@@ -317,8 +315,10 @@ export function ModelsPanel() {
  );
 }
 
-/** 一行角色：角色名 + 当前 selector（模型 + 档位）+ 档位按钮 + 「选择」按钮（开模型选择弹窗）。
- *  模型列表走 `ModelPickerDialog`——行内展开会把下方角色整体推下去（点开 / 关上时页面跳动）。 */
+/**
+ * 一行角色：角色名 + 当前 selector（模型 + 档位）+ 档位下拉 + 「选择」按钮（开模型选择弹窗）。
+ *  模型列表走 `ModelPickerDialog`、思考档走 `EnumSelect` 浮层——**都不做行内展开**：
+ *  行内展开会把下方角色整体推下去（点开 / 关上时页面跳动，用户实测）。 */
 function RoleRow({
  role,
  label,
@@ -342,9 +342,7 @@ function RoleRow({
 }) {
  const t = useText();
  const [pickerOpen, setPickerOpen] = useState(false);
- const [levelOpen, setLevelOpen] = useState(false);
  const [saving, setSaving] = useState(false);
- const lvRef = useDropdown(levelOpen, () => setLevelOpen(false));
 
  // 角色值 = 模型 selector + 可选的 `:思考档` 后缀；两截分开显示、分开改
  const { base, level } = splitSelector(current ?? "");
@@ -363,7 +361,6 @@ function RoleRow({
  };
 
  const setLevel = async (lv: string | null) => {
-  setLevelOpen(false);
   setSaving(true);
   await onSave(role, withLevel(base, lv));
   setSaving(false);
@@ -393,19 +390,24 @@ function RoleRow({
      )}
     </div>
     {canLevel && (
-     <button
-      onClick={() => { setPickerOpen(false); setLevelOpen((v) => !v); }}
+     /* 思考档 = 浮层下拉（`EnumSelect`）：空值档 = 「不写后缀」，交给 omp 自己的
+        `defaultThinkingLevel`，所以 `value` 用空串、`display` 显示「默认」 */
+     <EnumSelect
+      label={fmt(t.roleLevelAria, label)}
+      value={level ?? ""}
+      display={level ?? t.roleLevelDefault}
+      choices={[
+       { value: "", label: t.roleLevelDefault },
+       ...levels.map((lv) => ({ value: lv, label: lv })),
+      ]}
       disabled={saving || disabled}
-      className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
-      aria-label={fmt(t.roleLevelAria, label)}
-      aria-expanded={levelOpen}
-      title={t.roleLevelDefaultHint}
-     >
-      {level ?? t.roleLevelDefault}
-     </button>
+      triggerTitle={t.roleLevelDefaultHint}
+      triggerClassName={LEVEL_TRIGGER_CLASS}
+      onPick={(lv) => void setLevel(lv === "" ? null : lv)}
+     />
     )}
     <button
-     onClick={() => { setLevelOpen(false); setPickerOpen(true); }}
+     onClick={() => setPickerOpen(true)}
      disabled={saving || disabled}
      className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
      aria-label={fmt(t.rolePick + " {0}", label)}
@@ -425,37 +427,6 @@ function RoleRow({
     )}
     {saving && <Loader size={12} className="shrink-0 animate-spin text-muted" aria-hidden />}
    </div>
-
-   {/* 思考档：行内芯片排（设置页是可滚动容器，浮层会被裁掉）；
-       「默认」= 不写后缀，交给 omp 自己的 defaultThinkingLevel */}
-   {levelOpen && (
-    <div ref={lvRef} className="mt-2 flex flex-wrap gap-1 rounded-md bg-surface p-2">
-     <button
-      onClick={() => void setLevel(null)}
-      aria-pressed={level === null}
-      title={t.roleLevelDefaultHint}
-      className={`cursor-pointer rounded-md border px-2 py-0.5 text-[12px] transition-colors duration-100 ${level === null
-       ? "border-accent/50 bg-active text-foreground"
-       : "border-border text-muted hover:bg-hover hover:text-foreground"
-       }`}
-     >
-      {t.roleLevelDefault}
-     </button>
-     {levels.map((lv) => (
-      <button
-       key={lv}
-       onClick={() => void setLevel(lv)}
-       aria-pressed={level === lv}
-       className={`cursor-pointer rounded-md border px-2 py-0.5 font-mono text-[12px] transition-colors duration-100 ${level === lv
-        ? "border-accent/50 bg-active text-foreground"
-        : "border-border text-muted hover:bg-hover hover:text-foreground"
-        }`}
-      >
-       {lv}
-      </button>
-     ))}
-    </div>
-   )}
 
    {pickerOpen && (
     <ModelPickerDialog

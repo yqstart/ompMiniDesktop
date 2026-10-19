@@ -6,8 +6,8 @@ import { fmt, type Text } from "../../lib/locale";
 import { splitSelector, withLevel } from "../../lib/modelSelector";
 import { roleLabel } from "../../lib/roleNames";
 import { thinkingLevelsOf, THINKING_ORDER } from "../../lib/thinking";
-import { useDropdown } from "../../lib/useDropdown";
 import { useText } from "../../lib/useText";
+import { EnumSelect, LEVEL_TRIGGER_CLASS } from "./EnumSelect";
 import { ModelPickerDialog } from "./ModelPickList";
 
 /** 键的形态（只影响徽章与新建时的候选来源，不影响读写）：`*` 结尾 = 供应商通配、含 `/` = 模型 selector、其余 = 角色名。 */
@@ -30,7 +30,8 @@ function isWildcard(sel: string): boolean {
  * - 键三种形态，匹配规则全在 omp 里（壳侧只读写，不复制那套规则）：角色名 / 模型 selector /
  *   供应商通配（`provider/*` 保留失败模型的 id 只换供应商）；
  * - 值是有序备用 selector，**顺序就是 omp 的尝试顺序**；条目可带 `:档位` 后缀，不带则继承
- *   失败轮次的档位，通配条目总是继承；
+ *   失败轮次的档位，通配条目总是继承；档位在目标行上用 `EnumSelect` 浮层下拉选（与模型角色行
+ *   同一形态）——**不做行内展开**：展开会把下面的行整体推走（点开 / 关上都跳）；
  * - `retry.modelFallback = false` 时链完全不生效——所以开关与链放在同一个区块里（拆开会让
  *   「链配好了却不生效」变成一个看不见的坑）；
  * - 写的是 omp **全局配置**（与模型角色同一层）。
@@ -361,9 +362,6 @@ function ChainEditor({
  const [adding, setAdding] = useState(false);
  /** 新建链的「模型对象」挑选弹窗（模型太多，芯片排铺不下——与角色行同款弹窗）。 */
  const [keyPickerOpen, setKeyPickerOpen] = useState(false);
- /** 正在选档的目标下标（null = 没开）。 */
- const [levelAt, setLevelAt] = useState<number | null>(null);
- const lvRef = useDropdown(levelAt !== null, () => setLevelAt(null));
 
  const providers = useMemo(
   () => [...new Set(models.map((m) => m.provider))].sort((a, b) => a.localeCompare(b)),
@@ -377,7 +375,6 @@ function ChainEditor({
   const next = [...list];
   [next[i], next[j]] = [next[j], next[i]];
   setList(next);
-  setLevelAt(null);
  };
 
  /** 该条目的可选档位：目录里有这个模型就按它声明的档，查不到退回全集（宽容，不挡用户）。 */
@@ -508,15 +505,20 @@ function ChainEditor({
          {t.fallbackInheritLevel}
         </span>
        ) : (
-        <button
-         type="button"
-         onClick={() => setLevelAt(levelAt === i ? null : i)}
-         aria-expanded={levelAt === i}
-         aria-label={fmt(t.fallbackTargetLevelAria, sel)}
-         className="shrink-0 cursor-pointer rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
-        >
-         {splitSelector(sel).level ?? t.fallbackInheritLevel}
-        </button>
+        /* 档位 = 浮层下拉（`EnumSelect`）：与模型角色行的档位同一形态。空值档 = 「不写后缀」，
+           交给 omp 继承失败轮次的档位，所以 `value` 用空串、`display` 显示「继承档位」 */
+        <EnumSelect
+         label={fmt(t.fallbackTargetLevelAria, sel)}
+         value={splitSelector(sel).level ?? ""}
+         display={splitSelector(sel).level ?? t.fallbackInheritLevel}
+         choices={[
+          { value: "", label: t.fallbackInheritLevel },
+          ...levelsFor(sel).map((lv) => ({ value: lv, label: lv })),
+         ]}
+         triggerTitle={t.fallbackTargetLevelHint}
+         triggerClassName={LEVEL_TRIGGER_CLASS}
+         onPick={(lv) => setList(list.map((s, j) => (j === i ? withLevel(s, lv === "" ? null : lv) : s)))}
+        />
        )}
        <button
         type="button"
@@ -540,47 +542,13 @@ function ChainEditor({
        </button>
        <button
         type="button"
-        onClick={() => { setList(list.filter((_, j) => j !== i)); setLevelAt(null); }}
+        onClick={() => setList(list.filter((_, j) => j !== i))}
         aria-label={t.fallbackRemoveTarget}
         title={t.fallbackRemoveTarget}
         className="shrink-0 cursor-pointer rounded p-0.5 text-muted transition-colors duration-100 hover:bg-hover hover:text-danger"
        >
         <X size={12} aria-hidden />
        </button>
-       {/* 档位芯片排：行内展开（设置页是可滚动容器，浮层会被裁掉） */}
-       {levelAt === i && !isWildcard(sel) && (
-        <div ref={lvRef} className="mt-0.5 flex w-full flex-wrap gap-1 pl-5">
-         <button
-          type="button"
-          onClick={() => {
-           setList(list.map((s, j) => (j === i ? withLevel(s, null) : s)));
-           setLevelAt(null);
-          }}
-          className={`cursor-pointer rounded-md border px-2 py-0.5 text-[12px] transition-colors duration-100 ${splitSelector(sel).level === null
-           ? "border-accent/50 bg-active text-foreground"
-           : "border-border text-muted hover:bg-hover hover:text-foreground"
-           }`}
-         >
-          {t.fallbackInheritLevel}
-         </button>
-         {levelsFor(sel).map((lv) => (
-          <button
-           key={lv}
-           type="button"
-           onClick={() => {
-            setList(list.map((s, j) => (j === i ? withLevel(s, lv) : s)));
-            setLevelAt(null);
-           }}
-           className={`cursor-pointer rounded-md border px-2 py-0.5 font-mono text-[12px] transition-colors duration-100 ${splitSelector(sel).level === lv
-            ? "border-accent/50 bg-active text-foreground"
-            : "border-border text-muted hover:bg-hover hover:text-foreground"
-            }`}
-          >
-           {lv}
-          </button>
-         ))}
-        </div>
-       )}
       </div>
      ))}
      {list.length === 0 && <p className="py-1 text-[13px] text-warn">{t.fallbackNeedTarget}</p>}
