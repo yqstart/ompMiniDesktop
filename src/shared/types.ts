@@ -614,6 +614,38 @@ export type CommitTaskView = {
  startedAt: number;
 };
 
+// ---------- 设置 › omp 约束（全局 AGENTS.md / RULES.md / rules/*.md） ----------
+
+/** 约束文件类型：上下文约束 / 全局硬规则 / 独立规则（与 Rust `constraints::ConstraintFile` 同构）。 */
+export type ConstraintKind = "agents" | "rules" | "rule";
+
+/**
+ * 一份全局约束 / 规则文件的当前状态。`hash` 是写入的乐观锁（打开时的内容哈希）：
+ * 文件在界面之外被改过就拒绝写入，前端提示重新加载——不静默覆盖手改内容。
+ */
+export type ConstraintFile = {
+ kind: ConstraintKind;
+ /** 完整文件名（`AGENTS.md` / `RULES.md` / `no-any.md`）。 */
+ name: string;
+ path: string;
+ exists: boolean;
+ content: string;
+ hash: string;
+ modifiedMs: number | null;
+ size: number;
+ /** 读取失败的原文（非 UTF-8 / 超上限 / 权限），成功时为 null。 */
+ error: string | null;
+};
+
+/** 「omp 约束」页的文件清单（固定两份全局文件 + rules/ 下的独立规则）。 */
+export type ConstraintsView = {
+ agentDir: string;
+ rulesDir: string;
+ files: ConstraintFile[];
+ /** 规则目录列举失败时的说明；正常为 null。 */
+ rulesError: string | null;
+};
+
 // ---------- 自定义模型配置（设置 › 供应商） ----------
 
 /**

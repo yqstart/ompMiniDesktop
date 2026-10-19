@@ -1,6 +1,7 @@
 import { api } from "@shared/api";
-import type { MemoryProjectView, ModelCatalog, OmpSettingsCatalog, PluginsView, SessionView, SkillsView } from "@shared/types";
+import type { ConstraintsView, MemoryProjectView, ModelCatalog, OmpSettingsCatalog, PluginsView, SessionView, SkillsView } from "@shared/types";
 import { filterCatalog, SETTING_KIND_KEYS } from "./allSettings";
+import { constraintKey, ruleDescriptionOf, ruleDisplayName } from "./constraints";
 import type { Locale, Text } from "./locale";
 import { OMP_SETTING_NAMES } from "./ompSettingNames";
 import { sessionTitleForDisplay } from "./sessionTitle";
@@ -9,9 +10,9 @@ import type { SettingsTab } from "./settingsTabs";
 
 /**
  * 设置视图顶部搜索（v3）的数据层：**跨条目的纯前端过滤**——不引入后端全文索引，
- * 只过滤「本应用已加载的数据」（常用设置 80 项展示清单 / 模型目录 / 插件 / 技能 /
- * 记忆 / 归档会话）。目录数据与各面板各自的加载互不影响（这里另走一份**设置视图级缓存**，
- * 关闭设置视图时整体作废，见 `clearSettingsSearchCache`）。
+ * 只过滤「本应用已加载的数据」（常用设置 80 项展示清单 / omp 约束文件 / 模型目录 /
+ * 插件 / 技能 / 记忆 / 归档会话）。目录数据与各面板各自的加载互不影响（这里另走一份
+ * **设置视图级缓存**，关闭设置视图时整体作废，见 `clearSettingsSearchCache`）。
  *
  * - 常用设置沿用四档打分（键前缀 > 键子串 > 名称 > 描述，`filterCatalog`）；
  * - 其余条目按主文本 + 副文本大小写不敏感子串匹配，截断到有限条数（搜索是定位入口，不是清单）；
@@ -25,13 +26,14 @@ export type SettingsSearchSources = {
  skills: SkillsView | null;
  memories: MemoryProjectView[] | null;
  archived: SessionView[] | null;
+ constraints: ConstraintsView | null;
 };
 
 /** 源键 → 该源的加载函数（组件按需并行触发；模型目录优先走 store，兜底才用它）。 */
-export const SETTINGS_SEARCH_SOURCE_KEYS = ["catalog", "models", "plugins", "skills", "memories", "archived"] as const;
+export const SETTINGS_SEARCH_SOURCE_KEYS = ["catalog", "models", "plugins", "skills", "memories", "archived", "constraints"] as const;
 export type SettingsSearchSourceKey = (typeof SETTINGS_SEARCH_SOURCE_KEYS)[number];
 
-/** 一条搜索命中：`tab` = 目标条目，`focusKey` 非空时跳转后定位到该行（仅常用设置项）。 */
+/** 一条搜索命中：`tab` = 目标条目，`focusKey` 非空时跳转后定位到该行（常用设置键 / 约束文件键）。 */
 export type SettingsSearchHit = {
  id: string;
  tab: SettingsTab;
@@ -74,6 +76,7 @@ export function loadSettingsSearchSource(key: "plugins"): Promise<PluginsView>;
 export function loadSettingsSearchSource(key: "skills"): Promise<SkillsView>;
 export function loadSettingsSearchSource(key: "memories"): Promise<MemoryProjectView[]>;
 export function loadSettingsSearchSource(key: "archived"): Promise<SessionView[]>;
+export function loadSettingsSearchSource(key: "constraints"): Promise<ConstraintsView>;
 export function loadSettingsSearchSource(key: SettingsSearchSourceKey): Promise<unknown> {
  switch (key) {
   case "catalog":
@@ -88,6 +91,8 @@ export function loadSettingsSearchSource(key: SettingsSearchSourceKey): Promise<
    return cached(key, () => api.listMemories());
   case "archived":
    return cached(key, () => api.listArchivedSessions());
+  case "constraints":
+   return cached(key, () => api.getOmpConstraints());
  }
 }
 
@@ -236,6 +241,41 @@ export function searchSettings(
     sub: "",
    }));
   if (hits.length > 0) groups.push({ tab: "archived", hits });
+ }
+
+ // omp 约束（全局 AGENTS.md / RULES.md / rules/*.md）：命中条目名、文件名、路径或规则描述
+ if (sources.constraints) {
+  const hits: SettingsSearchHit[] = [];
+  if (has(t.tabConstraints, q) || has(t.tabConstraintsHint, q)) {
+   hits.push({
+    id: "constraints:entry",
+    tab: "constraints",
+    focusKey: constraintKey("agents", "AGENTS.md"),
+    title: t.tabConstraints,
+    sub: t.tabConstraintsHint,
+   });
+  }
+  for (const file of sources.constraints.files) {
+   if (hits.length >= OTHER_LIMIT) break;
+   const description = file.kind === "rule" ? ruleDescriptionOf(file.content) : "";
+   const title = file.kind === "rule" ? ruleDisplayName(file.name) : file.name;
+   if (!has(title, q) && !has(file.name, q) && !has(file.path, q) && !has(description, q)) continue;
+   hits.push({
+    id: `constraints:${file.kind}:${file.name}`,
+    tab: "constraints",
+    focusKey: constraintKey(file.kind, file.name),
+    title,
+    sub: cut(
+     description ||
+     (file.kind === "agents"
+      ? t.constraintsAgentsSummary
+      : file.kind === "rules"
+       ? t.constraintsRulesSummary
+       : t.constraintsGroupIndep),
+    ),
+   });
+  }
+  if (hits.length > 0) groups.push({ tab: "constraints", hits });
  }
 
  return groups;

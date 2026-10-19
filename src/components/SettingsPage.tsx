@@ -1,4 +1,4 @@
-import { Archive, ArrowLeft, ChartBar, Key, Notebook, Plug, Puzzle, Search, Sliders } from "reicon-react";
+import { Archive, ArrowLeft, BookOpen, ChartBar, Key, Notebook, Plug, Puzzle, Search, Sliders } from "reicon-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useText } from "../lib/useText";
 import { useApp } from "../stores/app";
@@ -8,6 +8,7 @@ import { clearSettingsSearchCache } from "../lib/settingsSearch";
 import { SETTINGS_TAB_LABEL_KEYS, type SettingsFocusRequest, type SettingsTab } from "../lib/settingsTabs";
 import { useSettingsSearchSources } from "../lib/useSettingsSearchSources";
 import { ArchivedSessions } from "./ArchivedSessions";
+import { ConstraintsPanel } from "./settings/ConstraintsPanel";
 import { GeneralSettingsPanel } from "./settings/GeneralSettingsPanel";
 import { MemoryPanel } from "./settings/MemoryPanel";
 import { PluginsPanel } from "./settings/PluginsPanel";
@@ -18,6 +19,7 @@ import { SettingsSearch } from "./settings/SettingsSearch";
 
 const TAB_ICONS = {
  general: Sliders,
+ constraints: BookOpen,
  models: Key,
  plugins: Plug,
  skills: Puzzle,
@@ -28,12 +30,13 @@ const TAB_ICONS = {
 
 /**
  * 导航四组（v3 设置重构的信息架构）：**通用 / 模型 / 扩展 / 数据**——
- * 上两组读写 omp 的配置与目录（常用设置 = `config.yml` 的唯一设置面；模型 = omp 模型相关
- * 的唯一管理面），扩展组管插件与技能，数据组管 omp 项目记忆与本应用自己的会话数据
+ * 上两组读写 omp 的配置与目录（常用设置 = `config.yml` 的唯一设置面；omp 约束 = 全局
+ * AGENTS.md / RULES.md / rules/*.md 的唯一编辑面；模型 = omp 模型相关的唯一管理面），
+ * 扩展组管插件与技能，数据组管 omp 项目记忆与本应用自己的会话数据
  * （使用统计 / 已归档对话）。
  */
 const TAB_GROUPS: { label: keyof Text; tabs: SettingsTab[] }[] = [
- { label: "settingsGroupGeneral", tabs: ["general"] },
+ { label: "settingsGroupGeneral", tabs: ["general", "constraints"] },
  { label: "settingsGroupModel", tabs: ["models"] },
  { label: "settingsGroupExt", tabs: ["plugins", "skills"] },
  { label: "settingsGroupData", tabs: ["memories", "usage", "archived"] },
@@ -44,9 +47,10 @@ const TAB_GROUPS: { label: keyof Text; tabs: SettingsTab[] }[] = [
  *
  * - **顶部条**：`← 返回聊天` + 当前条目名 + 右侧搜索钮（⌘F）——打开 = 左栏底部「设置」/ ⌘,，
  *   关闭 = 顶部「返回聊天」/ ⌘W / 左栏「设置」再点一次（`closeSettingsTab`）；
- * - **左导航**：四组七条目（组标题 + 条目），窄窗（44px 容器档）折叠为图标栏；
- * - **顶部搜索**：跨条目过滤（常用设置四档打分 / 模型 / 插件 / 技能 / 记忆 / 归档会话），
- *   命中高亮，结果点击跳到对应条目——常用设置项带键名定位（`focusRequest`）；
+ * - **左导航**：四组八条目（组标题 + 条目），窄窗（44px 容器档）折叠为图标栏；
+ * - **顶部搜索**：跨条目过滤（常用设置四档打分 / omp 约束 / 模型 / 插件 / 技能 / 记忆 /
+ *   归档会话），命中高亮，结果点击跳到对应条目——常用设置项与约束文件带键名定位
+ *   （`focusRequest`）；
  * - 内容区是唯一的滚动容器：各面板直接铺在页面上（区块标题 + 行式排布，不做嵌套卡片）。
  */
 export function SettingsPage({ visible = true }: { visible?: boolean }) {
@@ -106,7 +110,7 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
   [set],
  );
 
- /** 定位请求消费完成的回调（引用要稳定：通用页的定位 effect 依赖它）。 */
+ /** 定位请求消费完成的回调（引用要稳定：通用页 / 约束页的定位 effect 依赖它）。 */
  const clearFocusRequest = useCallback(() => setFocusRequest(null), []);
 
  const openSearch = () => {
@@ -243,6 +247,8 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
       <div className={searchOpen ? "hidden" : undefined}>
        {tab === "archived" ? (
         <ArchivedSessions />
+       ) : tab === "constraints" ? (
+        <ConstraintsPanel focusRequest={focusRequest} onFocusDone={clearFocusRequest} />
        ) : tab === "models" ? (
         <ModelsPanel />
        ) : tab === "plugins" ? (

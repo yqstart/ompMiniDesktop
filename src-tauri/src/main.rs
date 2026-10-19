@@ -1,5 +1,6 @@
 mod commands;
 mod commit_msg;
+mod constraints;
 mod context;
 mod extra_usage;
 mod git_commit;
@@ -163,6 +164,11 @@ fn main() {
             settings::get_omp_settings_catalog,
             settings::set_omp_setting,
             settings::reset_omp_setting,
+            // 设置 ›「omp 约束」：全局 AGENTS.md / RULES.md / rules/*.md 的读写
+            constraints::get_omp_constraints,
+            constraints::write_omp_constraint,
+            constraints::create_omp_rule,
+            constraints::delete_omp_rule,
             models_config::read_models_config,
             models_config::write_models_config,
             provider_models::fetch_provider_models,

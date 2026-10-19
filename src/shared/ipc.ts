@@ -65,6 +65,11 @@ export const IPC = {
  // 写一个设置项 / 恢复默认（cwd 钉 agentDir，写 omp 全局配置）
  setOmpSetting: "set_omp_setting",
  resetOmpSetting: "reset_omp_setting",
+ // omp 约束（设置 ›「omp 约束」）：全局 AGENTS.md / RULES.md / rules/*.md 的读写
+ getOmpConstraints: "get_omp_constraints",
+ writeOmpConstraint: "write_omp_constraint",
+ createOmpRule: "create_omp_rule",
+ deleteOmpRule: "delete_omp_rule",
  // 自定义模型（设置 › 供应商）：omp `models.yml` 的读写——上游没有 CLI 写入口，写文件是唯一路径
  readModelsConfig: "read_models_config",
  writeModelsConfig: "write_models_config",

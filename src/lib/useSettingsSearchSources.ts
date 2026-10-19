@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { MemoryProjectView, ModelCatalog, OmpSettingsCatalog, PluginsView, SessionView, SkillsView } from "@shared/types";
+import type { ConstraintsView, MemoryProjectView, ModelCatalog, OmpSettingsCatalog, PluginsView, SessionView, SkillsView } from "@shared/types";
 import { useApp } from "../stores/app";
 import {
  loadSettingsSearchSource,
@@ -16,6 +16,7 @@ type SearchData = {
  skills: SkillsView;
  memories: MemoryProjectView[];
  archived: SessionView[];
+ constraints: ConstraintsView;
 };
 
 type SourceStatus = "idle" | "loading" | "ok" | "error";
@@ -73,6 +74,7 @@ export function useSettingsSearchSources(enabled: boolean): {
   run("skills", loadSettingsSearchSource("skills"));
   run("memories", loadSettingsSearchSource("memories"));
   run("archived", loadSettingsSearchSource("archived"));
+  run("constraints", loadSettingsSearchSource("constraints"));
   // 模型目录优先 store（App 启动静默拉过一次）
   const stored = useApp.getState().models;
   if (stored) setSource("models", { status: "ok", data: stored, error: null });
@@ -90,6 +92,7 @@ export function useSettingsSearchSources(enabled: boolean): {
    skills: state.skills.data,
    memories: state.memories.data,
    archived: state.archived.data,
+   constraints: state.constraints.data,
   },
   settled: SETTINGS_SEARCH_SOURCE_KEYS.every((key) => state[key].status === "ok" || state[key].status === "error"),
   allFailed: SETTINGS_SEARCH_SOURCE_KEYS.every((key) => state[key].status === "error"),

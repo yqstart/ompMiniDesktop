@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
-import type { BtwRecord, ChangeSet, CheckoutView, CommitEvent, ContextBreakdown, DirListing, DiscoveredModel, FallbackChainsInfo, GitInfo, Goal, GoalState, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PathSearch, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, ScriptCatalog, SessionLiveStats, SessionPage, SessionRuntime, SessionStats, SessionView, SkillFileContent, SkillsView, TerminalEvent, TerminalSpawnOpts, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
+import type { BtwRecord, ChangeSet, CheckoutView, CommitEvent, ConstraintFile, ConstraintsView, ConstraintKind, ContextBreakdown, DirListing, DiscoveredModel, FallbackChainsInfo, GitInfo, Goal, GoalState, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PathSearch, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, ScriptCatalog, SessionLiveStats, SessionPage, SessionRuntime, SessionStats, SessionView, SkillFileContent, SkillsView, TerminalEvent, TerminalSpawnOpts, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -335,6 +335,23 @@ export const api = {
  setOmpSetting: (key: string, value: unknown) => call<OmpSetting>(IPC.setOmpSetting, { key, value }),
  /** 恢复该键的 schema 默认值（`omp config reset`，把默认值写回全局配置）。 */
  resetOmpSetting: (key: string) => call<OmpSetting>(IPC.resetOmpSetting, { key }),
+ /**
+  * omp 约束（设置 ›「omp 约束」）：全局上下文约束 `AGENTS.md`、sticky 硬规则 `RULES.md`
+  * 与独立规则 `rules/*.{md,mdc}` 的清单（含文件内容；规则文件体量很小，一次读全）。
+  * **只碰全局层**，项目级 `.omp/` 由 omp 自己发现。
+  */
+ getOmpConstraints: () => call<ConstraintsView>(IPC.getOmpConstraints),
+ /**
+  * 写一份全局约束 / 规则。`expectHash` = 打开时的内容哈希（乐观锁）：文件被外部改过
+  * 就抛错（前端提示重新加载）；传 `null` 是显式的「强制覆盖」（冲突对话框）。
+  * 后端写前备份 → 原子写 → 回读。规则文件保存前由前端做 YAML / 字段校验。
+  */
+ writeOmpConstraint: (kind: ConstraintKind, name: string, content: string, expectHash: string | null) =>
+  call<ConstraintFile>(IPC.writeOmpConstraint, { kind, name, content, expectHash }),
+ /** 新建一份独立规则（输入规则名；没写扩展名就补 `.md`）。已存在则报错。 */
+ createOmpRule: (stem: string) => call<ConstraintFile>(IPC.createOmpRule, { stem }),
+ /** 删除一份独立规则（后端先备份再删；界面负责二次确认）。 */
+ deleteOmpRule: (name: string) => call<void>(IPC.deleteOmpRule, { name }),
  /**
   * 自定义模型接入（设置 › 供应商）：读 / 写 `<agentDir>/models.yml`
   * ——omp 用户级自定义供应商 / 模型的唯一入口（上游没有 CLI 写入口，写文件是唯一路径）。

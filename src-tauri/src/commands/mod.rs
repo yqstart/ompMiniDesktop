@@ -28,6 +28,9 @@ pub struct AppState {
     /// 自定义模型配置（`models.yml`）的读写锁：写入含「预校验 + 备份 + 替换」多步，
     /// 并发保存会互相覆盖（见 `models_config.rs`）。
     pub models_edit: Mutex<()>,
+    /// 设置 ›「omp 约束」的写操作串行锁：`AGENTS.md` / `RULES.md` / `rules/*.md` 的
+    /// 「读 → 比对 → 备份 → 原子写」多步事务（见 `constraints.rs`）。
+    pub constraints_edit: Mutex<()>,
     /// 扩展（设置 ›「插件」/「技能」）写操作的串行锁：插件 install / uninstall 会动
     /// 同一个插件目录与 lock 文件；技能的 `disabledExtensions` 是读-改-写同一份 config.yml
     /// （见 `plugins.rs` / `skills.rs`）。能力少、争用低，共用一个锁就够。
@@ -2921,6 +2924,7 @@ pub fn load_state<R: tauri::Runtime>(app: &AppHandle<R>) -> AppState {
         roles_edit: Mutex::new(()),
         retry_edit: Mutex::new(()),
         models_edit: Mutex::new(()),
+        constraints_edit: Mutex::new(()),
         extensions_edit: Mutex::new(()),
         runtime: std::sync::Arc::new(Mutex::new(HashMap::new())),
         terminals: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),

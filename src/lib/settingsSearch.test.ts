@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type {
+ ConstraintsView,
  MemoryProjectView,
  ModelCatalog,
  OmpSettingsCatalog,
@@ -19,6 +20,7 @@ const EMPTY: SettingsSearchSources = {
  skills: null,
  memories: null,
  archived: null,
+ constraints: null,
 };
 
 /** 常用设置目录：只放展示清单里的真实键（`todo.enabled` / `defaultThinkingLevel`）。 */
@@ -58,7 +60,7 @@ const archived: SessionView[] = [
  { id: "0198aaaa-bbbb-7ccc-8ddd-eeeeffff0000", projectId: null, title: "重构设置页导航", cwd: "/x", timestamp: 0, archived: true, corrupt: false, note: null, running: false },
 ];
 
-const SOURCES: SettingsSearchSources = { catalog, models, plugins, skills, memories, archived };
+const SOURCES: SettingsSearchSources = { catalog, models, plugins, skills, memories, archived, constraints: null };
 
 describe("设置搜索（跨条目）", () => {
  it("空查询 / 全空格返回空", () => {
@@ -104,5 +106,28 @@ describe("设置搜索（跨条目）", () => {
    },
   };
   expect(searchSettings(withInternal, "secretKey", t, "zh-CN")).toEqual([]);
+ });
+
+ it("omp 约束：条目名 / 文件名 / 规则描述命中，跳转带 kind:name", () => {
+  const constraints: ConstraintsView = {
+   agentDir: "/a",
+   rulesDir: "/a/rules",
+   files: [
+    { kind: "agents", name: "AGENTS.md", path: "/a/AGENTS.md", exists: true, content: "# 约束", hash: "x", modifiedMs: null, size: 1, error: null },
+    { kind: "rules", name: "RULES.md", path: "/a/RULES.md", exists: true, content: "", hash: "x", modifiedMs: null, size: 0, error: null },
+    { kind: "rule", name: "no-any.md", path: "/a/rules/no-any.md", exists: true, content: "---\ndescription: 禁止 any\ncondition:\n  - ': any'\n---\n正文", hash: "x", modifiedMs: null, size: 1, error: null },
+   ],
+   rulesError: null,
+  };
+  const sources: SettingsSearchSources = { ...EMPTY, constraints };
+
+  const entry = searchSettings(sources, "omp 约束", t, "zh-CN").find((g) => g.tab === "constraints");
+  expect(entry?.hits[0]).toMatchObject({ title: t.tabConstraints, focusKey: "agents:AGENTS.md" });
+
+  const byRule = searchSettings(sources, "禁止", t, "zh-CN").find((g) => g.tab === "constraints");
+  expect(byRule?.hits[0]).toMatchObject({ title: "no-any", focusKey: "rule:no-any.md" });
+
+  const byFile = searchSettings(sources, "AGENTS.md", t, "zh-CN").find((g) => g.tab === "constraints");
+  expect(byFile?.hits.some((h) => h.focusKey === "agents:AGENTS.md")).toBe(true);
  });
 });
