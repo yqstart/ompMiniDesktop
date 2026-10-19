@@ -1,8 +1,11 @@
-import { Document, isMap, parseDocument } from "yaml";
+import { isMap, parseDocument } from "yaml";
 
 /**
- * 设置 ›「omp 约束」的数据层：把一份全局约束 / 规则文件的文本拆成
- * **frontmatter（结构化字段）+ 正文**，并在保存时把字段写回 frontmatter。
+ * 设置 ›「omp 约束」的数据层：**只做只读解析**——把一份全局约束 / 规则文件的文本拆成
+ * frontmatter（结构化字段）+ 正文，供列表摘要、类型标签与保存前校验使用。
+ *
+ * 界面上所有文件都是**直接编辑整份 Markdown**（2026-10-19 用户口径：去掉表单），
+ * 所以这里没有「字段 → 文本」的写回路径，用户写什么就保存什么。
  *
  * 上游事实（omp 18.11.1，`docs/context-files.md` / `docs/rulebook-matching-pipeline.md`）：
  * - `AGENTS.md` 是普通 Markdown（每次会话注入上下文），**不解析 frontmatter**；
@@ -12,19 +15,18 @@ import { Document, isMap, parseDocument } from "yaml";
  *   `enabled`；`enabled: false` 在 omp 发现阶段就被排除；
  * - 文件名（去扩展名）就是规则名。
  *
- * 保真的做法：表单保存时**在打开时的原 frontmatter 文档上改已知字段**
- * （`yaml` 的 `Document` API），注释、键序与不认识的字段都原样留下；只有「用户切到源码
- * 模式」或「原 frontmatter 解析不了」时才整段按文本写回。
+ * 解析只在读侧：列表摘要与类型标签看 frontmatter（解析不了就不下结论），保存前校验
+ * frontmatter 的结构（上游读不懂的 frontmatter 等于坏规则）。文本本身**原样保存**。
  */
 
 /** `interruptMode` 的合法值（上游 `Rule` 类型的联合）。 */
 export const INTERRUPT_MODES = ["never", "prose-only", "tool-only", "always"] as const;
 export type InterruptMode = (typeof INTERRUPT_MODES)[number];
 
-/** 可结构化编辑的规则 frontmatter（没有 frontmatter 时全部取默认值）。 */
+/** 规则 frontmatter 的已知字段（读侧解析结果；没有 frontmatter 时全部取默认值）。 */
 export type RuleFields = {
   description: string;
-  /** 默认开；`false` 时写进 frontmatter（`enabled: false`）。 */
+  /** 默认开；`enabled: false` 时 omp 在发现阶段就把这份规则排除掉。 */
   enabled: boolean;
   alwaysApply: boolean;
   globs: string[];
@@ -36,7 +38,7 @@ export type RuleFields = {
   interruptMode: InterruptMode | "";
 };
 
-/** 已知字段集合：之外的键在保存时原样保留，界面只提示「还保留了 N 个字段」。 */
+/** 已知字段集合：之外的键界面提示「未识别」（omp 同样只读已知字段）。 */
 export const KNOWN_RULE_FIELDS = [
   "description",
   "enabled",
@@ -56,7 +58,7 @@ export type RuleKind = "always" | "ttsr" | "rulebook";
 export type RuleDoc = {
   fields: RuleFields;
   body: string;
-  /** 不认识的顶层字段名（保存时由原文档保留，不会被表单抹掉）。 */
+  /** 不认识的顶层字段名（界面提示用；文件本身原样保存，不会被改写）。 */
   extraFields: string[];
 };
 
@@ -167,12 +169,7 @@ const keyName = (key: unknown): string => {
   return String(key);
 };
 
-/** 空文档（`contents === null`）上 `delete` 会抛「Expected a YAML collection」：先判空。 */
-function removeKey(document: Document, key: string): void {
-  if (document.contents !== null) document.delete(key);
-}
-
-/** 解析一份规则文件的文本；frontmatter 坏掉时返回错误（界面自动退到源码模式）。 */
+/** 解析一份规则文件的文本；frontmatter 坏掉时返回错误（界面据此不给类型标签）。 */
 export function parseRuleDoc(text: string): RuleParseResult {
   const split = splitFrontmatter(text);
   if (split.error) return { ok: false, error: split.error, body: split.body };
@@ -212,76 +209,6 @@ export function parseRuleDoc(text: string): RuleParseResult {
     }
   }
   return { ok: true, doc: { fields, body: split.body, extraFields } };
-}
-
-/**
- * 把表单字段写回 frontmatter：以 `baseText` 的原 frontmatter 文档为底（保留注释 / 键序 /
- * 不认识的字段），只改已知字段；解析不了就另起一份新文档（不会丢用户当前输入）。
- */
-export function buildRuleText(baseText: string, fields: RuleFields, body: string): string {
-  const split = splitFrontmatter(baseText);
-  let document = new Document();
-  if (split.frontmatter !== null && split.frontmatter.trim() !== "" && !split.error) {
-    const parsed = parseDocument(split.frontmatter);
-    if (parsed.errors.length === 0 && (parsed.contents === null || isMap(parsed.contents))) {
-      document = parsed;
-    }
-  }
-  const before = (document.toJS() ?? {}) as Record<string, unknown>;
-  const setText = (key: string, value: string) => {
-    const target = value.trim();
-    const current = before[key];
-    // 值没变就不碰节点：不改写未编辑字段，节点的注释与写法都不会丢
-    if (typeof current === "string" && current === target) return;
-    if (target) document.set(key, target);
-    else removeKey(document, key);
-  };
-  const setList = (key: string, values: string[]) => {
-    const target = values.map((value) => value.trim()).filter(Boolean);
-    const current = before[key];
-    const currentList = Array.isArray(current)
-      ? current.filter((item): item is string => typeof item === "string")
-      : typeof current === "string"
-        ? [current]
-        : null;
-    if (
-      currentList &&
-      currentList.length === target.length &&
-      currentList.every((item, index) => item === target[index])
-    ) {
-      return;
-    }
-    if (target.length > 0) document.set(key, target);
-    else removeKey(document, key);
-  };
-  setText("description", fields.description);
-  // 默认开：只有显式关掉才写 `enabled: false`
-  const currentEnabled = before.enabled !== false;
-  if (currentEnabled !== fields.enabled) {
-    if (fields.enabled) removeKey(document, "enabled");
-    else document.set("enabled", false);
-  }
-  const currentAlways = before.alwaysApply === true;
-  if (currentAlways !== fields.alwaysApply) {
-    if (fields.alwaysApply) document.set("alwaysApply", true);
-    else removeKey(document, "alwaysApply");
-  }
-  setList("globs", fields.globs);
-  setList("condition", fields.condition);
-  setList("astCondition", fields.astCondition);
-  setText("question", fields.question);
-  setList("scope", fields.scope);
-  setList("agents", fields.agents);
-  const currentInterrupt = asInterruptMode(before.interruptMode);
-  if (currentInterrupt !== fields.interruptMode) {
-    if (fields.interruptMode) document.set("interruptMode", fields.interruptMode);
-    else removeKey(document, "interruptMode");
-  }
-
-  // 空文档（只有注释 / 什么都没写）不输出 `null`
-  const yamlText = document.contents === null ? "" : document.toString({ lineWidth: 0 }).trimEnd();
-  if (!yamlText) return body;
-  return `---\n${yamlText}\n---\n${body}`;
 }
 
 /** 规则摘要：always = 总是生效；ttsr = 有实时注入条件；rulebook = 规则手册（按需读取）。 */

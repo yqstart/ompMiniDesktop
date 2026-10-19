@@ -14,7 +14,7 @@ oh-my-pi（`omp`）的桌面端：**聊天形态的 omp 工作台**（Tauri v2 +
 | `docs/v3-schedule.md` | 排期 3：设置重构（功能保留、形态重做）|
 | `docs/v4-schedule.md` | 排期 4：右栏工作台——文件目录 + 项目脚本 + 多开终端（**已实施**）|
 | `docs/v5-schedule.md` | 排期 5：会话读数——输入卡底部统计条（会话统计 / Token 用量 / 上下文 / 供应商用量）（**已实施**）|
-| `docs/v6-schedule.md` | 排期 6：设置 ›「omp 约束」——全局 AGENTS.md / RULES.md / rules/*.md 的可视化编辑（**已实施**）|
+| `docs/v6-schedule.md` | 排期 6：设置 ›「omp 约束」——全局 AGENTS.md / RULES.md / rules/*.md 的编辑（整份 Markdown 直接编辑，2026-10-19 去掉表单）（**已实施**）|
 | `docs/windows.md` | Windows 支持：原生链路 / WSL 桥接 / 平台分叉表 / 验证与已知边界（**P0+P1 已实施**，2026-10-19）|
 | `docs/benchmark-codex-desktop.md` | Codex Desktop 对标调研（含截图证据与设计语言合约）|
 | `docs/benchmark-zcode-desktop.md` | Zcode Desktop 对标调研 |
@@ -38,7 +38,7 @@ src/
   components/thread/         # 消息列：ChatView / TopBar / Thread / AssistantText / ToolRow / ToolRunRow / TurnRow / ApprovalCard / UiRequestCard / ChatEmptyState / PlanCard（任务清单浮卡）/ FindBar / BtwPanel / SessionStatsBar（卡底统计条）/ ContextMeter / SessionStatsDialog / DiffDialog…
   components/composer/       # 输入卡（v2）：Composer（卡顶行项目/分支 + 提交键 → 卡底工具行：`+`/执行模式/压缩/模型/思考档/发送 → 卡底统计条：SessionStatsBar = 会话统计/Token 用量/上下文/供应商用量）/ CommitButton / ApprovalModeMenu / ModelMenu / ThinkingMenu / PlusMenu / GoalRow / MentionList / SlashMenu / UsageLimits
   components/pickers/        # 选择器：ProjectPicker / BranchPicker（内嵌输入卡顶行；分支清单点选即切）
-  components/settings/       # GeneralSettingsPanel / ConstraintsPanel（omp 约束：全局 AGENTS.md / RULES.md / rules/*.md 的可视化编辑）/ ModelsPanel / PluginsPanel / SkillsPanel / ProvidersSection（供应商：登录型 + 自定义）/ CustomProviderEditForm（只配供应商字段）/ CustomProviderModelsDialog（自定义端点的模型清单：获取可用模型 + 勾选 + 调参）/ ProviderModelsDialog（登录型的星标挑选）/ MemoryPanel / UsagePanel / SettingsSearch（v3 顶部搜索）/ Highlight（命中高亮）…
+  components/settings/       # GeneralSettingsPanel / ConstraintsPanel（omp 约束：全局 AGENTS.md / RULES.md / rules/*.md 的整份 Markdown 编辑）/ ModelsPanel / PluginsPanel / SkillsPanel / ProvidersSection（供应商：登录型 + 自定义）/ CustomProviderEditForm（只配供应商字段）/ CustomProviderModelsDialog（自定义端点的模型清单：获取可用模型 + 勾选 + 调参）/ ProviderModelsDialog（登录型的星标挑选）/ MemoryPanel / UsagePanel / SettingsSearch（v3 顶部搜索）/ Highlight（命中高亮）…
   components/usage/ update/ git/   # 供应商用量 / 更新弹窗 / 提交面板
   components/SettingsPage.tsx / ReferencePicker.tsx / HealthBanner.tsx …
   lib/                       # viewmsg / mergeEvents / threadLayout / termTheme（终端配色）/ useSessionEvents / sessionOpen / streamReveal / mdBlocks / streamCaret / usePopoverAnchor（卡内浮层锚到被点的项）/ useGitInfo / localNote / promptHistory / useVisibleRefresh（设置页焦点回读）/ btw / checkouts / workspaceGroups / projectDrag / useElapsed / useText / locale / theme / platform / settingsTabs / settingsSearch / useSettingsSearchSources / …
@@ -101,9 +101,9 @@ scripts/                     # e2e-ipc-selfcheck / generate-icons / generate-mat
   - 派生指标（命中率 / 活跃天数 / 连续天数 / 热力图）与 jsonl 同一条口径：账本事件同样进活跃日与热力图；返回的 `extras` = 只由账本补上、jsonl 里已经没有的条数（**仅数据面**——2026-10-19 用户口径：设置页不再拿它写来源说明行，界面只留读数）。账本读不完（超预算）与 jsonl 预算一样置 `truncated`，不假装统计完了。
   - 记账失败（磁盘满 / 权限）只影响「已删除会话的补记」，**不许拖累会话线程**；本应用只读 omp，账本写在自己的应用数据目录里。
 - **设置写入口径**：omp 侧只经 `omp` CLI（`config set/reset`、`auth-broker`…）；**直接写文件的例外**：`models.yml`（hash 乐观锁 + 预校验 + 备份 + 原子写）与「omp 约束」的 `AGENTS.md` / `RULES.md` / `rules/*.md`（同款乐观锁 + 备份 + 原子写；上游没有写这些文件的 CLI）。本应用偏好不写 omp 配置。
-- **omp 约束（设置 ›「omp 约束」，2026-10-19）**：可视化编辑 omp 的**全局**约束与规则文件——只碰 `<agentDir>` 下三处：`AGENTS.md`（native 用户级上下文文件，每次会话启动注入）、`RULES.md`（sticky 规则，始终 always-apply、每轮重挂）、`rules/*.{md,mdc}`（独立规则，文件名即规则名，`enabled: false` 停用）；项目级 `.omp/` 由 omp 自己发现，本页不碰。
+- **omp 约束（设置 ›「omp 约束」，2026-10-19）**：编辑 omp 的**全局**约束与规则文件——只碰 `<agentDir>` 下三处：`AGENTS.md`（native 用户级上下文文件，每次会话启动注入）、`RULES.md`（sticky 规则，始终 always-apply、每轮重挂）、`rules/*.{md,mdc}`（独立规则，文件名即规则名，`enabled: false` 停用）；三种文件都是整份 Markdown 直接编辑。项目级 `.omp/` 由 omp 自己发现，本页不碰。
   - **数据面**（`constraints.rs`）：`get_omp_constraints`（固定两份文件 + rules/ 列表，一次读全）/ `write_omp_constraint`（`expectHash` 乐观锁 → 备份到 `<appData>/omp-mini/backups/constraints/` → 原子写 → 回读）/ `create_omp_rule` / `delete_omp_rule`（先备份再删）。文件名白名单：`rules/` 下单层 `.md` / `.mdc`、不以 `.` 开头、无路径分隔符 / 控制字符 / Windows 非法字符；内容上限 2 MiB；规则 frontmatter 必须有结束行。`expectHash = ""` 表示「打开时文件不存在」——外部创建了也算冲突；`null` = 冲突对话框里的显式强制覆盖。
-  - **编辑面**（`lib/constraints.ts`，`yaml` 的 `Document` API）：规则拆成 frontmatter 字段 + 正文——表单只改已知字段（description / enabled / alwaysApply / globs / condition / astCondition / question / scope / agents / interruptMode），**值没变的字段不重写**（尽量保住注释与写法），不认识的顶层字段原样保留；另有「源码」模式直接编辑整份 Markdown。保存前本地校验（大小 / NUL / YAML 可解析），失败不发请求。草稿在模块级缓存里跨设置页签 / 设置视图保留，「重新加载」才丢弃。
+  - **编辑面（2026-10-19 用户口径：去掉表单）**：三种文件（含 `rules/*.md`）一律**直接编辑整份 Markdown**——`AGENTS.md` / `RULES.md` / 规则文件共用一个编辑框，不再有「表单 / 源码」两档，frontmatter 由用户自己写、文本原样保存。`lib/constraints.ts` 的解析只在读侧：列表摘要与标题行的类型标签（`kindLabel(ruleKindOf(...))`）、未识别顶层字段提示、保存前校验（大小 / NUL / YAML 可解析）。保存前本地校验，失败不发请求。草稿在模块级缓存里跨设置页签 / 设置视图保留，「重新加载」才丢弃。
   - **生效**：omp 在会话启动 / `/clear` / `/new` 时重新发现规则与上下文文件，界面只说「新建的会话一定读到」；已打开会话是否热读未实测。
   - **设置搜索**：`constraints` 是独立数据源（条目名 / 文件名 / 路径 / 规则描述），命中跳转用 `focusKey = kind:name` 选中对应文件。
 - **自定义供应商：供应商配置 与 模型清单 拆开（2026-10-17 用户口径）**：`CustomProviderEditForm` 只配 名称 / 接口地址 / 接口类型 / API Key（**不再内嵌模型编辑区**）；模型清单一律在**已配置的供应商行**上点「挑选模型」管——自定义端点走 `CustomProviderModelsDialog`（「获取可用模型」→ 候选勾选 → 逐项调参 → 保存），登录型仍是 omp 目录里的星标挑选（`ProviderModelsDialog`）。数据层两个写入面**各写各的、互不覆盖**：`customModels.ts` 的 `upsertProvider`（供应商级字段，**不碰 `models` 节点**）与 `setProviderModels`（模型清单，逐条复用原节点保真改，**空清单删掉 `models` 键**）。
@@ -152,6 +152,6 @@ pnpm file-icons             # 从 material-icon-theme 重新生成右栏文件�
 
 ## 范围边界
 
-- **做**：聊天唯一形态（v1 已实施）、Codex / ZCode 对标（v2 已实施）、设置重构（v3 已实施）、**右栏工作台**——文件目录 + 项目脚本 + 多开终端（V42 / V43 / V44 已实施，口径见 `docs/v4-schedule.md`）、**会话读数**——输入卡底部统计条（排期 5 已实施，口径见 `docs/v5-schedule.md`）、**omp 约束**——全局 `AGENTS.md` / `RULES.md` / `rules/*.md` 的可视化编辑（0.2.0 / 排期 6 已实施，口径见 `docs/v6-schedule.md`）。
+- **做**：聊天唯一形态（v1 已实施）、Codex / ZCode 对标（v2 已实施）、设置重构（v3 已实施）、**右栏工作台**——文件目录 + 项目脚本 + 多开终端（V42 / V43 / V44 已实施，口径见 `docs/v4-schedule.md`）、**会话读数**——输入卡底部统计条（排期 5 已实施，口径见 `docs/v5-schedule.md`）、**omp 约束**——全局 `AGENTS.md` / `RULES.md` / `rules/*.md` 的编辑（整份 Markdown 直接编辑；0.2.0 / 排期 6 已实施，口径见 `docs/v6-schedule.md`）。
 - **不做**：编辑器（文件只读浏览，打开交给系统默认程序；**omp 约束页只编辑 omp 的全局约束 / 规则 Markdown，不是通用文件编辑器**）/ 内置浏览器 / SSH / 移动端 / PR 集成；分屏 / 多窗口；worktree 生命周期管理；云同步 / 定时任务。
 - 终端**只作为右栏工作台的页签**存在：同一页签内允许多开（标签行切换，V44 用户口径），但不许长出终端形态的会话模型（π 标题解析 / 目录行 / 覆盖层注入 / 独立窗口 / 任意分屏）；也不许把文件树升级成编辑器或全屏工作区（`docs/v1-schedule.md` §1 的删除清单仍然有效，`docs/v4-schedule.md` 是唯一例外口）。

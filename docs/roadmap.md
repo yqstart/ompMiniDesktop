@@ -14,7 +14,7 @@
 | 版本 | 主题 | 一句话目标 | 明细 |
 |---|---|---|---|
 | **0.1.0** | 首个版本（三部分一体交付） | 形态收敛 + 聊天对标 + 设置重构——终端形态整体下线；聊天形态按 Codex / ZCode 范式重做；设置改为独立视图 | [`v1-schedule.md`](v1-schedule.md) / [`v2-schedule.md`](v2-schedule.md) / [`v3-schedule.md`](v3-schedule.md) |
-| **0.2.0** | 右栏工作台 + 会话读数 + omp 约束（三部分一体交付） | 右栏从「上下文」面板换成**文件目录 + 项目脚本 + 多开终端**三页签（形态参照 DeepSeek Harness 的工作区文件 / 终端入口）；输入卡底部新增**统计条**：会话统计 + Token 用量 + 上下文 + 供应商用量（形态参照 DeepSeek Harness 的 composer dock）；设置里新增**「omp 约束」**：可视化编辑全局 `AGENTS.md` / `RULES.md` / `rules/*.{md,mdc}`（规则表单 + 正文 + 预览 + 源码） | [`v4-schedule.md`](v4-schedule.md) / [`v5-schedule.md`](v5-schedule.md) / [`v6-schedule.md`](v6-schedule.md) |
+| **0.2.0** | 右栏工作台 + 会话读数 + omp 约束（三部分一体交付） | 右栏从「上下文」面板换成**文件目录 + 项目脚本 + 多开终端**三页签（形态参照 DeepSeek Harness 的工作区文件 / 终端入口）；输入卡底部新增**统计条**：会话统计 + Token 用量 + 上下文 + 供应商用量（形态参照 DeepSeek Harness 的 composer dock）；设置里新增**「omp 约束」**：编辑全局 `AGENTS.md` / `RULES.md` / `rules/*.{md,mdc}`（整份 Markdown 直接编辑 + 预览；2026-10-19 去掉表单模式） | [`v4-schedule.md`](v4-schedule.md) / [`v5-schedule.md`](v5-schedule.md) / [`v6-schedule.md`](v6-schedule.md) |
 
 > 版本号以**实际发布**为准：排期 4 / 5 / 6 的内容随 `0.2.0` 一体交付（变更记录见 `CHANGELOG.md` 的 `0.2.0` 节）。
 
@@ -27,7 +27,7 @@
 | 排期 3 | 设置重构 | 设置从「标签页」改为独立视图：四组导航 + 跨条目搜索 + 行式控件（**已实施**） | [`v3-schedule.md`](v3-schedule.md) |
 | 排期 4 | 右栏工作台 | 右栏改为文件目录 + 终端双页签；上下文面板四区块退场（**已实施**） | [`v4-schedule.md`](v4-schedule.md) |
 | 排期 5 | 会话读数 | 输入卡底部统计条（会话统计 / Token 用量 / 上下文 / 供应商用量）；工具行的容量环与供应商用量搬下来（**已实施**） | [`v5-schedule.md`](v5-schedule.md) |
-| 排期 6 | omp 约束 | 设置 ›「omp 约束」：全局 `AGENTS.md` / `RULES.md` / `rules/*.md` 的列表、表单 + 源码编辑、预览、新建 / 删除；乐观锁 + 备份 + 原子写（**已实施**） | [`v6-schedule.md`](v6-schedule.md) |
+| 排期 6 | omp 约束 | 设置 ›「omp 约束」：全局 `AGENTS.md` / `RULES.md` / `rules/*.md` 的列表、整份 Markdown 编辑、预览、新建 / 删除；乐观锁 + 备份 + 原子写（**已实施**） | [`v6-schedule.md`](v6-schedule.md) |
 
 ## 版本号与发版约定
 
@@ -43,4 +43,4 @@
 - 设置重构：设置从「页签 + 卡片列表」改为独立视图——**顶部条**（返回 + 当前条目名 + 搜索入口 `⌘F`）+ **四组导航**（通用 / 模型 / 扩展 / 数据）+ **跨条目搜索**（常用设置四档打分、模型 / 插件 / 技能 / 记忆 / 归档命中高亮，结果跳转 + 键名定位闪烁）+ **行式控件**（区块标题 + 分隔线 + 语义行高，页面不做卡片）；七个条目的读写能力全量保留。明细见 `v3-schedule.md`，变更记录见 `CHANGELOG.md` 的 0.1.0 节。
 - **右栏工作台（0.2.0）**：右栏从 v2 的「上下文」面板（变更 / 进度 / 子代理 / 来源）换成**文件 / 脚本 / 终端三页签**——文件页签是当前会话工作目录的只读目录树（懒加载、变更标色、系统打开、引用到输入框），脚本页签把项目里能跑的东西摆出来（后端只读识别 `package.json` / `Cargo.toml` / `go.mod` / `manage.py` / `Makefile` / `justfile` / `Taskfile`，加本应用偏好里的自定义脚本），点一下就在终端页签里执行——终端是 PTY 里的登录 shell（真交互、全屏程序可用、按 cwd 保留、收起面板不杀进程）。上下文面板四区块连同它们的组件与 `lib/panelSources.ts` 一并退场（子代理 / 任务清单 / 提交链路的数据层保留，任务清单仍有消息列浮卡、提交仍有输入卡顶行键）。明细与验收见 `v4-schedule.md`，变更记录见 `CHANGELOG.md` 的 `0.2.0` 节。
 - **会话读数（0.2.0）**：输入卡底部新增**统计条**（四项、整条靠右）——**会话统计**（轮 / 步 / tok/s；点开：模型用时 / 工具调用用时 / 首发平均 TTFT / 输出速度）、**Token 用量**（缓存命中率；点开：分项与千分位总计）、**上下文占用**（容量环；点开分项）、**供应商用量**（只看全部已配置供应商的限额窗口、条上只有图标与档位配色；点开全部窗口）。数据由后端 `live_stats.rs` 扫该会话 jsonl 聚合，打开拉一次、运行中每 3s 回读；工具行原有的上下文容量环与供应商用量**搬到条上**（同一个数字不出现两次）。明细与验收见 `v5-schedule.md`。
-- **omp 约束（0.2.0）**：设置通用组新增「omp 约束」——只编辑 omp 的**全局层**三处：`AGENTS.md`（会话启动注入的上下文）、`RULES.md`（每轮重挂的 sticky 规则）、`rules/*.{md,mdc}`（独立规则，文件名即规则名）。规则用**表单 + 正文**编辑（描述 / 启用 / 总是生效 / globs / condition / astCondition / question / scope / agents / interruptMode），也可切「源码」直接改整份 Markdown；未知 frontmatter 字段与注释尽量原样保留。写入走 `expectHash` 乐观锁 + 备份 + 原子写；新建 / 删除规则，删除走 `ConfirmDialog` 二次确认。明细与验收见 `v6-schedule.md`。
+- **omp 约束（0.2.0）**：设置通用组新增「omp 约束」——只编辑 omp 的**全局层**三处：`AGENTS.md`（会话启动注入的上下文）、`RULES.md`（每轮重挂的 sticky 规则）、`rules/*.{md,mdc}`（独立规则，文件名即规则名）。三种文件都**直接编辑整份 Markdown**（含 frontmatter；2026-10-19 去掉表单模式），文本原样保存——未知 frontmatter 字段与注释都不动。写入走 `expectHash` 乐观锁 + 备份 + 原子写；新建 / 删除规则，删除走 `ConfirmDialog` 二次确认。明细与验收见 `v6-schedule.md`。

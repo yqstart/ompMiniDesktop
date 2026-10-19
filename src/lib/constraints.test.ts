@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_CONSTRAINT_BYTES,
-  buildRuleText,
   constraintKey,
   defaultRuleFields,
   newRuleName,
@@ -104,70 +103,6 @@ unknownField: 保留
 
   it("frontmatter 不是映射时报错", () => {
     expect(parseRuleDoc("---\n- a\n- b\n---\n正文").ok).toBe(false);
-  });
-});
-
-describe("buildRuleText", () => {
-  const base = `---
-description: 旧描述
-# 这是注释
-globs:
-  - src/**
-unknownField: 保留我
----
-
-正文
-`;
-
-  it("只改已知字段：注释、键序与未知字段都保留", () => {
-    const fields = {
-      ...defaultRuleFields(),
-      description: "新描述",
-      alwaysApply: true,
-      condition: [": any"],
-      // 原值的写法与内容都没变 → 这个节点不重写（注释挂在它附近）
-      globs: ["src/**"],
-    };
-    const text = buildRuleText(base, fields, "\n正文\n");
-    expect(text).toContain("description: 新描述");
-    expect(text).toContain("# 这是注释");
-    expect(text).toContain("unknownField: 保留我");
-    expect(text).toContain("alwaysApply: true");
-    expect(text).toContain("condition:");
-    expect(text.endsWith("---\n\n正文\n")).toBe(true);
-    // 再解析一次，字段值就是写进去的那份
-    const parsed = parseRuleDoc(text);
-    expect(parsed.ok && parsed.doc.fields.description).toBe("新描述");
-    expect(parsed.ok && parsed.doc.fields.alwaysApply).toBe(true);
-    expect(parsed.ok && parsed.doc.fields.condition).toEqual([": any"]);
-    expect(parsed.ok && parsed.doc.fields.globs).toEqual(["src/**"]);
-    expect(parsed.ok && parsed.doc.extraFields).toEqual(["unknownField"]);
-  });
-
-  it("清空字段会删键；默认开启不写 enabled", () => {
-    const text = buildRuleText(base, defaultRuleFields(), "\n正文\n");
-    expect(text).not.toContain("description:");
-    expect(text).not.toContain("globs:");
-    expect(text).not.toContain("enabled:");
-    expect(text).toContain("unknownField: 保留我");
-  });
-
-  it("没有 frontmatter 时按固定顺序生成；正文原样", () => {
-    const fields = {
-      ...defaultRuleFields(),
-      description: "新规则",
-      globs: ["src/**"],
-      enabled: false,
-      interruptMode: "always" as const,
-    };
-    const text = buildRuleText("正文\n", fields, "正文\n");
-    expect(text).toBe(
-      "---\ndescription: 新规则\nenabled: false\nglobs:\n  - src/**\ninterruptMode: always\n---\n正文\n",
-    );
-  });
-
-  it("字段全空时不生成空 frontmatter", () => {
-    expect(buildRuleText("正文\n", defaultRuleFields(), "正文\n")).toBe("正文\n");
   });
 });
 
