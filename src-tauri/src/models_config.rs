@@ -173,11 +173,16 @@ pub fn backup_file(path: &Path, backup_dir: &Path) -> Result<Option<PathBuf>, St
         .and_then(|s| s.to_str())
         .unwrap_or("models");
     let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("yml");
-    let name = format!(
-        "{stem}-{}.{ext}",
-        chrono::Local::now().format("%Y%m%d-%H%M%S%3f")
-    );
-    let dst = backup_dir.join(name);
+    // 时间戳只到毫秒：同一毫秒内的两次备份会撞名（Linux CI 上实测被覆盖成一份）。
+    // 撞名就往后加序号——「每次都留下一份」优先于名字好看；同一时间戳内序号递增，
+    // prune_backups 的「字典序即时序」仍然成立。
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S%3f").to_string();
+    let mut dst = backup_dir.join(format!("{stem}-{stamp}.{ext}"));
+    let mut seq = 1;
+    while dst.exists() {
+        dst = backup_dir.join(format!("{stem}-{stamp}-{seq}.{ext}"));
+        seq += 1;
+    }
     std::fs::copy(path, &dst).map_err(|e| format!("备份失败：{e}"))?;
     prune_backups(backup_dir, stem, ext, BACKUPS_KEEP);
     Ok(Some(dst))
@@ -412,6 +417,19 @@ mod tests {
         assert_eq!(count, BACKUPS_KEEP);
         // 保留的是「名字时序」最新的——最早的那份必须已被删
         assert!(!backups.join("models-20250100-000000000.00.yml").exists());
+    }
+
+    #[test]
+    fn backup_keeps_every_copy_within_one_millisecond() {
+        let dir = tmp("backup-same-ms");
+        let file = dir.join("models.yml");
+        let backups = dir.join("backups");
+        std::fs::write(&file, "providers: {}").unwrap();
+        // 紧挨着的两次备份常常落在同一毫秒：早期实现会撞名互相覆盖，只剩一份（CI 上暴露）
+        let first = backup_file(&file, &backups).unwrap().unwrap();
+        let second = backup_file(&file, &backups).unwrap().unwrap();
+        assert_ne!(first, second);
+        assert_eq!(std::fs::read_dir(&backups).unwrap().count(), 2);
     }
 
     #[test]
