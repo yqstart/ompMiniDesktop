@@ -251,33 +251,12 @@ export function PluginsPanel() {
  );
 
  return (
-  <section aria-label={t.tabPlugins} className="shrink-0">
-   {/* 页头整行已按用户口径退场（2026-10-19）：说明 / 计数 / 刷新钮都不再上界面；
-       只剩两个功能入口（体检 / 安装插件——安装没有第二个入口），重读时机 = 重挂 + 页内动作 */}
-   <div className="flex flex-wrap items-center justify-end gap-2">
-    <div className="flex shrink-0 items-center gap-0.5">
-     <button
-      onClick={() => void doDoctor(false)}
-      disabled={doctorBusy || lock}
-      className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
-      aria-label={t.pluginsDoctor}
-      title={t.pluginsDoctor}
-     >
-      {doctorBusy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Stethoscope size={12} aria-hidden />}
-     </button>
-     <button
-      onClick={openInstall}
-      disabled={lock}
-      className="flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 text-[12px] font-medium transition-colors duration-100 hover:bg-hover disabled:opacity-40"
-      aria-label={t.pluginsInstall}
-     >
-      <Plus size={12} aria-hidden />
-      {t.pluginsInstall}
-     </button>
-    </div>
-   </div>
-
-   {/* 可见范围（项目 package.json 依赖与项目级市场安装由 omp 按目录发现；全局 = 只看用户级） */}
+  <section aria-label={t.tabPlugins} className="settings-panel shrink-0">
+   {/* 页头整行已按用户口径退场（2026-10-19）：说明 / 计数 / 刷新钮都不再上界面，
+        只剩两个功能入口（体检 / 安装插件——安装没有第二个入口），重读时机 = 重挂 + 页内动作。
+        2026-10-19 用户口径：可见范围（项目 package.json 依赖与项目级市场安装由 omp 按目录发现；
+        全局 = 只看用户级）与功能入口**合并成一行**——下拉在左、入口靠右，页首不再占两行。
+        入口按钮与下拉同高（32px）：同一行里 28px 的按钮看着比下拉矮一档。 */}
    <div className="mt-3 flex flex-wrap items-center gap-2">
     <EnumSelect
      label={t.pluginsScope}
@@ -290,6 +269,26 @@ export function PluginsPanel() {
       setScopePath(options.find((o) => o.value === value)?.path ?? null);
      }}
     />
+    <div className="ml-auto flex shrink-0 items-center gap-0.5">
+     <button
+      onClick={() => void doDoctor(false)}
+      disabled={doctorBusy || lock}
+      className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-40"
+      aria-label={t.pluginsDoctor}
+      title={t.pluginsDoctor}
+     >
+      {doctorBusy ? <Loader size={12} className="animate-spin" aria-hidden /> : <Stethoscope size={12} aria-hidden />}
+     </button>
+     <button
+      onClick={openInstall}
+      disabled={lock}
+      className="flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 text-[12px] font-medium transition-colors duration-100 hover:bg-hover disabled:opacity-40"
+      aria-label={t.pluginsInstall}
+     >
+      <Plus size={12} aria-hidden />
+      {t.pluginsInstall}
+     </button>
+    </div>
    </div>
 
    {error && (

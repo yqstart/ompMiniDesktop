@@ -250,7 +250,7 @@ export function UsagePanel() {
  const totals = data?.totals;
 
  return (
-  <section aria-label={t.tabUsage} className="shrink-0">
+  <section aria-label={t.tabUsage} className="settings-panel shrink-0">
    {/* 页头只留范围切换这一个输入控件（2026-10-19 用户口径：说明与刷新钮都不再上界面）；
        重读时机 = 切范围 / 切走页签再回来（重挂） */}
    <div className="flex flex-wrap items-center justify-end gap-2">

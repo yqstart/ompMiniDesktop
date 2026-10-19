@@ -3,7 +3,7 @@ import type { RefObject } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { FileText, Loader, Plus, Refresh, Trash2 } from "reicon-react";
+import { Loader, Plus, Refresh, Trash2 } from "reicon-react";
 import { api } from "@shared/api";
 import type { ConstraintFile, ConstraintsView } from "@shared/types";
 import { useApp } from "../../stores/app";
@@ -72,14 +72,17 @@ function issueText(issue: ConstraintIssue, t: Text): string {
   return fmt(t.constraintsParseError, issue.detail);
 }
 
-function fileSummary(file: ConstraintFile, t: Text): string {
-  if (file.kind === "agents") return t.constraintsAgentsSummary;
-  if (file.kind === "rules") return t.constraintsRulesSummary;
-  if (file.error) return t.constraintsUnreadable;
+/**
+ * 行尾的类型标签：只有独立规则需要，而且**「规则手册」是默认类型、不重复上标签**——
+ * 每行都挂一个同样的「规则手册」只是噪音；只有「总是生效 / 实时注入」这种需要一眼认出的
+ * 类型才标出来。规则的 description 放在编辑器标题区（选中后可见），列表行不塞说明。
+ */
+function fileBadge(file: ConstraintFile, t: Text): string | null {
+  if (file.kind !== "rule" || file.error) return null;
   const parsed = parseRuleDoc(file.content);
-  if (!parsed.ok) return t.constraintsUnreadable;
-  const label = kindLabel(ruleKindOf(parsed.doc.fields), t);
-  return parsed.doc.fields.description ? `${label} · ${parsed.doc.fields.description}` : label;
+  if (!parsed.ok) return null;
+  const kind = ruleKindOf(parsed.doc.fields);
+  return kind === "rulebook" ? null : kindLabel(kind, t);
 }
 
 /** 编辑框里指的是同一份文件：预览只铺正文（frontmatter 不进正文渲染）。 */
@@ -140,42 +143,70 @@ function useAutoGrowTextarea(
   }, [ref, value, active]);
 }
 
+/**
+ * 文件列表的一行：**单行 32px**（名称 + 类型标签，**不带文件图标**——每行都是一份
+ * Markdown，图标不提供额外信息）。行 = 外层容器（选中 / hover 底色）+ 选择按钮（名称区）
+ * + 可选的删除键（独立规则，hover / 键盘聚焦时显形）——删除键必须与选择按钮是**兄弟**，
+ * button 不能套 button。**不挂原生 `title`**：浏览器那枚黑底提示框与产品样式无关，说明
+ * 放到编辑器标题区（选中即可见）。旧形态是两行的大块（py-1.5 + 第二行说明），在设置内容区
+ * 里铺满整宽、占位又高；现在按设计系统的列表行档（§4.2）收敛，按容器宽排成竖列或两列。
+ */
 function FileRow({
-  title,
-  summary,
+  file,
   selected,
   dirty,
   onSelect,
+  onDelete,
 }: {
-  title: string;
-  summary: string;
+  file: ConstraintFile;
   selected: boolean;
   dirty: boolean;
   onSelect: () => void;
+  /** 独立规则才有：行尾删除键（点开二次确认，不直接删）。 */
+  onDelete?: () => void;
 }) {
   const t = useText();
+  const title = file.kind === "rule" ? ruleDisplayName(file.name) : file.name;
+  const badge = fileBadge(file, t);
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={selected}
-      className={`flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors duration-100 ${selected
+    <div
+      className={`group/row flex h-8 w-full min-w-0 items-center rounded-md transition-colors duration-100 ${selected
         ? "bg-active text-foreground"
         : "text-muted hover:bg-hover hover:text-foreground"
         }`}
     >
-      <span className="flex min-w-0 items-center gap-1.5">
-        <FileText size={13} aria-hidden className="shrink-0" />
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-pressed={selected}
+        className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md px-2 text-left"
+      >
         <span className="truncate text-[13px]">{title}</span>
-        {dirty && (
+        {badge && (
           <span
-            className="size-1.5 shrink-0 rounded-full bg-warn"
-            title={t.constraintsUnsaved}
-          />
+            className={`shrink-0 rounded border border-border px-1 py-0.5 text-[10px] leading-none ${selected ? "text-muted" : "text-faint"}`}
+          >
+            {badge}
+          </span>
         )}
-      </span>
-      <span className="truncate pl-[19px] text-[11px] text-faint">{summary}</span>
-    </button>
+        {dirty && (
+          <>
+            <span className="size-1.5 shrink-0 rounded-full bg-warn" aria-hidden />
+            <span className="sr-only">{t.constraintsUnsaved}</span>
+          </>
+        )}
+      </button>
+      {onDelete && (
+        <button
+          type="button"
+          onClick={onDelete}
+          aria-label={`${t.constraintsDelete}：${title}`}
+          className={`mr-1 flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-faint transition-[color,background-color,opacity] duration-100 hover:bg-hover hover:text-danger focus-visible:opacity-100 group-hover/row:opacity-100 ${selected ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0 group-hover/row:pointer-events-auto"}`}
+        >
+          <Trash2 size={12} aria-hidden />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -206,7 +237,7 @@ export function ConstraintsPanel({
   const [newStem, setNewStem] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<ConstraintFile | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -278,7 +309,7 @@ export function ConstraintsPanel({
     setSaveError(null);
     setSavedFlash(false);
     setPreview(false);
-    setDeleting(false);
+    setDeleteTarget(null);
     setDeleteError(null);
   }, []);
 
@@ -400,7 +431,7 @@ export function ConstraintsPanel({
     });
     setConflict(false);
     setSaveError(null);
-    setDeleting(false);
+    setDeleteTarget(null);
   };
 
   const create = async () => {
@@ -429,18 +460,22 @@ export function ConstraintsPanel({
     }
   };
 
-  const remove = async () => {
-    if (!currentFile || currentFile.kind !== "rule" || deleteBusy) return;
+  /**
+   * 删除一份规则（列表行尾的删除键与编辑器底部入口共用）：按**目标文件**删，不依赖当前
+   * 选中的是哪一份；失败时弹窗保持打开、错误就地显示（可重试或取消）。
+   */
+  const remove = async (target: ConstraintFile) => {
+    if (target.kind !== "rule" || deleteBusy) return;
+    const key = constraintKey("rule", target.name);
     setDeleteBusy(true);
     setDeleteError(null);
     try {
-      await api.deleteOmpRule(currentFile.name);
-      const key = selected;
+      await api.deleteOmpRule(target.name);
       setView((prev) =>
         prev
           ? {
             ...prev,
-            files: prev.files.filter((file) => !(file.kind === "rule" && file.name === currentFile.name)),
+            files: prev.files.filter((file) => !(file.kind === "rule" && file.name === target.name)),
           }
           : prev,
       );
@@ -449,13 +484,19 @@ export function ConstraintsPanel({
         delete next[key];
         return next;
       });
-      selectFile("agents:AGENTS.md");
+      if (selected === key) selectFile("agents:AGENTS.md");
+      setDeleteTarget(null);
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : String(error));
-      setDeleting(false);
     } finally {
       setDeleteBusy(false);
     }
+  };
+
+  /** 打开删除确认（列表行尾的删除键 / 编辑器底部入口）：只记目标，不动编辑器选中。 */
+  const askDelete = (file: ConstraintFile) => {
+    setDeleteError(null);
+    setDeleteTarget(file);
   };
 
   const currentTitle = currentFile
@@ -473,7 +514,7 @@ export function ConstraintsPanel({
         : t.constraintsSourceHint;
 
   return (
-    <div ref={panelRef} className="mt-1">
+    <div ref={panelRef} className="settings-panel">
      {/* 页头整行已按用户口径退场（2026-10-19）：说明 / 刷新钮 / agentDir 读数都不再上界面
          （当前文件的全路径在编辑器标题行里本来就有）；重读时机 = 切走页签再回来（重挂）、
          窗口重新获得焦点（`useVisibleRefresh`）与编辑器工具行的「重新加载」 */}
@@ -505,117 +546,126 @@ export function ConstraintsPanel({
         <p className="mt-4 text-[13px] text-muted">{t.constraintsLoading}</p>
       ) : (
         <div className="mt-4 flex flex-col gap-5 @min-[760px]/panel:flex-row">
-          <nav aria-label={t.tabConstraints} className="w-full shrink-0 @min-[760px]/panel:w-60">
-            <h3 className="px-1 text-xs font-medium text-muted">{t.constraintsGroupAgents}</h3>
-            <div className="mt-1 flex flex-col gap-0.5">
-              {agentsFile && (
-                <FileRow
-                  title="AGENTS.md"
-                  summary={fileSummary(agentsFile, t)}
-                  selected={selected === constraintKey("agents", agentsFile.name)}
-                  dirty={states[constraintKey("agents", agentsFile.name)]?.dirty === true}
-                  onSelect={() => selectFile(constraintKey("agents", agentsFile.name))}
-                />
-              )}
-            </div>
-            <h3 className="mt-4 px-1 text-xs font-medium text-muted">{t.constraintsGroupRules}</h3>
-            <div className="mt-1 flex flex-col gap-0.5">
-              {rulesFile && (
-                <FileRow
-                  title="RULES.md"
-                  summary={fileSummary(rulesFile, t)}
-                  selected={selected === constraintKey("rules", rulesFile.name)}
-                  dirty={states[constraintKey("rules", rulesFile.name)]?.dirty === true}
-                  onSelect={() => selectFile(constraintKey("rules", rulesFile.name))}
-                />
-              )}
-            </div>
-            <div className="mt-4 flex items-center justify-between gap-2 px-1">
-              <h3 className="text-xs font-medium text-muted">{t.constraintsGroupIndep}</h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setCreating(true);
-                  setNewStem("");
-                  setCreateError(null);
-                }}
-                className="flex h-6 cursor-pointer items-center gap-1 rounded-md px-1.5 text-[11px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
-              >
-                <Plus size={10} aria-hidden />
-                {t.constraintsNewRule}
-              </button>
-            </div>
-            {creating && (
-              <form
-                className="mt-1.5 rounded-md border border-border bg-surface p-2"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void create();
-                }}
-              >
-                <input
-                  autoFocus
-                  value={newStem}
-                  onChange={(event) => {
-                    setNewStem(event.target.value);
+          <nav
+            aria-label={t.tabConstraints}
+            className="grid w-full shrink-0 grid-cols-1 gap-4 @min-[520px]/panel:grid-cols-2 @min-[760px]/panel:flex @min-[760px]/panel:w-60 @min-[760px]/panel:flex-col"
+          >
+            <section className="min-w-0">
+              <h3 className="truncate px-2 text-xs font-medium text-muted">{t.constraintsGroupAgents}</h3>
+              <div className="mt-1 flex flex-col gap-0.5">
+                {agentsFile && (
+                  <FileRow
+                    file={agentsFile}
+                    selected={selected === constraintKey("agents", agentsFile.name)}
+                    dirty={states[constraintKey("agents", agentsFile.name)]?.dirty === true}
+                    onSelect={() => selectFile(constraintKey("agents", agentsFile.name))}
+                  />
+                )}
+              </div>
+            </section>
+            <section className="min-w-0">
+              <h3 className="truncate px-2 text-xs font-medium text-muted">{t.constraintsGroupRules}</h3>
+              <div className="mt-1 flex flex-col gap-0.5">
+                {rulesFile && (
+                  <FileRow
+                    file={rulesFile}
+                    selected={selected === constraintKey("rules", rulesFile.name)}
+                    dirty={states[constraintKey("rules", rulesFile.name)]?.dirty === true}
+                    onSelect={() => selectFile(constraintKey("rules", rulesFile.name))}
+                  />
+                )}
+              </div>
+            </section>
+            <section className="min-w-0 @min-[520px]/panel:col-span-2">
+              <div className="flex items-center gap-2">
+                <h3 className="truncate px-2 text-xs font-medium text-muted">{t.constraintsGroupIndep}</h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCreating(true);
+                    setNewStem("");
                     setCreateError(null);
                   }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape" && !event.nativeEvent.isComposing) {
-                      event.preventDefault();
-                      setCreating(false);
-                      setNewStem("");
-                      setCreateError(null);
-                    }
+                  className="flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-[11px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+                >
+                  <Plus size={10} aria-hidden />
+                  {t.constraintsNewRule}
+                </button>
+              </div>
+              {creating && (
+                <form
+                  className="mt-1.5 rounded-md border border-border bg-surface p-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void create();
                   }}
-                  placeholder={t.constraintsNewRulePlaceholder}
-                  spellCheck={false}
-                  autoComplete="off"
-                  className="h-8 w-full min-w-0 rounded-md border border-border bg-surface px-2 text-[12px] outline-none transition-colors duration-100 placeholder:text-faint focus:border-accent"
-                />
-                {createError && <p className="mt-1 text-[11px] text-danger">{createError}</p>}
-                <div className="mt-1.5 flex items-center gap-1.5">
-                  <button
-                    type="submit"
-                    disabled={createBusy}
-                    className="h-7 cursor-pointer rounded-md border border-border px-2.5 text-[12px] transition-colors duration-100 hover:bg-hover disabled:opacity-40"
-                  >
-                    {t.constraintsCreate}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCreating(false);
-                      setNewStem("");
+                >
+                  <input
+                    autoFocus
+                    value={newStem}
+                    onChange={(event) => {
+                      setNewStem(event.target.value);
                       setCreateError(null);
                     }}
-                    className="h-7 cursor-pointer rounded-md px-2 text-[12px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
-                  >
-                    {t.cancel}
-                  </button>
-                  {createBusy && <Loader size={11} className="animate-spin text-muted" aria-hidden />}
-                </div>
-              </form>
-            )}
-            <div className="mt-1 flex flex-col gap-0.5">
-              {rules.length === 0 ? (
-                <p className="px-1 py-1 text-[11px] leading-4 text-faint">{t.constraintsNoRules}</p>
-              ) : (
-                rules.map((file) => {
-                  const key = constraintKey("rule", file.name);
-                  return (
-                    <FileRow
-                      key={key}
-                      title={ruleDisplayName(file.name)}
-                      summary={fileSummary(file, t)}
-                      selected={selected === key}
-                      dirty={states[key]?.dirty === true}
-                      onSelect={() => selectFile(key)}
-                    />
-                  );
-                })
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+                        event.preventDefault();
+                        setCreating(false);
+                        setNewStem("");
+                        setCreateError(null);
+                      }
+                    }}
+                    placeholder={t.constraintsNewRulePlaceholder}
+                    spellCheck={false}
+                    autoComplete="off"
+                    className="h-8 w-full min-w-0 rounded-md border border-border bg-surface px-2 text-[12px] outline-none transition-colors duration-100 placeholder:text-faint focus:border-accent"
+                  />
+                  {createError && <p className="mt-1 text-[11px] text-danger">{createError}</p>}
+                  <div className="mt-1.5 flex items-center gap-1.5">
+                    <button
+                      type="submit"
+                      disabled={createBusy}
+                      className="h-7 cursor-pointer rounded-md border border-border px-2.5 text-[12px] transition-colors duration-100 hover:bg-hover disabled:opacity-40"
+                    >
+                      {t.constraintsCreate}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCreating(false);
+                        setNewStem("");
+                        setCreateError(null);
+                      }}
+                      className="h-7 cursor-pointer rounded-md px-2 text-[12px] text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground"
+                    >
+                      {t.cancel}
+                    </button>
+                    {createBusy && <Loader size={11} className="animate-spin text-muted" aria-hidden />}
+                  </div>
+                </form>
               )}
-            </div>
+              <div className="mt-1 grid grid-cols-1 gap-x-4 gap-y-0.5 @min-[520px]/panel:grid-cols-2 @min-[760px]/panel:grid-cols-1">
+                {rules.length === 0 ? (
+                  <p className="col-span-1 truncate px-2 py-1 text-[11px] leading-4 text-faint @min-[520px]/panel:col-span-2">
+                    {t.constraintsNoRules}
+                  </p>
+                ) : (
+                  rules.map((file) => {
+                    const key = constraintKey("rule", file.name);
+                    return (
+                      <FileRow
+                        key={key}
+                        file={file}
+                        selected={selected === key}
+                        dirty={states[key]?.dirty === true}
+                        onSelect={() => selectFile(key)}
+                        onDelete={() => askDelete(file)}
+                      />
+                    );
+                  })
+                )}
+              </div>
+            </section>
           </nav>
 
           <div className="min-w-0 flex-1">
@@ -640,9 +690,12 @@ export function ConstraintsPanel({
                       )}
                       {savedFlash && <span className="text-[11px] text-accent">{t.constraintsSaved}</span>}
                     </div>
-                    <p className="mt-0.5 font-mono text-[11px] break-all text-faint" title={currentFile.path}>
+                    <p className="mt-0.5 font-mono text-[11px] break-all text-faint">
                       {currentFile.path}
                     </p>
+                    {currentKind === "rule" && ruleFields?.fields.description && (
+                      <p className="mt-1 text-[11px] leading-4 text-muted">{ruleFields.fields.description}</p>
+                    )}
                     {currentKind === "rule" && ruleFields && ruleFields.extraFields.length > 0 && (
                       <p className="mt-1 text-[11px] text-muted">
                         {fmt(t.constraintsExtraFields, String(ruleFields.extraFields.length))}
@@ -755,27 +808,6 @@ export function ConstraintsPanel({
                     />
                   )}
                 </div>
-
-                {currentFile.kind === "rule" && (
-                  <div className="mt-6 border-t border-border-soft pt-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDeleteError(null);
-                        setDeleting(true);
-                      }}
-                      className="flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[12px] text-muted transition-colors duration-100 hover:bg-hover hover:text-danger"
-                    >
-                      <Trash2 size={11} aria-hidden />
-                      {t.constraintsDelete}
-                    </button>
-                    {deleteError && (
-                      <p role="alert" className="mt-1 text-xs text-danger">
-                        {deleteError}
-                      </p>
-                    )}
-                  </div>
-                )}
               </section>
             )}
           </div>
@@ -783,16 +815,16 @@ export function ConstraintsPanel({
       )}
 
       <ConfirmDialog
-        open={deleting}
+        open={deleteTarget !== null}
         danger
-        title={currentFile ? fmt(t.constraintsDeleteConfirm, ruleDisplayName(currentFile.name)) : t.constraintsDelete}
-        detail={t.constraintsDeleteDetail}
+        title={deleteTarget ? fmt(t.constraintsDeleteConfirm, ruleDisplayName(deleteTarget.name)) : t.constraintsDelete}
+        detail={deleteError ?? t.constraintsDeleteDetail}
         confirmLabel={t.delete}
         onConfirm={() => {
-          if (!deleteBusy) void remove();
+          if (deleteTarget && !deleteBusy) void remove(deleteTarget);
         }}
         onCancel={() => {
-          setDeleting(false);
+          setDeleteTarget(null);
           setDeleteError(null);
         }}
       />

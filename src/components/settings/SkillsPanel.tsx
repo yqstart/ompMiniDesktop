@@ -247,7 +247,7 @@ export function SkillsPanel() {
  const loadErrorText = loadError === null ? null : loadError || t.skillsLoadFailed;
 
  return (
-  <section aria-label={t.tabSkills} className="shrink-0">
+  <section aria-label={t.tabSkills} className="settings-panel shrink-0">
    {/* 页头整行已按用户口径退场（2026-10-19）：说明 / 计数 / 刷新钮都不再上界面；
        外部改动（在终端里装了技能）靠焦点回读与重挂补上 */}
 

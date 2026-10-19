@@ -59,7 +59,7 @@ export function SettingsSearch({
  const total = groups.reduce((sum, group) => sum + group.hits.length, 0);
 
  return (
-  <div className="flex flex-col gap-4">
+  <div className="settings-panel flex flex-col gap-4">
    {/* 输入行：单行、常驻在内容区顶部（⌘F 是打开它的唯一入口——顶部条已无搜索钮） */}
    <div className="flex items-center gap-2 rounded-md border border-border bg-surface px-2.5 transition-colors duration-100 focus-within:border-accent">
     <Search size={14} aria-hidden className="shrink-0 text-muted" />
@@ -90,11 +90,11 @@ export function SettingsSearch({
    </div>
 
    {q === "" ? (
-    <p className="px-1 text-xs text-muted">{t.settingsSearchIdle}</p>
+    <p className="text-xs text-muted">{t.settingsSearchIdle}</p>
    ) : allFailed ? (
-    <p role="alert" className="px-1 text-[13px] leading-5 text-danger">{t.settingsSearchFailed}</p>
+    <p role="alert" className="text-[13px] leading-5 text-danger">{t.settingsSearchFailed}</p>
    ) : total === 0 ? (
-    <div className="flex flex-col items-start gap-2 px-1">
+    <div className="flex flex-col items-start gap-2">
      <p className="text-[13px] text-muted">{settled ? t.ompSettingsNoMatch : t.settingsSearchPending}</p>
      {settled && (
       <button
@@ -111,13 +111,13 @@ export function SettingsSearch({
       const label = t[SETTINGS_TAB_LABEL_KEYS[group.tab]];
       return (
        <section key={group.tab} aria-label={label}>
-        <h3 className="px-1 text-xs font-medium text-muted">{label}</h3>
+        <h3 className="text-xs font-medium text-muted">{label}</h3>
         <div className="mt-1 flex flex-col">
          {group.hits.map((hit) => (
           <button
            key={hit.id}
            onClick={() => onNavigate(hit.tab, hit.focusKey ?? undefined)}
-           className="flex w-full cursor-pointer flex-col justify-center gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors duration-100 hover:bg-hover"
+           className="flex w-full cursor-pointer flex-col justify-center gap-0.5 rounded-md py-1.5 text-left transition-colors duration-100 hover:bg-hover"
           >
            <span className="truncate text-[13px] leading-5">
             <Highlight text={hit.title} query={q} />

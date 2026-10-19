@@ -223,7 +223,7 @@ export function MemoryPanel() {
  };
 
  return (
-  <section aria-label={t.tabMemories} className="shrink-0">
+  <section aria-label={t.tabMemories} className="settings-panel shrink-0">
    {/* 页头整行已按用户口径退场（2026-10-19）：说明 / 计数 / 刷新钮都不再上界面；
        外部改动（omp 后台整理写了新记忆）靠焦点回读与重挂补上 */}
    {error && (

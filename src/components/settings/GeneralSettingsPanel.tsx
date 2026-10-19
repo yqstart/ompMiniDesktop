@@ -340,7 +340,7 @@ export function GeneralSettingsPanel({
  useVisibleRefresh(() => void load(true));
 
  return (
-  <section ref={rootRef} aria-label={t.tabGeneral} className="shrink-0">
+  <section ref={rootRef} aria-label={t.tabGeneral} className="settings-panel shrink-0">
    {missingOmp && <p className="mt-1 text-[13px] text-warn">{t.ompSettingsMissing}</p>}
    {err && (
     <p role="alert" className="mt-3 rounded border border-danger/40 bg-danger/5 px-3 py-2 text-[13px] text-danger">
@@ -383,7 +383,7 @@ export function GeneralSettingsPanel({
          <button
           onClick={() => toggleSection(section)}
           aria-expanded={isOpen}
-          className="flex min-h-8 w-full cursor-pointer items-center gap-1.5 rounded-md px-1 text-left transition-colors duration-100 hover:bg-hover"
+          className="flex min-h-8 w-full cursor-pointer items-center gap-1.5 rounded-md text-left transition-colors duration-100 hover:bg-hover"
          >
           {isOpen ? (
            <ChevronDown size={12} aria-hidden className="shrink-0 text-faint" />
@@ -483,7 +483,7 @@ function SettingRow({
    : null;
 
  return (
-  <div data-setting={item.key} className="min-h-11 px-1 py-2.5">
+  <div data-setting={item.key} className="min-h-11 py-2.5">
    <div className="flex flex-wrap items-center gap-2">
     <div className="min-w-0 basis-full @min-[480px]/panel:flex-1 @min-[480px]/panel:basis-0" title={hint}>
      <div className={name ? "text-[13px] leading-5" : "font-mono text-[12px] leading-5 break-all"}>

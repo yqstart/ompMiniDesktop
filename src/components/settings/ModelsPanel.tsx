@@ -188,7 +188,7 @@ export function ModelsPanel() {
  const entries = useMemo(() => myModelEntries(myModels, catalog), [myModels, catalog]);
 
  return (
-  <>
+  <div className="settings-panel">
    {/* 页头整行已按用户口径退场（2026-10-19）：说明 / 刷新钮都不再上界面；重读时机 =
        切走页签再回来（重挂）+ 页内自身动作（保存供应商 / 挑选模型走 refreshAll，
        经 modelsRefreshed 广播） */}
@@ -311,7 +311,7 @@ export function ModelsPanel() {
     onSaved={(info) => { chainsRevision.current += 1; setChains(info); }}
     onRefresh={() => void refreshAll()}
    />
-  </>
+  </div>
  );
 }
 

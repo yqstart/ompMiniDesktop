@@ -217,7 +217,9 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
      aria-label={searchOpen ? t.settingsSearch : undefined}
      className="@container/panel min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto"
     >
-     <div className="mx-auto w-full max-w-4xl px-3 pb-12 pt-4 sm:px-6">
+     {/* 页面留白只此一处：左右 `px-3/6`、顶部 `pt-6`、底部 `pb-12`——各面板（`.settings-panel`）
+         不许再给首块加上外边距（`index.css` 那条规则兜底），否则各条目首屏间距又会各写各的。 */}
+     <div className="mx-auto w-full max-w-4xl px-3 pb-12 pt-6 sm:px-6">
       {/* 面板与搜索并列挂载（搜索只是遮住面板）：切搜索不触发面板卸载重挂 ——
           通用页的目录（`omp config list`，秒级）不该因开了次搜索又拉一遍。 */}
       <div className={searchOpen ? "hidden" : undefined}>

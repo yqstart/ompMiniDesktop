@@ -167,4 +167,26 @@ describe("omp 约束面板", () => {
     expect(content).toBe(next);
     expect(expectHash).toBe("rule-hash");
   });
+
+  it("规则行尾的删除键走二次确认，确认后按目标文件删除", async () => {
+    act(() => {
+      root.render(<ConstraintsPanel />);
+    });
+    await flush();
+
+    // 列表行上的删除键（hover / 聚焦显形）——不先选中该规则也能删，确认框针对它
+    const rowDelete = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="删除规则：no-any"]',
+    );
+    expect(rowDelete).toBeTruthy();
+    act(() => rowDelete?.click());
+    await flush();
+
+    expect(container.textContent).toContain("删除规则「no-any」？");
+    act(() => buttonByText(container, "删除")?.click());
+    await flush();
+
+    expect(api.deleteOmpRule).toHaveBeenCalledWith("no-any.md");
+    expect(container.textContent).not.toContain("no-any");
+  });
 });
