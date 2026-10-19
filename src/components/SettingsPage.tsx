@@ -1,9 +1,8 @@
-import { Archive, ArrowLeft, BookOpen, ChartBar, Key, Notebook, Plug, Puzzle, Search, Sliders } from "reicon-react";
+import { Archive, ArrowLeft, BookOpen, ChartBar, Key, Notebook, Plug, Puzzle, Sliders } from "reicon-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useText } from "../lib/useText";
 import { useApp } from "../stores/app";
 import type { Text } from "../lib/locale";
-import { isMacKeyboard } from "../lib/platform";
 import { clearSettingsSearchCache } from "../lib/settingsSearch";
 import { SETTINGS_TAB_LABEL_KEYS, type SettingsFocusRequest, type SettingsTab } from "../lib/settingsTabs";
 import { useSettingsSearchSources } from "../lib/useSettingsSearchSources";
@@ -45,12 +44,13 @@ const TAB_GROUPS: { label: keyof Text; tabs: SettingsTab[] }[] = [
 /**
  * 设置视图（v3 设置重构）：覆盖主区的独立视图，不再是「标签页 + 卡片列表」的形态——
  *
- * - **顶部条**：`← 返回聊天` + 当前条目名 + 右侧搜索钮（⌘F）——打开 = 左栏底部「设置」/ ⌘,，
- *   关闭 = 顶部「返回聊天」/ ⌘W / 左栏「设置」再点一次（`closeSettingsTab`）；
+ * - **顶部条**：`← 返回聊天` + 当前条目名（**没有搜索钮**，2026-10-19 用户口径）——
+ *   打开设置 = 左栏底部「设置」/ ⌘,，关闭 = 顶部「返回聊天」/ ⌘W / 左栏「设置」再点一次
+ *   （`closeSettingsTab`）；
  * - **左导航**：四组八条目（组标题 + 条目），窄窗（44px 容器档）折叠为图标栏；
- * - **顶部搜索**：跨条目过滤（常用设置四档打分 / omp 约束 / 模型 / 插件 / 技能 / 记忆 /
- *   归档会话），命中高亮，结果点击跳到对应条目——常用设置项与约束文件带键名定位
- *   （`focusRequest`）；
+ * - **顶部搜索**：入口只剩 ⌘F（跨条目过滤——常用设置四档打分 / omp 约束 / 模型 / 插件 /
+ *   技能 / 记忆 / 归档会话），命中高亮，结果点击跳到对应条目——常用设置项与约束文件带键名
+ *   定位（`focusRequest`）；
  * - 内容区是唯一的滚动容器：各面板直接铺在页面上（区块标题 + 行式排布，不做嵌套卡片）。
  */
 export function SettingsPage({ visible = true }: { visible?: boolean }) {
@@ -67,8 +67,6 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
  const focusSeq = useRef(0);
  /** 搜索数据源：首次展开时并行懒加载；搜索关掉再开不重拉（模块级缓存，见 lib/settingsSearch）。 */
  const { sources, settled, allFailed } = useSettingsSearchSources(searchOpen);
- /** 快捷键提示（⌘F / Ctrl+F）——按平台分叉的唯一口径在 lib/platform。 */
- const searchShortcut = isMacKeyboard() ? "⌘F" : "Ctrl+F";
 
  // 关闭设置视图即卸载：搜索缓存整体作废（下次进入设置重新取——搜索定位的清单不该跨次陈旧）
  useEffect(() => () => clearSettingsSearchCache(), []);
@@ -113,14 +111,6 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
  /** 定位请求消费完成的回调（引用要稳定：通用页 / 约束页的定位 effect 依赖它）。 */
  const clearFocusRequest = useCallback(() => setFocusRequest(null), []);
 
- const openSearch = () => {
-  if (searchOpen) {
-   pageRef.current?.querySelector<HTMLElement>("#settings-search-input")?.focus();
-   return;
-  }
-  set({ settingsSearchOpen: true });
- };
-
  const closeSearch = () => set({ settingsSearchOpen: false });
 
  const title = searchOpen ? t.settingsSearch : t[SETTINGS_TAB_LABEL_KEYS[tab]];
@@ -139,7 +129,7 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
      : "hidden"
    }
   >
-   {/* 顶部条：返回 + 当前条目名 + 搜索入口（搜索展开时标题切为「搜索设置」） */}
+   {/* 顶部条：返回 + 当前条目名（搜索展开时标题切为「搜索设置」；搜索入口只剩 ⌘F） */}
    <header className="flex h-12 shrink-0 items-center gap-1 border-b border-border-soft pl-1.5 pr-3 sm:pl-2.5 sm:pr-5">
     <button
      onClick={() => useApp.getState().closeSettingsTab()}
@@ -151,20 +141,6 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
      <span className="hidden @min-[560px]/settings:inline">{t.backToChat}</span>
     </button>
     <h1 className="min-w-0 flex-1 truncate px-1.5 text-sm font-medium">{title}</h1>
-    <button
-     onClick={openSearch}
-     aria-label={t.settingsSearch}
-     title={t.settingsSearch}
-     aria-pressed={searchOpen}
-     className={`flex h-8 shrink-0 cursor-pointer items-center gap-2 rounded-md px-2 text-[13px] transition-colors duration-100 ${searchOpen
-      ? "bg-active text-foreground"
-      : "text-muted hover:bg-hover hover:text-foreground"
-      }`}
-    >
-     <Search size={14} aria-hidden className="shrink-0" />
-     <span className="hidden @min-[560px]/settings:inline">{t.settingsSearch}</span>
-     <kbd className="hidden text-[11px] text-faint @min-[640px]/settings:inline">{searchShortcut}</kbd>
-    </button>
    </header>
 
    <div className="flex min-h-0 min-w-0 flex-1">

@@ -143,7 +143,7 @@ describe("设置视图框架", () => {
    });
    await flush();
 
-   // 打开搜索（顶部钮 / ⌘F 落到同一个 store 状态）
+   // 打开搜索（⌘F 落到 store 状态；顶部条已无搜索钮）
    act(() => {
     useApp.getState().set({ settingsSearchOpen: true });
    });

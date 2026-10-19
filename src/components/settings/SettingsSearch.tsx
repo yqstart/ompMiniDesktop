@@ -60,7 +60,7 @@ export function SettingsSearch({
 
  return (
   <div className="flex flex-col gap-4">
-   {/* 输入行：单行、常驻在内容区顶部（顶部条的搜索钮 / ⌘F 只是打开它的入口） */}
+   {/* 输入行：单行、常驻在内容区顶部（⌘F 是打开它的唯一入口——顶部条已无搜索钮） */}
    <div className="flex items-center gap-2 rounded-md border border-border bg-surface px-2.5 transition-colors duration-100 focus-within:border-accent">
     <Search size={14} aria-hidden className="shrink-0 text-muted" />
     <input
