@@ -124,6 +124,9 @@ fn main() {
             git_commit::cancel_commit_task,
             git_ops::get_change_set,
             git_ops::switch_branch,
+            git_ops::pull_workspace,
+            git_ops::continue_merge,
+            git_ops::abort_merge,
             project_files::list_project_files,
             // —— V42（右栏工作台）：文件目录树 + 终端 ——
             workspace_fs::list_dir,

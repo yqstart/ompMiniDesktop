@@ -248,7 +248,13 @@ export async function refreshWorkspaceGitState(paths?: string[]): Promise<void> 
  try {
   const states = await api.getWorkspaceGitState(list);
   if (seq !== refreshSeq) return;
-  useApp.getState().setWorkspaceGitStates(states);
+  const s = useApp.getState();
+  s.setWorkspaceGitStates(states);
+  // 拉取冲突态对账：冲突时 behind 必然 > 0（双方都有新提交才可能冲突）；
+  // 归零 = 合并已经在别处收尾（终端 / 编辑器里 add + commit），徽章不该继续显示冲突。
+  for (const st of states) {
+   if (st.isRepo && st.behind === 0 && s.pullStates[st.path]?.phase === "conflict") s.clearPullState(st.path);
+  }
  } catch {
   // 静默：行徽章是提示，不是关键路径。
  }

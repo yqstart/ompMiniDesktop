@@ -8,6 +8,8 @@
 
 ### Added
 
+- **左栏项目头的「远程有新提交」徽章可以直接拉取**：图标从 `BranchDown`（视觉上像收件箱）换成 `Download`，徽章改成按钮——点击即 `git pull`（能快进就快进、分叉就合并，不 rebase；无冲突直接更新，成功后徽章随快照归零消失）。拉取中徽章转圈；失败转 `AlertTriangle` + 危险色、悬停显示 git 原文、点击重试。**有冲突则在冲突处停下**：自动用系统默认编辑器打开第一个冲突文件，并弹出冲突清单（逐个打开 / **继续合并** = 未标记解决的冲突文件先 `add` 再提交合并 / **放弃合并** = `git merge --abort`），冲突解决在编辑器里做，壳不做内置编辑器。
+
 - **Windows 原生支持（P0）**：右栏终端按平台选 shell（`pwsh` 7 → Windows PowerShell 5.1 → `cmd.exe`；PowerShell 用 `-NoLogo`，cmd 不带参数，不再硬编码 `-l`）；进程树强杀走 `taskkill /PID <pid> /T /F`；omp 定位改为「PATH 扫描 → `where omp` → 官方脚本落点」；绝对路径判断统一用 `Path::is_absolute()` / 前端 `lib/paths.ts`，修复 `C:\...` 被当相对路径拼成 `cwd/C:\...`；`rel_to` 与 `@` 短标签后缀把 `\` 归一成 `/`；会话目录回退 `USERPROFILE` → 系统临时目录（不再硬编码 `/tmp`）；Windows 保留系统标题栏，左栏 / 中列顶栏不再留 macOS 红绿灯的 72px。详见 `docs/windows.md`。
 - **WSL 边界（P1）**：识别 `\\wsl$\<distro>\...` 与 `\\wsl.localhost\...`；右栏终端自动 `wsl.exe -d <distro> -- bash -lc "cd -- '<linux 路径>' && export TERM=... && exec bash -l"`；WSL 项目的聊天会话**明确拒绝**（Windows 壳不跨发行版启动 omp，避免 UNC 工作目录 + 两套工具链的半坏状态），项目选择器显示 `WSL` 徽标与说明；「安装 omp」弹窗提示 Windows 版与 WSL 版不共享会话文件。WSL 会话历史合并不在本次范围（见 `docs/windows.md` 后续项）。
 

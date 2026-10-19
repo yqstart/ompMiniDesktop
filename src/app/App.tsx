@@ -9,6 +9,7 @@ import type { ModelCatalog } from "@shared/types";
 import { ChatSidebar } from "../components/sidebar/ChatSidebar";
 import { ReferencePicker } from "../components/ReferencePicker";
 import { CommitTaskPanel } from "../components/git/CommitTaskPanel";
+import { PullConflictDialog } from "../components/git/PullConflictDialog";
 import { HealthBanner } from "../components/HealthBanner";
 import { SettingsPage } from "../components/SettingsPage";
 import { ChatView } from "../components/thread/ChatView";
@@ -379,6 +380,8 @@ export function App() {
     {settingsTabOpen && <SettingsPage visible={settingsTabActive} />}
    </main>
    <CommitTaskPanel />
+   {/* 拉取冲突清单（挂着就显示：`pullConflictCwd` 为 null 时组件自己返回 null） */}
+   <PullConflictDialog />
    {updateDialogOpen && <UpdateDialog />}
    {ompUpdateDialogOpen && <OmpUpdateDialog />}
  {ompInstallDialogOpen && <OmpInstallDialog />}

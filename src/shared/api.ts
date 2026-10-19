@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
-import type { BtwRecord, ChangeSet, CheckoutView, CommitEvent, ConstraintFile, ConstraintsView, ConstraintKind, ContextBreakdown, DirListing, DiscoveredModel, FallbackChainsInfo, GitInfo, Goal, GoalState, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PathSearch, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, ScriptCatalog, SessionLiveStats, SessionPage, SessionRuntime, SessionStats, SessionView, SkillFileContent, SkillsView, TerminalEvent, TerminalSpawnOpts, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
+import type { BtwRecord, ChangeSet, CheckoutView, CommitEvent, ConstraintFile, ConstraintsView, ConstraintKind, ContextBreakdown, DirListing, DiscoveredModel, FallbackChainsInfo, GitInfo, Goal, GoalState, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PathSearch, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PullOutcome, ScriptCatalog, SessionLiveStats, SessionPage, SessionRuntime, SessionStats, SessionView, SkillFileContent, SkillsView, TerminalEvent, TerminalSpawnOpts, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -110,6 +110,15 @@ export const api = {
   call<void>(IPC.pushWorkspace, { cwd, onEvent }),
  /** 取消运行中的任务（后端杀进程组，落 `canceled` 终态）。 */
  cancelCommitTask: (cwd: string) => call<void>(IPC.cancelCommitTask, { cwd }),
+ /**
+  * 拉取远程（行徽章的 behind 徽章点击）：`git pull`（不 rebase，能快进就快进、分叉就合并）。
+  * 冲突**不是**异常——后端返回 `status: "conflicts"` + 冲突文件绝对路径，前端去编辑器解决。
+  */
+ pullWorkspace: (cwd: string) => call<PullOutcome>(IPC.pullWorkspace, { cwd }),
+ /** 冲突解决后继续合并（未标记解决的冲突文件先 add，再用合并信息提交）。 */
+ continueMerge: (cwd: string) => call<void>(IPC.continueMerge, { cwd }),
+ /** 放弃这次合并（`git merge --abort`，工作区回到拉取前）。 */
+ abortMerge: (cwd: string) => call<void>(IPC.abortMerge, { cwd }),
  /**
   * 左栏行徽章的 git 快照（批量；每行一次 `status --porcelain -b`，后端并发 + 超时降级）。
   */

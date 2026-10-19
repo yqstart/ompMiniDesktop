@@ -22,6 +22,8 @@ const MAX_CHANGE_FILES: usize = 2000;
 /// 大仓库里可能偏慢的 git 操作（status / add）：给 30s，超时才报失败。
 /// 只读的行徽章那条链路仍用 `git_info::GIT_TIMEOUT`（4s）——那是背景刷新，慢就降级。
 const SLOW: Duration = Duration::from_secs(30);
+/// 拉取要 fetch + merge，慢网络 / 大仓库下比本地写操作慢得多：给 120s。
+const PULL_TIMEOUT: Duration = Duration::from_secs(120);
 // ---------- 类型（与前端 `shared/types.ts` 同构） ----------
 
 /// 一个待提交的文件（`git status --porcelain=v1 -z` 一行 + numstat 的增删行数）。
@@ -73,6 +75,31 @@ impl ChangeSet {
             behind: 0,
             files: vec![],
         }
+    }
+}
+
+/// 一次拉取的结果（行徽章的「远程有新提交」点击）。
+///
+/// **冲突不是命令失败**：合并停在冲突态，等用户在编辑器里解决——所以走 `Ok` 返回，
+/// 让前端拿到冲突文件清单；真正的命令失败（网络 / 权限 / 本地改动被覆盖）才走 `Err`。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullOutcome {
+    /// `up-to-date`（远程没有新提交）/ `merged`（已更新：快进或产生合并提交）/ `conflicts`。
+    pub status: String,
+    /// 冲突文件的**绝对路径**（`status == "conflicts"` 时非空）。
+    pub conflicts: Vec<String>,
+    /// git 输出摘要（成功时是 pull 的 stdout；冲突时是 stderr 的冲突提示）。
+    pub detail: String,
+}
+
+impl PullOutcome {
+    fn done(status: &str, detail: String) -> Self {
+        Self { status: status.into(), conflicts: vec![], detail }
+    }
+
+    fn conflicts(paths: Vec<String>, detail: String) -> Self {
+        Self { status: "conflicts".into(), conflicts: paths, detail }
     }
 }
 
@@ -274,6 +301,44 @@ pub fn validate_branch_arg(branch: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 解析 `git diff --name-only --diff-filter=U -z` 的未合并路径（相对仓库根）。
+///
+/// `-z` 是 NUL 分隔，中文 / 空格路径不用转义；空段（尾部 NUL）丢掉。
+pub fn parse_unmerged_paths(out: &str) -> Vec<String> {
+    out.split('\0')
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// 把仓库根基准的路径拼成绝对路径（前端打开编辑器 / 显示都需要绝对路径）。
+/// 已经是绝对路径的原样保留。
+pub fn absolute_paths(root: &str, paths: &[String]) -> Vec<String> {
+    paths
+        .iter()
+        .map(|p| {
+            if std::path::Path::new(p).is_absolute() {
+                p.clone()
+            } else {
+                std::path::Path::new(root).join(p).to_string_lossy().into_owned()
+            }
+        })
+        .collect()
+}
+
+/// git 输出摘要：给前端做悬停说明，限行 + 限长（完整输出只进日志 / 终端）。
+pub fn summarize_git(out: &str) -> String {
+    let text = out.trim();
+    if text.is_empty() {
+        return String::new();
+    }
+    let mut s = text.lines().take(20).collect::<Vec<_>>().join("\n");
+    if s.chars().count() > 2000 {
+        s = s.chars().take(2000).collect();
+    }
+    s
+}
+
 // ---------- git 调用 ----------
 
 /// 仓库根（`rev-parse --show-toplevel`）：变更集与暂存区都是**根基准**（porcelain 与
@@ -417,6 +482,104 @@ pub async fn switch_branch(cwd: String, branch: String) -> Result<(), CmdError> 
     run_git_timeout(&git, &cwd, &["switch", &branch], SLOW)
         .await
         .map_err(|e| cmd_err("GIT_SWITCH", e.trim().to_string(), None))?;
+    Ok(())
+}
+
+/// 拉取 / 合并命令的前置：目录存在 + git 可用 + 确实是仓库。
+async fn repo_git(cwd: &str) -> Result<String, CmdError> {
+    if !dir_exists(cwd) {
+        return Err(cmd_err("DIR_MISSING", "工作目录不存在".into(), None));
+    }
+    let Some(git) = git_bin().await else {
+        return Err(cmd_err("GIT_MISSING", "未找到 git".into(), Some("请安装 git 或在终端里确认 PATH".into())));
+    };
+    match run_git(&git, cwd, &["rev-parse", "--is-inside-work-tree"]).await {
+        Ok(out) if out.trim() == "true" => Ok(git),
+        Ok(_) => Err(cmd_err("NOT_REPO", "这个目录不是 git 仓库".into(), None)),
+        Err(e) => Err(cmd_err("PREFLIGHT", e, None)),
+    }
+}
+
+/// 当前未合并（冲突）的路径，相对仓库根；查询失败按「没有冲突」处理（调用方有自己的失败路径）。
+async fn unmerged_paths(git: &str, dir: &str) -> Vec<String> {
+    run_git(git, dir, &["diff", "--name-only", "--diff-filter=U", "-z"])
+        .await
+        .map(|out| parse_unmerged_paths(&out))
+        .unwrap_or_default()
+}
+
+async fn head_sha(git: &str, dir: &str) -> Option<String> {
+    run_git(git, dir, &["rev-parse", "HEAD"])
+        .await
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// 拉取远程更新（左栏「远程有 N 个新提交」徽章点击）。
+///
+/// - `--no-rebase`：分叉时走**合并**而不是变基；`--ff` 覆盖用户配置的 `pull.ff=only`
+///   （能快进就快进，不能就合）——用户口径是「无冲突直接更新合并代码」；
+/// - `--no-edit`：合并提交用 git 自动生成的信息，不拉起终端编辑器（这里 stdin 是 null）；
+/// - 有冲突：**保留合并态**，把冲突文件（绝对路径）交回前端去编辑器解决；
+/// - 其余失败（网络 / 权限 / 本地改动会被覆盖）：git 原文回传，前端显示成错误态。
+#[tauri::command]
+pub async fn pull_workspace(cwd: String) -> Result<PullOutcome, CmdError> {
+    let git = repo_git(&cwd).await?;
+    let before = head_sha(&git, &cwd).await;
+    match run_git_timeout(&git, &cwd, &["pull", "--no-rebase", "--ff", "--no-edit"], PULL_TIMEOUT).await {
+        Ok(out) => {
+            // 有更新 = HEAD 变了（快进或合并提交）；HEAD 没动 = 远程没有新提交。
+            // 不靠 stdout 文案判断：git 的输出会跟随界面语言本地化。
+            let after = head_sha(&git, &cwd).await;
+            let status = if before.is_some() && after == before { "up-to-date" } else { "merged" };
+            Ok(PullOutcome::done(status, summarize_git(&out)))
+        }
+        Err(err) => {
+            let unmerged = unmerged_paths(&git, &cwd).await;
+            if unmerged.is_empty() {
+                return Err(cmd_err(
+                    "GIT_PULL",
+                    err,
+                    Some("请检查网络 / 远程权限，或本地是否有会被覆盖的改动".into()),
+                ));
+            }
+            let root = work_root(&git, &cwd).await;
+            Ok(PullOutcome::conflicts(absolute_paths(&root, &unmerged), summarize_git(&err)))
+        }
+    }
+}
+
+/// 冲突解决后继续合并：把仍未标记解决的冲突文件 `git add`（调用方点按钮 = 已解决），
+/// 再用合并信息完成提交（`--no-edit` 不拉起编辑器）。不在合并态时直接拒绝。
+#[tauri::command]
+pub async fn continue_merge(cwd: String) -> Result<(), CmdError> {
+    let git = repo_git(&cwd).await?;
+    let root = work_root(&git, &cwd).await;
+    if run_git(&git, &root, &["rev-parse", "-q", "--verify", "MERGE_HEAD"]).await.is_err() {
+        return Err(cmd_err("NOT_MERGING", "当前没有待完成的合并".into(), None));
+    }
+    let unmerged = unmerged_paths(&git, &root).await;
+    if !unmerged.is_empty() {
+        let mut args: Vec<&str> = vec!["add", "--"];
+        args.extend(unmerged.iter().map(String::as_str));
+        run_git_timeout(&git, &root, &args, SLOW)
+            .await
+            .map_err(|e| cmd_err("MERGE_ADD", format!("标记冲突文件已解决失败：{e}"), None))?;
+    }
+    run_git_timeout(&git, &root, &["commit", "--no-edit", "--no-verify"], SLOW)
+        .await
+        .map_err(|e| cmd_err("MERGE_COMMIT", format!("完成合并失败：{e}"), None))?;
+    Ok(())
+}
+
+/// 放弃这次合并（冲突解决不了时的退路）：`git merge --abort` 把工作区恢复回拉取前。
+#[tauri::command]
+pub async fn abort_merge(cwd: String) -> Result<(), CmdError> {
+    let git = repo_git(&cwd).await?;
+    run_git_timeout(&git, &cwd, &["merge", "--abort"], SLOW)
+        .await
+        .map_err(|e| cmd_err("MERGE_ABORT", format!("放弃合并失败：{e}"), None))?;
     Ok(())
 }
 
@@ -564,6 +727,31 @@ mod tests {
         assert!(validate_branch_arg("-f").is_err());
     }
 
+    #[test]
+    fn unmerged_paths_parse_nul_list_and_absolutize() {
+        let out = "src/a.ts\0文档/冲突 文件.md\0\0";
+        let paths = parse_unmerged_paths(out);
+        assert_eq!(paths, vec!["src/a.ts", "文档/冲突 文件.md"]);
+        // 相对路径拼到仓库根上；本来就是绝对路径的原样保留
+        assert_eq!(
+            absolute_paths("/repo", &paths),
+            vec!["/repo/src/a.ts", "/repo/文档/冲突 文件.md"]
+        );
+        assert_eq!(absolute_paths("/repo", &["/abs/x".to_string()]), vec!["/abs/x"]);
+        // 没有冲突时是空表
+        assert!(parse_unmerged_paths("").is_empty());
+    }
+
+    #[test]
+    fn summarize_git_trims_and_caps() {
+        assert_eq!(summarize_git("  Fast-forward\n a.txt | 1 +\n  "), "Fast-forward\n a.txt | 1 +");
+        assert_eq!(summarize_git("   "), "");
+        let long: String = (0..50).map(|i| format!("line{i}\n")).collect();
+        let summary = summarize_git(&long);
+        assert_eq!(summary.lines().count(), 20, "最多 20 行");
+        assert!(!summary.ends_with('\n'));
+    }
+
     #[tokio::test]
     async fn real_repo_switch_branch_switches_and_refuses_conflicts() {
         let Some(git) = git_bin().await else { panic!("未找到 git") };
@@ -617,6 +805,96 @@ mod tests {
         assert!(err.message.contains("overwritten"), "err={}", err.message);
         assert_eq!(g(&["branch", "--show-current"]), "main", "冲突拒绝后必须留在原分支");
         assert_eq!(std::fs::read_to_string(work.join("f.txt")).unwrap(), "uncommitted-edit\n", "改动不得被动过");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn real_repo_pull_merges_and_stops_at_conflicts() {
+        let Some(git) = git_bin().await else { panic!("未找到 git") };
+        let root = std::env::temp_dir().join(format!("omp-mini-pull-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let remote = root.join("remote.git");
+        std::fs::create_dir_all(&remote).unwrap();
+        let run = |dir: &std::path::Path, args: &[&str]| {
+            let out = std::process::Command::new(&git).arg("-C").arg(dir).args(args).output().unwrap();
+            assert!(out.status.success(), "git {args:?} 失败：{}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        assert!(std::process::Command::new(&git)
+            .args(["init", "--bare", "--initial-branch=main"])
+            .arg(&remote)
+            .output()
+            .unwrap()
+            .status
+            .success());
+
+        // 两个克隆（A = 本应用操作的仓库，B = 模拟同事推送）
+        let a = root.join("a");
+        let b = root.join("b");
+        for dir in [&a, &b] {
+            let out = std::process::Command::new(&git)
+                .args(["clone", remote.to_str().unwrap(), dir.to_str().unwrap()])
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "clone 失败：{}", String::from_utf8_lossy(&out.stderr));
+            run(dir, &["config", "user.email", "e2e@test.local"]);
+            run(dir, &["config", "user.name", "omp e2e"]);
+        }
+        let a_str = a.to_string_lossy().to_string();
+        let b_str = b.to_string_lossy().to_string();
+
+        // 首个提交（A 推上去，B 跟上）
+        std::fs::write(a.join("f.txt"), "base\n").unwrap();
+        run(&a, &["add", "."]);
+        run(&a, &["commit", "-m", "chore: init"]);
+        run(&a, &["push", "-u", "origin", "main"]);
+        run(&b, &["pull", "--ff-only"]);
+
+        // 远程有新提交 → 快进合并（状态 merged，behind 归零）
+        std::fs::write(b.join("g.txt"), "from b\n").unwrap();
+        run(&b, &["add", "."]);
+        run(&b, &["commit", "-m", "feat: g"]);
+        run(&b, &["push"]);
+        let out = pull_workspace(a_str.clone()).await.expect("快进失败");
+        assert_eq!(out.status, "merged");
+        assert!(out.conflicts.is_empty());
+        assert_eq!(std::fs::read_to_string(a.join("g.txt")).unwrap(), "from b\n");
+        // 再拉一次：没有新提交（HEAD 不变）
+        let out = pull_workspace(a_str.clone()).await.expect("重复拉取失败");
+        assert_eq!(out.status, "up-to-date");
+
+        // 双方改同一个文件 → 冲突：停在合并态，冲突文件是绝对路径。
+        // A 的提交**只留在本地**（推上去 B 就成了快进），B 基于当前远程改同一文件并推送。
+        std::fs::write(a.join("f.txt"), "a-version\n").unwrap();
+        run(&a, &["commit", "-am", "chore: a"]);
+        run(&b, &["pull", "--ff-only"]);
+        std::fs::write(b.join("f.txt"), "b-version\n").unwrap();
+        run(&b, &["commit", "-am", "chore: b"]);
+        run(&b, &["push"]);
+        let out = pull_workspace(a_str.clone()).await.expect("冲突应走 Ok 返回");
+        assert_eq!(out.status, "conflicts");
+        assert!(!out.conflicts.is_empty());
+        let conflict = std::path::Path::new(&out.conflicts[0]);
+        assert!(conflict.is_absolute(), "冲突文件必须是绝对路径：{}", out.conflicts[0]);
+        assert_eq!(conflict.file_name().unwrap(), "f.txt");
+        assert!(run(&a, &["status", "--porcelain"]).contains("UU f.txt"), "应停在未合并态");
+
+        // 放弃合并：回到拉取前（本地那次提交还在）
+        abort_merge(a_str.clone()).await.expect("放弃合并失败");
+        assert_eq!(std::fs::read_to_string(a.join("f.txt")).unwrap(), "a-version\n");
+        assert!(run(&a, &["status", "--porcelain"]).is_empty());
+        // 不在合并态时继续合并被拒
+        let err = continue_merge(a_str.clone()).await.unwrap_err();
+        assert_eq!(err.code, "NOT_MERGING");
+
+        // 冲突解决后继续合并：改文件 → 标记已解决 → 合并提交
+        let out = pull_workspace(a_str.clone()).await.expect("再次拉取失败");
+        assert_eq!(out.status, "conflicts");
+        std::fs::write(a.join("f.txt"), "resolved\n").unwrap();
+        continue_merge(a_str.clone()).await.expect("继续合并失败");
+        assert!(run(&a, &["log", "-1", "--format=%P"]).split_whitespace().count() == 2, "应产生合并提交");
+        assert!(run(&a, &["status", "--porcelain"]).is_empty());
 
         let _ = std::fs::remove_dir_all(&root);
     }

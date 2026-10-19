@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Archive, BranchDown, BranchUp, Check, ChevronRight, Folder, FolderError, FolderMinus, FolderPlus, Inbox, Layers, LinkOff, Loader, PenLine, Plus, Trash2, X } from "reicon-react";
+import { AlertTriangle, Archive, BranchUp, Check, ChevronRight, Download, Folder, FolderError, FolderMinus, FolderPlus, Inbox, Layers, LinkOff, Loader, PenLine, Plus, Trash2, X } from "reicon-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "@shared/api";
 import type { ProjectView, SessionView, WorkspaceView } from "@shared/types";
@@ -15,6 +15,7 @@ import { runSessionBatch } from "../../lib/sessionBatch";
 import { formatSessionFullTime, formatSessionTime } from "../../lib/sessionTime";
 import { sessionTitleForDisplay } from "../../lib/sessionTitle";
 import { isCommitTaskRunning, pushWorkspace } from "../../lib/commitTasks";
+import { pullWorkspace } from "../../lib/pull";
 import { useText } from "../../lib/useText";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { DropLine } from "./DropLine";
@@ -172,6 +173,8 @@ export function ChatSidebar() {
  // git 行徽章的数据（刷新时机由 App 的 useWorkspaceGitRefresh 统一管）。
  const gitStates = useApp((s) => s.workspaceGitStates);
  const commitTasks = useApp((s) => s.commitTasks);
+ // 拉取运行态（behind 徽章的可点化：转圈 / 冲突 / 失败重试）。
+ const pullStates = useApp((s) => s.pullStates);
  // 目录行：项目头的分支 / 上游徽章判定用（主目录那一行；与 git 快照同源）。
  const checkouts = useApp((s) => s.checkouts);
  /** 新建会话入口（本组第一行钮 / ⌘T）的失败文案：与本地 `error` 共用下面同一条错误条。 */
@@ -599,6 +602,9 @@ export function ChatSidebar() {
   const dirty = gs.dirty;
   const ahead = gs.ahead;
   const behind = gs.behind;
+  const pull = pullStates[project.path];
+  // 拉取失败 / 停在冲突态时即便暂时没有 behind 也要给出入口（否则错误会被静默吞掉）
+  const pullAttention = pull?.phase === "error" || pull?.phase === "conflict";
   // 上游缺失提示：没有上游 / 上游已被远程删除 → 与远程**无法比较**，不能留白
   // （否则会被读成「与远程一致」）。正常上游返回 null——差异由 ahead / behind 徽章表达；
   // detached（主目录没有分支名）与非仓库不标。
@@ -610,7 +616,21 @@ export function ChatSidebar() {
     : gs.upstream === null
      ? t.gitNoUpstreamTitle
      : null;
-  if (!dirty && ahead <= 0 && behind <= 0 && !running && !failed && upstreamNote === null) return null;
+  if (!dirty && ahead <= 0 && behind <= 0 && !running && !failed && upstreamNote === null && !pullAttention) return null;
+  // behind 徽章的悬停 / 读屏文案：拉取中 / 冲突 / 失败各有自己的说明
+  const pullTitle =
+   pull?.phase === "running"
+    ? t.gitPullRunningTitle
+    : pull?.phase === "conflict"
+     ? t.gitPullConflictTitle
+     : pull?.phase === "error"
+      ? fmt(t.gitPullFailedTitle, pull.error ?? "")
+      : fmt(t.gitPullTitle, behind);
+  const onPull = (e: { stopPropagation: () => void }) => {
+   e.stopPropagation();
+   if (pull?.phase === "conflict") useApp.getState().setPullConflictCwd(project.path);
+   else void pullWorkspace(project.path);
+  };
   return (
    <span className="flex shrink-0 items-center gap-1" onClick={(e) => e.preventDefault()}>
     {dirty && (
@@ -629,18 +649,33 @@ export function ChatSidebar() {
       className="flex h-5 cursor-pointer items-center gap-0.5 rounded-sm bg-surface px-1 text-accent transition-colors duration-100 hover:bg-hover"
      >
       <BranchUp size={11} aria-hidden />
-      <span className="font-mono text-[10px] leading-none">{ahead}</span>
+      <span className="font-mono text-[10px] leading-none translate-y-px">{ahead}</span>
      </button>
     )}
-    {behind > 0 && (
-     <span
-      title={fmt(t.gitBehindTitle, behind)}
-      aria-label={fmt(t.gitBehindTitle, behind)}
-      className="flex h-5 items-center gap-0.5 rounded-sm bg-surface px-1 text-warn"
+    {(behind > 0 || pullAttention) && (
+     <button
+      type="button"
+      disabled={pull?.phase === "running"}
+      onClick={onPull}
+      title={pullTitle}
+      aria-label={pullTitle}
+      className={`flex h-5 items-center gap-0.5 rounded-sm bg-surface px-1 transition-colors duration-100 ${
+       pull?.phase === "running"
+        ? "cursor-default text-muted"
+        : pullAttention
+         ? "cursor-pointer text-danger hover:bg-hover"
+         : "cursor-pointer text-warn hover:bg-hover"
+      }`}
      >
-      <BranchDown size={11} aria-hidden />
-      <span className="font-mono text-[10px] leading-none">{behind}</span>
-     </span>
+      {pull?.phase === "running" ? (
+       <Loader size={11} aria-hidden className="animate-spin" />
+      ) : pullAttention ? (
+       <AlertTriangle size={11} aria-hidden />
+      ) : (
+       <Download size={11} aria-hidden />
+      )}
+      {behind > 0 && <span className="font-mono text-[10px] leading-none translate-y-px">{behind}</span>}
+     </button>
     )}
     {upstreamNote && (
      <span title={upstreamNote} aria-label={upstreamNote} className="flex size-5 items-center justify-center rounded-sm bg-surface text-faint">

@@ -20,6 +20,7 @@ const mock = vi.hoisted(() => ({
  archiveSessions: vi.fn(),
  removeProject: vi.fn(async () => undefined),
  moveProject: vi.fn(async () => [] as unknown[]),
+ pullWorkspace: vi.fn(),
 }));
 vi.mock("@shared/api", () => ({
  api: {
@@ -34,7 +35,13 @@ vi.mock("@shared/api", () => ({
   archiveSessions: mock.archiveSessions,
   removeProject: mock.removeProject,
   moveProject: mock.moveProject,
+  pullWorkspace: mock.pullWorkspace,
  },
+}));
+vi.mock("@tauri-apps/plugin-opener", () => ({
+ openPath: vi.fn(async () => undefined),
+ openUrl: vi.fn(async () => undefined),
+ revealItemInDir: vi.fn(async () => undefined),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(async () => null) }));
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: vi.fn(async () => "0.10.0") }));
@@ -95,12 +102,18 @@ beforeEach(() => {
  mock.removeProject.mockResolvedValue(undefined);
  mock.moveProject.mockReset();
  mock.moveProject.mockResolvedValue([]);
+ mock.pullWorkspace.mockReset();
+ mock.pullWorkspace.mockResolvedValue({ status: "up-to-date", conflicts: [], detail: "" });
  useApp.setState({
   projects: [P1, P2],
   workspaceGroups: [W1],
   sessions: [],
   activeSessionId: null,
   locale: "zh-CN",
+  workspaceGitStates: {},
+  commitTasks: {},
+  pullStates: {},
+  pullConflictCwd: null,
  });
  container = document.createElement("div");
  document.body.append(container);
@@ -228,6 +241,23 @@ describe("项目分组头的行内悬浮图标（V43）", () => {
   });
   // alpha 列的进行中会话只有 s1；已归档的 s4 不在列表里，也不许被删
   expect(mock.deleteSessions).toHaveBeenCalledWith(["s1"]);
+ });
+
+ it("远程有落后提交时显示拉取徽章（下载图标），点击直接拉取", async () => {
+  act(() => {
+   useApp.setState({
+    workspaceGitStates: { "/w/alpha": { path: "/w/alpha", isRepo: true, dirty: false, ahead: 0, behind: 8, upstream: "origin/main", upstreamGone: false } },
+    commitTasks: {},
+   });
+  });
+  await open();
+  const badge = container.querySelector<HTMLButtonElement>(`button[aria-label="${fmt(TEXT["zh-CN"].gitPullTitle, 8)}"]`);
+  expect(badge, "拉取徽章应渲染").not.toBeNull();
+  expect(badge?.textContent).toContain("8");
+  await act(async () => {
+   badge!.click();
+  });
+  expect(mock.pullWorkspace).toHaveBeenCalledWith("/w/alpha");
  });
 
  it("有未推送提交时分组头显示待推送徽章（点击走推送）", async () => {

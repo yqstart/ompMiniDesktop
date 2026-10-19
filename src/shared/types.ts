@@ -518,6 +518,23 @@ export type WorkspaceGitState = {
  upstreamGone: boolean;
 };
 
+/** 一次拉取的结果（与 Rust `git_ops::PullOutcome` 同构）。冲突不是错误：停在合并态等编辑器解决。 */
+export type PullOutcome = {
+ /** `up-to-date`（远程没有新提交）/ `merged`（已更新）/ `conflicts`（有冲突，已停在合并态）。 */
+ status: "up-to-date" | "merged" | "conflicts";
+ /** 冲突文件的**绝对路径**（`status === "conflicts"` 时非空）。 */
+ conflicts: string[];
+ /** git 输出摘要（悬停说明用）。 */
+ detail: string;
+};
+
+/** 拉取运行态（按 cwd）：running = 正在拉；conflict = 停在合并态等解决；error = 上次失败。 */
+export type PullState = {
+ phase: "running" | "conflict" | "error";
+ conflicts: string[];
+ error: string | null;
+};
+
 /** 变更集里的一个文件（与 Rust `git_ops::ChangeFile` 同构）。`index` / `worktree` = porcelain 的 XY。 */
 export type ChangeFile = {
  path: string;

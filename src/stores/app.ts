@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { BtwRecord, CheckoutView, CommitOutcome, CommitTaskView, Goal, HealthInfo, ImageAttachment, ModelCatalog, OmpUpdate, OmpUpdateRun, PendingReference, PlanCardState, ProjectView, QueuedMessages, RefPickerTarget, SessionRuntime, SessionStatus, SessionView, SubAgentInfo, TodoPhase, UpdateState, ViewMsg, WorkspaceGitState, WorkspaceView } from "@shared/types";
+import type { BtwRecord, CheckoutView, CommitOutcome, CommitTaskView, Goal, HealthInfo, ImageAttachment, ModelCatalog, OmpUpdate, OmpUpdateRun, PendingReference, PlanCardState, ProjectView, PullState, QueuedMessages, RefPickerTarget, SessionRuntime, SessionStatus, SessionView, SubAgentInfo, TodoPhase, UpdateState, ViewMsg, WorkspaceGitState, WorkspaceView } from "@shared/types";
 import type { Locale, LocaleMode } from "../lib/locale";
 import { loadLocaleMode, resolveLocale, saveLocaleMode, systemLang } from "../lib/locale";
 import { applyTheme, loadTheme, saveTheme, type ThemeMode } from "../lib/theme";
@@ -287,6 +287,16 @@ type AppState = {
   */
  workspaceGitStates: Record<string, WorkspaceGitState>;
  setWorkspaceGitStates: (states: WorkspaceGitState[]) => void;
+ /**
+  * 拉取远程的运行态（按 cwd，见 `lib/pull.ts`）：running = 徽章转圈；conflict = 停在合并态
+  * （徽章转成冲突色 + 弹冲突清单）；error = 上次失败（徽章转成警告色，悬停看错误原文）。
+  */
+ pullStates: Record<string, PullState>;
+ setPullState: (cwd: string, state: PullState) => void;
+ clearPullState: (cwd: string) => void;
+ /** 冲突清单浮层当前查看的工作区（null = 关着；合并态本身不受影响，Esc 只收起浮层）。 */
+ pullConflictCwd: string | null;
+ setPullConflictCwd: (cwd: string | null) => void;
  /**
   * 提交任务（按 cwd 存）：运行中关闭浮层 = 转后台（任务继续，行徽章指示）；
   * 失败任务保留到「重试 / 新任务 / 用户清除」，成功任务在关闭浮层时清除（git 快照接管）。
@@ -814,6 +824,17 @@ export const useApp = create<AppState>((set, get) => ({
    for (const st of states) next[st.path] = st;
    return { workspaceGitStates: next };
   }),
+ pullStates: {},
+ setPullState: (cwd, state) => set((s) => ({ pullStates: { ...s.pullStates, [cwd]: state } })),
+ clearPullState: (cwd) =>
+  set((s) => {
+   if (!(cwd in s.pullStates)) return {};
+   const next = { ...s.pullStates };
+   delete next[cwd];
+   return { pullStates: next };
+  }),
+ pullConflictCwd: null,
+ setPullConflictCwd: (cwd) => set({ pullConflictCwd: cwd }),
  commitTasks: {},
  activeCommitCwd: null,
  setCommitTask: (task) => set((s) => ({ commitTasks: { ...s.commitTasks, [task.cwd]: task } })),

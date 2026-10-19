@@ -36,6 +36,12 @@ export const IPC = {
  pushWorkspace: "push_workspace",
  cancelCommitTask: "cancel_commit_task",
  getWorkspaceGitState: "get_workspace_git_state",
+ /** 拉取远程（行徽章的「远程有新提交」点击）：无冲突直接合并，冲突停在合并态。 */
+ pullWorkspace: "pull_workspace",
+ /** 冲突解决后继续合并（标记已解决 + 用合并信息提交）。 */
+ continueMerge: "continue_merge",
+ /** 放弃这次合并（恢复拉取前的工作区）。 */
+ abortMerge: "abort_merge",
  // 供应商（设置 › 供应商）：login / logout / modelRoles
  listProviders: "list_providers",
  getProviderLogin: "get_provider_login",
