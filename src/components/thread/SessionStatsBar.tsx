@@ -144,7 +144,6 @@ function TurnStatsItem({ stats }: { stats: SessionLiveStats }) {
        </div>
       ))}
      </div>
-     <p className="mt-2 text-[11px] leading-relaxed text-faint">{t.liveStatsNote}</p>
     </div>
    )}
   </div>
@@ -210,7 +209,6 @@ function TokenStatsItem({ stats }: { stats: SessionLiveStats }) {
        </div>
       ))}
      </div>
-     <p className="mt-2 text-[11px] leading-relaxed text-faint">{t.liveStatsTokensNote}</p>
     </div>
    )}
   </div>

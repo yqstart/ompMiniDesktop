@@ -8,16 +8,17 @@ import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
 import { useDropdown } from "../../lib/useDropdown";
 import { clampThinking, thinkingLevelsOf } from "../../lib/thinking";
-import { shortModelName, fmtContextWindow } from "../../lib/modelNames";
+import { shortModelName } from "../../lib/modelNames";
 import { StarToggle } from "../settings/StarToggle";
 
 /**
  * 模型选择器（2026-10-14 与思考档拆分）：触发按钮 = 模型短名，浮层 = 搜索 + 刷新 +
  * 星标置顶分组（与设置页模型弹窗同一份口径）。
  *
- * **每行都带供应商标识**（`m.provider`）：同一模型名可能来自多家（deepseek 直连 / ccproxy /
+ * **每行只带供应商标识**（`m.provider`）：同一模型名可能来自多家（deepseek 直连 / ccproxy /
  * commandcode…），只给模型名分不出是哪一个；分组标题之外每行各自带一份，星标区与搜索结果里
- * 也不会裸露。
+ * 也不会裸露。行尾**不再摆上下文窗口 / 图片能力标记**（2026-10-19 用户口径：选择器里只要供应商，
+ * 容量与模态不进选择面）。
  *
  * 选模型仍会联动思考档，但**只在后端兜底**：omp 切模型会保留仍然合法的档位，只有缺档
  * （切过无思考模型等）才由 runtime 落 **omp 配置的默认档**（`defaultThinkingLevel`，
@@ -158,11 +159,9 @@ export function ModelMenu() {
                       aria-label={fmt(t.useModelAria, m.name)}
                     >
                       <span className="truncate">{m.name}</span>
-                      <span className="ml-auto flex shrink-0 gap-1 font-mono text-xs">
+                      <span className="ml-auto flex shrink-0 font-mono text-xs">
                         {/* 供应商：同一模型名可能来自多家，行内必须能分辨 */}
                         <span className="text-faint">{m.provider}</span>
-                        {m.contextWindow ? <span className="text-muted">{fmtContextWindow(m.contextWindow)}</span> : null}
-                        {m.input?.includes("image") ? <span className="text-muted">{t.imageCap}</span> : null}
                       </span>
                       {m.selector === currentModel && <Check size={12} className="shrink-0 text-accent" aria-hidden />}
                     </button>

@@ -180,7 +180,7 @@ describe("SessionStatsBar", () => {
   expect(text).toContain("62,804,864");
   expect(text).toContain("输出");
   expect(text).toContain("230,698");
-  // 缓存写为 0 时不铺那一行（与 DH 同门槛；注脚里的公式提到「缓存写入」，所以只看有没有行值）
+  // 缓存写为 0 时不铺那一行（与 DH 同门槛：只看有没有行值）
   expect(text).not.toContain("缓存写入0");
   expect(text).toContain("$1.50");
  });

@@ -209,7 +209,6 @@ export function UsageLimits() {
        {fmt(t.usageLimitsAccountsWithout, usage.accountsWithoutUsage.length)}
       </p>
      )}
-     <p className="px-1 pt-1.5 text-[11px] text-faint">{t.usageLimitsFoot}</p>
     </div>
    )}
   </div>

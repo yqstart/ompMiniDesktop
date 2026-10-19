@@ -195,7 +195,7 @@ function Heatmap({ cells, numLocale }: { cells: UsageHeatRow[]; numLocale: strin
  * - 「Token 活动」热力图：最近 53 周的逐日日历，**不随范围切换**，右上三档换取值口径；
  * - 数据来源 = omp 会话记录（每条 assistant 消息的 `usage`，含已归档会话）**∪** 壳侧使用账本
  *   （后端按 `responseId` 去重）：**会话被删掉后那部分用量仍留在统计里**，`extras` 就是账本补上的
- *   条数，界面上要明说来源；
+ *   条数（2026-10-19 用户口径：这个来源说明不再上界面，本页只留读数）；
  * - 全数字（含命中率 / 连续天数）由后端算好，前端只做格式化；
  * - 扫描有预算，超出时明说「统计可能不全」（后端 `truncated`），不假装统计完了；
  * - 本页自身**只读**（不写 omp 配置、不写覆盖层）；账本的写入在会话运行时（`runtime.rs`）。
@@ -252,9 +252,8 @@ export function UsagePanel() {
 
  return (
   <section aria-label={t.tabUsage} className="shrink-0">
-   {/* 页头：口径提示 + 右侧「范围切换 + 刷新」；窄窗整组换行，不挤压提示文字 */}
-   <div className="flex flex-wrap items-start gap-2">
-    <p className="min-w-0 grow basis-3/5 text-xs leading-5 text-muted">{t.usageHint}</p>
+   {/* 页头：右侧「范围切换 + 刷新」（2026-10-19 用户口径：口径说明文字不再上界面，页头只留操作） */}
+   <div className="flex flex-wrap items-center justify-end gap-2">
     <div className="flex shrink-0 flex-wrap items-center gap-0.5">
      <div role="radiogroup" aria-label={t.usageRangeAria} className="flex flex-wrap gap-1 rounded-md bg-surface p-1">
       {RANGES.map((r) => (
@@ -290,10 +289,6 @@ export function UsagePanel() {
    )}
    {data?.truncated && (
     <p className="mt-2 text-[13px] text-warn">{fmt(t.usageTruncated, data.scannedFiles)}</p>
-   )}
-   {data !== null && data.extras > 0 && (
-    /* 数据来源要明说：这部分是壳侧账本补的（omp 会话记录已经删了），不是 jsonl 扫出来的 */
-    <p className="mt-2 text-[12px] leading-relaxed text-faint">{fmt(t.usageLedgerExtra, data.extras)}</p>
    )}
 
    {data === null ? (

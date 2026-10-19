@@ -345,8 +345,6 @@ const ZH = {
  ompSettingsNoMatch: "没有匹配的设置",
  ompSettingsStale: "刷新失败，当前显示上次读取的结果",
  listRefreshFailed: "刷新失败，当前显示上次读取的结果",
- archivedHint:
-  "归档的对话不在左栏工作区树里显示；恢复后即可继续使用，删除会把 jsonl 会话文件一起删掉、不可恢复。这里不受列表扫描窗口限制，多老的归档都找得到。",
  archivedRefresh: "刷新",
  archivedLoading: "读取中…",
  archivedEmpty: "还没有已归档的对话。在项目会话弹窗里点「归档」。",
@@ -396,8 +394,6 @@ const ZH = {
 
  // 设置 › 使用统计（omp 会话 jsonl 里的用量聚合：tokens 用量 / Cache 命中率 / 活跃天数）
  tabUsage: "使用统计",
- usageHint:
-  "统计来自本机 omp 的会话记录（每一条 assistant 消息的 usage 求和，含已归档会话）：tokens 用量、Cache 命中率与活跃天数。本应用只读取 omp，不做联网上报；运行期间的用量另在本地记一份账，会话删掉也不会从统计里消失。",
  usageRangeToday: "今日",
  usageRange7d: "近 7 日",
  usageRange30d: "近 30 日",
@@ -407,7 +403,6 @@ const ZH = {
  usageLoadFailed: "统计加载失败",
  usageEmpty: "这个范围内还没有可统计的用量。跑过带模型的 omp 会话后，这里会给出 tokens 用量、缓存命中率与活跃天数。",
  usageTruncated: "已到扫描预算（已扫描 {0} 个会话文件），统计可能不全。",
- usageLedgerExtra: "其中 {0} 条来自本地记账（会话记录已删除，用量仍保留）。",
  usageTokens: "tokens 用量",
  usageCacheHit: "Cache 命中率",
  usageCacheReadSub: "缓存读 {0} tokens",
@@ -641,8 +636,7 @@ const ZH = {
  ompSettingsMissing: "未找到 omp——先用顶部横幅的「重新检测 / 指定路径」指定；omp 就绪后，安装信息与诊断在左栏字标行 omp 版本 chip 的弹窗里。",
  // 设置面板（设置 ›「常用设置」）的文案；展示哪些键由 `lib/settingsList.ts` 的清单过滤，
  // 分组 / 枚举取值来自上游人读清单，值与说明来自 --json
- allSettingsHint:
-  "omp 常用设置的本地精选清单（模型、上下文、压缩、工具、记忆等，按上游分组）。写的是全局配置（~/.omp/agent/config.yml），新建的会话一定读到新值；完整清单在终端里跑 omp config list；鼠标停在某一行上看 omp 自己的说明（上游英文原文，不做翻译）。",
+ allSettingsHint: "omp 常用设置",
  allSettingsExpandAll: "全部展开",
  allSettingsCollapseAll: "全部收起",
  allSettingsCount: "共 {0} 项",
@@ -1082,7 +1076,6 @@ const ZH = {
  ctxPartSystemContext: "系统上下文",
  ctxCacheHit: "平均缓存命中率",
  ctxCacheReadTitle: "缓存读 {0} · 未缓存输入 {1} · 缓存写 {2}（本会话累计）",
- ctxNote: "总量与「消息」是 omp 真值；非消息各档按字符量估算后对齐到真值，用来判断哪一块在吃上下文。",
  ctxAria: "上下文容量：已用 {0}，窗口 {1}，占 {2}；{3}",
 
  // 输入框
@@ -1175,7 +1168,6 @@ const ZH = {
  liveStatsToolTime: "工具调用用时",
  liveStatsTtftAvg: "首 token 平均（TTFT）",
  liveStatsTpsLabel: "输出速度（TPS）",
- liveStatsNote: "模型用时与吞吐取自会话记录里每一轮的耗时；工具用时按工具结果落盘的时刻逐个求和，是估算。",
  liveStatsTokensTitle: "Token 用量",
  liveStatsTokensInline: "{0} tok",
  liveStatsTokensAria: "Token 用量：{0}，缓存命中 {1}",
@@ -1187,7 +1179,6 @@ const ZH = {
  liveStatsOutputLabel: "输出",
  liveStatsReasoningLabel: "推理",
  liveStatsCostLabel: "成本",
- liveStatsTokensNote: "会话记录里逐轮用量求和；缓存命中 = 缓存读取 ÷（未缓存输入 + 缓存读取 + 缓存写入），总计 = 三桶输入 + 输出。",
  spanSec: "{0} 秒",
  spanMinSec: "{0} 分 {1} 秒",
  spanHourMin: "{0} 小时 {1} 分",
@@ -1282,7 +1273,6 @@ const ZH = {
  usageLimitsWindow5h: "5 小时",
  usageLimitsWindow7d: "每周",
  usageLimitsWindowMonthly: "每月",
- usageLimitsFoot: "数据来自 omp 的用量查询 · 只读",
  usageLimitsNoData: "无用量数据",
  usageLimitsNoDataHint: "omp 暂不支持查询这个供应商的用量（模型仍可正常使用）",
  usageLimitsNoDataMore: "另有 {0} 个供应商无用量数据",
@@ -1297,7 +1287,6 @@ const ZH = {
  searchModelPlaceholder: "搜索模型…",
  refreshModels: "刷新模型列表",
  pickerLoadError: "模型目录加载失败：{0}",
- imageCap: "图",
 
  // 权限徽标
  permAlwaysAsk: "每次询问",
@@ -1811,8 +1800,6 @@ const EN: Record<TextKey, string> = {
  ompSettingsNoMatch: "No matching settings",
  ompSettingsStale: "Refresh failed; showing the last loaded result",
  listRefreshFailed: "Refresh failed; showing the last loaded result",
- archivedHint:
-  "Archived chats are hidden from the workspace tree. Restore brings one back to use; delete removes the jsonl file for good. This list ignores the scan window, so even very old archives show up.",
  archivedRefresh: "Refresh",
  archivedLoading: "Loading…",
  archivedEmpty: "Nothing archived yet. Use Archive in a project's session popup.",
@@ -1861,8 +1848,6 @@ const EN: Record<TextKey, string> = {
 
  // 设置 › 使用统计（omp 会话 jsonl 里的用量聚合：tokens 用量 / Cache 命中率 / 活跃天数）
  tabUsage: "Usage",
- usageHint:
-  "Stats come from local omp session records (summed from each assistant message's usage, archived chats included): tokens used, cache hit rate and active days. This app only reads omp and never reports usage anywhere; it also keeps a local ledger while sessions run, so deleting a chat no longer removes its usage from these numbers.",
  usageRangeToday: "Today",
  usageRange7d: "Last 7 days",
  usageRange30d: "Last 30 days",
@@ -1872,7 +1857,6 @@ const EN: Record<TextKey, string> = {
  usageLoadFailed: "Failed to load usage stats",
  usageEmpty: "No usage in this range yet. Once omp sessions run with a model, tokens used, cache hit rate and active days show up here.",
  usageTruncated: "Hit the scan budget ({0} session files scanned); figures may be incomplete.",
- usageLedgerExtra: "{0} of them come from the local ledger (their session records were deleted).",
  usageTokens: "tokens used",
  usageCacheHit: "Cache hit rate",
  usageCacheReadSub: "{0} cached tokens",
@@ -2099,8 +2083,7 @@ const EN: Record<TextKey, string> = {
  ompSettingsTuiOnly: "TUI only",
  ompSettingsDefault: "Default",
  ompSettingsMissing: "omp not found — use “Re-check / Set path” in the banner at the top first; once omp is ready, its install info and diagnostics live in the dialog behind the omp version chip on the sidebar wordmark row.",
- allSettingsHint:
-  "A curated local list of omp's commonly used settings (model, context, compaction, tools, memory and more), grouped as upstream does. Writes go to omp's global config (~/.omp/agent/config.yml) and new sessions always pick them up; for the full key list run omp config list in a terminal; hover a row for omp's own description (upstream English, not translated).",
+ allSettingsHint: "omp common settings",
  allSettingsExpandAll: "Expand all",
  allSettingsCollapseAll: "Collapse all",
  allSettingsCount: "{0} keys",
@@ -2519,7 +2502,6 @@ const EN: Record<TextKey, string> = {
  ctxPartSystemContext: "System context",
  ctxCacheHit: "Avg cache hit rate",
  ctxCacheReadTitle: "Cache read {0} · uncached input {1} · cache write {2} (this chat)",
- ctxNote: "Used tokens and “Messages” come straight from omp; the non-message rows are estimated from character volume and scaled to that true total, to show what fills the context.",
  ctxAria: "Context capacity: {0} used of {1}, {2}; {3}",
  attachOnlyImages: "Only PNG / JPEG / WebP / GIF images are supported; other files were ignored",
  attachSomeIgnored: "Non-image files were ignored; only images were added",
@@ -2610,7 +2592,6 @@ const EN: Record<TextKey, string> = {
  liveStatsToolTime: "Tool time",
  liveStatsTtftAvg: "Avg first token (TTFT)",
  liveStatsTpsLabel: "Output speed (TPS)",
- liveStatsNote: "Model time and throughput come from the duration recorded for each turn; tool time is estimated from when each tool result landed on disk.",
  liveStatsTokensTitle: "Token usage",
  liveStatsTokensInline: "{0} tok",
  liveStatsTokensAria: "Token usage: {0}, cache hit {1}",
@@ -2622,7 +2603,6 @@ const EN: Record<TextKey, string> = {
  liveStatsOutputLabel: "Output",
  liveStatsReasoningLabel: "Reasoning",
  liveStatsCostLabel: "Cost",
- liveStatsTokensNote: "Summed from per-turn usage in the session record; cache hit = cache read ÷ (uncached input + cache read + cache write), total = the three input buckets + output.",
  spanSec: "{0}s",
  spanMinSec: "{0}m {1}s",
  spanHourMin: "{0}h {1}m",
@@ -2711,7 +2691,6 @@ const EN: Record<TextKey, string> = {
  usageLimitsWindow5h: "5 hours",
  usageLimitsWindow7d: "Weekly",
  usageLimitsWindowMonthly: "Monthly",
- usageLimitsFoot: "From omp usage query · read-only",
  usageLimitsNoData: "No usage data",
  usageLimitsNoDataHint: "omp can't query usage for this provider yet (models still work)",
  usageLimitsNoDataMore: "{0} more provider(s) without usage data",
@@ -2724,7 +2703,6 @@ const EN: Record<TextKey, string> = {
  searchModelPlaceholder: "Search models…",
  refreshModels: "Refresh model list",
  pickerLoadError: "Failed to load the model catalog: {0}",
- imageCap: "img",
  permAlwaysAsk: "Always ask",
  permAlwaysAskDesc: "Confirm every file edit and command",
  permWrite: "Ask on write",

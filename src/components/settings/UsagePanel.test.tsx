@@ -168,14 +168,13 @@ describe("使用统计 › 三张指标卡", () => {
   expect(container.textContent).not.toContain("%");
  });
 
- it("有账本补记时说清来源，没有则不出现这一行", async () => {
-  await render();
-  expect(container.textContent).not.toContain("本地记账");
-
+ it("账本补记（extras）不再上界面：读数照常，来源说明行不出现", async () => {
   mock.getUsageStats.mockImplementation(async () => ({ ...usage, extras: 7 }));
-  act(() => radio("近 7 日").click());
-  await flush();
-  expect(container.textContent).toContain("其中 7 条来自本地记账");
+  await render();
+  expect(container.textContent).toContain("tokens 用量");
+  expect(container.textContent).toContain("1,540");
+  expect(container.textContent).not.toContain("本地记账");
+  expect(container.textContent).not.toContain("来自本地");
  });
 });
 

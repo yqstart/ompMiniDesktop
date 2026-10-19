@@ -114,8 +114,8 @@ export function ArchivedSessions() {
 
  return (
   <section aria-label={t.tabArchived} className="shrink-0">
-   <div className="flex flex-wrap items-start gap-2">
-    <p className="min-w-0 flex-1 text-xs leading-5 text-muted">{t.archivedHint}</p>
+   {/* 页头：右侧「计数 + 刷新」（2026-10-19 用户口径：口径说明文字不再上界面，页头只留操作） */}
+   <div className="flex flex-wrap items-center justify-end gap-2">
     <div className="flex shrink-0 items-center gap-2">
      {rows !== null && <span className="font-mono text-[11px] text-faint">{total}</span>}
      <button

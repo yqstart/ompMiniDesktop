@@ -202,7 +202,6 @@ export function ContextMeter() {
        </span>
       </div>
      )}
-     <p className="mt-2 text-[11px] leading-relaxed text-faint">{t.ctxNote}</p>
     </div>
    )}
   </div>
