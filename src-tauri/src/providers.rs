@@ -15,7 +15,9 @@
 //! **为什么角色写入走 `omp config set modelRoles <JSON>`**：settings schema 里
 //! `modelRoles` 是 record，`omp config set` 只接受整表 JSON（点路径 `modelRoles.smol`
 //! 实测报 "Unknown setting"）。所以这里是「读 → 改一个键 → 写回」，用 `roles_edit`
-//! 互斥锁串行化，避免两次并发编辑互相覆盖。
+//! 互斥锁串行化，避免两次并发编辑互相覆盖。**多套「模型配置」的激活**走
+//! [`apply_model_roles`]：整表一次覆盖（旧配置独有的角色要删掉），仍用同一把 `roles_edit`
+//! 锁；写后回读，前端拿回读真值收敛。
 //!
 //! **失败转移链（`retry.fallbackChains`）走同一套模式**：它也是 record（键 = 角色名 /
 //! 模型 selector / 供应商通配，值 = 有序备用 selector 数组），整表写回、用 `retry_edit`
@@ -975,6 +977,59 @@ pub async fn set_model_role(
     Ok(roles_info(&vals))
 }
 
+/// 校验并归一化整张角色表（纯函数，`apply_model_roles` 与单测共用）：
+/// 逐项走 [`apply_role_edit`]——非法角色名 / 非字符串值直接报错，空白 selector 视为删除，
+/// selector 去首尾空白。返回的新表可直接序列化给 `omp config set modelRoles`。
+pub fn normalize_role_table(
+    roles: &serde_json::Map<String, serde_json::Value>,
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    let mut next = serde_json::Map::new();
+    for (role, value) in roles {
+        let selector = value
+            .as_str()
+            .ok_or_else(|| format!("角色 {role} 的值不是字符串"))?;
+        apply_role_edit(&mut next, role, Some(selector))?;
+    }
+    Ok(next)
+}
+
+/// 整表写入模型角色（设置 › 模型的「模型配置」用）：激活一套配置 / 编辑激活配置时，
+/// 前端把该配置的整表发来，这里一次性覆盖 `modelRoles`。
+///
+/// 与 [`set_model_role`] 的区别：那个是「读 → 改一个键 → 写回」，适合单行编辑；
+/// 切换配置必须**整表覆盖**（旧配置独有的角色要被删掉），逐个键写又慢又不原子。
+/// 空表合法（= 清空所有角色，omp 按默认回退规则解析）。写入前逐项走 [`apply_role_edit`]
+/// 的校验；已是目标值就不写（幂等），写完回读一次确认。
+#[tauri::command]
+pub async fn apply_model_roles(
+    state: tauri::State<'_, AppState>,
+    roles: serde_json::Map<String, serde_json::Value>,
+) -> Result<ModelRolesInfo, CmdError> {
+    let bin = omp_bin(&state)?;
+    let _guard = state.roles_edit.lock().await;
+    let next = normalize_role_table(&roles).map_err(|e| cmd_err("ROLE_INVALID", e, None))?;
+    let vals = config_values_global(&state, &bin, &["modelRoles", "modelRoleStorage"])
+        .await
+        .map_err(|e| cmd_err("ROLES_READ_FAILED", e, None))?;
+    let current = vals
+        .get("modelRoles")
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    if current == next {
+        return Ok(roles_info(&vals));
+    }
+    let json = serde_json::to_string(&serde_json::Value::Object(next))
+        .map_err(|e| cmd_err("ROLES_WRITE_FAILED", format!("角色序列化失败：{e}"), None))?;
+    run_omp(&bin, &["config", "set", "modelRoles", &json])
+        .await
+        .map_err(|e| cmd_err("ROLES_WRITE_FAILED", format!("写入角色失败：{e}"), None))?;
+    // 回读：写入被 omp 静默丢弃时，界面不该显示一个其实没生效的值
+    let vals = config_values_global(&state, &bin, &["modelRoles", "modelRoleStorage"])
+        .await
+        .map_err(|e| cmd_err("ROLES_READ_FAILED", e, None))?;
+    Ok(roles_info(&vals))
+}
+
 /// Ctrl+P 快速切换环（`cycleOrder`）：**环 = 模型角色的派生投影**（用户口径 2026-10-10），
 /// 没有手动编辑面——本命令把它对齐成 [`derive_cycle_order`] 的结果。
 ///
@@ -1329,6 +1384,30 @@ mod tests {
             json,
             r#"{"default":"commandcode/meta/muse-spark-1.3-contributor:xhigh"}"#
         );
+    }
+
+    #[test]
+    fn normalize_role_table_validates_and_drops_unset_roles() {
+        let mut input = serde_json::Map::new();
+        input.insert("default".into(), serde_json::json!("  a/one  "));
+        input.insert("smol".into(), serde_json::json!("   "));
+        input.insert("my-role_2".into(), serde_json::json!("b/two:high"));
+        let out = normalize_role_table(&input).unwrap();
+        assert_eq!(
+            out.get("default").and_then(|v| v.as_str()),
+            Some("a/one")
+        );
+        // 空白 selector = 未配置（不出现在写回的整表里）
+        assert!(!out.contains_key("smol"));
+        assert_eq!(out.len(), 2);
+
+        let mut bad_name = serde_json::Map::new();
+        bad_name.insert("bad name".into(), serde_json::json!("a/one"));
+        assert!(normalize_role_table(&bad_name).is_err());
+
+        let mut bad_value = serde_json::Map::new();
+        bad_value.insert("default".into(), serde_json::json!(42));
+        assert!(normalize_role_table(&bad_value).is_err());
     }
 
     #[test]

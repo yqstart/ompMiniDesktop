@@ -27,6 +27,12 @@ export default defineConfig({
   build: {
     target: "es2021",
     rollupOptions: {
+      // 桌面壳入口 + 手机 PWA 入口：两者共享 store / 事件归一 / 消息渲染，
+      // 远程服务只把 mobile.html 与 assets 暴露给手机。
+      input: {
+        main: path.resolve(__dirname, "index.html"),
+        mobile: path.resolve(__dirname, "mobile.html"),
+      },
       output: {
         // Markdown 渲染链（react-markdown + remark-gfm + rehype-highlight）体积大且只在
         // 渲染助手正文时用到：单独分包，主包保持轻量（桌面端本地加载，无网络成本）。

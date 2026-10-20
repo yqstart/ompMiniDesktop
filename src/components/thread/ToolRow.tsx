@@ -16,6 +16,7 @@ import { useOpenPath } from "../../lib/openPath";
 import { toolLineParts, type ToolLineIcon } from "../../lib/toolLine";
 import { useElapsedSeconds, formatElapsed } from "../../lib/useElapsed";
 import { useApp } from "../../stores/app";
+import { isRemoteClient } from "@shared/remote";
 
 /**
  * 工具调用行（原 `ToolCard`）。
@@ -117,7 +118,7 @@ export function ToolRow({ m, cwd }: { m: Extract<ViewMsg, { kind: "tool" }>; cwd
       <button
        className="block w-full cursor-pointer truncate text-left font-mono text-[11px] text-faint hover:text-foreground"
        title={fmt(t.toolOpenTitle, m.argsSummary)}
-       onClick={() => void openLocal(m.argsSummary)}
+       onClick={() => { if (!isRemoteClient()) void openLocal(m.argsSummary); }}
       >
        {m.argsSummary}
       </button>

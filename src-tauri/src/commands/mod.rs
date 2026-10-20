@@ -24,8 +24,8 @@ pub struct AppState {
     pub login: std::sync::Arc<Mutex<Option<crate::providers::LoginSession>>>,
     /// 最近一次登录的进度快照（切走设置页再回来时用它补齐，见 `providers.rs`）。
     pub login_status: std::sync::Arc<Mutex<crate::providers::LoginStatus>>,
-    /// 模型角色「读 → 改 → 写」的串行锁：`modelRoles` 是 record，只能整表写回，
-    /// 两次并发编辑不加锁会互相覆盖（丢键）。
+    /// 模型角色「读 → 改 → 写」与「整表激活」的串行锁：`modelRoles` 是 record，
+    /// 只能整表写回，两次并发写不加锁会互相覆盖（丢键）。
     pub roles_edit: Mutex<()>,
     /// 失败转移链（`retry.fallbackChains`）的同类锁：record 也只能整表写回。
     pub retry_edit: Mutex<()>,
@@ -570,7 +570,7 @@ pub async fn remove_project(app: AppHandle, state: State<'_, AppState>, id: Stri
     let sids = session_ids_for(&agent.join("sessions"), &proj_path);
     // 聊天形态：该项目下的长驻会话进程先停（逐个通知 idle + kill_runtime，不阻塞落盘）
     for sid in &sids {
-        let _ = app.emit(format!("omp-status://{sid}").as_str(), serde_json::json!({"state":"idle"}));
+        crate::remote::emit_event(&app, &format!("omp-status://{sid}"), &serde_json::json!({"state":"idle"}));
         kill_runtime(&state, sid);
     }
     {
@@ -1341,7 +1341,7 @@ async fn delete_session_inner(state: &State<'_, AppState>, id: &str) -> Result<(
 
 /// 图片附件（V2 M6）：只用得上 base64 与 mime，`name`/`bytes` 供前端展示。
 /// 前端传 camelCase（`dataBase64` / `mimeType`），omp 侧 image 内容块用 `data` / `mimeType`。
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageAttachment {
     pub data_base64: String,
@@ -1500,7 +1500,7 @@ fn plan_after_rejected_params(
         }
         Err(mut e2) => {
             e2.message = format!(
-                "新建会话失败：{}；去掉项目偏好（模型 / 思考档）重试仍失败：{}",
+                "新建会话失败：{}；去掉模型 / 思考档参数重试仍失败：{}",
                 first_err.message, e2.message
             );
             Plan::GiveUp(e2)
@@ -1534,6 +1534,49 @@ async fn spawn_new<R: tauri::Runtime>(
     .await
 }
 
+/// 计划会话的 spawn 模型 / 思考档选择（纯函数，单测锁着）。
+///
+/// omp 的 TUI 进入计划模式会把活动模型切到 `modelRoles.plan`，但 rpc-ui 的
+/// `--plan-yolo` 启动路径**不会**自己做这一步（它只设 plan-mode 状态）。所以壳侧在
+/// plan 角色已配置时用 `--model @plan` 让 omp 在启动时按角色解析（角色 selector 的
+/// `:档位` 后缀也会被 omp 采纳）；项目 `last_model` / `last_thinking` 只作为
+/// plan 角色未配置时的兜底——否则项目偏好会把计划角色覆盖掉。
+fn plan_spawn_prefs(
+    plan: bool,
+    has_plan_role: bool,
+    project_model: Option<String>,
+    project_thinking: Option<String>,
+) -> (Option<String>, Option<String>) {
+    if plan && has_plan_role {
+        (Some("@plan".to_string()), None)
+    } else {
+        (project_model, project_thinking)
+    }
+}
+
+/// 计划角色是否配置（读**项目 cwd 的有效值**：项目 `.omp/config.yml` 里单独配的 plan
+/// 角色也要算，不能只读全局层）。读失败按未配置处理——新建会话不因一次探测失败被挡住。
+async fn plan_role_configured(bin: &str, cwd: &str) -> bool {
+    let out = crate::providers::run_omp_in_timeout(
+        Some(std::path::Path::new(cwd)),
+        bin,
+        &["config", "get", "modelRoles", "--json"],
+        std::time::Duration::from_secs(5),
+    )
+    .await;
+    let Ok(out) = out else { return false };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(out.trim()) else { return false };
+    has_plan_role(&v)
+}
+
+/// `omp config get modelRoles --json` 的回包 → plan 角色是否非空。
+fn has_plan_role(v: &serde_json::Value) -> bool {
+    v.get("value")
+        .and_then(|value| value.get("plan"))
+        .and_then(|plan| plan.as_str())
+        .is_some_and(|plan| !plan.trim().is_empty())
+}
+
 /// 新建会话的返回：视图 + （可选的）降级说明。
 ///
 /// 为什么不让 `create_session` 直接返回 `SessionView`：参数被 omp 拒绝而降级这件事
@@ -1548,7 +1591,8 @@ pub struct CreateSessionResult {
 }
 
 /// 新建聊天会话（V32：按目录开——左栏目录行 / 会话弹窗的「新建」都传 checkout 路径；
-/// 模型与思考档沿用所属项目上次的选择）。
+/// 普通会话的模型与思考档沿用所属项目上次的选择；**计划会话优先按 `modelRoles.plan`**
+/// 启动（`--model @plan`，思考档取角色 selector 的后缀），plan 角色未配置时才回退到项目偏好）。
 ///
 /// **参数被 omp 拒绝时必须还能建起来**（用户实测的坑）：覆盖层记的 `last_model` /
 /// `last_thinking` 会在上游改名 / 删除模型后变成悬空值，而 omp 对非法 `--model` /
@@ -1590,7 +1634,7 @@ pub async fn create_session_in<R: tauri::Runtime>(
             Some("若只是想在 WSL 里跑命令，用右栏终端；omp 的会话文件在 WSL 自己的 ~/.omp 下，不与 Windows 侧共享。".into()),
         ));
     }
-    let (model, thinking) = {
+    let (project_model, project_thinking) = {
         let ov = state.overlay.lock().await;
         let projects: Vec<(String, String)> = ov.projects.iter().map(|p| (p.id.clone(), p.path.clone())).collect();
         let scope = projects.clone();
@@ -1606,6 +1650,9 @@ pub async fn create_session_in<R: tauri::Runtime>(
     let Some(bin) = bin else {
         return Err(cmd_err("OMP_MISSING", "未找到 omp，无法新建会话".into(), Some("请先安装 oh-my-pi".into())));
     };
+    // 计划会话按 `modelRoles.plan` 启动；plan 角色未配置时才沿用项目偏好。
+    let has_plan_role = plan && plan_role_configured(&bin, &cwd).await;
+    let (model, thinking) = plan_spawn_prefs(plan, has_plan_role, project_model, project_thinking);
     // spawn 内部以会话 id 作 runtime 表的键（不再需要占位键换名——换名窗口会让
     // pump 的首批帧查不到表条目：命令面缓存丢、偏好回写跳过）
     let first = spawn_new(app, state, &bin, &cwd, model.as_deref(), thinking.as_deref(), plan).await;
@@ -2583,7 +2630,7 @@ pub async fn approve(app: AppHandle, state: State<'_, AppState>, id: String, ui_
     if let Some(r) = state.runtime.lock().await.get(&id) {
         r.activity.set_state(crate::runtime::ACT_RUNNING);
     }
-    let _ = app.emit(format!("omp-status://{id}").as_str(), serde_json::json!({"state":"running"}));
+    crate::remote::emit_event(&app, &format!("omp-status://{id}"), &serde_json::json!({"state":"running"}));
     Ok(())
 }
 
@@ -2622,7 +2669,7 @@ pub async fn respond_ui(
     if let Some(r) = state.runtime.lock().await.get(&id) {
         r.activity.set_state(crate::runtime::ACT_RUNNING);
     }
-    let _ = app.emit(format!("omp-status://{id}").as_str(), serde_json::json!({"state":"running"}));
+    crate::remote::emit_event(&app, &format!("omp-status://{id}"), &serde_json::json!({"state":"running"}));
     Ok(())
 }
 
@@ -3027,11 +3074,66 @@ mod tests {
         apply_project_order, assign_members, catalog_fresh, check_direct, check_suffix, clean_workspace_name,
         complete_candidates,
         derived_title, display_title, discover_omp_path, get_global_approval, kill_runtime, list_archived_in,
-        load_cached, load_state, owner_project, plan_after_rejected_params, rpc_request, scan_window,
-        session_file_for, spawn_session_runtime, stderr_first_line, AppState, Plan, MODELS_TTL_MS,
+        load_cached, load_state, owner_project, plan_after_rejected_params, plan_role_configured,
+        plan_spawn_prefs, rpc_request, scan_window, session_file_for, spawn_session_runtime, stderr_first_line,
+        has_plan_role, AppState, Plan, MODELS_TTL_MS,
     };
     use crate::overlay::{Overlay, Project};
     use std::collections::HashMap;
+
+    /// 计划会话：plan 角色已配置时用 `--model @plan`（思考档交给角色后缀），
+    /// 未配置时沿用项目偏好；普通会话永远用项目偏好。
+    #[test]
+    fn plan_session_prefers_plan_role() {
+        let project_model = Some("project/model".to_string());
+        let project_thinking = Some("max".to_string());
+        assert_eq!(
+            plan_spawn_prefs(true, true, project_model.clone(), project_thinking.clone()),
+            (Some("@plan".to_string()), None)
+        );
+        assert_eq!(
+            plan_spawn_prefs(true, false, project_model.clone(), project_thinking.clone()),
+            (project_model.clone(), project_thinking.clone())
+        );
+        assert_eq!(
+            plan_spawn_prefs(false, true, project_model.clone(), project_thinking.clone()),
+            (project_model, project_thinking)
+        );
+    }
+
+    /// `omp config get modelRoles --json` 的回包形状：只有非空字符串才算配置了 plan 角色。
+    #[test]
+    fn plan_role_config_shape() {
+        assert!(has_plan_role(&serde_json::json!({"value": {"plan": "p/m:high"}})));
+        assert!(!has_plan_role(&serde_json::json!({"value": {}})));
+        assert!(!has_plan_role(&serde_json::json!({"value": {"plan": "   "}})));
+        assert!(!has_plan_role(&serde_json::json!({"value": {"plan": null}})));
+    }
+
+    /// `plan_role_configured` 真的会跑 `omp config get`（桩命令），读失败按未配置兜底。
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn plan_role_configured_reads_effective_config() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("omp-plan-role-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("omp");
+        std::fs::write(
+            &bin,
+            "#!/bin/sh\nprintf '%s' '{\"key\":\"modelRoles\",\"value\":{\"plan\":\"p/m:high\"},\"type\":\"record\"}'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(plan_role_configured(bin.to_str().unwrap(), dir.to_str().unwrap()).await);
+
+        // 探测失败（不存在的 bin）不报错、按未配置处理
+        assert!(!plan_role_configured(dir.join("missing-omp").to_str().unwrap(), dir.to_str().unwrap()).await);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// `@` 补全取词：一层列举 / 递归搜索两条口径。
     /// 用户实测的坑：只列一层时，目标在子目录里就「`@` 有弹窗、继续输入就消失」。

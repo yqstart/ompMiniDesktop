@@ -15,6 +15,7 @@ pub mod project_files;
 pub mod project_scripts;
 pub mod providers;
 pub mod pty;
+pub mod remote;
 pub mod runtime;
 pub mod session_scan;
 pub mod settings;

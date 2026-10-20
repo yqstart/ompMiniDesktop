@@ -86,6 +86,7 @@ plan            => Unknown command: plan
 ### 方案 A（已实施，2026-10-20）：新会话以计划模式启动
 
 - **后端**：`SpawnOpts` 增加 `plan_yolo: bool`，`create_session` 接受 `plan: Option<bool>`，spawn 时传 `--plan-yolo`（必要时 `--plan-yolo-into=<模型>`）。**不要**用 `plan.defaultOnStartup`（rpc 下未观察到效果，见上）。降级重试保留 plan；resume / 重启一律 `plan_yolo: false`。
+- **计划阶段模型 = `modelRoles.plan`**（2026-10-20 补）：omp 的 TUI 进入计划模式会把活动模型切到 `plan` 角色，但 rpc-ui 的 `--plan-yolo` 启动路径不会自己做这一步。壳侧在 spawn 前读项目 cwd 的有效 `modelRoles.plan`：配置了就用 `--model @plan`（角色 selector 的 `:档位` 后缀交给 omp 解析），**不传**项目 `last_model` / `last_thinking`；没配置时沿用项目偏好。批准后仍由 omp 的 `--plan-yolo-into` 默认切到 `smol` 角色（未配置时 omp 按默认档兜底）。
 - **入口（2026-10-20 修订）**：工具行 `+` 旁的「计划」chip **常驻**（不再随空态消失）。
   - **空态**（没有活动会话）= 切换下一次新建会话的开关：空态第一条消息 = `createChatIn(dir, { plan: true })` → 新建 `--plan-yolo` 会话 → 发送 → 开关复位（一次性）；点项目选择器同样带着开关新建（`ProjectPicker` → `startChatInProject({ plan })`）。
   - **有会话**（2026-10-20 修订）：若当前会话**完全空**（无对话内容 / 无草稿 / 无附件 / 未运行）→ 直接**开 / 关**计划模式：`runSessionBatch("delete",[sid])` 删掉这个没有 jsonl 的空会话，再用同一目录 `createChatIn(cwd, { plan: !active })` 新建（已计划就换回普通会话；只换 id，不给用户留两个空会话）。否则打开 `composer/PlanStartDialog.tsx`：未计划 = 说明「运行中不能切换」+ 「用当前目录新建计划会话」；已计划 = 「计划模式（已启用），运行中无法关闭」+ 「新建普通会话」。`+` 菜单「计划」也走同一入口。计划会话在 `store.planSessions` 本地标记，工具行 chip 显示 accent（`get_state` 不返回 planMode）。
@@ -93,7 +94,7 @@ plan            => Unknown command: plan
 - **展示（已做）**：
   - `write` 的 `path` 以 `local://` 且以 `-plan.md` 结尾 → 工具行标成「计划」（`lib/toolLine.ts` 的 `toolVerbPlan`）。
 - **展示（未做，可选）**：`write` 的 `path === "xd://propose"` 标成「提交计划」；`customType:"plan-mode-context"` 渲染成一条 `divider:"reminder"` 紧凑行「计划模式：只读规划」。
-- **代价**：自动批准，没有人工确认；执行模型默认 smol（可用 `--plan-yolo-into` 指定），与用户偏好模型可能不同。
+- **代价**：自动批准，没有人工确认；计划阶段用 `plan` 角色（未配置则项目偏好），执行阶段默认 smol 角色（可用 `--plan-yolo-into` 指定），与用户偏好模型可能不同。
 - **风险**：`--plan-yolo` 与 `--goal` 互斥（`create_session` 目前不带 `--goal`，不冲突）；计划文件在 omp 的 `local://` 存储里，壳侧无法直接打开，只能从工具参数读全文。
 
 ### 方案 B（不推荐）：壳侧提示词计划

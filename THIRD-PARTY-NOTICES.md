@@ -75,6 +75,16 @@
 - 仓库：https://github.com/serde-rs/serde · https://github.com/serde-rs/json · https://github.com/chronotope/chrono · https://github.com/BurntSushi/walkdir
 - 许可证：MIT / Apache-2.0（双许可）
 
+### axum / tower-http / futures-util（远程控制 HTTP/WS）
+- 仓库：https://github.com/tokio-rs/axum · https://github.com/tower-rs/tower-http · https://github.com/rust-lang/futures-rs
+- 许可证：MIT
+- 说明：手机远程控制（0.3.0）的内嵌 HTTP/WS 服务、请求体上限与压缩。
+
+### qrcode / if-addrs / sha2 / rand / base64 / subtle（远程控制）
+- 仓库：https://github.com/kennytm/qrcode-rust · https://github.com/if-addrs/if-addrs · https://github.com/RustCrypto/hashes · https://github.com/rust-random/rand · https://github.com/marshallpierce/rust-base64 · https://github.com/dalek-cryptography/subtle
+- 许可证：MIT（qrcode / if-addrs）/ MIT 或 Apache-2.0（sha2 / rand / base64）/ BSD-3-Clause（subtle）
+- 说明：配对二维码、局域网地址枚举、设备 token 哈希 / 常量时间比较。
+
 ### reqwest / rustls（HTTP 客户端）
 - 仓库：https://github.com/seanmonstar/reqwest · https://github.com/rustls/rustls
 - 许可证：Apache-2.0 / MIT（reqwest）；Apache-2.0 / ISC / MIT（rustls）

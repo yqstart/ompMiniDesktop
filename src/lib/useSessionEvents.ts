@@ -1,7 +1,8 @@
 import { useEffect } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { listen as tauriListen } from "@tauri-apps/api/event";
 import { IPC } from "@shared/ipc";
 import { api } from "@shared/api";
+import { isRemoteClient, onRemoteReconnected, remoteListen, remotePending } from "@shared/remote";
 import { useApp } from "../stores/app";
 import type { AskQuestion, BtwRecord, BtwTurn, Goal, SessionRuntime, SessionStatus, SubAgentInfo, TodoPhase, ViewMsg } from "@shared/types";
 import { summarizeArgs, mentionFilesOf, diffStatOf, primaryPathOf, TOOL_OUTPUT_FULL_MAX } from "./viewmsg";
@@ -840,13 +841,17 @@ export function useSessionEvents() {
  const { activeSessionId, set } = useApp();
 
  useEffect(() => {
-  const sid = activeSessionId;
-  if (!sid) return;
-  // 内存治理：非活跃会话的历史只留最近 K 个（更早的清掉，切回时重新 get_history 拉回）
-  trimSessionHistories(sid);
+   const sid = activeSessionId;
+   if (!sid) return;
+   // 手机 PWA 走 WebSocket；桌面端仍是 Tauri 事件。**在 effect 里判定**：
+   // 移动端入口在渲染前才设置 `__OMP_REMOTE__`，模块加载期不能缓存这个开关。
+   const listen = isRemoteClient() ? remoteListen : tauriListen;
+   // 内存治理：非活跃会话的历史只留最近 K 个（更早的清掉，切回时重新 get_history 拉回）
+   trimSessionHistories(sid);
   let off1: (() => void) | undefined;
   let off2: (() => void) | undefined;
   let off3: (() => void) | undefined;
+  let offRe: (() => void) | undefined;
   // `listen` 是异步注册的：cleanup 先于注册完成时必须把「已在路上」的监听立刻解掉，
   // 否则监听器泄漏（旧会话的帧会一直写进 store）。
   let disposed = false;
@@ -934,7 +939,7 @@ export function useSessionEvents() {
      // 立刻看得见。只认翻转（重复 idle 帧不刷）；只刷本会话目录（别的目录这一轮没被动过）。
      if (st.statusBySession[sid]?.state !== "idle") {
       const cwd = st.sessions.find((x) => x.id === sid)?.cwd;
-      scheduleWorkspaceGitRefresh(cwd ? [cwd] : undefined);
+      if (!isRemoteClient()) scheduleWorkspaceGitRefresh(cwd ? [cwd] : undefined);
      }
      if (st.approvalRestartBySession[sid]) {
       st.clearApprovalRestart(sid);
@@ -958,6 +963,26 @@ export function useSessionEvents() {
    void syncSessionRuntime(sid);
    // 子代理注册表补拉（V41）：与运行时真值同一次订阅建立时到位
    void syncSubagents(sid);
+   // 手机端重连/打开会话时补拉「错过的审批」：审批帧不在 jsonl 里，只靠实时流会永久丢。
+   const loadPending = () => {
+    void remotePending(sid)
+     .then((frames) => {
+      if (disposed || useApp.getState().activeSessionId !== sid) return;
+      const st = useApp.getState();
+      const have = new Set((st.eventsBySession[sid] ?? []).map((m) => m.id));
+      const dict = TEXT[st.locale];
+      const rows = frames.flatMap((f) => frameToViewMsgs(sid, f, dict)).filter((m) => !have.has(m.id));
+      if (rows.length > 0) st.appendEvents(sid, rows);
+     })
+     .catch(() => undefined);
+   };
+   if (isRemoteClient()) {
+    loadPending();
+    offRe = onRemoteReconnected(() => {
+     loadPending();
+     void syncSessionRuntime(sid);
+    });
+   }
   })();
   return () => {
    disposed = true;
@@ -966,6 +991,7 @@ export function useSessionEvents() {
    off1?.();
    off2?.();
    off3?.();
+   offRe?.();
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [activeSessionId]);

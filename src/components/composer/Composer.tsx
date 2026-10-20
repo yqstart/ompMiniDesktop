@@ -35,6 +35,7 @@ import { DraftEditor, type DraftEditorHandle, type DraftTextSource } from "./dra
 import { referenceTarget } from "../../lib/workspaceFiles";
 import { SlashMenu, type SlashAction } from "./SlashMenu";
 import { ApprovalModeMenu } from "./ApprovalModeMenu";
+import { FastMenu } from "./FastMenu";
 import { ModelMenu } from "./ModelMenu";
 import { ThinkingMenu } from "./ThinkingMenu";
 
@@ -50,7 +51,7 @@ const NEW_DRAFT = "__new__";
  * 但**不在卡片内部**（外部独立一行）；
  * **输入区** = 附件条 + 提及芯片 + 待发区 + 自动增高输入框；
  * **卡底工具行** = 左「`+` 菜单（添加：文件 / 工作区文件 / 目标 / 计划；指令：压缩）+ 执行模式菜单」，
- * 右「压缩行动点 + 模型 · 思考档 ▾ + 圆形发送 / 停止」；**卡底统计条** = `SessionStatsBar`，
+ * 右「压缩行动点 + Fast 服务档位 + 模型 · 思考档 ▾ + 圆形发送 / 停止」；**卡底统计条** = `SessionStatsBar`，
  * **在输入卡外部、卡片下方独立一行**（2026-10-20 用户口径：从卡片内部移出；不在工具行的
  * `flex-wrap` 容器里）——会话统计 /
  * Token 用量 / 上下文占用 / 供应商用量（2026-10-16 对齐 DeepSeek Harness 的 composer dock）——
@@ -1335,6 +1336,8 @@ export function Composer() {
      <QueueBadge />
      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
       <CompactButton />
+      {/* Fast = 当前模型的服务档位（不是换模型）；开关与模型选择器分开，避免选模型副作用 */}
+      <FastMenu />
       {/* 模型与思考档是两个独立选择器（2026-10-14 拆分）：模型名 ▾ 与 档位 ▾ 各开各的浮层 */}
       <ModelMenu />
       <ThinkingMenu />

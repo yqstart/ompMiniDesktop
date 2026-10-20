@@ -243,6 +243,22 @@ export function searchSettings(
   if (hits.length > 0) groups.push({ tab: "archived", hits });
  }
 
+ // 远程控制（静态条目：没有可枚举的远端数据，只在查询命中标题 / 说明时给出入口）
+ if (has(t.tabRemote, q) || has(t.tabRemoteHint, q) || has("remote", q) || has("手机", q)) {
+  groups.push({
+   tab: "remote",
+   hits: [
+    {
+     id: "remote:entry",
+     tab: "remote",
+     focusKey: null,
+     title: t.tabRemote,
+     sub: t.tabRemoteHint,
+    },
+   ],
+  });
+ }
+
  // omp 约束（全局 AGENTS.md / RULES.md / rules/*.md）：命中条目名、文件名、路径或规则描述
  if (sources.constraints) {
   const hits: SettingsSearchHit[] = [];

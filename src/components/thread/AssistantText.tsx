@@ -5,6 +5,7 @@ import { Check, Copy } from "reicon-react";
 import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Components } from "react-markdown";
 import { fmt } from "../../lib/locale";
+import { isRemoteClient } from "@shared/remote";
 import { useText } from "../../lib/useText";
 import { positionStreamCaret } from "../../lib/streamCaret";
 import { splitMarkdownBlocks, openFenceState } from "../../lib/mdBlocks";
@@ -87,7 +88,11 @@ export function AssistantText({ text, complete }: { text: string; complete: bool
       onClick={() => {
        const url = pendingUrl;
        setPendingUrl(null);
-       void import("@tauri-apps/plugin-opener").then((m) => m.openUrl(url).catch(() => undefined));
+       if (isRemoteClient()) {
+        window.open(url, "_blank", "noopener,noreferrer");
+       } else {
+        void import("@tauri-apps/plugin-opener").then((m) => m.openUrl(url).catch(() => undefined));
+       }
       }}
      >
       {t.openLink}
@@ -142,7 +147,19 @@ function CodeBlock({ children, ...props }: React.ComponentProps<"pre">) {
   void el;
   const text = extractText(children);
   try {
-   await navigator.clipboard.writeText(text);
+   if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+   } else {
+    // HTTP 局域网不是安全上下文，Clipboard API 不可用；退回 execCommand。
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+   }
    setCopied(true);
    window.setTimeout(() => setCopied(false), 1500);
   } catch {
@@ -156,7 +173,7 @@ function CodeBlock({ children, ...props }: React.ComponentProps<"pre">) {
    </pre>
    <button
     onClick={() => void copy()}
-    className="absolute top-1.5 right-1.5 flex cursor-pointer items-center gap-1 rounded-md border border-border bg-elevated px-1.5 py-0.5 text-[11px] text-muted opacity-0 transition-opacity duration-150 group-hover/code:opacity-100 focus-visible:opacity-100"
+    className={`absolute top-1.5 right-1.5 flex cursor-pointer items-center gap-1 rounded-md border border-border bg-elevated px-1.5 py-0.5 text-[11px] text-muted transition-opacity duration-150 focus-visible:opacity-100 ${isRemoteClient() ? "opacity-100" : "opacity-0 group-hover/code:opacity-100"}`}
     aria-label={t.copy}
     title={t.copy}
    >

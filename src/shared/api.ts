@@ -1,14 +1,17 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
-import type { BtwRecord, ChangeSet, CheckoutView, CommitEvent, ConstraintFile, ConstraintsView, ConstraintKind, ContextBreakdown, DirListing, DiscoveredModel, FallbackChainsInfo, GitInfo, Goal, GoalState, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PathSearch, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PullOutcome, ScriptCatalog, SessionLiveStats, SessionPage, SessionRuntime, SessionStats, SessionView, SkillFileContent, SkillsView, TerminalEvent, TerminalSpawnOpts, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
+import { isRemoteClient, remoteInvoke } from "./remote";
+import type { BtwRecord, ChangeSet, CheckoutView, CommitEvent, ConstraintFile, ConstraintsView, ConstraintKind, ContextBreakdown, DirListing, DiscoveredModel, FallbackChainsInfo, GitInfo, Goal, GoalState, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PathSearch, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PullOutcome, RemotePairing, RemoteStatus, RemoteTailscale, ScriptCatalog, SessionLiveStats, SessionPage, SessionRuntime, SessionStats, SessionView, SkillFileContent, SkillsView, TerminalEvent, TerminalSpawnOpts, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
  * 命令名与 `src-tauri` 注册名保持一致；失败统一抛 Error(message)。
+ *
+ * 手机 PWA 模式（`window.__OMP_REMOTE__`）走 HTTP/WS；桌面端仍是 Tauri invoke。
  */
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
  try {
-  return await invoke<T>(cmd, args);
+  return isRemoteClient() ? await remoteInvoke<T>(cmd, args) : await invoke<T>(cmd, args);
  } catch (error) {
   if (error instanceof Error) throw error;
   // Tauri 把 Rust CmdError 序列化为普通对象；先归一，界面才能显示真实诊断而非笼统失败。
@@ -294,6 +297,12 @@ export const api = {
  setModelRole: (role: string, selector: string | null) =>
   call<ModelRolesInfo>(IPC.setModelRole, { role, selector }),
  /**
+  * 整表覆盖模型角色（设置 › 模型的「模型配置」）：激活一套配置 / 编辑激活配置时调用。
+  * 后端逐项校验、已是目标值就不写、写完回读真值；空表 = 清空所有角色。
+  */
+ applyModelRoles: (roles: Record<string, string>) =>
+  call<ModelRolesInfo>(IPC.applyModelRoles, { roles }),
+ /**
   * 同步 Ctrl+P 轮换序（omp `cycleOrder`）：环是「模型角色」的派生投影——后端按角色展示
   * 顺序取已配置模型、按**模型基名**保序去重（`:思考档` 后缀不算另一个模型；重复模型保留
   * 第一个出现的角色），已是目标值就不写；**幂等**，返回回读的真值。打开模型页与改角色后各跑一次。
@@ -495,4 +504,20 @@ export const api = {
   * `Makefile` / `justfile` / `Taskfile.yml` …）。**只读**：不执行、不写盘。
   */
  discoverScripts: (cwd: string) => call<ScriptCatalog>(IPC.discoverScripts, { cwd }),
+
+ // ---------- V50：手机远程控制（设置 ›「远程控制」） ----------
+ /** 服务运行状态 + 地址 + 设备 + Tailscale（连接数变化时桌面事件也会推）。 */
+ remoteGetStatus: () => call<RemoteStatus>(IPC.remoteGetStatus),
+ /** 启动/重启服务；`access` = `lan`（0.0.0.0）或 `tailscale`（只绑 127.0.0.1）。 */
+ remoteStart: (access: "lan" | "tailscale", port: number) =>
+  call<RemoteStatus>(IPC.remoteStart, { access, port }),
+ remoteStop: () => call<RemoteStatus>(IPC.remoteStop),
+ /** 生成一次性配对二维码（secret 在 URL fragment 里，只在这里返回）。 */
+ remotePairing: (baseUrl: string) => call<RemotePairing>(IPC.remotePairing, { baseUrl }),
+ remoteCancelPairing: () => call<void>(IPC.remoteCancelPairing),
+ remoteRevokeDevice: (id: string) => call<RemoteStatus>(IPC.remoteRevokeDevice, { id }),
+ remoteRevokeAll: () => call<RemoteStatus>(IPC.remoteRevokeAll),
+ remoteTailscaleProbe: () => call<RemoteTailscale>(IPC.remoteTailscaleProbe),
+ remoteTailscaleEnable: () => call<RemoteStatus>(IPC.remoteTailscaleEnable),
+ remoteTailscaleDisable: () => call<RemoteStatus>(IPC.remoteTailscaleDisable),
 };

@@ -19,6 +19,7 @@ mod provider_models;
 mod provider_usage;
 mod providers;
 mod pty;
+mod remote;
 mod runtime;
 mod session_scan;
 mod settings;
@@ -41,6 +42,25 @@ fn main() {
         .setup(|app| {
             let state = load_state(app.handle());
             app.manage(state);
+            // V50：手机远程控制的服务管理器（默认不启动，等设置页显式开启）。
+            app.manage(remote::RemoteManager::new(app.handle()));
+            // 开发联调：`OMP_REMOTE_AUTOSTART=1` 时自动开服务并打印配对 URL（release 不含）。
+            #[cfg(debug_assertions)]
+            if std::env::var("OMP_REMOTE_AUTOSTART").is_ok() {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let manager = handle.state::<remote::RemoteManager>();
+                    match manager.start(&handle, "lan", 43110).await {
+                        Ok(status) => {
+                            eprintln!("[remote] started: {:?}", status.addresses.iter().map(|a| &a.url).collect::<Vec<_>>());
+                            if let Ok(info) = manager.pairing_qr("http://127.0.0.1:43110/") {
+                                eprintln!("[remote] pairing: {}", info.url);
+                            }
+                        }
+                        Err(e) => eprintln!("[remote] start failed: {e:?}"),
+                    }
+                });
+            }
             // V34：聊天会话进程的闲置回收（内存治理）——常驻 omp 进程每个 0.5–1GB，
             // 「浏览过的会话」不回收就会一直攒；回收后重新打开 / 发消息都会自动 resume。
             runtime::start_idle_reaper(app.handle().clone());
@@ -155,6 +175,7 @@ fn main() {
             providers::logout_provider,
             providers::get_model_roles,
             providers::set_model_role,
+            providers::apply_model_roles,
             providers::sync_cycle_order,
             providers::get_fallback_chains,
             providers::set_fallback_chain,
@@ -177,6 +198,17 @@ fn main() {
             models_config::write_models_config,
             provider_models::fetch_provider_models,
             title_prompt::sync_title_prompt,
+            // —— V50：手机远程控制（内嵌 HTTP/WS + 扫码配对）——
+            remote::remote_get_status,
+            remote::remote_start,
+            remote::remote_stop,
+            remote::remote_pairing,
+            remote::remote_cancel_pairing,
+            remote::remote_revoke_device,
+            remote::remote_revoke_all,
+            remote::remote_tailscale_probe,
+            remote::remote_tailscale_enable,
+            remote::remote_tailscale_disable,
             omp_update::check_omp_update,
             omp_update::install_omp,
             omp_update::start_omp_update,
@@ -192,6 +224,10 @@ fn main() {
                 pty::kill_all(&state.terminals);
                 git_commit::kill_all(&state.commit_tasks);
                 omp_update::kill_update(&state.omp_update_task);
+                // 手机远程控制：停服务 + 尽力关闭本次由壳启动的 Tailscale Serve。
+                if let Some(remote) = app.try_state::<remote::RemoteManager>() {
+                    remote.shutdown();
+                }
             }
         });
 }

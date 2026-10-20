@@ -4,6 +4,7 @@ import { THREAD_PAGE, useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
 import { api } from "@shared/api";
+import { isRemoteClient } from "@shared/remote";
 import { openBtwPanel } from "../../lib/btw";
 import { buildThreadLayout } from "../../lib/threadLayout";
 import type { ViewMsg } from "@shared/types";
@@ -196,6 +197,8 @@ export function Thread() {
   * （贴顶时往下让，靠边时水平收进视口），浮条本身是 fixed，不参与消息列布局。
   */
  const onMouseUp = () => {
+  // 手机端划选浮条（旁问 / 引用）依赖桌面输入卡与 btw 面板，远程先关掉。
+  if (isRemoteClient()) return;
   const el = scroller.current;
   if (!el) return;
   const s = window.getSelection();
@@ -261,9 +264,16 @@ export function Thread() {
  useLayoutEffect(() => {
   followBottom();
  }, [events, working, followBottom]);
- if (projects.length === 0) return <ChatEmptyState kind="no-project" />;
- if (!activeSessionId || (events.length === 0 && !working)) {
-  return <ChatEmptyState kind="no-session" hasSession={!!activeSessionId} />;
+ // 手机端没有项目 / 会话空态（移动壳自己渲染列表与引导）；只留正文区。
+ if (isRemoteClient()) {
+  if (!activeSessionId || (events.length === 0 && !working)) {
+   return <div className="flex flex-1 items-center justify-center text-[13px] text-faint">{t.remoteThreadEmpty}</div>;
+  }
+ } else {
+  if (projects.length === 0) return <ChatEmptyState kind="no-project" />;
+  if (!activeSessionId || (events.length === 0 && !working)) {
+   return <ChatEmptyState kind="no-session" hasSession={!!activeSessionId} />;
+  }
  }
  return (
   <>

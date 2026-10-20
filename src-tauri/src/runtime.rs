@@ -16,7 +16,7 @@ use std::{
     },
 };
 use tokio::sync::Mutex;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStdin},
@@ -284,6 +284,9 @@ pub struct SessionMeta {
     /// fast 模式（`get_state.fastModeEnabled/Active`；V41——模型不支持时两者皆 false）。
     pub fast_mode_enabled: Option<bool>,
     pub fast_mode_active: Option<bool>,
+    /// 当前模型是否提供 priority 服务档位（Fast）。由壳侧按 omp `service-tier` 规则从
+    /// `get_state.model` 元数据判定；`None` / `false` 时前端不显示闪电图标。
+    pub fast_mode_supported: Option<bool>,
     /// slow 模式（`get_state.slowModeSupported/Enabled`；V41）。
     pub slow_mode_supported: Option<bool>,
     pub slow_mode_enabled: Option<bool>,
@@ -324,6 +327,7 @@ impl SessionMeta {
             goal: d.get("goal").filter(|g| !g.is_null()).cloned(),
             fast_mode_enabled: d.get("fastModeEnabled").and_then(|x| x.as_bool()),
             fast_mode_active: d.get("fastModeActive").and_then(|x| x.as_bool()),
+            fast_mode_supported: m.map(fast_mode_supported),
             slow_mode_supported: d.get("slowModeSupported").and_then(|x| x.as_bool()),
             slow_mode_enabled: d.get("slowModeEnabled").and_then(|x| x.as_bool()),
             todo_phases: d.get("todoPhases").filter(|t| !t.is_null()).cloned(),
@@ -344,6 +348,7 @@ impl SessionMeta {
         Self {
             model: model_ref(m),
             efforts: efforts_of(m),
+            fast_mode_supported: Some(fast_mode_supported(m)),
             thinking_level: None,
             ..Self::default()
         }
@@ -375,6 +380,117 @@ fn model_ref(m: &serde_json::Value) -> Option<ModelRef> {
         id,
         name: m.get("name").and_then(|x| x.as_str()).map(str::to_string),
     })
+}
+
+/// 模型元数据里的字符串字段（缺失按空串）。
+fn text_field<'a>(m: &'a serde_json::Value, key: &str) -> &'a str {
+    m.get(key).and_then(|x| x.as_str()).unwrap_or("")
+}
+
+/// 模型的 OpenAI 身份 + OpenAI 兼容 wire（omp `i(model)`）：
+/// `!fireworks/github-copilot && api∈{openai-*} && identity.class=openai`。
+fn is_openai_compat(m: &serde_json::Value) -> bool {
+    let provider = text_field(m, "provider");
+    let api = text_field(m, "api");
+    let identity = m
+        .get("identity")
+        .and_then(|i| i.get("class"))
+        .and_then(|x| x.as_str());
+    provider != "fireworks"
+        && provider != "github-copilot"
+        && matches!(api, "openai-completions" | "openai-responses" | "openai-codex-responses")
+        && identity == Some("openai")
+}
+
+/// omp `ty(model)`：服务档位家族。`None` = 模型没有 service-tier 控制（`/fast` 直接拒绝）。
+fn service_tier_family(m: &serde_json::Value) -> Option<&'static str> {
+    let provider = text_field(m, "provider");
+    let identity = m
+        .get("identity")
+        .and_then(|i| i.get("class"))
+        .and_then(|x| x.as_str());
+    if provider == "openrouter" {
+        return match identity {
+            Some("anthropic") => Some("anthropic"),
+            Some("gemini") => Some("google"),
+            Some("openai") => Some("openai"),
+            _ => None,
+        };
+    }
+    if provider == "openai" || provider == "openai-codex" {
+        return Some("openai");
+    }
+    if text_field(m, "api") == "anthropic-messages" {
+        return Some("anthropic");
+    }
+    if provider == "google" || provider == "google-vertex" {
+        return Some("google");
+    }
+    if is_openai_compat(m) {
+        return Some("openai");
+    }
+    None
+}
+
+/// omp `Cu(tier, model)`：模型是否声明支持某个服务档位（这里只需要 priority）。
+fn supports_service_tier(m: &serde_json::Value, tier: &str) -> bool {
+    let provider = text_field(m, "provider");
+    if text_field(m, "api") == "openai-codex-responses" && tier != "flex" && tier != "default" {
+        if let Some(tiers) = m.get("serviceTiers").and_then(|x| x.as_array()) {
+            if !tiers.is_empty() {
+                return tiers.iter().any(|x| x.as_str() == Some(tier));
+            }
+        }
+    }
+    if tier == "ultrafast" {
+        return provider == "openai" || provider == "openai-codex";
+    }
+    if provider == "openai" || provider == "openai-codex" {
+        return true;
+    }
+    if provider == "openrouter" {
+        return matches!(tier, "flex" | "scale" | "priority");
+    }
+    if is_openai_compat(m) {
+        return true;
+    }
+    if provider == "google" {
+        return matches!(tier, "flex" | "priority");
+    }
+    if provider == "google-vertex" || provider == "fireworks" {
+        return tier == "priority";
+    }
+    false
+}
+
+/// omp `Cve("priority", model)`：priority 档位的实际可用性。
+/// 非 first-party Anthropic 的 anthropic-messages 端点（如 commandcode 的 Claude）
+/// 明确不可用；OpenRouter 只看 openai / google 身份。
+fn priority_supported(m: &serde_json::Value) -> bool {
+    let provider = text_field(m, "provider");
+    if provider == "anthropic" {
+        return true;
+    }
+    if provider == "openrouter" {
+        return matches!(service_tier_family(m), Some("openai" | "google"));
+    }
+    if text_field(m, "api") == "anthropic-messages" {
+        return false;
+    }
+    supports_service_tier(m, "priority")
+}
+
+/// 当前模型能否使用 omp 的 priority（Fast）服务档位。
+///
+/// 复刻 omp 18.12.3 `packages/ai/src/service-tier.ts` 的判定（`ty` + `Cve`/`Cu`）：
+/// 家族映射不出来（commandcode 的 DeepSeek、官方 DeepSeek、fireworks 等）= 不支持；
+/// 家族有了还要过 priority 的可用性（如非 first-party 的 anthropic-messages 端点不支持）。
+/// 前端据此决定是否显示 Fast 闪电图标——**不支持就不显示**，不再等点击后报错。
+pub fn fast_mode_supported(m: &serde_json::Value) -> bool {
+    if !m.is_object() {
+        return false;
+    }
+    service_tier_family(m).is_some() && priority_supported(m)
 }
 
 /// 思考档强度序（与 omp CLI `--thinking` 全集一致，off 最弱）。
@@ -763,7 +879,7 @@ async fn spawn_long_lived_inner<R: tauri::Runtime>(
     // 会早于 spawn 完成（拉空）——不在这里补一发，打开旧会话后工具行上的模型与思考档
     // 就一直空着，直到用户手动切一次模型。前端建订阅通常早于握手完成（会话先选中、
     // spawn 要等 omp 起来），所以这一发能收到；真收不到也有那次补拉兜底。
-    let _ = app.emit(&format!("omp-state://{sid}"), &meta);
+    crate::remote::emit_serializable(app, &format!("omp-state://{sid}"), &meta);
     Ok((sid, sfile, meta))
 }
 
@@ -1012,6 +1128,30 @@ fn update_meta<R: tauri::Runtime>(app: &AppHandle<R>, key: &str, f: impl FnOnce(
     }
 }
 
+/// 更新快照并广播 `omp-state`（切模型这种会改前端读取字段的动作）。
+/// `get_state` 回读路径有自己的一发；这里服务 `set_model` 的成功回包——不广播的话
+/// 前端 `currentRuntime.fastModeSupported` 会停在旧模型，Fast 闪电要等下一次回读才更新。
+fn update_meta_emit<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    key: &str,
+    f: impl FnOnce(&mut SessionMeta),
+) {
+    let map = app.state::<crate::commands::AppState>().runtime.clone();
+    let payload = {
+        let guard = map.try_lock();
+        match guard {
+            Ok(mut m) => m.get_mut(key).map(|r| {
+                f(&mut r.meta);
+                serde_json::to_value(&r.meta).unwrap_or(serde_json::Value::Null)
+            }),
+            Err(_) => None,
+        }
+    };
+    if let Some(p) = payload {
+        crate::remote::emit_event(app, &format!("omp-state://{key}"), &p);
+    }
+}
+
 /// `set_model` 的成功回包（切模型后要不要落思考档、落哪一档，只在这一帧上判定）。
 fn is_set_model_ok(v: &serde_json::Value) -> bool {
     v.get("type").and_then(|t| t.as_str()) == Some("response")
@@ -1141,7 +1281,7 @@ async fn handle_frame<R: tauri::Runtime>(
                         *m = meta.clone();
                     });
                     let payload = serde_json::to_value(&meta).unwrap_or(serde_json::Value::Null);
-                    let _ = app.emit(&format!("omp-state://{key}"), payload);
+                    crate::remote::emit_event(app, &format!("omp-state://{key}"), &payload);
                     // 真值顺带回写项目偏好：新建会话时沿用该项目上次的模型/思考档
                     let st = app.state::<crate::commands::AppState>();
                     let selector = meta.model.as_ref().map(|m| format!("{}/{}", m.provider, m.id));
@@ -1155,9 +1295,11 @@ async fn handle_frame<R: tauri::Runtime>(
                 if v.get("command").and_then(|c| c.as_str()) == Some("set_model") {
                     if let Some(d) = v.get("data").filter(|d| d.get("provider").is_some()) {
                         let meta = SessionMeta::from_model(d);
-                        update_meta(app, key, |m| {
+                        // 同步广播：切模型时 Fast 支持 / 模型元数据要立刻到前端，不能等下一次回读
+                        update_meta_emit(app, key, |m| {
                             m.model = meta.model;
                             m.efforts = meta.efforts;
+                            m.fast_mode_supported = meta.fast_mode_supported;
                         });
                     }
                 }
@@ -1210,7 +1352,7 @@ async fn handle_frame<R: tauri::Runtime>(
                 })
             };
             if let Some(p) = payload {
-                let _ = app.emit(&format!("omp-state://{key}"), p);
+                crate::remote::emit_event(app, &format!("omp-state://{key}"), &p);
             }
         }
         // 运行中跟住上下文占用：`message_end` = 一个 assistant 步收尾（工具循环的每一步），
@@ -1296,7 +1438,7 @@ fn emit_status<R: tauri::Runtime>(
     if let Some(d) = detail {
         payload["detail"] = serde_json::Value::String(d.to_string());
     }
-    let _ = app.emit(status_ch, payload);
+    crate::remote::emit_event(app, status_ch, &payload);
 }
 
 fn dispatch<R: tauri::Runtime>(
@@ -1322,22 +1464,22 @@ fn dispatch<R: tauri::Runtime>(
         // 可回收的 idle——否则它一直不进闲置回收（见 [`ACT_IDLE_AWAITING`]）。
         "session_settled" => {
             emit_status(app, status, activity, "idle", None);
-            let _ = app.emit(evt, v);
+            crate::remote::emit_event(app, evt, v);
         }
         // 本地命令完成信号（`prompt` 回包 `data.agentInvoked:false` 或后续
         // `prompt_result{agentInvoked:false}`）：没有 agent turn、不会有
         // `agent_end`，此处直接收敛到 idle，否则转圈停不下来。
         "response" if is_local_prompt_result(v) => {
             emit_status(app, status, activity, "idle", None);
-            let _ = app.emit(evt, v);
+            crate::remote::emit_event(app, evt, v);
         }
         "prompt_result" if !v.get("agentInvoked").and_then(|b| b.as_bool()).unwrap_or(true) => {
             emit_status(app, status, activity, "idle", None);
-            let _ = app.emit(evt, v);
+            crate::remote::emit_event(app, evt, v);
         }
         "command_output" | "notice" | "todo_reminder" | "goal_updated" | "irc_message" => {
             // 本地命令输出 / 单向通知 / 计划提醒：透传给前端渲染，不触碰运行状态。
-            let _ = app.emit(evt, v);
+            crate::remote::emit_event(app, evt, v);
         }
         "available_commands_update" => {
             // 可用命令面：缓存后透传，前端 `/` 补全的数据源。
@@ -1347,13 +1489,13 @@ fn dispatch<R: tauri::Runtime>(
                     m.commands = Some(cmds.clone());
                 });
             }
-            let _ = app.emit(evt, v);
+            crate::remote::emit_event(app, evt, v);
         }
         "auto_compaction_start" | "auto_compaction_end" | "auto_retry_start" | "auto_retry_end"
         | "retry_fallback_applied" | "retry_fallback_succeeded" | "subagent_lifecycle" | "subagent_progress"
         | "subagent_event" => {
             // 压缩 / 重试 / 子代理生命周期：透传给前端渲染成分隔线。
-            let _ = app.emit(evt, v);
+            crate::remote::emit_event(app, evt, v);
         }
         "extension_ui_request" => {
             // 需要用户回包的方法才会进「等待输入」状态（审批 + 通用 UI 请求）；
@@ -1363,16 +1505,16 @@ fn dispatch<R: tauri::Runtime>(
             if matches!(method, "select" | "confirm" | "input" | "editor") {
                 emit_status(app, status, activity, "awaiting-approval", None);
             }
-            let _ = app.emit(evt, v);
+            crate::remote::emit_event(app, evt, v);
         }
         "response" | "message_start" | "message_update" | "message_end" | "turn_start" | "turn_end"
         | "tool_execution_start" | "tool_execution_update" | "tool_execution_end" | "model_changed"
         | "thinking_level_changed" | "title_change" => {
-            let _ = app.emit(evt, v);
+            crate::remote::emit_event(app, evt, v);
         }
         _ => {
             // 未知帧：透传 unknown 进日志不崩（前端忽略）
-            let _ = app.emit(evt, v);
+            crate::remote::emit_event(app, evt, v);
         }
     }
 }
@@ -2338,6 +2480,10 @@ mod tests {
         assert_eq!(m.model.as_ref().unwrap().provider, "commandcode");
         assert_eq!(m.efforts.as_ref().unwrap().len(), 5);
         assert_eq!(m.thinking_level.as_deref(), Some("xhigh"));
+        // opus() 是 commandcode 的 Claude（api anthropic-messages、非 first-party）→ 不支持 Fast
+        assert_eq!(m.fast_mode_supported, Some(false));
+        // 前端读的 wire 字段名是 camelCase（`SessionRuntime.fastModeSupported`）
+        assert_eq!(serde_json::to_value(&m).unwrap()["fastModeSupported"], serde_json::json!(false));
 
         // 无思考模型：档位键缺失（实测），efforts 为 None
         let haiku_state = serde_json::json!({ "model": {"provider":"commandcode","id":"claude-haiku-4-5-20251001"} });
@@ -2345,15 +2491,96 @@ mod tests {
         assert!(h.efforts.is_none());
         assert!(h.thinking_level.is_none());
         assert_eq!(h.model.as_ref().unwrap().id, "claude-haiku-4-5-20251001");
+        assert_eq!(h.fast_mode_supported, Some(false));
 
         // set_model 回包：data 即模型对象本身，档位留空等回读
         let f = SessionMeta::from_model(&opus());
         assert_eq!(f.model.as_ref().unwrap().id, "claude-opus-5");
         assert_eq!(f.efforts.as_ref().unwrap().last().unwrap(), "max");
         assert!(f.thinking_level.is_none());
+        assert_eq!(f.fast_mode_supported, Some(false));
+
+        // OpenAI 模型（provider openai）→ 支持 Fast
+        let openai_state = serde_json::json!({
+            "model": {
+                "provider": "openai",
+                "id": "gpt-5",
+                "api": "openai-responses",
+                "identity": { "class": "openai" }
+            }
+        });
+        assert_eq!(SessionMeta::from_state(&openai_state).fast_mode_supported, Some(true));
 
         // 无 id 的畸形 data 不产出模型
         assert!(SessionMeta::from_state(&serde_json::json!({"model": {"provider": "x"}})).model.is_none());
+    }
+
+    /// Fast 闪电的显隐判据（与 omp `service-tier.ts` 的 `ty` + `Cve`/`Cu` 对齐）：
+    /// 只按模型元数据判定，不靠先点一次 `set_fast_mode` 试错。
+    #[test]
+    fn fast_mode_support_follows_omp_service_tier_rules() {
+        fn model(
+            provider: &str,
+            api: &str,
+            identity: Option<&str>,
+            service_tiers: Option<&[&str]>,
+        ) -> serde_json::Value {
+            let mut v = serde_json::json!({"provider": provider, "id": "m", "api": api});
+            if let Some(c) = identity {
+                v["identity"] = serde_json::json!({"class": c});
+            }
+            if let Some(t) = service_tiers {
+                v["serviceTiers"] = serde_json::json!(t);
+            }
+            v
+        }
+
+        // 用户截图里的 commandcode DeepSeek：OpenAI 兼容，但 identity 不是 openai → 没有档位控制
+        assert!(!fast_mode_supported(&model(
+            "commandcode",
+            "openai-responses",
+            Some("deepseek"),
+            None
+        )));
+        // 非 first-party 的 anthropic-messages（commandcode 的 Claude）也不可用
+        assert!(!fast_mode_supported(&model(
+            "commandcode",
+            "anthropic-messages",
+            Some("anthropic"),
+            None
+        )));
+        // 三大家族
+        assert!(fast_mode_supported(&model("openai", "openai-responses", Some("openai"), None)));
+        assert!(fast_mode_supported(&model("anthropic", "anthropic-messages", Some("anthropic"), None)));
+        assert!(fast_mode_supported(&model("google", "google-generative-ai", Some("gemini"), None)));
+        assert!(fast_mode_supported(&model("google-vertex", "google-generative-ai", Some("gemini"), None)));
+        // OpenRouter：openai / google 身份可用，anthropic 身份不可用
+        assert!(fast_mode_supported(&model("openrouter", "openai-responses", Some("openai"), None)));
+        assert!(fast_mode_supported(&model("openrouter", "google-generative-ai", Some("gemini"), None)));
+        assert!(!fast_mode_supported(&model("openrouter", "anthropic-messages", Some("anthropic"), None)));
+        // 自定义 OpenAI 兼容端点（identity.class=openai）可用
+        assert!(fast_mode_supported(&model("custom", "openai-completions", Some("openai"), None)));
+        // fireworks 在 omp 里没有 service-tier family（即使 Cu 对 priority 返回 true）
+        assert!(!fast_mode_supported(&model("fireworks", "openai-completions", Some("openai"), None)));
+        // openai-codex：serviceTiers 显式列出时按列表；缺省仍按 provider 放行
+        assert!(fast_mode_supported(&model(
+            "openai-codex",
+            "openai-codex-responses",
+            Some("openai"),
+            Some(&["priority"])
+        )));
+        assert!(!fast_mode_supported(&model(
+            "openai-codex",
+            "openai-codex-responses",
+            Some("openai"),
+            Some(&["flex"])
+        )));
+        assert!(fast_mode_supported(&model(
+            "openai-codex",
+            "openai-codex-responses",
+            Some("openai"),
+            None
+        )));
     }
 
     #[test]

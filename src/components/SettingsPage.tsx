@@ -1,4 +1,4 @@
-import { Archive, ArrowLeft, BookOpen, ChartBar, Key, Notebook, Plug, Puzzle, Sliders } from "reicon-react";
+import { Archive, ArrowLeft, BookOpen, ChartBar, Key, Notebook, Plug, Puzzle, Sliders, Mobile } from "reicon-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useText } from "../lib/useText";
 import { useApp } from "../stores/app";
@@ -8,6 +8,7 @@ import { SETTINGS_TAB_LABEL_KEYS, type SettingsFocusRequest, type SettingsTab } 
 import { useSettingsSearchSources } from "../lib/useSettingsSearchSources";
 import { ArchivedSessions } from "./ArchivedSessions";
 import { ConstraintsPanel } from "./settings/ConstraintsPanel";
+import { RemotePanel } from "./settings/RemotePanel";
 import { GeneralSettingsPanel } from "./settings/GeneralSettingsPanel";
 import { MemoryPanel } from "./settings/MemoryPanel";
 import { PluginsPanel } from "./settings/PluginsPanel";
@@ -19,6 +20,7 @@ import { SettingsSearch } from "./settings/SettingsSearch";
 const TAB_ICONS = {
  general: Sliders,
  constraints: BookOpen,
+ remote: Mobile,
  models: Key,
  plugins: Plug,
  skills: Puzzle,
@@ -35,7 +37,7 @@ const TAB_ICONS = {
  * （使用统计 / 已归档对话）。
  */
 const TAB_GROUPS: { label: keyof Text; tabs: SettingsTab[] }[] = [
- { label: "settingsGroupGeneral", tabs: ["general", "constraints"] },
+ { label: "settingsGroupGeneral", tabs: ["general", "constraints", "remote"] },
  { label: "settingsGroupModel", tabs: ["models"] },
  { label: "settingsGroupExt", tabs: ["plugins", "skills"] },
  { label: "settingsGroupData", tabs: ["memories", "usage", "archived"] },
@@ -47,7 +49,7 @@ const TAB_GROUPS: { label: keyof Text; tabs: SettingsTab[] }[] = [
  * - **顶部条**：`← 返回聊天` + 当前条目名（**没有搜索钮**，2026-10-19 用户口径）——
  *   打开设置 = 左栏底部「设置」/ ⌘,，关闭 = 顶部「返回聊天」/ ⌘W / 左栏「设置」再点一次
  *   （`closeSettingsTab`）；
- * - **左导航**：四组八条目（组标题 + 条目），窄窗（44px 容器档）折叠为图标栏；
+ * - **左导航**：四组九条目（组标题 + 条目；通用组含「远程控制」），窄窗（44px 容器档）折叠为图标栏；
  * - **顶部搜索**：入口只剩 ⌘F（跨条目过滤——常用设置四档打分 / omp 约束 / 模型 / 插件 /
  *   技能 / 记忆 / 归档会话），命中高亮，结果点击跳到对应条目——常用设置项与约束文件带键名
  *   定位（`focusRequest`）；
@@ -144,7 +146,7 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
    </header>
 
    <div className="flex min-h-0 min-w-0 flex-1">
-    {/* 左导航：四组七条目；窄窗（44px 容器档）折叠为图标栏（组标题收进 sr-only） */}
+    {/* 左导航：四组九条目；窄窗（44px 容器档）折叠为图标栏（组标题收进 sr-only） */}
     <nav
      aria-label={t.title}
      className="flex w-11 shrink-0 flex-col border-r border-border-soft px-1.5 py-2 @min-[640px]/settings:w-[var(--w-settings-nav)] @min-[640px]/settings:px-2"
@@ -227,6 +229,8 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
         <ArchivedSessions />
        ) : tab === "constraints" ? (
         <ConstraintsPanel focusRequest={focusRequest} onFocusDone={clearFocusRequest} />
+       ) : tab === "remote" ? (
+        <RemotePanel />
        ) : tab === "models" ? (
         <ModelsPanel />
        ) : tab === "plugins" ? (

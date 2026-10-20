@@ -79,4 +79,4 @@ ZCode 是 Z.ai 的 Agentic Development Environment（ADE）：同一工作区的
 | 右面板 | 文件树 / 浏览器 / 侧会话多 tab | 无 | v2：右面板收敛为「上下文面板」（与 Codex 环境面板合一） |
 | 设置 | 行式控件 + 描述 | 七页签 | v3 全量重构（见 v3-schedule） |
 
-**不适用项**：Bot Channel（飞书 / 微信）、Remote 手机端、Idle-time 任务、GLM 模型绑定——omp 语境不同，不引入。
+**不适用项**：Bot Channel（飞书 / 微信）、Idle-time 任务、GLM 模型绑定——omp 语境不同，不引入。**Remote 手机端**在 0.3.0 按「局域网 / Tailscale + 浏览器 PWA」重新评估并落地（见 [`remote-control.md`](remote-control.md)），不是 ZCode 的 Bot Channel 形态。

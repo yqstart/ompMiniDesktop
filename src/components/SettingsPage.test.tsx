@@ -109,7 +109,7 @@ afterEach(() => {
 });
 
 describe("设置视图框架", () => {
- it("顶部条 + 四组八条目导航；切条目显示对应面板", async () => {
+ it("顶部条 + 四组九条目导航；切条目显示对应面板", async () => {
   vi.mocked(api.getOmpSettingsCatalog).mockResolvedValue(catalog([catalogItem({ key: "todo.enabled" })]));
   act(() => {
    root.render(<SettingsPage visible />);
@@ -118,7 +118,7 @@ describe("设置视图框架", () => {
 
   expect(container.textContent).toContain("返回聊天");
   const tabs = [...container.querySelectorAll<HTMLElement>('[role="tab"]')].map((b) => b.textContent?.trim());
-  expect(tabs).toEqual(["常用设置", "omp 约束", "模型", "插件", "技能", "记忆", "使用统计", "已归档对话"]);
+  expect(tabs).toEqual(["常用设置", "omp 约束", "远程控制", "模型", "插件", "技能", "记忆", "使用统计", "已归档对话"]);
   // 四组组标题（窄导航下 sr-only，但仍在无障碍树里）
   for (const group of ["通用", "模型", "扩展", "数据"]) {
    expect(container.textContent).toContain(group);

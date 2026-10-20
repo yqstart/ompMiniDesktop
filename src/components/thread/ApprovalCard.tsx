@@ -1,6 +1,7 @@
 import { ShieldAlert, ShieldCheck, ShieldX } from "reicon-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "@shared/api";
+import { isRemoteClient } from "@shared/remote";
 import { useApp } from "../../stores/app";
 import type { Text } from "../../lib/locale";
 import { useText } from "../../lib/useText";
@@ -77,13 +78,15 @@ export function ApprovalCard({ m, sessionId }: { m: Extract<ViewMsg, { kind: "ap
           >
             {busy === "once" ? t.approvalBusy : t.approvalAllowOnce}
           </button>
-          <button
-            onClick={() => void decide("always")}
-            disabled={busy !== null}
-            className="cursor-pointer rounded-md border border-border px-3.5 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
-          >
-            {busy === "always" ? t.approvalBusy : t.approvalAllowAlways}
-          </button>
+          {!isRemoteClient() && (
+            <button
+              onClick={() => void decide("always")}
+              disabled={busy !== null}
+              className="cursor-pointer rounded-md border border-border px-3.5 py-1.5 text-[13px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+            >
+              {busy === "always" ? t.approvalBusy : t.approvalAllowAlways}
+            </button>
+          )}
           <button
             onClick={() => void decide("deny")}
             disabled={busy !== null}

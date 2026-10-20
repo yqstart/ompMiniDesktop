@@ -51,6 +51,8 @@ export const IPC = {
  logoutProvider: "logout_provider",
  getModelRoles: "get_model_roles",
  setModelRole: "set_model_role",
+ // 模型配置（设置 › 模型）：激活一套配置 / 编辑激活配置 = 整表覆盖 modelRoles
+ applyModelRoles: "apply_model_roles",
  // Ctrl+P 轮换序（设置 › 模型）：cycleOrder = modelRoles 的派生投影，幂等同步
  syncCycleOrder: "sync_cycle_order",
  // 失败转移链（设置 › 模型）：retry.fallbackChains 的读写与两个配套开关
@@ -176,6 +178,17 @@ export const IPC = {
  terminalKill: "terminal_kill",
  /** 识别项目里的可跑脚本（右栏「脚本」页签；只读扫描清单文件，不执行任何命令）。 */
  discoverScripts: "discover_scripts",
+ // —— V50：手机远程控制（内嵌 HTTP/WS + 扫码配对）——
+ remoteGetStatus: "remote_get_status",
+ remoteStart: "remote_start",
+ remoteStop: "remote_stop",
+ remotePairing: "remote_pairing",
+ remoteCancelPairing: "remote_cancel_pairing",
+ remoteRevokeDevice: "remote_revoke_device",
+ remoteRevokeAll: "remote_revoke_all",
+ remoteTailscaleProbe: "remote_tailscale_probe",
+ remoteTailscaleEnable: "remote_tailscale_enable",
+ remoteTailscaleDisable: "remote_tailscale_disable",
  // events
  /** 供应商登录进度（payload = 全量 ProviderLoginStatus 快照）。 */
  providerLogin: "omp-provider://login",
@@ -191,4 +204,6 @@ export const IPC = {
  chatStatus: (id: string) => `omp-status://${id}`,
  /** 聊天会话运行时真值（payload = 全量 SessionRuntime 快照）。 */
  chatRuntime: (id: string) => `omp-state://${id}`,
+ /** 手机远程控制状态（payload = RemoteStatus；启动/停止/配对/撤销/连接数变化时推）。 */
+ remoteState: "remote://state",
 } as const;

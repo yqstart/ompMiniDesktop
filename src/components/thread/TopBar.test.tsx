@@ -205,4 +205,16 @@ describe("聊天 TopBar 会话名编辑", () => {
   act(() => panel?.click());
   expect(useApp.getState().workbenchOpen).toBe(true);
  });
+
+ it("整条标题栏是窗口拖拽区，禁用态按钮不挡拖拽", () => {
+  render();
+  // ① 裸属性只认「直接命中 header 的 mousedown」；内容全在两层 flex 容器里，等于整条拖不动
+  expect(container.querySelector("header")?.getAttribute("data-tauri-drag-region")).toBe("deep");
+  // ② 交互件不带属性：Tauri 拖拽脚本按 clickable 元素短路，点击语义（改名 / 导出 / 开关）保住
+  expect([...container.querySelectorAll("header button")].every((b) => !b.hasAttribute("data-tauri-drag-region"))).toBe(true);
+  // ③ 空态标题 / 导出是 disabled 按钮：收不到 mousedown 还会挡住 `deep`，必须让出这一片
+  const disabled = [...container.querySelectorAll<HTMLButtonElement>("header button:disabled")];
+  expect(disabled.length).toBe(2);
+  expect(disabled.every((b) => b.className.includes("disabled:pointer-events-none"))).toBe(true);
+ });
 });

@@ -1065,6 +1065,8 @@ export type SessionRuntime = {
  /** fast 模式（`get_state.fastModeEnabled/Active`；模型不支持时两者皆 false）。 */
  fastModeEnabled?: boolean | null;
  fastModeActive?: boolean | null;
+ /** 当前模型是否提供 priority 服务档位（Fast）；false / 未读时输入卡不显示闪电图标。 */
+ fastModeSupported?: boolean | null;
  /** slow 模式（`get_state.slowModeSupported/Enabled`；不支持时 supported=false）。 */
  slowModeSupported?: boolean | null;
  slowModeEnabled?: boolean | null;
@@ -1330,3 +1332,65 @@ export interface ScriptCatalog {
  ecosystems: string[];
  scripts: ProjectScript[];
 }
+
+// ---------- V50：手机远程控制（PWA + 内嵌 HTTP/WS） ----------
+
+/** 远程访问方式：局域网直连 / 仅 Tailscale HTTPS。 */
+export type RemoteAccess = "lan" | "tailscale";
+
+/** 一个可供手机拨号/扫码的地址。 */
+export type RemoteAddress = {
+ url: string;
+ label: string;
+ kind: "lan" | "tailscale" | "local" | string;
+};
+
+/** 已配对设备（桌面设置页展示；不含 token 哈希）。 */
+export type RemoteDevice = {
+ id: string;
+ name: string;
+ createdAt: number;
+ lastSeenAt: number | null;
+ lastIp: string | null;
+};
+
+/** Tailscale 探测 / Serve 状态。 */
+export type RemoteTailscale = {
+ installed: boolean;
+ backendState: string | null;
+ dnsName: string | null;
+ ipv4: string | null;
+ httpsUrl: string | null;
+ serveEnabled: boolean;
+ error: string | null;
+};
+
+/** 远程控制运行状态（`remote_get_status` / `remote://state`）。 */
+export type RemoteStatus = {
+ running: boolean;
+ access: RemoteAccess | string;
+ port: number;
+ addresses: RemoteAddress[];
+ pairingActive: boolean;
+ pairingExpiresIn: number;
+ devices: RemoteDevice[];
+ connections: number;
+ tailscale: RemoteTailscale;
+ error: string | null;
+};
+
+/** 一次性配对二维码（secret 在 URL fragment 里，不进日志）。 */
+export type RemotePairing = {
+ url: string;
+ svg: string;
+ expiresIn: number;
+};
+
+/** 手机端会话列表的一次快照：会话 + 各会话实时状态 + 待审批数。 */
+export type RemoteOverview = {
+ sessions: SessionView[];
+ totalFiles: number;
+ scannedFiles: number;
+ statuses: Record<string, string>;
+ pending: Record<string, number>;
+};

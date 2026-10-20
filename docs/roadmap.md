@@ -17,6 +17,7 @@
 | **0.2.0** | 右栏工作台 + 会话读数 + omp 约束（三部分一体交付） | 右栏从「上下文」面板换成**文件目录 + 项目脚本 + 多开终端**三页签（形态参照 DeepSeek Harness 的工作区文件 / 终端入口）；输入卡底部新增**统计条**：会话统计 + Token 用量 + 上下文 + 供应商用量（形态参照 DeepSeek Harness 的 composer dock）；设置里新增**「omp 约束」**：编辑全局 `AGENTS.md` / `RULES.md` / `rules/*.{md,mdc}`（整份 Markdown 直接编辑 + 预览；2026-10-19 去掉表单模式） | [`v4-schedule.md`](v4-schedule.md) / [`v5-schedule.md`](v5-schedule.md) / [`v6-schedule.md`](v6-schedule.md) |
 | **0.2.1** | 补丁版（Windows 支持 + 交互收敛） | **Windows 原生支持与 WSL 边界**；左栏行首状态点 + 默认只展开首组 + 恢复上次会话；远程落后徽章点击拉取；约束页默认预览；自定义供应商「挑选模型」打开即拉 | [`windows.md`](windows.md) / [`v6-schedule.md`](v6-schedule.md) |
 | **0.2.2** | 补丁版（输入卡收敛 + 计划模式） | `+` / `/` 合并为同一面板；目标 / 计划入口收进工具行、目标改为主输入框直接写；计划模式接 `--plan-yolo`（工具行常驻「计划」chip）；卡上顶行 / 补全浮层 / 统计条移到卡片外部；思考档纵向下拉、模型浮层加宽；`⌘⇧P` 打开不预选、行高固定；运行中 `/skill:` 生效、压缩禁用 | [`plan-mode.md`](plan-mode.md) |
+| **0.3.0** | 手机远程控制（PWA + 内嵌 HTTP/WS） | 桌面端内嵌服务，手机扫码配对后继续 omp 会话：会话列表 / 历史 / 实时流、发送 / 转向 / 排队 / 停止、审批（once / deny）、新建会话；局域网直连 + Tailscale HTTPS；白名单 RPC + 设备撤销；不引入云端中继 | [`remote-control.md`](remote-control.md) |
 
 > 版本号以**实际发布**为准：排期 4 / 5 / 6 的内容随 `0.2.0` 一体交付（变更记录见 `CHANGELOG.md` 的 `0.2.0` 节）。
 

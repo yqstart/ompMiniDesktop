@@ -1,16 +1,17 @@
 import type { Text } from "./locale";
 
 /**
- * 设置视图的导航条目（v3 设置重构的四组八条目：通用 / 模型 / 扩展 / 数据）。
+ * 设置视图的导航条目（v3 设置重构的四组九条目：通用 / 模型 / 扩展 / 数据（通用组多了「远程控制」））。
  * 类型与文案键映射放这里（纯数据），`SettingsPage` 与搜索视图共用——
  * 搜索视图不许反向 import 页面组件（会成环）。
  */
-export type SettingsTab = "general" | "constraints" | "models" | "plugins" | "skills" | "memories" | "usage" | "archived";
+export type SettingsTab = "general" | "constraints" | "remote" | "models" | "plugins" | "skills" | "memories" | "usage" | "archived";
 
 /** 条目 → 标题文案键（导航条目与搜索分组标题共用）。 */
 export const SETTINGS_TAB_LABEL_KEYS: Record<SettingsTab, keyof Text> = {
  general: "tabGeneral",
  constraints: "tabConstraints",
+ remote: "tabRemote",
  models: "tabModels",
  plugins: "tabPlugins",
  skills: "tabSkills",

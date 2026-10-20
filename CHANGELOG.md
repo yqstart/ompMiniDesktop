@@ -6,6 +6,44 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-20
+
+### Added
+
+- **手机远程控制（PWA + 内嵌 HTTP/WS）**：桌面端在 Tauri 进程内嵌 axum 服务，手机浏览器扫码配对后继续桌面端的 omp 会话——会话列表（状态点 / 待审批徽标）、打开会话（历史 + 实时流 + 工具卡 / 任务卡）、发送 / 转向 / 排队 / 停止、审批（**允许一次 / 拒绝**）、新建会话；移动壳复用桌面 `stores/app` / `useSessionEvents` / `openSessionWithHistory` / `Thread`，只重做页头、列表与输入卡。`docs/remote-control.md` 是调研、协议与安全模型的唯一口径。
+- **扫码配对与设备管理**：一次性 256-bit 配对密钥只放 URL fragment（120s / 单次），换 HttpOnly `omp_remote` 设备 Cookie；设备 token 只存哈希（`remote-devices.json`，0600），支持撤销 / 全部撤销；撤销即断开 WS（4401）。设置 ›「远程控制」提供二维码、地址、设备列表、连接数与安全说明；每次启动默认关闭。
+- **Tailscale HTTPS**：检测 `tailscale status --json`，一键 `tailscale serve --https=8443`（只绑/代理 127.0.0.1），手机切 5G 也能经 MagicDNS HTTPS 访问；关闭时清理 Serve；失败不影响局域网模式。
+- **局域网直连**：绑定 `0.0.0.0`，枚举私网 IPv4（过滤 docker / VPN / CGNAT）给出可扫码地址；「仅 Tailscale」模式只绑 `127.0.0.1`。
+- **移动端 PWA**：Vite 多入口（`index.html` + `mobile.html`）、`public/manifest.webmanifest` 与 192/512/maskable 图标、iOS A2HS meta；触控优先的会话列表 / 页头 / 输入卡 / 设置 sheet；图片附件（Canvas 压到 2048 / JPEG 0.85），iOS 键盘用 visualViewport 收根容器。
+- **事件镜像与待审批缓存**：`runtime.rs` / `commands` 的 Tauri 事件统一出口 `remote::emit_event` 同步写入 `RemoteHub`；WebSocket 帧与 Tauri 事件同名（`omp-event/status/state://<sid>`），复用同一套事件归一。审批 / ask 帧即使手机离线也缓存 30 分钟，重连或打开会话时补拉。
+- **overview 接口**：手机列表一次拿会话 + 各会话活动态 + 待审批数，非当前会话在等审批时列表也能亮橙点。
+- **调试联调入口**：`OMP_REMOTE_AUTOSTART=1 pnpm tauri:dev`（仅 debug）自动起服务并打印配对 URL。
+
+- **输入卡新增 Fast 服务档位开关**（2026-10-20）：工具行模型选择器左侧只有**一个闪电图标**（无文案 / 无菜单）——点击开 / 关 omp `set_fast_mode` 的 priority 服务档位，开启时图标变黄（`text-warn`）。**只有支持 Fast 的模型才显示闪电**：壳侧按 omp `service-tier.ts` 的规则从 `get_state.model` 的 `provider` / `api` / `identity.class` 算 `fastModeSupported`，选择模型时即时更新，commandcode 的 DeepSeek、非 first-party 的 anthropic-messages 等不支持模型直接不显示，不再等点击后报错。**不是换快速模型，也不保证 tok/s 变快**：Fast 是供应商服务档位（OpenAI `service_tier=priority` / Anthropic `speed=fast` / Google priority），可能降低排队 / 首字延迟，实际速度由供应商决定。`ultra`（`/fast ultra`）只有终端 / TUI 提供，rpc-ui 没有这个开关，界面完全不展示。`fastModeEnabled/Active` 从 `get_state` 回读并乐观回填；支持判定为真但运行时仍被拒时，错误原文在图标上方就地显示，下一次点击清掉并允许重试。模型行**不做「选中即开 Fast」的闪电**（选模型与开档位是两件事；`omp models --json` 不暴露 Fast 能力，当前模型的支持判定来自 `get_state` 的完整模型元数据）。
+
+- **模型角色改为多套「模型配置」**（2026-10-20 用户口径）：设置 › 模型的「模型角色」不再把所有角色摊在页面上，而是**配置列表 + 编辑弹窗**——列表行**只展示名称**（不展示角色数 / selector 等模型信息，点击名称直接打开编辑弹窗），弹窗里编辑名称与角色（不在设置页行内展开），弹窗内角色清单独立滚动、底部动作条固定；新建用同一个弹窗的 new 模式，名称与角色一起配，创建后不自动激活。**同一时间恰好一套激活**，激活 = 把该套角色表整表写进 omp（新命令 `apply_model_roles`，整表覆盖 + 回读；旧配置独有的角色会被删掉），未激活配置的修改只保存在本机（localStorage `omp.modelRoleProfiles.v1`）。激活中的配置不能删除；删除未激活配置走二次确认。首次打开时用 omp 当前 `modelRoles` 自动生成「默认配置」并激活；omp 侧（TUI / CLI）改过的角色仍会收进当前激活配置（「omp 里改完切回来能看到」不变）。角色行（选模型 / 思考档 / 清除）与 Ctrl+P 轮换序派生逻辑不变。
+
+### Security
+
+- 远程只暴露**白名单 RPC**（会话 / 消息 / 审批 / 新建；无文件树、终端、git、设置、项目增删、归档删除）；会话 id 必须是完整 uuid；`create_session` 的 cwd 必须是已登记项目根或子目录。
+- 审批在手机端只允许 once / deny，`always` 后端直接 403（不把会话升级成 yolo）。
+- Host 允许列表（防 DNS rebinding；HTTP/2 用 URI authority 兜底）、Origin 同源、`X-OMP-Remote` 自定义头 + JSON Content-Type（防 CSRF）、无 CORS、限流、16 MiB 请求体上限、静态路径净化（拒绝 `..` / `%` / 反斜杠）。
+- HTML 带 CSP（`script-src 'self'`、`frame-ancestors 'none'` 等）、`X-Content-Type-Options`、`Referrer-Policy: no-referrer`、`X-Frame-Options: DENY`；API 全部 `no-store`。
+- 设备 token 只存 `sha256(salt||token)`，常量时间比较；撤销即关闭该设备 WS；不记录 token / 消息 / 审批内容。
+
+### Changed
+
+- `runtime.rs` 与 `commands/mod.rs` 的事件 emit 统一走 `remote::emit_event` / `emit_serializable`（桌面行为不变，远程镜像）。
+- `src/shared/api.ts` 的 invoke 分支：`window.__OMP_REMOTE__` 时走 HTTP/WS，桌面仍走 Tauri；`useSessionEvents` 的 `listen` 同口径切换。
+- 设置导航「通用」组新增「远程控制」（三条目），跨条目搜索加入静态入口。
+- 文档：新增 `docs/remote-control.md`；`AGENTS.md` 补源码结构 / 数据流 / 范围边界（手机端只作为远程控制 PWA）；`docs/roadmap.md` 加 0.3.0；`design-system/MASTER.md` 补远程面板与移动壳；`README` / `SECURITY` / `THIRD-PARTY-NOTICES` 同步。
+
+### Fixed
+
+- **计划模式现在按 `modelRoles.plan` 启动**（2026-10-20 用户口径）：omp 的 TUI 进入计划模式会切到 `plan` 角色，但 rpc-ui 的 `--plan-yolo` 启动路径不会——此前计划会话用的是项目上次的模型 / 思考档。现在 spawn 前读项目 cwd 的有效 `modelRoles.plan`：配置了就用 `--model @plan`（角色 selector 的 `:档位` 后缀由 omp 解析，不再传项目 `last_model` / `last_thinking`）；plan 角色未配置时仍沿用项目偏好。计划批准后的执行模型仍由 omp 的 `--plan-yolo-into` 默认 `smol` 角色决定。目标模式不改模型（omp 没有 `goal` 角色，沿用当前会话模型）。
+
+- **标题栏整条都能拖动窗口了**（2026-10-20 用户实测）：中列 `TopBar` 的 `data-tauri-drag-region` 是裸属性，而 Tauri 的拖拽脚本只认**直接命中带属性元素**的 mousedown——标题栏的内容全在两层 flex 容器里，实际只有 72px 红绿灯留白和几像素 gap 能拖，按在标题 / 空白处拖不动整个 app。现在标题栏用 `="deep"`（子树里任意点击都算拖拽），交互件（标题改名 / 导出 / 工作台开关 / 改名输入框）不带属性、由脚本按 clickable 元素短路，点击语义不变；空态标题与导出是 disabled 按钮（收不到 mousedown 还会挡住拖拽区），禁用态挂 `pointer-events-none` 把这一片让回标题栏。
+
 ## [0.2.2] - 2026-10-20
 
 ### Added
