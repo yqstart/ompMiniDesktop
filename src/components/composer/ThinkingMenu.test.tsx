@@ -11,6 +11,7 @@ import { ThinkingMenu } from "./ThinkingMenu";
 /**
  * 思考档选择器（2026-10-14 与模型选择器拆分）：
  * - 档位只列当前模型**真正支持**的档（`off` 恒可用）；不支持思考 / 无会话时整个控件不出现；
+ * - 浮层是纵向行钮列表（顶部小标题 + 当前档打勾），与模型 / 执行模式选择器同口径；
  * - 默认档读 omp 的 `defaultThinkingLevel`：真值合法显示真值，缺档 / 非法显示配置默认档
  *   （夹到支持集），配置没读到退最高档；
  * - 点选下发 `set_thinking_level` 并即时收起。
@@ -67,20 +68,24 @@ afterEach(() => {
 });
 
 const trigger = () => container.querySelector<HTMLButtonElement>('button[aria-label="选择思考等级"]');
-const chips = () => [...container.querySelectorAll<HTMLButtonElement>('button[aria-label^="思考等级 "]')];
+const rows = () => [...container.querySelectorAll<HTMLButtonElement>('button[aria-label^="思考等级 "]')];
 
 describe("思考档选择器", () => {
  it("只列当前模型支持的档位（off 恒在），点选下发 set_thinking_level 并收起", async () => {
   act(() => {
    root.render(<ThinkingMenu />);
   });
-  expect(chips().map((b) => b.textContent)).toEqual(["off", "low", "medium", "high"]);
+  expect(rows().map((b) => b.textContent)).toEqual(["off", "low", "medium", "high"]);
+  // 纵向行钮（每行占满浮层宽度、当前档行尾打勾），不再是并排的一排芯片
+  expect(rows().every((b) => b.className.includes("w-full"))).toBe(true);
+  expect(rows()[2].querySelector("svg")).not.toBeNull();
+  expect(rows()[0].querySelector("svg")).toBeNull();
   // 缺档时显示的是 omp 配置的默认档（medium），不是最高档
   expect(trigger()?.textContent).toContain("medium");
-  expect(chips()[2].getAttribute("aria-pressed")).toBe("true");
+  expect(rows()[2].getAttribute("aria-pressed")).toBe("true");
   expect(container.textContent).toContain("omp 默认：medium");
 
-  act(() => chips()[3].click());
+  act(() => rows()[3].click());
   await act(async () => { await delay(0); });
   expect(vi.mocked(api.setThinking)).toHaveBeenCalledWith("s1", "high");
   expect(useApp.getState().currentThinking).toBe("high");
@@ -93,7 +98,7 @@ describe("思考档选择器", () => {
    root.render(<ThinkingMenu />);
   });
   expect(trigger()?.textContent).toContain("high");
-  expect(chips()[3].getAttribute("aria-pressed")).toBe("true");
+  expect(rows()[3].getAttribute("aria-pressed")).toBe("true");
  });
 
  it("配置默认档不被该模型支持 / 没读到 → 最高档兜底（不编造档位）", () => {

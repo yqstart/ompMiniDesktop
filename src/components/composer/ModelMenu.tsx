@@ -20,6 +20,10 @@ import { StarToggle } from "../settings/StarToggle";
  * 也不会裸露。行尾**不再摆上下文窗口 / 图片能力标记**（2026-10-19 用户口径：选择器里只要供应商，
  * 容量与模态不进选择面）。
  *
+ * **面板宽度 26rem**（2026-10-20 用户口径：`commandcode` 这类长供应商 + 长模型名把名字截成
+ * 「DeepSeek V4 Flash Vision…」）：比原来的 20rem 宽出 6rem，长名字基本能看全；窄视口仍由
+ * `max-w-[calc(100vw-2rem)]` 兜底收窄。
+ *
  * 选模型仍会联动思考档，但**只在后端兜底**：omp 切模型会保留仍然合法的档位，只有缺档
  * （切过无思考模型等）才由 runtime 落 **omp 配置的默认档**（`defaultThinkingLevel`，
  * 见 `lib/thinkingDefault.ts`）——这里乐观镜像同一口径（有效档保留、否则夹默认档），
@@ -120,7 +124,7 @@ export function ModelMenu() {
         <ChevronDown size={13} aria-hidden className="shrink-0 opacity-60" />
       </button>
       {open && (
-        <div className="absolute right-0 bottom-8 z-10 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-elevated shadow-pop">
+        <div className="absolute right-0 bottom-8 z-10 w-[26rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-elevated shadow-pop">
           <div className="flex items-center gap-2 p-2">
             <label htmlFor="model-search" className="sr-only">{t.searchModelLabel}</label>
             <input
@@ -157,6 +161,7 @@ export function ModelMenu() {
                       onClick={() => void pick(m)}
                       className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors duration-100 hover:bg-hover"
                       aria-label={fmt(t.useModelAria, m.name)}
+                      title={m.selector}
                     >
                       <span className="truncate">{m.name}</span>
                       <span className="ml-auto flex shrink-0 font-mono text-xs">

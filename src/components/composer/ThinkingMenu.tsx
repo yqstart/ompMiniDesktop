@@ -11,7 +11,8 @@ import { ensureOmpDefaultThinking } from "../../lib/thinkingDefault";
 
 /**
  * 思考档选择器（2026-10-14 与模型选择器拆分）：触发按钮 = 灯泡图标 + 当前档，浮层 = 当前模型
- * **真正支持**的档位芯片（`off` 恒可用）+ 一行「omp 默认」提示。
+ * **真正支持**的档位行钮列表（`off` 恒可用，当前档打勾）+ 一行「omp 默认」提示。
+ * 形态与模型 / 执行模式选择器同口径：顶部小标题 + 纵向行钮列表（不再用一排横向芯片）。
  *
  * **默认档口径**：读 omp 的 `defaultThinkingLevel`（`lib/thinkingDefault.ts`）——omp 真值合法就显示
  * 真值，真值不可用（缺档 / 对新模型非法）才显示配置默认档夹到该模型的支持集；配置没读到退最高档。
@@ -68,27 +69,25 @@ export function ThinkingMenu() {
         <ChevronDown size={13} aria-hidden className="shrink-0 opacity-60" />
       </button>
       {open && (
-        <div className="absolute right-0 bottom-8 z-10 w-60 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-elevated shadow-pop">
-          <div className="px-2.5 pt-2 text-xs text-faint">{t.thinkingSection}</div>
+        <div className="absolute right-0 bottom-8 z-10 w-48 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-elevated p-1 pb-1.5 shadow-pop">
+          <div className="px-2 pt-1.5 pb-0.5 text-[11px] text-faint">{t.thinkingSection}</div>
           {/* 只列 omp 真值（或目录）给出的支持档；off 恒可用 */}
-          <div className="flex flex-wrap gap-1 p-2">
-            {levels.map((lv) => (
-              <button
-                key={lv}
-                onClick={() => pick(lv)}
-                className={`flex cursor-pointer items-center gap-1 rounded-md border px-2 py-1 text-[12px] transition-colors duration-100 ${lv === level ? "border-accent/50 bg-active text-foreground" : "border-border text-muted hover:bg-hover hover:text-foreground"
-                  }`}
-                aria-label={fmt(t.thinkingLevelAria, lv)}
-                aria-pressed={lv === level}
-              >
-                {lv === level && <Check size={10} aria-hidden />}
-                {lv}
-              </button>
-            ))}
-          </div>
+          {levels.map((lv) => (
+            <button
+              key={lv}
+              onClick={() => pick(lv)}
+              className={`flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors duration-100 hover:bg-hover ${lv === level ? "font-medium text-foreground" : "text-muted"
+                }`}
+              aria-label={fmt(t.thinkingLevelAria, lv)}
+              aria-pressed={lv === level}
+            >
+              <span className="min-w-0 flex-1 truncate">{lv}</span>
+              {lv === level && <Check size={12} aria-hidden className="shrink-0 text-accent" />}
+            </button>
+          ))}
           {/* 默认档提示：对当前模型生效的 omp 配置默认档（真值不可用时显示的就是它） */}
           {ompDefaultThinking && (
-            <div className="px-2.5 pb-2 text-[11px] text-faint">
+            <div className="px-2 pt-1 text-[11px] text-faint">
               {fmt(t.thinkingDefaultHint, clampThinking(ompDefaultThinking, efforts))}
             </div>
           )}
