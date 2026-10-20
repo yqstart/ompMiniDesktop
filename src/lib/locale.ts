@@ -96,7 +96,7 @@ const ZH = {
  // 侧栏：搜索
  refPickTitle: "引用工作区文件",
  refPickSearchPlaceholder: "搜索文件名或路径（项目名也可）",
- refPickInsertHint: "Enter 插入 @路径（不发送）",
+ refPickInsertHint: "↑↓ 选择，Enter 插入 @路径（不发送）",
  refPickDirHint: "目录默认折叠，点文件夹行可展开；行尾链接键（或 ↑↓ 停在它上面按 Enter）引用整个文件夹",
  refPickDirRef: "引用整个文件夹",
  refPickGroupCount: "{0}（{1}）",
@@ -1546,7 +1546,7 @@ const EN: Record<TextKey, string> = {
  addProject: "Add project",
  refPickTitle: "Reference workspace file",
  refPickSearchPlaceholder: "Search by file name, path, or project",
- refPickInsertHint: "Enter inserts the @path (does not send)",
+ refPickInsertHint: "↑↓ to select, Enter inserts the @path (does not send)",
  refPickDirHint: "Folders start collapsed; click a row to expand/collapse, and the link icon at its end (or ↑↓ + Enter) references the whole folder",
  refPickDirRef: "Reference the whole folder",
  refPickGroupCount: "{0} ({1})",

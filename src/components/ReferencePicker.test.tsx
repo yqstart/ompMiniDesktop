@@ -46,6 +46,7 @@ beforeEach(() => {
    { id: "s1", projectId: "fe", title: "会话", cwd: "/p/fe", timestamp: 1, archived: false, corrupt: false, note: null, running: false },
   ],
   drafts: { s1: "" },
+  pendingReference: null,
   locale: "zh-CN",
   refPickerTarget: { sessionId: "s1" },
   sidebarOpen: false,
@@ -131,10 +132,33 @@ describe("引用工作区文件浮层", () => {
   expect(useApp.getState().composerFocusSeq).toBeGreaterThan(0);
  });
 
- it("键盘：默认停在第一条文件行，↑ 能停到文件夹行、Enter 引用整个文件夹", async () => {
+ it("打开（浏览态）不预选任何行：↑↓ 才出现高亮；未选中时 Enter 不投递", async () => {
   await open();
-  // 默认折叠下的行序：src(0) → README.md(1)
-  press("ArrowUp"); // 从默认落点（README.md）上移到 src
+  // 行序：src(0) → README.md(1)。刚打开时文件行没有 aria-selected，目录行也没有高亮底色
+  const selectedFiles = () => [...container.querySelectorAll('[role="option"][aria-selected="true"]')];
+  expect(selectedFiles()).toHaveLength(0);
+  expect(container.querySelector("input")!.getAttribute("aria-activedescendant")).toBeNull();
+  // 目录行也没有选中底色（高亮行 = bg-active）
+  expect(container.querySelector(".bg-active")).toBeNull();
+
+  press("Enter");
+  expect(useApp.getState().pendingReference).toBeNull();
+  expect(useApp.getState().refPickerTarget).toEqual({ sessionId: "s1" });
+
+  // ↓ 第一次才落位：落在第一条文件行（README.md），不是第一行的目录
+  press("ArrowDown");
+  expect(selectedFiles().map((o) => o.textContent)).toEqual(["README.md"]);
+  press("Enter");
+  expect(useApp.getState().pendingReference).toMatchObject({ path: "/p/be/README.md" });
+ });
+
+ it("键盘：浏览态 ↑ 从第一条文件行往上落到文件夹行、Enter 引用整个文件夹", async () => {
+  await open();
+  // 行序：src(0) → README.md(1)；打开时不预选，↑ 第一次落在第一条文件行（README.md）上方
+  expect(container.querySelectorAll('[role="option"][aria-selected="true"]')).toHaveLength(0);
+  press("ArrowUp");
+  // 目录行不是 role=option，选中态靠 bg-active
+  expect(container.querySelector(".bg-active")?.textContent).toContain("src");
   press("Enter");
   expect(useApp.getState().pendingReference).toMatchObject({
    sessionId: "s1",

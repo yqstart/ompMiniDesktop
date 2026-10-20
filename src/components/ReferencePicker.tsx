@@ -49,8 +49,10 @@ type Section = { key: string; name: string; count: number; rows: RefRow[] };
  * 展开成 fileMention 消息，含 cwd 之外的绝对路径，2026-10-09 真机实测），跨项目文件因此照样进上下文。
  * **文件夹同样可引用**（条目树里的目录行尾悬停出链接键，与右栏文件树同一口径）——注入 `@<目录>/`，
  * 语义 = omp 的目录提及（整个目录进上下文）。
- * 结果按项目分组、以资源管理器式目录树展示（chevron 折叠 / 目录与文件类型图标 / ↑↓ 走每一行，
- * **默认落点 = 第一条文件行**——打字后 Enter 仍是引用文件，要引用文件夹就 ↑↓ 停到目录行）；
+ * 结果按项目分组、以资源管理器式目录树展示（chevron 折叠 / 目录与文件类型图标 / ↑↓ 走每一行）；
+ * **刚打开（浏览态）不预选任何行**——↑↓ 或点击才出现高亮（2026-10-20 用户口径：打开就高亮一条
+ * 文件容易让人以为已经选好了），搜索态仍默认停在第一条文件行（打字后 Enter 直接引用最佳匹配）；
+ * 要引用文件夹就 ↑↓ 停到目录行。
  * **浏览态目录默认折叠**（只铺顶层，点着往下展开），**搜索态默认展开**（命中的深层文件必须可见）。
  *
  * 数据只在打开时拉一次（后端 60s 缓存）——输入不触发 IPC。
@@ -181,13 +183,20 @@ export function ReferencePicker(): React.JSX.Element | null {
   [sections],
  );
  const total = entries.length;
- /** 没按过方向键时的默认落点 = 第一条**文件**行（打字后 Enter 直接引用文件；要引用文件夹就 ↑↓ 停上去）。 */
- const defaultIndex = useMemo(() => {
+ /** 键盘锚点 = 第一条**文件**行：浏览态第一次 ↓ 落在这里、↑ 落在它上面一行（通常是目录）。 */
+ const anchorIndex = useMemo(() => {
   const at = entries.findIndex((entry) => isFileRow(entry.row));
   return at >= 0 ? at : 0;
  }, [entries]);
- /** `cursor === null` = 还没动过方向键（跟随默认落点，列表变化后也不会错位）。 */
- const activeIndex = total === 0 ? -1 : cursor === null || cursor >= total ? defaultIndex : cursor;
+ /**
+  * 渲染用的选中行：
+  * - 按过方向键（`cursor` 有效）→ 跟随它；
+  * - **浏览态（刚打开 / 清空查询）不预选任何行**（`-1`）——打开就高亮一条文件会被误当成
+  *   已经选好（2026-10-20 用户口径：要手动选）；
+  * - 搜索态默认停在锚点（用户已明确在找东西，Enter 直接引用最佳匹配）。
+  */
+ const activeIndex =
+  total === 0 ? -1 : cursor !== null && cursor < total ? cursor : browsing ? -1 : anchorIndex;
  const active = activeIndex >= 0 ? entries[activeIndex] ?? null : null;
 
  /**
@@ -245,7 +254,14 @@ export function ReferencePicker(): React.JSX.Element | null {
        if (total === 0) return;
        e.preventDefault();
        const delta = e.key === "ArrowDown" ? 1 : -1;
-       setCursor(((activeIndex < 0 ? 0 : activeIndex) + delta + total) % total);
+       // 还没选中（浏览态刚打开）：第一次 ↓ 落在第一条文件行、↑ 落在它上面一行（通常是目录）
+       const next =
+        activeIndex >= 0
+         ? (activeIndex + delta + total) % total
+         : delta > 0
+          ? anchorIndex
+          : (anchorIndex - 1 + total) % total;
+       setCursor(next);
       } else if (e.key === "Enter") {
        if (active) {
         e.preventDefault();
@@ -320,7 +336,7 @@ export function ReferencePicker(): React.JSX.Element | null {
             ref={(el) => {
              rowRefs.current[row.index] = el;
             }}
-            className={`group flex items-center gap-1 rounded-md py-[3px] pr-1 transition-colors duration-100 ${activeIndex === row.index ? "bg-active" : "hover:bg-hover"}`}
+            className={`group flex h-6 items-center gap-1 rounded-md pr-1 transition-colors duration-100 ${activeIndex === row.index ? "bg-active" : "hover:bg-hover"}`}
             style={{ paddingLeft: 6 + row.depth * INDENT }}
            >
             <button
@@ -342,11 +358,13 @@ export function ReferencePicker(): React.JSX.Element | null {
               ))}
              </span>
             </button>
-            {/* 行尾动作：引用整个文件夹（hover 才露面，与右栏文件树同一口径） */}
+            {/* 行尾动作：引用整个文件夹（hover 才露面，与右栏文件树同一口径）。
+                用 `invisible` 而非 `hidden`：按钮**始终占位**，hover 只切可见性——
+                否则 20px 的按钮会把 24px 行撑高，鼠标扫过时整列上下跳。 */}
             <button
              type="button"
              onClick={() => chooseDir(section.key, row.rel)}
-             className="hidden size-5 shrink-0 cursor-pointer items-center justify-center rounded text-faint transition-colors duration-100 group-hover:flex hover:bg-active hover:text-foreground"
+             className="invisible flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-faint transition-colors duration-100 group-hover:visible hover:bg-active hover:text-foreground"
              aria-label={t.refPickDirRef}
              title={t.refPickDirRef}
             >
@@ -368,7 +386,7 @@ export function ReferencePicker(): React.JSX.Element | null {
            onClick={() => choose(row.item)}
            title={row.item.abs}
            style={{ paddingLeft: 6 + row.depth * INDENT }}
-           className={`flex w-full cursor-pointer items-center gap-1.5 rounded-md py-[3px] pr-2 text-left transition-colors duration-100 ${activeIndex === row.index ? "bg-active" : "hover:bg-hover"}`}
+           className={`flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-md pr-2 text-left transition-colors duration-100 ${activeIndex === row.index ? "bg-active" : "hover:bg-hover"}`}
           >
            <span className="w-3 shrink-0" aria-hidden />
            <FileIcon name={row.name} isDir={false} size={14} />
