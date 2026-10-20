@@ -40,10 +40,10 @@ import { ContextMeter } from "./ContextMeter";
  *   沿用原有门槛（没有真值就不出现）；
  * - 收敛：打开会话拉一次；**运行中每 3 秒**回读（读数随步推进），终态翻转再拉一次拿终值
  *   ——omp 不推这类投影，只能这样收敛；失败保留旧值，不打断阅读。
- * - **独占一行、整条靠右**（2026-10-16 用户口径）：它是**卡片的直接子元素**（`Composer` 里挂在
- *   工具行容器**之外**），`justify-end` 让四项贴整卡右缘排。**不许**塞进工具行那个
- *   `flex flex-wrap` 容器——那样它只是行尾的又一个 flex item，会与模型 / 思考档 / 发送键**同行**，
- *   `border-t` 也只剩自己那半截宽（用户实测的错位）。
+ * - **独占一行、整条靠右**（2026-10-16 用户口径）：它是**输入卡外部**的一行（2026-10-20 用户口径：
+ *   从卡片内部移到卡片下方；`Composer` 里挂在卡片 `div` 之外、与卡片同宽的容器里），`justify-end`
+ *   让四项贴整卡右缘排。**不许**塞进工具行那个 `flex flex-wrap` 容器——那样它只是行尾的又一个
+ *   flex item，会与模型 / 思考档 / 发送键**同行**（用户实测的错位）；也不再放回卡片内部。
  * - **浮层的包含块 = 本统计条根**（`relative` 在根上，四项的按钮包装器**不许**自带 `relative`：
  *   它一旦定位就成了浮层的包含块，`lib/usePopoverAnchor` 的实测也就失去基准），但**水平位置跟随被点的项**
  *   （2026-10-16 用户口径）——只贴条缘展开的浮层离按钮很远（用户实测：点中间的容量环、浮层跑到卡片最右侧）；
@@ -79,7 +79,7 @@ export function SessionStatsBar() {
  if (!showStats && !showTokens && ctxPct == null && !showUsage) return null;
 
  return (
-  <div className="relative flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5 border-t border-border-soft px-2 pt-1 pb-1.5 text-[11px] text-faint">
+  <div className="relative flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5 px-2 pt-0.5 pb-0.5 text-[11px] text-faint">
    {showStats && stats && <TurnStatsItem stats={stats} />}
    {showTokens && stats && <TokenStatsItem stats={stats} />}
    <ContextMeter />

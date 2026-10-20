@@ -212,13 +212,14 @@ describe("Composer 工具行（v2）", () => {
   const meter = container.querySelector<HTMLButtonElement>('button[aria-label^="上下文容量"]');
   expect(meter).not.toBeNull();
   expect(meter?.textContent).toContain("13%");
-  // 「+」菜单（v2）：点开占用互斥槽，菜单行 = 标题 + 说明（说明不再挤在标题里）
+  // 「+」菜单（v2）：点开占用互斥槽，单行 = 图标 + 标题 + 命令名（2026-10-20 去掉说明行）
   const plus = container.querySelector<HTMLButtonElement>('button[aria-label="添加上下文"]');
   expect(plus).not.toBeNull();
   act(() => plus?.click());
   expect(useApp.getState().composerMenu).toBe("plus");
   expect(container.textContent).toContain(TEXT["zh-CN"].refPickTitle);
-  expect(container.textContent).toContain(TEXT["zh-CN"].plusAddRefHint);
+  expect(container.textContent).toContain(TEXT["zh-CN"].plusFileTitle);
+  expect(container.textContent).toContain(TEXT["zh-CN"].plusGoalTitle);
   act(() => plus?.click());
   expect(useApp.getState().composerMenu).toBeNull();
   // 执行模式菜单（v2）：行 = 名称 + 说明；作用域说明是「本会话 + 新会话默认」，勾选跟生效档

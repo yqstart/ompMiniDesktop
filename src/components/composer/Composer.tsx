@@ -30,8 +30,10 @@ import { CompactButton, QueueBadge } from "../thread/StatusBar";
 import { resolveContext } from "../../lib/context";
 import { useGitInfo } from "../../lib/useGitInfo";
 import { GoalRow } from "./GoalRow";
-import { MentionList, type PathCandidate } from "./MentionList";
+import { GoalDialog } from "./GoalDialog";
+import { MentionList, type MentionRow, type PathCandidate } from "./MentionList";
 import { DraftEditor, type DraftEditorHandle, type DraftTextSource } from "./draft/DraftEditor";
+import { referenceTarget } from "../../lib/workspaceFiles";
 import { SlashMenu } from "./SlashMenu";
 import { PlusMenu } from "./PlusMenu";
 import { ApprovalModeMenu } from "./ApprovalModeMenu";
@@ -43,15 +45,18 @@ const PASTE_FILE_MIN = 2000;
 
 /**
  * 会话输入卡（v2 §3 形态，对齐 Codex / ZCode 的输入卡）：
- * **卡顶行** = 项目 + 分支选择器内嵌（原外置的上下文条收缩进来；分支可点切、其后是提交入口）；
+ * **卡上顶行**（2026-10-20 从卡内移出）= 项目 + 分支选择器 + 提交键，与卡片同宽、左缘对齐，
+ * 但**不在卡片内部**（外部独立一行）；
  * **输入区** = 附件条 + 提及芯片 + 待发区 + 自动增高输入框；
- * **卡底工具行** = 左「`+` 菜单（图片 / 引用文件）+ 执行模式菜单」，右「压缩行动点 + 模型 · 思考档 ▾ +
- * 圆形发送 / 停止」；**卡底统计条** = `SessionStatsBar`，**工具行之下的独立一行**
- * （卡片直接子元素，不在工具行的 `flex-wrap` 容器里）——会话统计 / Token 用量 / 上下文占用 /
- * 供应商用量（2026-10-16 对齐 DeepSeek Harness 的 composer dock）——「我要不要再开一轮」的读数
- * （跑了多少步、烧了多少 token、上下文还剩多少、配额还剩多少）都在那一行里，点开各自给明细。
- * 上下文容量环与供应商用量 2026-10-14 从顶栏右端搬进输入卡、2026-10-16 从工具行挪进统计条；
- * 提交入口 = 卡顶行的提交键（与右栏「变更」区块同一浮层链路）。
+ * **卡底工具行** = 左「`+` 菜单（添加：文件 / 工作区文件 / 目标 / 计划；指令：压缩）+ 执行模式菜单」，
+ * 右「压缩行动点 + 模型 · 思考档 ▾ + 圆形发送 / 停止」；**卡底统计条** = `SessionStatsBar`，
+ * **在输入卡外部、卡片下方独立一行**（2026-10-20 用户口径：从卡片内部移出；不在工具行的
+ * `flex-wrap` 容器里）——会话统计 /
+ * Token 用量 / 上下文占用 / 供应商用量（2026-10-16 对齐 DeepSeek Harness 的 composer dock）——
+ * 「我要不要再开一轮」的读数（跑了多少步、烧了多少 token、上下文还剩多少、配额还剩多少）都在那一行里，
+ * 点开各自给明细。上下文容量环与供应商用量 2026-10-14 从顶栏右端搬进输入卡、2026-10-16 从工具行挪进统计条；
+ * 提交入口 = 卡上顶行的提交键（与右栏「变更」区块同一浮层链路）。
+ * `@` / `/` 补全浮层 2026-10-20 也移到卡片外部（卡片上方的独立块，不再撑高卡片）。
  * 待发区（V40）：omp 的队列真值（`queue_update`）——可撤回 / 编辑 / 提升，Esc 中断还原
  * （「排队」按钮 2026-10-13 按用户口径退场，排队只走 Tab / ⌘Ctrl+Enter）。
  *
@@ -60,6 +65,9 @@ const PASTE_FILE_MIN = 2000;
  * 三条入口都在光标处留下 `#N` 占位（N = 附件稳定编号，`commitImages` 唯一收尾）：文字与图片
  * 的对应关系写在正文里（「如图#1」），缩略图角标同编号。实测核对（omp 18.10.4 rpc-ui）：
  * 文本原样进 user 消息、图片按数组序追加为 image 块，`#N` 只是普通文本、上游不做特殊解析。
+ *
+ * 2026-10-20：`+` 菜单的「文件」按类型分流（图片 → 附件，其他文件 → `@` 引用），
+ * 「目标」走独立弹窗（不覆盖草稿），「计划」先留入口；`@` 浮层顶部多一行「工作区文件」入口。
  */
 export function Composer() {
  const t = useText();
@@ -105,7 +113,7 @@ export function Composer() {
  const archived = sessions.find((s) => s.id === activeSessionId)?.archived;
  // @文件 提及（V2 M6b）：展开由 omp 做，这里只把草稿里的提及显示成芯片并问一次「路径存在吗」
  const cwd = sessions.find((s) => s.id === activeSessionId)?.cwd ?? "";
- // 卡顶行（v2 §3）：项目 + 分支选择器内嵌（原 `ContextBar` 收缩进来）；git 查询与右栏共用 `useGitInfo`
+ // 卡上顶行（2026-10-20 从卡内移出）：项目 + 分支 + 提交；git 查询与右栏共用 `useGitInfo`
  const projects = useApp((s) => s.projects);
  const { project } = resolveContext(projects, sessions, activeSessionId);
  const { info: git, loading: gitLoading, reload: reloadGit } = useGitInfo(cwd);
@@ -139,6 +147,9 @@ export function Composer() {
  }, [checks, mentionKey, mentions]);
  const [attachError, setAttachError] = useState<string | null>(null);
  const [dragging, setDragging] = useState(false);
+ /** 目标弹窗（`+` 菜单「目标」）：只在打开时挂载，objective 由 props 初始化。 */
+ const [goalDialogOpen, setGoalDialogOpen] = useState(false);
+ const goal = useApp((s) => (s.activeSessionId ? (s.goalBySession[s.activeSessionId] ?? null) : null));
  // `@` 补全状态：mentionIdx 为高亮下标，-1 = 无补全；mentionToken 是 `@` 后的路径前缀。
  const [mentionIdx, setMentionIdx] = useState(-1);
  const [mentionCands, setMentionCands] = useState<PathCandidate[]>([]);
@@ -223,13 +234,17 @@ export function Composer() {
   if (mentionEmpty) return;
   let alive = true;
   const key = mentionQueryKey;
+  const token = mentionToken ?? "";
   const timer = setTimeout(() => {
    void api
     .completePath(cwd, mentionToken)
     .then((rs) => {
      if (!alive) return;
      setMentionCands(rs);
-     setMentionIdx(rs.length > 0 ? 0 : -1);
+     // 默认落点 = 第一条**路径**；空 token 时浮层最上面还有一行「工作区文件」入口，
+     // 只在没有路径可落时才落到入口上——打 `@` 的主诉求是引用文件，不是打开选择器。
+     const entry = token === "" ? 1 : 0;
+     setMentionIdx(rs.length > 0 ? entry : token === "" ? 0 : -1);
      setMentionLoadedKey(key);
     })
     .catch(() => undefined);
@@ -240,12 +255,31 @@ export function Composer() {
   };
  }, [mentionQueryKey, mentionToken, cwd, activeSessionId, mentionEmpty]);
 
- // 选中一条候选（点击、Tab、Enter 三个入口共用）：
+ /** 浮层行：路径候选 + 刚打 `@`（token 为空）时插在最前面的「工作区文件」入口。 */
+ const mentionRows = useMemo<MentionRow[]>(() => {
+  if (!mentionOpen) return [];
+  const paths: MentionRow[] = mentionCands.map((cand) => ({ kind: "path", cand }));
+  return mentionToken === "" ? [{ kind: "workspace" }, ...paths] : paths;
+ }, [mentionOpen, mentionCands, mentionToken]);
+
+ // 选中一行（点击、Tab、Enter 三个入口共用）：
+ // - **工作区文件** → 收掉刚打出的 `@`，打开跨项目引用浮层（⌘⇧P 同一入口，选完由它投递芯片）；
  // - **文件** → 换成引用芯片（`ReferenceChipNode`）：显示短标签，序列化出去的是真路径 `c.real`；
  // - **目录** → 换成一段**路径文本** `@<短标签>/`（光标停在其后）：这就是「往下钻一层」——
  //   浮层立刻接着列该目录里的东西，想引用整个目录时直接发送这段文本即可。
  //   （插成芯片的话光标被原子节点挡住、打不出下一段路径，用户实测「进不了文件夹」。）
- const pickMention = (c: PathCandidate) => {
+ const pickMention = (row: MentionRow) => {
+  if (row.kind === "workspace") {
+   // 不记 `mentionDismissed`：删掉这枚 `@` 后 token 自然变空，浮层自己会关；
+   // 记了的话 key（`cwd\0`）不变，用户下一次打 `@` 会被这条标记挡住。
+   setMentionCands([]);
+   setMentionIdx(-1);
+   // 这一枚 `@` 只是入口开关：ReferencePicker 选完直接插芯片，留着会变成 `@@标签`
+   editorRef.current?.replaceMentionWithText("", "");
+   if (activeSessionId) useApp.getState().set({ refPickerTarget: { sessionId: activeSessionId } });
+   return;
+  }
+  const c = row.cand;
   const token = mentionToken ?? "";
   if (c.isDir) editorRef.current?.replaceMentionWithText(token, `@${c.label}/`);
   else editorRef.current?.replaceMention(token, { path: c.real, label: c.label, isDir: false });
@@ -364,16 +398,18 @@ export function Composer() {
     }
    }
   }
-  // `@` 补全打开时：上下键导航、Tab/Enter 选中、Esc 关闭（优先于发送）
-  const completing = mentionCands.length > 0;
+  // `@` 补全打开时：上下键导航、Tab/Enter 选中、Esc 关闭（优先于发送）。
+  // 行数取 `mentionRows`——空 token 时最上面还有「工作区文件」入口，没有路径候选也能用
+  // ↑↓ 停到它上面（`completing` 用 cands 判定会让入口永远键盘够不着）。
+  const completing = mentionRows.length > 0;
   if (completing && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
-   setMentionIdx((i) => (i + (e.key === "ArrowDown" ? 1 : -1) + mentionCands.length) % mentionCands.length);
+   setMentionIdx((i) => (i + (e.key === "ArrowDown" ? 1 : -1) + mentionRows.length) % mentionRows.length);
    return true;
   }
   if (completing && e.key === "Tab") {
    // 没有高亮（mentionIdx = -1）时补第一项：Tab 在补全里不该"什么都不做"
-   const c = mentionCands[Math.max(0, mentionIdx)];
-   if (c) pickMention(c);
+   const row = mentionRows[Math.max(0, mentionIdx)];
+   if (row) pickMention(row);
    return true;
   }
   // Esc 关浮层也认「正在取词」这一态（此时还没有候选，completing 为假）
@@ -384,9 +420,9 @@ export function Composer() {
    return true;
   }
   if (completing && e.key === "Enter" && !e.shiftKey && !(e.metaKey || e.ctrlKey)) {
-   const c = mentionIdx >= 0 ? mentionCands[mentionIdx] : undefined;
-   if (c) {
-    pickMention(c);
+   const row = mentionIdx >= 0 ? mentionRows[mentionIdx] : undefined;
+   if (row) {
+    pickMention(row);
     return true;
    }
   }
@@ -506,26 +542,54 @@ export function Composer() {
   }
  };
 
- const pickImages = async () => {
+ /**
+  * `+` 菜单「文件」：系统文件选择器，**按类型分流**——
+  * - 图片（png / jpg / jpeg / webp / gif）→ 附件（`prompt.images`，与粘贴 / 拖拽同一条路）；
+  * - 其他文件 → 在光标处插一枚引用芯片，写的是 `referenceTarget` 的路径（会话目录内相对、
+  *   目录外绝对——与右栏文件树 / ⌘⇧P 引用浮层同一条投递口径），omp 按 `@file` 读进上下文。
+  * 不设过滤器：omp 的附件只吃图片，非图片文件走 mention 才是它们进上下文的正确方式。
+  */
+ const pickFiles = async () => {
+  const IMAGE = /\.(png|jpe?g|webp|gif)$/i;
   try {
-   const picked = await open({
-    multiple: true,
-    filters: [{ name: t.attachImages, extensions: ["png", "jpg", "jpeg", "webp", "gif"] }],
-   });
+   const picked = await open({ multiple: true, title: t.plusFilePickTitle });
    if (!picked) return;
    const paths = Array.isArray(picked) ? picked : [picked];
    setAttachError(null);
    const added: ImageAttachment[] = [];
    for (const p of paths) {
-    try {
-     added.push(await api.readImageFile(p));
-    } catch (e) {
-     setAttachError(e instanceof Error ? e.message : t.attachReadFailed);
+    if (IMAGE.test(p)) {
+     try {
+      added.push(await api.readImageFile(p));
+     } catch (e) {
+      setAttachError(e instanceof Error ? e.message : t.attachReadFailed);
+     }
+     continue;
     }
+    // 跨平台取基名：Tauri 在 Windows 上给的是反斜杠路径（芯片 label 不该是整条路径）
+    const name = p.split(/[\\/]/).filter(Boolean).pop() ?? p;
+    editorRef.current?.insertReference({ path: referenceTarget(cwd, p), label: name, isDir: false });
    }
    if (added.length > 0) commitImages(added);
+   // 选完回到输入框（系统对话框会夺焦；不显式还回来的话用户得再点一下才能继续写）
+   editorRef.current?.focus();
   } catch (e) {
    setAttachError(e instanceof Error ? e.message : t.attachPickFailed);
+  }
+ };
+
+ /** `+` 菜单「工作区文件」：⌘⇧P 的跨项目引用浮层（投递口径完全一致）。 */
+ const openWorkspacePicker = () => {
+  if (activeSessionId) useApp.getState().set({ refPickerTarget: { sessionId: activeSessionId } });
+ };
+
+ /** `+` 菜单「压缩」：与工具行的压缩行动点同一条后端通路（失败由流内错误行展示）。 */
+ const compactNow = async () => {
+  if (!activeSessionId) return;
+  try {
+   await api.compactSession(activeSessionId);
+  } catch {
+   // 同 `CompactButton`：不弹错，omp 的错误走 divider 行
   }
  };
 
@@ -708,6 +772,16 @@ export function Composer() {
    // eslint-disable-next-line react-hooks/purity -- localNote 只在事件处理器里调用，非 render
    { kind: "command", id: `lc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, output: text } as ViewMsg,
   ]);
+ };
+
+ /**
+  * `+` 菜单「计划」：入口先留（2026-10-20 用户口径）。
+  * omp 的 rpc-ui 命令面里没有 `/plan`（实测 18.12.3：`available_commands_update` 不含它），
+  * 壳侧也没有对应的 RPC——这里不塞假命令，只在流尾说明入口状态，等上游暴露后再接。
+  */
+ const planPending = () => {
+  if (!activeSessionId) return;
+  localNote(activeSessionId, t.plusPlanPendingNote);
  };
 
  /** 已发送 prompt 历史（V41，codex 的 ↑↓ 调回）：浏览态 {sid, idx, backup}——idx 指向历史下标、
@@ -920,6 +994,37 @@ export function Composer() {
   <div className={`shrink-0 pb-4 ${empty ? "pb-[14vh]" : ""}`}>
    {/* 目标行（V40）：有 goal 时显示（目标 / 状态 / 暂停·继续·清除） */}
    <GoalRow />
+   {/* `@` 路径补全（2026-10-20 用户口径：浮层在输入卡**外部**）：一层列举 / 递归搜名字
+       （`complete_path`），Tab/Enter 选中；空 token 时最上面多一行「工作区文件」入口。
+       取词中与「没有匹配」都留在浮层里如实说——无声消失会被当成坏了（用户实测）。 */}
+   {mentionOpen && (
+    <div className="mx-auto mb-1.5 max-w-(--measure-content)">
+     <MentionList
+      rows={mentionRows}
+      active={mentionIdx}
+      onPick={pickMention}
+      onHover={setMentionIdx}
+      status={mentionLoadedKey !== mentionQueryKey ? "loading" : mentionRows.length > 0 ? "ready" : "empty"}
+     />
+    </div>
+   )}
+   {/* `/` 命令补全：同样在卡片外（与 `@` 互斥，不会同时出现） */}
+   {slashOpen && (
+    <div className="mx-auto mb-1.5 max-w-(--measure-content)">
+     <SlashMenu cands={slashCands} active={slashIdx} query={slashToken ?? ""} onPick={pickCommand} onHover={hoverSlash} />
+    </div>
+   )}
+   {/* 卡上顶行（2026-10-20 从输入卡内部移出）：项目 / 分支 / 提交——与卡片同宽、左缘对齐，
+       不再是卡片的一部分；与「+」菜单等共用 composerMenu 互斥槽 */}
+   <div className="mx-auto flex max-w-(--measure-content) items-center gap-0.5 px-2 pb-1.5">
+    <ProjectPicker project={project} />
+    {git?.isRepo ? (
+     <>
+      <BranchPicker git={git} cwd={cwd} loading={gitLoading} onReload={reloadGit} />
+      <CommitButton cwd={cwd} />
+     </>
+    ) : null}
+   </div>
    <div
     onDragOver={(e) => {
      if (!e.dataTransfer.types.includes("Files")) return;
@@ -936,16 +1041,6 @@ export function Composer() {
     className={`mx-auto max-w-(--measure-content) rounded-xl border bg-surface transition-colors duration-100 ${dragging ? "border-accent bg-accent/5" : awaiting ? "border-warn/60" : "border-border focus-within:border-accent/70"
      }`}
    >
-    {/* 卡顶行（v2 §3，对齐 ZCode）：项目 + 分支选择器内嵌；与「+」菜单等共用 composerMenu 互斥槽 */}
-    <div className="flex items-center gap-0.5 px-2 pt-2">
-     <ProjectPicker project={project} />
-     {git?.isRepo ? (
-      <>
-       <BranchPicker git={git} cwd={cwd} loading={gitLoading} onReload={reloadGit} />
-       <CommitButton cwd={cwd} />
-      </>
-     ) : null}
-    </div>
     {awaiting && <div className="px-4 pt-2.5 text-[13px] text-warn">{t.resolveApprovalFirst}</div>}
     {attachments.length > 0 && (
      <div className="flex flex-wrap gap-2 px-3 pt-3">
@@ -1027,21 +1122,8 @@ export function Composer() {
     <label htmlFor="composer" className="sr-only">
      {t.composerLabel}
     </label>
-    {/* `@` 路径补全：一层列举 / 递归搜名字（`complete_path`），Tab/Enter 选中。
-        取词中与「没有匹配」都留在浮层里如实说——无声消失会被当成坏了（用户实测）。 */}
-    {mentionOpen && (
-     <MentionList
-      cands={mentionCands}
-      active={mentionIdx}
-      onPick={pickMention}
-      onHover={setMentionIdx}
-      status={mentionLoadedKey !== mentionQueryKey ? "loading" : mentionCands.length > 0 ? "ready" : "empty"}
-     />
-    )}
-    {/* `/` 命令补全：omp 命令面（含技能），限高内部滚动，不挤压输入框 */}
-    {slashOpen && (
-     <SlashMenu cands={slashCands} active={slashIdx} query={slashToken ?? ""} onPick={pickCommand} onHover={hoverSlash} />
-    )}
+    {/* `@` / `/` 补全浮层已移到输入卡**外部**（2026-10-20 用户口径）：卡片上方的独立块，
+        不再塞在卡片内部——原先它们把输入区往下推，看起来就像输入框的一部分。 */}
     {/* 输入区：草稿编辑器（Lexical）——`@引用` 是原子芯片（图标 + 短标签），
         序列化出去的是真路径；高度由内容撑开（CSS 封顶 `max-h-44`）。
         悬停给出 `@标签 → 真实相对路径`（引用不单独排芯片，完整路径要查就在这里）。 */}
@@ -1058,14 +1140,16 @@ export function Composer() {
      editable={!awaiting}
     />
     <div className="flex flex-wrap items-center gap-0.5 gap-y-1 px-2 py-1.5">
-     {/* 卡底工具行（v2 §3）：左 = `+`（附件 / 引用文件 / 图片）+ 执行模式菜单 + 排队徽标；
+     {/* 卡底工具行（v2 §3）：左 = `+`（文件 / 工作区文件 / 目标 / 计划 / 压缩）+ 执行模式菜单 + 排队徽标；
          右 = 压缩行动点 / 上下文容量环 / 供应商用量（2026-10-14 从顶栏右端搬进输入卡）+
          模型 / 思考档（两个独立选择器）+ 发送 / 停止 */}
      <PlusMenu
-      onPickImages={() => void pickImages()}
-      onPickRef={() => {
-       if (activeSessionId) useApp.getState().set({ refPickerTarget: { sessionId: activeSessionId } });
-      }}
+      onPickFiles={() => void pickFiles()}
+      onPickRef={openWorkspacePicker}
+      onOpenGoal={() => setGoalDialogOpen(true)}
+      onOpenPlan={planPending}
+      onCompact={() => void compactNow()}
+      compactBusy={status === "running"}
       disabled={!activeSessionId || awaiting}
      />
      <ApprovalModeMenu />
@@ -1097,13 +1181,26 @@ export function Composer() {
       )}
      </div>
     </div>
-    {/* 卡底统计条（2026-10-16，对齐 DeepSeek Harness 的 composer dock）：
-        **独占一行**——它是**卡片的直接子元素**，不许塞进上面工具行的 `flex-wrap` 容器里：
-        那样它只会变成行尾的又一个 flex item，跟模型 / 思考档 / 发送键挤在同一行、
-        `border-t` 分隔线也只剩自己那半截宽（用户实测的错位）。
-        四项：会话统计 / Token 用量 / 上下文占用 / 供应商用量，各自点开明细 */}
+   </div>
+   {/* 卡底统计条（2026-10-20 用户口径：移到输入卡**外部**）：
+       **卡片下方独立一行**——与卡片同宽、整条靠右，四项各自点开明细。
+       不许塞进工具行（会与模型 / 发送键同行、分隔线只剩半截），也不再放回卡片内部。 */}
+   <div className="mx-auto mt-1.5 max-w-(--measure-content)">
     <SessionStatsBar />
    </div>
+   {/* 目标弹窗（`+` 菜单「目标」）：只在打开时挂载，objective 由当前 goal 初始化 */}
+   {goalDialogOpen && activeSessionId && (
+    <GoalDialog
+     key={activeSessionId}
+     sessionId={activeSessionId}
+     goal={goal}
+     onClose={() => {
+      setGoalDialogOpen(false);
+      // 弹窗关闭后焦点回输入框（DialogShell 不负责恢复打开前的焦点）
+      editorRef.current?.focus();
+     }}
+    />
+   )}
   </div >
  );
 }

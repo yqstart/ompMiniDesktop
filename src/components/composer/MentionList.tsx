@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { CircleInfo, CodeFile, File, FileText, FileZip, Folder, Image } from "reicon-react";
+import { Fragment, useEffect, useRef } from "react";
+import { CircleInfo, CodeFile, File, FileText, FileZip, Folder, FolderFiles, Image } from "reicon-react";
 import type { IconComponent } from "reicon-react";
 import { fileKindOf, type FileKind } from "../../lib/fileKind";
 import { splitPath } from "../../lib/toolLine";
@@ -21,6 +21,15 @@ export type PathCandidate = {
 };
 
 /**
+ * 浮层里的一行：路径候选，或「工作区文件」入口（2026-10-20）。
+ *
+ * 入口只在刚打出 `@`（token 为空）时插在候选**前面**：`@` 路径补全只覆盖当前会话目录，
+ * 跨项目的文件原本只有 ⌘⇧P 一条路；把「工作区文件」放进 `@` 浮层，键盘流里也能直达
+ * （↑ 一下到入口、Enter 打开引用浮层）。默认高亮仍落在第一条路径上（打 `@` 的主诉求是文件）。
+ */
+export type MentionRow = { kind: "path"; cand: PathCandidate } | { kind: "workspace" };
+
+/**
  * 类别 → 图标形状。**形状承担辨识度，颜色不承担**（§2 单强调色）：
  * 目录用 `accent`（与左栏文件夹同色），文件一律灰阶。
  */
@@ -40,20 +49,23 @@ const KIND_ICON: Record<FileKind, IconComponent> = {
  * **次要片段是目录**（11px mono `faint`，保留结尾斜杠，放不下时截断）；
  * 识别信息交给图标，不给文件名上色（上游数据是路径，不是我们的文案）。
  *
+ * 顶部另有一行**工作区文件**入口（`MentionRow` 的 `workspace` 档）：它属于同一个 listbox，
+ * 但用一条细分隔线与路径候选分开——"打开另一个选择器"与"选中一个路径"是两种动作。
+ *
  * 取词状态也在这个框里如实说（`status`）：**正在搜**与**没有匹配**都留着这一行——
  * 让浮层无声消失会被当成「补全坏了」（用户实测：输入 `@baselin` 浮层直接没了）。
  */
 export function MentionList({
- cands,
+ rows,
  active,
  onPick,
  onHover,
  status = "ready",
 }: {
- cands: PathCandidate[];
+ rows: MentionRow[];
  /** 高亮下标（`-1` = 无高亮）。 */
  active: number;
- onPick: (c: PathCandidate) => void;
+ onPick: (row: MentionRow) => void;
  onHover: (index: number) => void;
  /** `loading` = 防抖 / 取词中；`empty` = 取完了没有匹配；`ready` = 有候选。 */
  status?: "loading" | "ready" | "empty";
@@ -66,7 +78,7 @@ export function MentionList({
  }, [active]);
 
  return (
-  <div className="mx-3 mb-1 overflow-hidden rounded-md border border-border bg-elevated shadow-pop">
+  <div className="overflow-hidden rounded-md border border-border bg-elevated shadow-pop">
    <div className="px-2.5 pt-2 pb-1 text-[11px] font-medium text-faint">{t.mentionListTitle}</div>
    {/* role="listbox" 只包候选行：标题与提示行不是可选项，不该出现在选项列表里 */}
    <div
@@ -78,16 +90,38 @@ export function MentionList({
     {status === "loading" && <p className="px-2.5 py-1.5 text-[12px] text-faint">{t.mentionListLoading}</p>}
     {status === "empty" && <p className="px-2.5 py-1.5 text-[12px] text-faint">{t.mentionListEmpty}</p>}
     {status === "ready" &&
-     cands.map((c, i) => {
+     rows.map((row, i) => {
+      if (row.kind === "workspace") {
+       return (
+        <Fragment key="workspace-entry">
+         <button
+          type="button"
+          role="option"
+          aria-selected={i === active}
+          onClick={() => onPick(row)}
+          onMouseEnter={() => onHover(i)}
+          className={`flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left ${i === active ? "bg-hover" : ""}`}
+         >
+          <FolderFiles size={14} aria-hidden className="shrink-0 text-accent" />
+          <span className="shrink-0 text-[13px] text-foreground">{t.mentionWorkspaceTitle}</span>
+          <span className="ml-auto min-w-0 truncate pl-2 text-[11px] text-faint">{t.mentionWorkspaceHint}</span>
+         </button>
+         {/* 入口与路径候选之间的分隔：两种动作（打开选择器 / 选中路径）不该混成一片；
+             没有路径候选时不画（避免悬空的一条线） */}
+         {i < rows.length - 1 && <div role="presentation" className="mx-2.5 my-0.5 border-t border-border-soft" />}
+        </Fragment>
+       );
+      }
+      const c = row.cand;
       const { base, dir } = splitPath(c.path);
       const Icon = KIND_ICON[fileKindOf(c.path, c.isDir)];
       return (
        <button
-        key={c.path}
+        key={`${c.path}\u0000${c.real}`}
         type="button"
         role="option"
         aria-selected={i === active}
-        onClick={() => onPick(c)}
+        onClick={() => onPick(row)}
         onMouseEnter={() => onHover(i)}
         className={`flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left ${i === active ? "bg-hover" : ""}`}
        >

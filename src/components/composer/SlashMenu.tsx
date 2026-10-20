@@ -35,7 +35,7 @@ export function SlashMenu({
  }, [active]);
 
  return (
-  <div className="mx-3 mb-1 overflow-hidden rounded-md border border-border bg-elevated shadow-pop">
+  <div className="overflow-hidden rounded-md border border-border bg-elevated shadow-pop">
    {/* role="listbox" 只包候选行：提示行不是可选项，不该出现在选项列表里 */}
    <div ref={boxRef} role="listbox" aria-label={t.slashListAria} className="max-h-56 overflow-y-auto overscroll-contain py-1">
     {cands.length === 0 && (
