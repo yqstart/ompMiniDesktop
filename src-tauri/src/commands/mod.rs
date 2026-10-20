@@ -1516,6 +1516,7 @@ async fn spawn_new<R: tauri::Runtime>(
     cwd: &str,
     model: Option<&str>,
     thinking: Option<&str>,
+    plan: bool,
 ) -> Result<(String, String, crate::runtime::SessionMeta), CmdError> {
     crate::runtime::spawn_long_lived(
         app,
@@ -1527,6 +1528,7 @@ async fn spawn_new<R: tauri::Runtime>(
             model: model.map(str::to_string),
             thinking: thinking.map(str::to_string),
             approval: None,
+            plan_yolo: plan,
         },
     )
     .await
@@ -1560,8 +1562,9 @@ pub async fn create_session<R: tauri::Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppState>,
     cwd: String,
+    plan: Option<bool>,
 ) -> Result<CreateSessionResult, CmdError> {
-    create_session_in(&app, &state, cwd).await
+    create_session_in(&app, &state, cwd, plan.unwrap_or(false)).await
 }
 
 /// `create_session` 的泛型实现（命令壳只负责取 State）：单测用 mock runtime 直接调它。
@@ -1569,6 +1572,7 @@ pub async fn create_session_in<R: tauri::Runtime>(
     app: &AppHandle<R>,
     state: &AppState,
     cwd: String,
+    plan: bool,
 ) -> Result<CreateSessionResult, CmdError> {
     if !std::path::Path::new(&cwd).is_dir() {
         return Err(cmd_err("DIR_MISSING", "目录不存在".into(), None));
@@ -1604,12 +1608,12 @@ pub async fn create_session_in<R: tauri::Runtime>(
     };
     // spawn 内部以会话 id 作 runtime 表的键（不再需要占位键换名——换名窗口会让
     // pump 的首批帧查不到表条目：命令面缓存丢、偏好回写跳过）
-    let first = spawn_new(app, state, &bin, &cwd, model.as_deref(), thinking.as_deref()).await;
+    let first = spawn_new(app, state, &bin, &cwd, model.as_deref(), thinking.as_deref(), plan).await;
     let (sid, sfile, _meta, fallback) = match first {
         Ok((sid, sfile, meta)) => (sid, sfile, meta, None),
         // 没带项目偏好就失败 → 不是参数的问题，原样上抛（错误里已含 omp 的 stderr 原因）
         Err(e) if model.is_none() && thinking.is_none() => return Err(e),
-        Err(e) => match plan_after_rejected_params(&e, spawn_new(app, state, &bin, &cwd, None, None).await, &model, &thinking) {
+        Err(e) => match plan_after_rejected_params(&e, spawn_new(app, state, &bin, &cwd, None, None, plan).await, &model, &thinking) {
             Plan::GiveUp(e2) => return Err(e2),
             Plan::Degraded { sid, sfile, meta, fallback: notice, forget } => {
                 if let Some((gone_model, gone_thinking)) = forget {
@@ -1770,7 +1774,7 @@ async fn spawn_session_runtime<R: tauri::Runtime>(
     let (sid, sfile, _meta) = crate::runtime::spawn_long_lived(
         app,
         state.runtime.clone(),
-        crate::runtime::SpawnOpts { bin, cwd: spawn_cwd, resume: Some(id.to_string()), model: None, thinking: None, approval },
+        crate::runtime::SpawnOpts { bin, cwd: spawn_cwd, resume: Some(id.to_string()), model: None, thinking: None, approval, plan_yolo: false },
     )
     .await?;
     // 身份漂移 = omp 的保护性 fork（`Session moved to a new file / open-elsewhere`）：
@@ -3505,7 +3509,7 @@ done\n",
         let state = std::sync::Arc::new(state);
         app.manage(state.clone());
 
-        let out = super::create_session_in(app.handle(), &state, spawn_dir.to_string_lossy().to_string()).await;
+        let out = super::create_session_in(app.handle(), &state, spawn_dir.to_string_lossy().to_string(), false).await;
         let out = out.expect("项目里的失效模型不该让新建会话整个失败（应降级重试）");
 
         // 收尾：进程与临时目录
@@ -3593,7 +3597,7 @@ done\n",
         let state = std::sync::Arc::new(state);
         app.manage(state.clone());
 
-        let out = super::create_session_in(app.handle(), &state, spawn_dir.to_string_lossy().to_string()).await;
+        let out = super::create_session_in(app.handle(), &state, spawn_dir.to_string_lossy().to_string(), false).await;
         state.runtime.lock().await.clear();
         let out = out.expect("失效模型不该让新建会话整个失败（真实 omp 也应降级重试）");
         let fb = out.fallback.expect("降级要带回说明");
@@ -3780,6 +3784,7 @@ done
                 model: None,
                 thinking: None,
                 approval: None,
+                plan_yolo: false,
             },
         )
         .await
@@ -3894,6 +3899,7 @@ done
                 model: None,
                 thinking: None,
                 approval: None,
+                plan_yolo: false,
             },
         )
         .await

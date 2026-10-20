@@ -18,7 +18,7 @@ import type { ProjectView } from "@shared/types";
  * 点当前项目只收起下拉、不重复新建（同一项目下再开新对话走左栏分组里的入口）。
  */
 export function ProjectPicker({ project }: { project: ProjectView | null }) {
- const { projects, activeSessionId, composerMenu } = useApp();
+ const { projects, activeSessionId, composerMenu, planModeNext, setPlanModeNext } = useApp();
  const t = useText();
  const [error, setError] = useState<string | null>(null);
  const open = composerMenu === "project";
@@ -71,8 +71,13 @@ export function ProjectPicker({ project }: { project: ProjectView | null }) {
          setError(null);
          // 已在该项目里：只收下拉，不再新建（避免每次点都造一个空会话）
          if (current) return;
-         void startChatInProject(p.id, { projectName: p.name }).then((res) => {
-          if (!res.ok) setError(res.message);
+         void startChatInProject(p.id, { projectName: p.name, plan: planModeNext }).then((res) => {
+          if (!res.ok) {
+           setError(res.message);
+           return;
+          }
+          // 计划开关是「下一次新建会话」的一次性选项：新建完就复位
+          if (planModeNext) setPlanModeNext(false);
          });
         }}
         disabled={p.missing}

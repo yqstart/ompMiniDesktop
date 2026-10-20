@@ -28,6 +28,18 @@ export function BtwPanel() {
   if (listRef.current) listRef.current.scrollTop = 0;
  }, [btw.records]);
 
+ // Esc 关闭面板（与输入卡浮层同口径；焦点在输入框里也生效）
+ useEffect(() => {
+  if (!btw.open) return;
+  const onKey = (e: KeyboardEvent) => {
+   if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
+   e.preventDefault();
+   setBtw({ open: false, draft: "" });
+  };
+  window.addEventListener("keydown", onKey);
+  return () => window.removeEventListener("keydown", onKey);
+ }, [btw.open, setBtw]);
+
  const sessionId = btw.sessionId;
  if (!btw.open || !sessionId) return null;
 

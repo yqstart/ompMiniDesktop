@@ -7,20 +7,19 @@ import {
  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { openPath } from "@tauri-apps/plugin-opener";
-import { ArrowUp, Hourglass, PenLine, Timer, TriangleWarning, X } from "reicon-react";
-import type { AvailableCommand, Goal, ImageAttachment, ViewMsg } from "@shared/types";
+import { ArrowUp, ClipboardList, Hourglass, PenLine, Plus, Target, Timer, TriangleWarning, X } from "reicon-react";
+import type { Goal, ImageAttachment, ViewMsg } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { api } from "@shared/api";
 import { attachmentFromFile, attachmentFromOmpImage, dataUrl } from "../../lib/attachments";
 import { fmt } from "../../lib/locale";
 import { extractMentions, rewriteMentions } from "../../lib/mentions";
-import { LOCAL_COMMANDS, localCommandDescription, matchLocalCommand, type LocalCommand } from "../../lib/localCommands";
 import { cycleSessionApproval } from "../../lib/sessionApproval";
 import { loadHistory, pushHistory } from "../../lib/promptHistory";
-import { openBtwPanel, askBtw } from "../../lib/btw";
-import { commandInsert, filterCommands, isCompleteCommand, normalizeCommands, type SlashCandidate } from "../../lib/slashCommands";
-import { openForkedSession, refreshTitleAfterFirstSend } from "../../lib/sessionOpen";
+import { commandInsert, filterCommands, isCompleteCommand, normalizeCommands, SKILL_PREFIX, type SlashCandidate } from "../../lib/slashCommands";
+import { createChatIn, refreshTitleAfterFirstSend } from "../../lib/sessionOpen";
+import { resolveNewChatCheckout } from "../../lib/checkouts";
+import { runSessionBatch } from "../../lib/sessionBatch";
 import { useText } from "../../lib/useText";
 import { ProjectPicker } from "../pickers/ProjectPicker";
 import { BranchPicker } from "../pickers/BranchPicker";
@@ -30,18 +29,20 @@ import { CompactButton, QueueBadge } from "../thread/StatusBar";
 import { resolveContext } from "../../lib/context";
 import { useGitInfo } from "../../lib/useGitInfo";
 import { GoalRow } from "./GoalRow";
-import { GoalDialog } from "./GoalDialog";
+import { PlanStartDialog } from "./PlanStartDialog";
 import { MentionList, type MentionRow, type PathCandidate } from "./MentionList";
 import { DraftEditor, type DraftEditorHandle, type DraftTextSource } from "./draft/DraftEditor";
 import { referenceTarget } from "../../lib/workspaceFiles";
-import { SlashMenu } from "./SlashMenu";
-import { PlusMenu } from "./PlusMenu";
+import { SlashMenu, type SlashAction } from "./SlashMenu";
 import { ApprovalModeMenu } from "./ApprovalModeMenu";
 import { ModelMenu } from "./ModelMenu";
 import { ThinkingMenu } from "./ThinkingMenu";
 
 /** 大段粘贴转文件引用的阈值（字符数；V41，zcode 同款——超过就存文件 + `@` 注入）。 */
 const PASTE_FILE_MIN = 2000;
+
+/** 空态输入卡的草稿键：`activeSessionId === null` 时也要有草稿，发送时再新建会话。 */
+const NEW_DRAFT = "__new__";
 
 /**
  * 会话输入卡（v2 §3 形态，对齐 Codex / ZCode 的输入卡）：
@@ -71,7 +72,7 @@ const PASTE_FILE_MIN = 2000;
  */
 export function Composer() {
  const t = useText();
- const { activeSessionId, draftOf, setDraft, statusBySession, sessions, attachmentsOf, addAttachments, removeAttachment, clearAttachments, queuedOf, currentModel, currentRuntime, models, composerFocusSeq } =
+ const { activeSessionId, draftOf, setDraft, statusBySession, sessions, attachmentsOf, addAttachments, removeAttachment, clearAttachments, queuedOf, currentModel, currentRuntime, models, composerFocusSeq, checkouts, planModeNext, setPlanModeNext, planSessions } =
   useApp();
  /** 草稿编辑器句柄（Lexical；不受控——编辑器状态是权威，store 里的草稿是它的投影）。 */
  const editorRef = useRef<DraftEditorHandle | null>(null);
@@ -93,7 +94,11 @@ export function Composer() {
    }
   }
  };
- const draft = draftOf(activeSessionId);
+ const draft = draftOf(activeSessionId ?? NEW_DRAFT);
+ /** 空态草稿键（没有活动会话时不落到 `drafts[null]`，否则输入会丢）。 */
+ const draftKey = activeSessionId ?? NEW_DRAFT;
+ /** 当前会话的目标（工具行「目标」按钮的状态；与 GoalRow 同源）。 */
+ const goal = useApp((s) => (s.activeSessionId ? (s.goalBySession[s.activeSessionId] ?? null) : null));
  /**
   * 草稿投影同步：store 里的草稿是**外部写入**的入口（队列退回 / 历史调回 / 切会话），
   * 与编辑器当前全文不一致时才灌进去（编辑器自己打字时两者一致，不会重置光标）。
@@ -146,10 +151,31 @@ export function Composer() {
    .join("\n");
  }, [checks, mentionKey, mentions]);
  const [attachError, setAttachError] = useState<string | null>(null);
+ /** 空态首条消息「先新建会话」在飞：防重复点击，发送键在此期间禁用。 */
+ const [creating, setCreating] = useState(false);
+ /** 计划模式弹窗（有会话时从工具行 chip / `+` 菜单打开）：说明 + 新建计划会话。 */
+ const [planDialogOpen, setPlanDialogOpen] = useState(false);
+ /** 空会话换成计划会话在飞（删除 + 新建）：防重复点击。 */
+ const [planBusy, setPlanBusy] = useState(false);
  const [dragging, setDragging] = useState(false);
- /** 目标弹窗（`+` 菜单「目标」）：只在打开时挂载，objective 由 props 初始化。 */
- const [goalDialogOpen, setGoalDialogOpen] = useState(false);
- const goal = useApp((s) => (s.activeSessionId ? (s.goalBySession[s.activeSessionId] ?? null) : null));
+ /**
+  * 目标输入模式（2026-10-20 用户口径）：点工具行「目标」/ 目标条的编辑键 →
+  * **主输入框**承接目标描述，发送即 `goalCommand(create)`；成功后才出现目标条。
+  * 用会话 id 记录，切会话自动失效。
+  */
+ const [goalModeFor, setGoalModeFor] = useState<string | null>(null);
+ const goalMode = !!activeSessionId && goalModeFor === activeSessionId;
+ const enterGoalMode = (toggle = true) => {
+  if (!activeSessionId) return;
+  if (toggle && goalMode) {
+   setGoalModeFor(null);
+   return;
+  }
+  setGoalModeFor(activeSessionId);
+  setAttachError(null);
+  // 草稿为空且有目标：预填当前目标，方便直接改；草稿非空则保留用户内容
+  if (!draft.trim() && goal) persistDraft(activeSessionId, goal.objective);
+ };
  // `@` 补全状态：mentionIdx 为高亮下标，-1 = 无补全；mentionToken 是 `@` 后的路径前缀。
  const [mentionIdx, setMentionIdx] = useState(-1);
  const [mentionCands, setMentionCands] = useState<PathCandidate[]>([]);
@@ -183,17 +209,13 @@ export function Composer() {
 
  // 补全浮层有两套：`/` 命令面（数据是 omp 自己的 `available_commands_update`）与 `@` 路径。
  // 两者互斥——草稿以 `/` 开头时整条就是一条命令，不该再冒出路径候选。
- const commands = useMemo(() => {
-  // 壳本地命令（V40）以固定组置顶（`source:"local"`）：它们是壳拦截处理的，
-  // 与 omp 命令面分开可见（描述文案走字典、随语言切换重算）。
-  const local: AvailableCommand[] = LOCAL_COMMANDS.map((c) => ({
-   name: c.name,
-   description: localCommandDescription(c, t),
-   hint: c.hint,
-   source: "local",
-  }));
-  return [...local, ...normalizeCommands(currentRuntime?.commands)];
- }, [currentRuntime?.commands, t]);
+ // 2026-10-20 用户口径：壳本地命令组（/goal /status /btw …）不再注入 `/` 面板，
+ // 2026-10-20 用户口径：`/` 面板不再列 omp 的命令（噪音），只留技能命令
+ // （`skill:<名>`）；手打其它 `/xxx` 仍走 omp 的 run_slash，由它自己裁决。
+ const commands = useMemo(
+  () => normalizeCommands(currentRuntime?.commands).filter((c) => c.source === "skill" || c.name.startsWith(SKILL_PREFIX)),
+  [currentRuntime?.commands],
+ );
  // `/` 补全只在草稿是单条命令、光标还在首个 token 内时开。**流式中不开**：那时 Enter 走 steer
  // 插话，`/xxx` 是当文本发出去的，弹出补全等于暗示它能当命令跑。
  const slashToken = (() => {
@@ -203,11 +225,17 @@ export function Composer() {
  })();
  // Esc 关掉后记住当时的 token：token 一变（继续打字）就重新打开，不用手动清标记
  const [slashDismissed, setSlashDismissed] = useState<string | null>(null);
- const slashOpen = slashToken !== null && slashToken !== slashDismissed && commands.length > 0;
+ /** `+` 按钮打开的工具面板（与 `/` 共用同一个 `SlashMenu`）：Esc / 再点关闭。 */
+ const [toolsOpen, setToolsOpen] = useState(false);
+ const slashOpen = slashToken !== null && slashToken !== slashDismissed;
  const slashCands = useMemo(
   () => (slashOpen ? filterCommands(commands, slashToken ?? "") : []),
   [slashOpen, commands, slashToken],
  );
+ /** `+` 面板的候选（全部技能）；`/` 面板用 `slashCands`（按输入过滤）。 */
+ const toolCands = useMemo(() => filterCommands(commands, ""), [commands]);
+ const panelOpen = toolsOpen || slashOpen;
+ const panelCands = slashOpen ? slashCands : toolCands;
  // 高亮跟着输入走：slashKey 一变（继续打字 / 命令面刷新）就当回到第一条。
  // 不用 effect 重置——effect 里同步 setState 会多打一轮渲染，react-hooks 规则也不让。
  const slashKey = `${slashToken ?? ""}\u0000${commands.length}`;
@@ -294,6 +322,7 @@ export function Composer() {
   const tail = sp >= 0 ? draft.slice(sp).trimStart() : "";
   setDraft(activeSessionId, commandInsert(c) + tail);
   setSlashDismissed(slashToken);
+  setToolsOpen(false);
  };
 
  // 外部投递的引用（右栏文件树 / 快速过滤 / ⌘⇧P 引用浮层）：插进编辑器后立刻清掉请求。
@@ -317,21 +346,23 @@ export function Composer() {
   // `sync` = 把 store 的草稿投影进编辑器，store 本来就是权威：不回写
   // （回写会让迟到的投影通知覆盖更新的草稿，例如发送失败后的回滚）
   if (source === "sync") return;
-  persistDraft(activeSessionId, text);
+  persistDraft(draftKey, text);
   // 只有用户敲的才算「编辑」；壳插入引用不该打断历史浏览（否则 ↑ 调回后被立刻清掉）
   if (source === "user" && browsing) setHist(null);
  };
 
- /** 输入框占位文案（按当前状态切换；审批中优先）。 */
- const placeholder = awaiting
-  ? t.resolveApprovalFirst
-  : dragging
-   ? t.placeholderDragging
-   : running
-    ? t.placeholderRunning
-    : empty
-     ? t.placeholderNew
-     : t.placeholderIdle;
+ /** 输入框占位文案（按当前状态切换；目标输入模式最优先，其次审批中）。 */
+ const placeholder = goalMode
+  ? t.goalInputPlaceholder
+  : awaiting
+   ? t.resolveApprovalFirst
+   : dragging
+    ? t.placeholderDragging
+    : running
+     ? t.placeholderRunning
+     : empty
+      ? t.placeholderNew
+      : t.placeholderIdle;
 
  /** 粘贴（编辑器 capture 阶段先问这里）：图片走附件、大段文本转文件引用、其余交给编辑器。 */
  const handlePaste = (e: ReactClipboardEvent<HTMLElement>): boolean => {
@@ -369,11 +400,23 @@ export function Composer() {
   * `/` 与 `@` 补全 → 发送 / 插话 / 排队 → 历史浏览 → Shift+Tab 执行模式。
   * 语义与旧 textarea 版逐条对应，只是「光标在开头」改问编辑器（多行编辑时不该抢方向键）。
   */
+ // `+` 面板打开时焦点在按钮上（编辑器的 capture 收不到），Esc 用 window 兜底关闭
+ useEffect(() => {
+  if (!toolsOpen) return;
+  const onKey = (e: KeyboardEvent) => {
+   if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
+   e.preventDefault();
+   setToolsOpen(false);
+  };
+  window.addEventListener("keydown", onKey);
+  return () => window.removeEventListener("keydown", onKey);
+ }, [toolsOpen]);
+
  const handleKeyDown = (e: ReactKeyboardEvent<HTMLElement>): boolean => {
-  // `/` 命令补全打开时先接管键盘（它和 `@` 补全互斥，开着就说明草稿是条命令）。
-  // Esc 用 slashOpen 判定：零命中时面板也在，也该关得掉。
-  if (slashOpen && e.key === "Escape") {
+  // 共用面板（`/` 或 `+`）打开时先接管键盘：Esc 关掉它（零命中时面板也在，也该关得掉）。
+  if (panelOpen && e.key === "Escape") {
    setSlashDismissed(slashToken);
+   setToolsOpen(false);
    return true;
   }
   const slashActive = slashOpen && slashCands.length > 0;
@@ -593,6 +636,39 @@ export function Composer() {
   }
  };
 
+ /** `/` 面板顶部固定操作（与 `+` 菜单一致）：清掉 `/` 草稿后执行同一条动作。 */
+ const pickSlashAction = (a: SlashAction) => {
+  if (!activeSessionId) return;
+  setToolsOpen(false);
+  setSlashDismissed(slashToken);
+  // `/` 面板的草稿就是一条 `/`；`+` 面板打开时草稿可能是用户内容，不能清
+  if (slashOpen) persistDraft(activeSessionId, "");
+  if (a === "file") void pickFiles();
+  else if (a === "workspace") openWorkspacePicker();
+  else void compactNow();
+ };
+
+ /** 技能：把完整命令 `/skill:<名> ` 插到输入框（omp 只认消息开头，非空草稿插到最前）。 */
+ const pickSkill = (name: string) => {
+  setToolsOpen(false);
+  const cmd = `/${name} `;
+  // omp 的命令门只认消息开头的 `/`：光标前已有文字时插到光标处，命令就落在正文中间，
+  // 发送后技能不会加载（实测一帧 skill-prompt 都没有）——所以非空草稿一律插到最前。
+  if (draft.trim()) editorRef.current?.insertTextAtStart(cmd);
+  else editorRef.current?.insertText(cmd);
+  editorRef.current?.focus();
+ };
+
+ /** 共用面板选中：`/` 打开时按命令写整条草稿；`+` 打开时把技能插到光标处。 */
+ const pickPanel = (c: SlashCandidate) => {
+  if (slashOpen) {
+   pickCommand(c);
+   return;
+  }
+  setToolsOpen(false);
+  pickSkill(c.name);
+ };
+
  // 流式中追问的发送语义**对齐 omp 终端与 codex**（codex TUI 实测：轮次运行中 Enter 走 steer、
  // Tab 排队、Esc 打断；omp 终端：Enter = steering 插话、Ctrl+Q / Ctrl+Enter = follow-up 排队）——
  // Enter 走插话（steer，进当前轮、下一个边界生效），Tab 与 Cmd/Ctrl+Enter 走排队（follow_up，
@@ -608,11 +684,11 @@ export function Composer() {
   * 入口（`check_paths` 的 `resolved`），两边不会各说各话。解析不出来（歧义 / 不存在）就按原文发
   * ——芯片此时已经用警告色告诉过用户了。**失败不阻塞发送**。
   */
- const expandMentions = async (text: string): Promise<string> => {
+ const expandMentions = async (text: string, baseCwd: string): Promise<string> => {
   const tokens = extractMentions(text);
-  if (tokens.length === 0 || !cwd) return text;
+  if (tokens.length === 0 || !baseCwd) return text;
   try {
-   const rs = await api.checkPaths(cwd, tokens);
+   const rs = await api.checkPaths(baseCwd, tokens);
    const map = new Map(rs.filter((r) => r.resolved).map((r) => [r.path, r.resolved as string]));
    return map.size > 0
     ? rewriteMentions(text, (token) => {
@@ -630,7 +706,21 @@ export function Composer() {
  const sendQueued = async (mode: "steer" | "follow_up") => {
   if (!activeSessionId || (!draft.trim() && attachments.length === 0) || archived) return;
   const raw = draft;
-  const text = await expandMentions(raw);
+  // `/` 开头的命令不能走 steer / follow_up：omp 只在 `prompt` 入口过命令门（实测
+  // steer 里的 `/skill:…` 不注入技能）。统一走 run_slash，运行中由 omp 排队到下一个边界。
+  if (raw.trim().startsWith("/") && attachments.length === 0) {
+   const cmdText = raw.trim();
+   persistDraft(activeSessionId, "");
+   try {
+    await api.runSlash(activeSessionId, cmdText);
+    pushHistory(activeSessionId, cmdText);
+    resetHistory();
+   } catch {
+    persistDraft(activeSessionId, cmdText);
+   }
+   return;
+  }
+  const text = await expandMentions(raw, cwd);
   const sentImages = attachments;
   // 清空 / 回滚都走 persistDraft（带 localStorage 同步）：只清内存的话，
   // 已发送的内容下次启动会被 hydrateDrafts 从 `omp.drafts.v1` 恢复回输入框（幽灵草稿）。
@@ -775,13 +865,62 @@ export function Composer() {
  };
 
  /**
-  * `+` 菜单「计划」：入口先留（2026-10-20 用户口径）。
-  * omp 的 rpc-ui 命令面里没有 `/plan`（实测 18.12.3：`available_commands_update` 不含它），
-  * 壳侧也没有对应的 RPC——这里不塞假命令，只在流尾说明入口状态，等上游暴露后再接。
+  * 「计划」入口（工具行 chip 与 `+` 菜单共用）：
+  * - 空态（没有活动会话）= 切换**下一次新建会话**的计划开关（发送时生效）；
+  * - 有会话 = 打开 `PlanStartDialog`——计划模式是启动参数（`--plan-yolo`），
+  *   rpc-ui 没有运行中切换的通道（见 docs/plan-mode.md），弹窗里说明并给
+  *   「用当前目录新建计划会话」这一个落地动作。
   */
- const planPending = () => {
-  if (!activeSessionId) return;
-  localNote(activeSessionId, t.plusPlanPendingNote);
+ /** 当前会话是否「完全空」：没有对话内容、没有草稿 / 附件、不在跑、未归档。 */
+ const isEmptySession = (sid: string): boolean => {
+  const events = useApp.getState().eventsBySession[sid] ?? [];
+  const hasContent = events.some((m) => m.kind !== "divider");
+  return !hasContent && !running && !archived && !draft.trim() && attachments.length === 0;
+ };
+
+ /**
+  * 把「还没发过消息的空会话」换成另一种启动模式（计划 / 普通）：
+  * 空会话没有 jsonl、没有内容，删掉再用同一目录新建是透明的（只换 id）——
+  * **开启和取消走同一条路**，用户点一下就能来回切，不会留下两个空会话。
+  */
+ const replaceEmptySession = async (plan: boolean) => {
+  if (!activeSessionId || planBusy) return;
+  const sid = activeSessionId;
+  const dir = cwd;
+  if (!dir) {
+   setPlanDialogOpen(true);
+   return;
+  }
+  setPlanBusy(true);
+  setAttachError(null);
+  try {
+   const del = await runSessionBatch("delete", [sid]);
+   if (del.failed.length > 0) {
+    setAttachError(del.failed[0]?.message ?? t.planConvertFailed);
+    return;
+   }
+   const res = plan ? await createChatIn(dir, { plan: true }) : await createChatIn(dir);
+   if (!res.ok) setAttachError(res.message);
+  } catch (e) {
+   setAttachError(e instanceof Error ? e.message : t.planConvertFailed);
+  } finally {
+   setPlanBusy(false);
+  }
+ };
+
+ const openPlanEntry = () => {
+  if (!activeSessionId) {
+   setPlanModeNext(!planModeNext);
+   return;
+  }
+  const active = planSessions.includes(activeSessionId);
+  // 空会话：开 / 关都直接换（用户就在这个「新会话」里，不该再让他建一个）
+  if (isEmptySession(activeSessionId)) {
+   void replaceEmptySession(!active);
+   return;
+  }
+  // 已有内容 / 草稿 / 运行中：只能新建；弹窗按当前是否计划会话给不同说明
+  setPlanDialogOpen(true);
  };
 
  /** 已发送 prompt 历史（V41，codex 的 ↑↓ 调回）：浏览态 {sid, idx, backup}——idx 指向历史下标、
@@ -820,118 +959,12 @@ export function Composer() {
   persistDraft(sid, list[next]);
  };
 
- /** 壳本地命令的执行（V40）：命中 `LOCAL_COMMANDS` 后由这里分发（不发去 omp）。 */
- const runLocalCommand = async (cmd: LocalCommand, arg: string) => {
-  const sid = activeSessionId;
-  if (!sid) return;
-  const st = useApp.getState();
-  try {
-   switch (cmd.name) {
-    case "goal": {
-     const op = arg === "" ? "get" : /^(pause|resume|drop|clear)$/i.test(arg) ? (arg === "clear" ? "drop" : arg) : "create";
-     const data = await api.goalCommand(sid, op as "get" | "create" | "resume" | "pause" | "drop", op === "create" ? arg : undefined);
-     const goal = (data.goal ?? null) as Goal | null;
-     useApp.getState().setGoal(sid, goal);
-     localNote(sid, goal ? fmt(t.goalNoteSet, goal.objective) : t.goalNoteCleared);
-     break;
-    }
-    case "status":
-     st.setStatsOpen(true);
-     break;
-    case "btw":
-    case "side": {
-     await openBtwPanel(sid);
-     if (arg) await askBtw(sid, arg);
-     break;
-    }
-    case "fork": {
-     const view = await api.forkSession(sid);
-     await openForkedSession(view);
-     break;
-    }
-    case "find":
-     st.setFindOpen(true);
-     break;
-    case "fast": {
-     const cur = st.currentRuntime?.fastModeEnabled ?? false;
-     const on = arg === "on" ? true : arg === "off" ? false : !cur;
-     try {
-      await api.setFastMode(sid, on);
-      localNote(sid, on ? t.fastOn : t.fastOff);
-     } catch (e) {
-      // 模型不支持时 omp 的原文错误（"Fast mode is unavailable for the current model."）原样上屏
-      localNote(sid, e instanceof Error ? e.message : String(e));
-     }
-     break;
-    }
-    case "slow": {
-     const cur = st.currentRuntime?.slowModeEnabled ?? false;
-     const on = arg === "on" ? true : arg === "off" ? false : !cur;
-     try {
-      await api.setSlowMode(sid, on);
-      localNote(sid, on ? t.slowOn : t.slowOff);
-     } catch (e) {
-      localNote(sid, e instanceof Error ? e.message : String(e));
-     }
-     break;
-    }
-    case "export": {
-     const { path } = await api.exportSessionHtml(sid);
-     if (path) {
-      localNote(sid, fmt(t.exportDone, path));
-      // 导出即打开（系统默认应用 / 浏览器）；失败静默（路径已在流尾）
-      void openPath(path).catch(() => undefined);
-     } else {
-      localNote(sid, t.exportDone.replace("{0}", "?"));
-     }
-     break;
-    }
-   }
-  } catch (e) {
-   localNote(sid, e instanceof Error ? e.message : String(e));
-  }
- };
 
 
- const send = async () => {
-  // `!` 前缀 = 本地 shell（V41，codex 的 `!` 用法）：在会话进程的工作目录跑一条命令，
-  // 命令行与输出各落一条流尾 command 行；运行中也可用（omp 的 bash 是 concurrent 分发）。
-  if (draft.trim().startsWith("!") && draft.trim().length > 1 && activeSessionId && !archived && attachments.length === 0) {
-   const cmd = draft.trim().slice(1).trim();
-   persistDraft(activeSessionId, "");
-   void runShell(activeSessionId, cmd);
-   return;
-  }
-  // `/` 开头先查壳本地命令（V40：/goal /status /btw /fork /find——发给 omp 只会变成普通提示词）；
-  // 未命中才走 omp 命令面（run_slash 直发，command_output 回来，无 agent turn）
-  if (!running && draft.trim().startsWith("/") && attachments.length === 0 && activeSessionId && !archived) {
-   const cmdText = draft.trim();
-   persistDraft(activeSessionId, "");
-   const local = matchLocalCommand(cmdText);
-   if (local) {
-    void runLocalCommand(local.cmd, local.arg);
-    return;
-   }
-   try {
-    await api.runSlash(activeSessionId, cmdText);
-    pushHistory(activeSessionId, cmdText);
-    resetHistory();
-   } catch {
-    persistDraft(activeSessionId, cmdText);
-   }
-   return;
-  }
-  if (running && activeSessionId && (draft.trim() || attachments.length > 0) && !archived) {
-   // 流式中 Enter = 插话（steer），与 omp 终端的 Enter 一致
-   void sendQueued("steer");
-   return;
-  }
-  if (!activeSessionId || (!draft.trim() && attachments.length === 0) || running || archived) return;
+ /** 把一条消息发进指定会话（正常发送与空态新建后共用）：乐观回显 + 失败回滚 + 标题回退。 */
+ const sendTextTo = async (sid: string, baseCwd: string, raw: string, sentImages: ImageAttachment[]) => {
   // 输入框里是短标签，omp 只认真路径：发送前展开（回显 / 历史 / 回滚都用原文，用户看到的还是自己写的）
-  const raw = draft;
-  const text = await expandMentions(raw);
-  const sentImages = attachments;
-  const sid = activeSessionId;
+  const text = await expandMentions(raw, baseCwd);
   // 首条判定：流里还没有 user 消息 = 这是本会话第一条（标题回退只做这一次）
   const isFirst = !(useApp.getState().eventsBySession[sid] ?? []).some((m) => m.kind === "user");
   // 乐观回显：先落一条本地 user 消息，id 带时间戳；
@@ -978,6 +1011,93 @@ export function Composer() {
   }
  };
 
+ /**
+  * 空态输入卡的第一条消息：先按「计划模式」开关新建会话（`--plan-yolo`），
+  * 再把这条消息发进去。目录与 ⌘T 同口径（`resolveNewChatCheckout`），
+  * 没有可用目录时退回第一个项目路径。
+  */
+ const sendFirstInNewChat = async () => {
+  const raw = draft;
+  if (!raw.trim() || creating) return;
+  const dir = resolveNewChatCheckout(checkouts)?.path ?? projects[0]?.path ?? "";
+  if (!dir) {
+   setAttachError(t.newChatNoProject);
+   return;
+  }
+  setCreating(true);
+  setAttachError(null);
+  const res = await createChatIn(dir, { plan: planModeNext });
+  if (!res.ok) {
+   setAttachError(res.message);
+   setCreating(false);
+   return;
+  }
+  // 一次性开关：新建成功后复位，避免下一个新会话意外沿用
+  persistDraft(NEW_DRAFT, "");
+  if (planModeNext) setPlanModeNext(false);
+  const created = useApp.getState().sessions.find((s) => s.id === res.id);
+  setCreating(false);
+  await sendTextTo(res.id, created?.cwd ?? dir, raw, []);
+ };
+
+ /** 当前 chip 的启用态：空态看开关；有会话看本地计划标记（`get_state` 不返回 planMode）。 */
+ const planActive = activeSessionId ? planSessions.includes(activeSessionId) : planModeNext;
+
+ const send = async () => {
+  // 空态（没有活动会话）：输入的第一条消息 = 新建会话 + 发送（计划模式开关在这里生效）
+  if (!activeSessionId) {
+   void sendFirstInNewChat();
+   return;
+  }
+  // 目标输入模式：主输入框里的文本 = 目标描述；发送即创建 / 更新目标，
+  // 然后把同一段文本作为**启动消息**发出去（omp 的 goal 只是状态，不会自己开跑，
+  // 不发这条就只剩目标条、没有流式输出）。运行中只设目标，避免打断当前轮。
+  if (goalMode) {
+   const text = draft.trim();
+   if (!text) return;
+   try {
+    const data = await api.goalCommand(activeSessionId, "create", text);
+    useApp.getState().setGoal(activeSessionId, (data.goal ?? null) as Goal | null);
+    persistDraft(activeSessionId, "");
+    setGoalModeFor(null);
+    if (!running) await sendTextTo(activeSessionId, cwd, text, []);
+   } catch (e) {
+    setAttachError(e instanceof Error ? e.message : String(e));
+   }
+   return;
+  }
+  // `!` 前缀 = 本地 shell（V41，codex 的 `!` 用法）：在会话进程的工作目录跑一条命令，
+  // 命令行与输出各落一条流尾 command 行；运行中也可用（omp 的 bash 是 concurrent 分发）。
+  if (draft.trim().startsWith("!") && draft.trim().length > 1 && !archived && attachments.length === 0) {
+   const cmd = draft.trim().slice(1).trim();
+   persistDraft(activeSessionId, "");
+   void runShell(activeSessionId, cmd);
+   return;
+  }
+  // `/` 开头一律走 omp 命令面（run_slash 直发）：omp 在 `prompt` 入口过命令门，
+  // `/skill:<名>` 会被解析成技能注入（实测 skill-prompt），运行中则由 omp 排到下一个边界。
+  // 走 steer 只会把 `/skill:…` 当普通文本，技能不会被加载——所以不能按 running 改道。
+  if (draft.trim().startsWith("/") && attachments.length === 0 && !archived) {
+   const cmdText = draft.trim();
+   persistDraft(activeSessionId, "");
+   try {
+    await api.runSlash(activeSessionId, cmdText);
+    pushHistory(activeSessionId, cmdText);
+    resetHistory();
+   } catch {
+    persistDraft(activeSessionId, cmdText);
+   }
+   return;
+  }
+  if (running && (draft.trim() || attachments.length > 0) && !archived) {
+   // 流式中 Enter = 插话（steer），与 omp 终端的 Enter 一致
+   void sendQueued("steer");
+   return;
+  }
+  if ((!draft.trim() && attachments.length === 0) || running || archived) return;
+  await sendTextTo(activeSessionId, cwd, draft, attachments);
+ };
+
  if (archived) {
   return (
    <div className="shrink-0 pb-4">
@@ -992,8 +1112,9 @@ export function Composer() {
  // 外层**不挂水平内边距**——挂上 px-4 就把 85% 的基准缩成「中列 − 32」，卡比正文窄一截、看着错位。
  return (
   <div className={`shrink-0 pb-4 ${empty ? "pb-[14vh]" : ""}`}>
-   {/* 目标行（V40）：有 goal 时显示（目标 / 状态 / 暂停·继续·清除） */}
-   <GoalRow />
+   {/* 目标条（V40；2026-10-20 纯展示 + 暂停/继续/清除）：只在目标存在后出现；
+       编辑由工具行「目标」进入主输入框的目标输入模式（不再有上方编辑框 / 弹窗） */}
+   <GoalRow key={activeSessionId ?? "none"} onEdit={() => enterGoalMode(false)} />
    {/* `@` 路径补全（2026-10-20 用户口径：浮层在输入卡**外部**）：一层列举 / 递归搜名字
        （`complete_path`），Tab/Enter 选中；空 token 时最上面多一行「工作区文件」入口。
        取词中与「没有匹配」都留在浮层里如实说——无声消失会被当成坏了（用户实测）。 */}
@@ -1008,10 +1129,19 @@ export function Composer() {
      />
     </div>
    )}
-   {/* `/` 命令补全：同样在卡片外（与 `@` 互斥，不会同时出现） */}
-   {slashOpen && (
+   {/* `+` 与 `/` 共用同一个面板（2026-10-20 用户口径）：操作组 + 技能；
+       `/` 打开时按输入过滤，`+` 打开时列全部技能 */}
+   {panelOpen && (
     <div className="mx-auto mb-1.5 max-w-(--measure-content)">
-     <SlashMenu cands={slashCands} active={slashIdx} query={slashToken ?? ""} onPick={pickCommand} onHover={hoverSlash} />
+     <SlashMenu
+      cands={panelCands}
+      active={slashOpen ? slashIdx : -1}
+      query={slashOpen ? (slashToken ?? "") : ""}
+      onPick={pickPanel}
+      onHover={hoverSlash}
+      onAction={pickSlashAction}
+      compactDisabled={running}
+     />
     </div>
    )}
    {/* 卡上顶行（2026-10-20 从输入卡内部移出）：项目 / 分支 / 提交——与卡片同宽、左缘对齐，
@@ -1140,18 +1270,67 @@ export function Composer() {
      editable={!awaiting}
     />
     <div className="flex flex-wrap items-center gap-0.5 gap-y-1 px-2 py-1.5">
-     {/* 卡底工具行（v2 §3）：左 = `+`（文件 / 工作区文件 / 目标 / 计划 / 压缩）+ 执行模式菜单 + 排队徽标；
+     {/* 卡底工具行（v2 §3）：左 = `+`（文件 / 工作区文件 / 压缩）+ 目标 / 计划按钮 + 执行模式菜单 + 排队徽标；
          右 = 压缩行动点 / 上下文容量环 / 供应商用量（2026-10-14 从顶栏右端搬进输入卡）+
          模型 / 思考档（两个独立选择器）+ 发送 / 停止 */}
-     <PlusMenu
-      onPickFiles={() => void pickFiles()}
-      onPickRef={openWorkspacePicker}
-      onOpenGoal={() => setGoalDialogOpen(true)}
-      onOpenPlan={planPending}
-      onCompact={() => void compactNow()}
-      compactBusy={status === "running"}
+     <button
+      type="button"
+      onClick={() => setToolsOpen((v) => !v)}
       disabled={!activeSessionId || awaiting}
-     />
+      aria-label={t.plusMenuAria}
+      aria-expanded={panelOpen}
+      title={t.plusMenuAria}
+      className={`flex shrink-0 cursor-pointer items-center justify-center rounded-md p-1.5 transition-colors duration-100 hover:bg-hover disabled:cursor-default disabled:opacity-40 ${panelOpen ? "bg-active text-foreground" : "text-muted hover:text-foreground"}`}
+     >
+      <Plus size={16} aria-hidden />
+     </button>
+     {/* 目标入口（2026-10-20 用户口径）：工具行按钮 → **主输入框**进入目标输入模式，
+         发送即设置；成功后上方才出现目标条。输入中 / 已有目标 = accent。 */}
+     {activeSessionId && (
+      <button
+       type="button"
+       onClick={() => enterGoalMode()}
+       aria-label={t.goalLabel}
+       aria-pressed={goalMode || goal != null}
+       title={goalMode ? t.goalModeHint : goal ? fmt(t.goalChipHint, goal.objective) : t.goalChipAdd}
+       className={`flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[13px] whitespace-nowrap transition-colors duration-100 hover:bg-hover ${
+        goalMode || goal ? "bg-accent/10 text-accent" : "text-muted hover:text-foreground"
+       }`}
+      >
+       <Target size={13} aria-hidden />
+       {t.goalLabel}
+      </button>
+     )}
+     {/* 计划入口（方案 A）：空态 = 切换**下一次新建会话**的计划开关（`--plan-yolo`）；
+         有会话 = 打开弹窗（计划模式是启动参数，运行中无法切换，见 docs/plan-mode.md）。
+         入口常驻可发现，不再只在空态出现。 */}
+     <button
+      type="button"
+      onClick={openPlanEntry}
+      disabled={planBusy}
+      aria-label={t.planToggle}
+      aria-pressed={planActive}
+      aria-haspopup={activeSessionId ? "dialog" : undefined}
+      title={
+       planBusy
+        ? t.planConverting
+        : activeSessionId
+         ? planActive
+          ? isEmptySession(activeSessionId)
+            ? t.planDisableHint
+            : t.planActiveLockedHint
+          : isEmptySession(activeSessionId)
+            ? t.planEnableHint
+            : t.planSwitchHint
+         : t.planToggleHint
+      }
+      className={`flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[13px] whitespace-nowrap transition-colors duration-100 hover:bg-hover disabled:cursor-default disabled:opacity-40 ${
+       planActive ? "bg-accent/10 text-accent" : "text-muted hover:text-foreground"
+      }`}
+     >
+      <ClipboardList size={13} aria-hidden />
+      {planBusy ? t.planConverting : t.planToggle}
+     </button>
      <ApprovalModeMenu />
      <QueueBadge />
      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
@@ -1172,7 +1351,7 @@ export function Composer() {
       ) : (
        <button
         onClick={() => void send()}
-        disabled={(!draft.trim() && attachments.length === 0) || awaiting}
+        disabled={(!draft.trim() && attachments.length === 0) || awaiting || creating}
         className="ml-1 flex h-7 w-7 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity duration-150 hover:opacity-90 disabled:cursor-default disabled:opacity-30"
         aria-label={t.sendAria}
        >
@@ -1188,17 +1367,12 @@ export function Composer() {
    <div className="mx-auto mt-1.5 max-w-(--measure-content)">
     <SessionStatsBar />
    </div>
-   {/* 目标弹窗（`+` 菜单「目标」）：只在打开时挂载，objective 由当前 goal 初始化 */}
-   {goalDialogOpen && activeSessionId && (
-    <GoalDialog
-     key={activeSessionId}
-     sessionId={activeSessionId}
-     goal={goal}
-     onClose={() => {
-      setGoalDialogOpen(false);
-      // 弹窗关闭后焦点回输入框（DialogShell 不负责恢复打开前的焦点）
-      editorRef.current?.focus();
-     }}
+   {/* 计划模式弹窗（有会话时从工具行 chip / `+` 菜单打开）：说明 + 新建计划会话 */}
+   {planDialogOpen && (
+    <PlanStartDialog
+     dir={cwd || resolveNewChatCheckout(checkouts)?.path || projects[0]?.path || ""}
+     active={planActive}
+     onClose={() => setPlanDialogOpen(false)}
     />
    )}
   </div >

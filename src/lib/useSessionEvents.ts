@@ -687,7 +687,8 @@ export function forgetSession(sid: string): void {
   !(sid in st.attachmentsBySession) &&
   !(sid in st.queuedBySession) &&
   !(sid in st.goalBySession) &&
-  !(sid in st.subagentsBySession)
+  !(sid in st.subagentsBySession) &&
+  !(st.planSessions ?? []).includes(sid)
  ) {
   return;
  }
@@ -716,6 +717,9 @@ export function forgetSession(sid: string): void {
   queuedBySession: queued,
   goalBySession: goals,
   subagentsBySession: subs,
+  ...((st.planSessions ?? []).includes(sid)
+   ? { planSessions: (st.planSessions ?? []).filter((x) => x !== sid) }
+   : {}),
   // 旁问面板正开着这个会话时一并关掉（记录属于会话，不跨会话残留）
   ...(st.btw.sessionId === sid ? { btw: { open: false, sessionId: null, records: [], busyRecordId: null, draft: "", error: null } } : {}),
  });

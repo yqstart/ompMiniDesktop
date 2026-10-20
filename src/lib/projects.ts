@@ -40,9 +40,9 @@ export async function pickAndAddProject(): Promise<AddProjectResult> {
  */
 export async function startChatInProject(
  projectId: string,
- opts: { projectName?: string } = {},
+ opts: { projectName?: string; plan?: boolean } = {},
 ): Promise<SwitchProjectResult> {
  const p = useApp.getState().projects.find((x) => x.id === projectId);
  if (!p) return { ok: false, message: TEXT[useApp.getState().locale].pickProjectFirst };
- return createChatIn(p.path, { projectName: opts.projectName ?? p.name });
+ return createChatIn(p.path, { projectName: opts.projectName ?? p.name, plan: opts.plan });
 }

@@ -1,7 +1,10 @@
-import { Fragment, useEffect, useRef } from "react";
-import { CircleInfo } from "reicon-react";
+import { Fragment, useEffect, useRef, type ReactNode } from "react";
+import { CircleInfo, FilePlus, FolderFiles, MinimizeSquare } from "reicon-react";
 import { SKILL_PREFIX, type SlashCandidate } from "../../lib/slashCommands";
 import { useText } from "../../lib/useText";
+
+/** `/` 面板顶部固定操作（与 `+` 菜单一致）：文件 / 工作区文件 / 压缩。 */
+export type SlashAction = "file" | "workspace" | "compact";
 
 /**
  * 输入框 `/` 命令补全浮层：命令组（无标题）+ 技能组（带标题）+ 底部操作提示行。
@@ -18,6 +21,8 @@ export function SlashMenu({
  query,
  onPick,
  onHover,
+ onAction,
+ compactDisabled = false,
 }: {
  cands: SlashCandidate[];
  /** 高亮下标（`-1` = 无高亮）。 */
@@ -26,6 +31,10 @@ export function SlashMenu({
  query: string;
  onPick: (c: SlashCandidate) => void;
  onHover: (index: number) => void;
+ /** 顶部固定操作：与 `+` 菜单同一条动作（文件 / 工作区文件 / 压缩）。 */
+ onAction: (a: SlashAction) => void;
+ /** 运行中禁用「压缩」：omp 不会在任务跑着的时候处理 compact 请求（与工具行 CompactButton 同口径）。 */
+ compactDisabled?: boolean;
 }) {
  const t = useText();
  const boxRef = useRef<HTMLDivElement>(null);
@@ -34,12 +43,47 @@ export function SlashMenu({
   boxRef.current?.querySelector('[role="option"][aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
  }, [active]);
 
+ /** 操作行：不是命令候选（不进 listbox / 键盘导航），点一下直接执行。 */
+ const action = (icon: ReactNode, label: string, a: SlashAction) => {
+  // 运行中 omp 不处理 compact（实测请求被晾着、不回包）：与工具行 CompactButton 一样禁用，
+  // 不给一个点了没反应的入口。
+  const disabled = a === "compact" && compactDisabled;
+  return (
+   <button
+    type="button"
+    disabled={disabled}
+    title={disabled ? t.compactBusyHint : undefined}
+    onClick={() => onAction(a)}
+    className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors duration-100 ${
+     disabled ? "cursor-default opacity-40" : "cursor-pointer hover:bg-hover"
+    }`}
+   >
+    <span className="shrink-0 text-muted">{icon}</span>
+    <span className="text-[13px] text-muted">{label}</span>
+   </button>
+  );
+ };
+
  return (
   <div className="overflow-hidden rounded-md border border-border bg-elevated shadow-pop">
+   {/* 空查询时先在顶部铺「操作」组（2026-10-20 用户口径：与 `+` 菜单一致）——
+       有查询时让位给匹配结果，不占列表高度。 */}
+   {!query.trim() && (
+    <div className="border-b border-border-soft py-1">
+     <div role="presentation" className="px-2.5 pt-2 pb-1 text-[11px] font-medium text-faint">
+      {t.slashActionGroup}
+     </div>
+     {action(<FilePlus size={13} aria-hidden />, t.plusFileTitle, "file")}
+     {action(<FolderFiles size={13} aria-hidden />, t.refPickTitle, "workspace")}
+     {action(<MinimizeSquare size={13} aria-hidden />, t.plusCompactTitle, "compact")}
+    </div>
+   )}
    {/* role="listbox" 只包候选行：提示行不是可选项，不该出现在选项列表里 */}
-   <div ref={boxRef} role="listbox" aria-label={t.slashListAria} className="max-h-56 overflow-y-auto overscroll-contain py-1">
+   <div ref={boxRef} role="listbox" aria-label={t.slashListAria} className="max-h-72 overflow-y-auto overscroll-contain py-1">
     {cands.length === 0 && (
-     <div className="px-2.5 py-2 text-[13px] text-muted">{t.slashListEmpty}</div>
+     <div className="px-2.5 py-2 text-[13px] text-muted">
+      {query.trim() ? t.slashListEmpty : t.plusNoSkills}
+     </div>
     )}
     {cands.map((c, i) => (
      <Fragment key={c.name}>

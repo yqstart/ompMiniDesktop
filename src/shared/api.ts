@@ -127,8 +127,11 @@ export const api = {
 
  // ---------- 聊天形态（V32 恢复自 V1–V10）：RPC 会话命令面 ----------
 
- /** 新建聊天会话（按目录开：左栏目录行 / 会话弹窗的「新建」传 checkout 路径）。 */
- createSession: (cwd: string) => call<SessionView>(IPC.createSession, { cwd }),
+ /** 新建聊天会话（按目录开：左栏目录行 / 会话弹窗的「新建」传 checkout 路径）。
+  *  `plan` = 计划模式（`--plan-yolo`）：只读规划、自动批准后执行；运行中无法切换，
+  *  所以只给新建用（见 `docs/plan-mode.md`）。 */
+ createSession: (cwd: string, plan?: boolean) =>
+  call<SessionView>(IPC.createSession, { cwd, plan: plan === true }),
  /** 打开（或聚焦）聊天会话：已有长驻进程直接返回；否则 `omp --resume` 拉起。 */
  openSession: (id: string) => call<SessionView>(IPC.openSession, { id }),
  /** 会话改名（V40）：RPC `set_session_name` 写 omp 真名（jsonl `title` 行）+ 清覆盖层备注。 */

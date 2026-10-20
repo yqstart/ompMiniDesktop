@@ -60,6 +60,11 @@ export function toolLineParts(
   // 行号后缀（`:1-120`）不进行内：行上只留文件名与目录，行号在展开面板的完整摘要里
   const { path } = splitRange(m.argsSummary);
   const { base, dir } = splitPath(path);
+  // 计划模式（`omp --plan-yolo`）的计划文件：omp 用 `write local://<slug>-plan.md` 提交计划，
+  // 行上直接标「计划」，否则会被当成一次普通写入（见 docs/plan-mode.md）。
+  if (m.name === "write" && path.startsWith("local://") && path.endsWith("-plan.md")) {
+   return { icon: file.icon, verb: t.toolVerbPlan, main: base, sub: "", pathLike: true };
+  }
   return { icon: file.icon, verb: t[file.key], main: base, sub: dir, pathLike: true };
  }
  if (m.name === "bash") {

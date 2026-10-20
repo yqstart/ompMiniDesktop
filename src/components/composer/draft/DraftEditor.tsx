@@ -16,6 +16,7 @@ import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext
 import {
  $createLineBreakNode,
  $createParagraphNode,
+ $createRangeSelection,
  $createTextNode,
  $getRoot,
  $getSelection,
@@ -23,6 +24,7 @@ import {
  $isElementNode,
  $isRangeSelection,
  $isTextNode,
+ $setSelection,
  type LexicalNode,
  type RangeSelection,
 } from "lexical";
@@ -70,6 +72,8 @@ export type DraftEditorHandle = {
  setText: (text: string) => void;
  /** 在光标处插入纯文本（支持 `\n`，走 LineBreakNode）。 */
  insertText: (text: string) => void;
+ /** 插到整段草稿的最开头（技能命令必须在行首，omp 才认 `/skill:<名>`）。 */
+ insertTextAtStart: (text: string) => void;
  /** 插入一个软换行（Shift+Enter）。 */
  insertLineBreak: () => void;
  /** 在光标处插入一枚引用芯片（前后按需补空格）。 */
@@ -290,6 +294,26 @@ function EditorBridge({
      if (!$isRangeSelection(selection)) $replaceAll($draftText() + text);
      else if (text.includes("\n")) $insertNodes(text.split("\n").flatMap((line, index) => (index > 0 ? [$createLineBreakNode(), $createTextNode(line)] : [$createTextNode(line)])));
      else selection.insertText(text);
+    }, { tag: TAG_INSERT }),
+   insertTextAtStart: (text: string) =>
+    editor.update(() => {
+     if (text.length === 0) return;
+     const first = $getRoot().getFirstChild();
+     const node = $createTextNode(text);
+     // 草稿恒定一个段落：插到第一个段落（或首个行内节点）之前，光标停在插入文本末尾——
+     // 用户接着写的任务会接在命令后面，而不是接在原文末尾。
+     if (!first) {
+      $replaceAll(text);
+      return;
+     }
+     const head = $isElementNode(first) ? first.getFirstChild() : first;
+     if (head) head.insertBefore(node);
+     else if ($isElementNode(first)) first.append(node);
+     else first.insertBefore(node);
+     const sel = $createRangeSelection();
+     sel.anchor.set(node.getKey(), text.length, "text");
+     sel.focus.set(node.getKey(), text.length, "text");
+     $setSelection(sel);
     }, { tag: TAG_INSERT }),
    insertLineBreak: () =>
     editor.update(() => $insertNodes([$createLineBreakNode()]), { tag: TAG_INSERT }),

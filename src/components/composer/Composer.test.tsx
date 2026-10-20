@@ -14,7 +14,7 @@ import { TEXT, fmt } from "../../lib/locale";
  * 2. 发送语义（V39，对齐 omp 终端与 codex）：流式中 Enter = 插话（steer）、Tab / ⌘Ctrl+Enter = 排队
  *    （follow_up；运行中工具行的「排队」按钮 2026-10-13 按用户口径退场）；
  * 3. V40/V41 增量：Shift+Tab 执行模式循环、Esc 中断还原队列、待发区 = 队列真值（撤回 / 编辑 / 提升）、
- *    壳本地命令拦截（/goal /status …不进 omp）。
+ *    壳本地命令已移除，`/` 面板只留技能；`+` / `/` 共用同一个面板。
  * 执行模式的真值口径（覆盖层水合 / 写全局默认 + 本会话覆盖）另见 `lib/sessionApproval.test.ts`。
  */
 
@@ -212,16 +212,20 @@ describe("Composer 工具行（v2）", () => {
   const meter = container.querySelector<HTMLButtonElement>('button[aria-label^="上下文容量"]');
   expect(meter).not.toBeNull();
   expect(meter?.textContent).toContain("13%");
-  // 「+」菜单（v2）：点开占用互斥槽，单行 = 图标 + 标题 + 命令名（2026-10-20 去掉说明行）
+  // `+` 与 `/` 共用同一个面板（2026-10-20 用户口径）：操作组（文件 / 工作区 / 压缩）+ 技能
   const plus = container.querySelector<HTMLButtonElement>('button[aria-label="添加上下文"]');
   expect(plus).not.toBeNull();
   act(() => plus?.click());
-  expect(useApp.getState().composerMenu).toBe("plus");
-  expect(container.textContent).toContain(TEXT["zh-CN"].refPickTitle);
+  expect(container.querySelector('[role="listbox"]')).not.toBeNull();
   expect(container.textContent).toContain(TEXT["zh-CN"].plusFileTitle);
-  expect(container.textContent).toContain(TEXT["zh-CN"].plusGoalTitle);
-  act(() => plus?.click());
-  expect(useApp.getState().composerMenu).toBeNull();
+  expect(container.textContent).toContain(TEXT["zh-CN"].refPickTitle);
+  expect(container.textContent).toContain(TEXT["zh-CN"].plusCompactTitle);
+  // 目标 / 计划入口是工具行常驻按钮，不在面板里
+  expect(container.querySelector('button[aria-label="目标"]')).not.toBeNull();
+  expect(container.querySelector('button[aria-label="计划"]')).not.toBeNull();
+  // Esc 关闭面板（焦点在按钮上也会走 window 兜底）
+  await press(plus, { key: "Escape" });
+  expect(container.querySelector('[role="listbox"]')).toBeNull();
   // 执行模式菜单（v2）：行 = 名称 + 说明；作用域说明是「本会话 + 新会话默认」，勾选跟生效档
   const perm = container.querySelector<HTMLButtonElement>('button[aria-label^="权限："]');
   expect(perm).not.toBeNull();
@@ -240,6 +244,28 @@ describe("Composer 工具行（v2）", () => {
   const sendBtn = container.querySelector<HTMLButtonElement>('button[aria-label="发送"]');
   expect(sendBtn).not.toBeNull();
   expect(sendBtn?.className).toContain("rounded-full");
+ });
+
+ it("`+` 面板选技能：命令插到最前（omp 只认行首，正文中间不会加载技能）", async () => {
+  useApp.setState({
+   sessions: [session()],
+   activeSessionId: "s1",
+   drafts: { s1: "把这段逻辑简化一下" },
+   currentRuntime: {
+    model: null,
+    efforts: null,
+    thinkingLevel: null,
+    commands: [{ name: "skill:code-simplifier", source: "skill", description: "简化代码" }],
+   },
+  });
+  act(() => root.render(<Composer />));
+  await act(async () => { });
+  const plus = container.querySelector<HTMLButtonElement>('button[aria-label="添加上下文"]');
+  act(() => plus?.click());
+  const row = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("code-simplifier"));
+  expect(row).not.toBeUndefined();
+  await act(async () => { row!.click(); });
+  expect(useApp.getState().drafts["s1"]).toBe("/skill:code-simplifier 把这段逻辑简化一下");
  });
 
  it("执行模式菜单选择：写全局默认（新会话档位）+ 本会话覆盖（idle 时立即重启换档）", async () => {
@@ -397,18 +423,32 @@ describe("Composer 发送语义（V39/V40：对齐 omp 终端与 codex）", () =
   expect(apiMock.removeQueuedMessage).toHaveBeenCalledWith("s1", "再跑测试", "followUp");
  });
 
- it("壳本地命令：/goal 走 goalCommand（不进 omp），/status 开统计弹窗", async () => {
+ it("工具行目标按钮：主输入框进入目标模式，发送即创建目标", async () => {
+  const ta = await mount(false);
+  // 先清空（mount 自带草稿「你好」）：目标模式只在输入框为空时显示目标 placeholder
+  act(() => useApp.setState({ drafts: { s1: "" } }));
+  await act(async () => { });
+  const btn = container.querySelector<HTMLButtonElement>('button[aria-label="目标"]');
+  expect(btn).not.toBeNull();
+  act(() => btn!.click());
+  expect(btn!.getAttribute("aria-pressed")).toBe("true");
+  expect(container.textContent).toContain(TEXT["zh-CN"].goalInputPlaceholder);
+  act(() => useApp.setState({ drafts: { s1: "把首页加载压到 2 秒内" } }));
+  await act(async () => { });
+  await press(ta, { key: "Enter" });
+  expect(apiMock.goalCommand).toHaveBeenCalledWith("s1", "create", "把首页加载压到 2 秒内");
+  // goal 只是状态，不会自己开跑：创建成功后还要把同一段文本作为启动消息发出去
+  await act(async () => { });
+  expect(apiMock.sendMessage).toHaveBeenCalledWith("s1", "把首页加载压到 2 秒内", []);
+ });
+
+ it("壳本地命令已移除：/goal 不再被壳拦截，走 omp 的 run_slash", async () => {
   const ta = await mount(false);
   act(() => useApp.setState({ drafts: { s1: "/goal 修好所有类型错误" } }));
   await act(async () => { });
   await press(ta, { key: "Enter" });
-  expect(apiMock.goalCommand).toHaveBeenCalledWith("s1", "create", "修好所有类型错误");
-  expect(apiMock.runSlash).not.toHaveBeenCalled();
-  act(() => useApp.setState({ drafts: { s1: "/status" } }));
-  await act(async () => { });
-  await press(ta, { key: "Enter" });
-  expect(useApp.getState().statsOpen).toBe(true);
-  expect(apiMock.runSlash).not.toHaveBeenCalled();
+  expect(apiMock.runSlash).toHaveBeenCalledWith("s1", "/goal 修好所有类型错误");
+  expect(apiMock.goalCommand).not.toHaveBeenCalled();
  });
 
  it("非本地命令仍走 run_slash（omp 命令面）", async () => {
@@ -417,6 +457,33 @@ describe("Composer 发送语义（V39/V40：对齐 omp 终端与 codex）", () =
   await act(async () => { });
   await press(ta, { key: "Enter" });
   expect(apiMock.runSlash).toHaveBeenCalledWith("s1", "/compact");
+ });
+
+ it("运行中 Enter 发 /skill: 也走 run_slash（steer 通道 omp 不识别技能）", async () => {
+  const ta = await mount(true);
+  act(() => useApp.setState({ drafts: { s1: "/skill:code-simplifier 收一下这个文件" } }));
+  await act(async () => { });
+  await press(ta, { key: "Enter" });
+  expect(apiMock.runSlash).toHaveBeenCalledWith("s1", "/skill:code-simplifier 收一下这个文件");
+  expect(apiMock.steerMessage).not.toHaveBeenCalled();
+ });
+
+ it("运行中 Tab 发 /skill: 也走 run_slash（不走 follow_up）", async () => {
+  const ta = await mount(true);
+  act(() => useApp.setState({ drafts: { s1: "/skill:web-search 查一下" } }));
+  await act(async () => { });
+  await press(ta, { key: "Tab" });
+  expect(apiMock.runSlash).toHaveBeenCalledWith("s1", "/skill:web-search 查一下");
+  expect(apiMock.followUpMessage).not.toHaveBeenCalled();
+ });
+
+ it("运行中：面板里的「压缩」禁用（omp 不处理运行中的 compact 请求）", async () => {
+  await mount(true);
+  act(() => container.querySelector<HTMLButtonElement>('button[aria-label="添加上下文"]')?.click());
+  const row = [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === TEXT["zh-CN"].plusCompactTitle);
+  expect(row).not.toBeUndefined();
+  expect(row!.disabled).toBe(true);
+  expect(row!.getAttribute("title")).toBe(TEXT["zh-CN"].compactBusyHint);
  });
 });
 
@@ -484,29 +551,6 @@ describe("Composer V41：大段粘贴 / fast·slow / 导出", () => {
   const ta = await mount(false);
   await pasteText(ta!, "短文本");
   expect(apiMock.savePaste).not.toHaveBeenCalled();
- });
-
- it("/fast 与 /slow：toggle 走 IPC；返回命令行走流尾", async () => {
-  const ta = await mount(false);
-  act(() => useApp.setState({ drafts: { s1: "/fast" } }));
-  await act(async () => { });
-  await press(ta, { key: "Enter" });
-  expect(apiMock.setFastMode).toHaveBeenCalledWith("s1", true);
-  act(() => useApp.setState({ drafts: { s1: "/slow on" } }));
-  await act(async () => { });
-  await press(ta, { key: "Enter" });
-  expect(apiMock.setSlowMode).toHaveBeenCalledWith("s1", true);
- });
-
- it("/export：导出会话并交给系统打开", async () => {
-  const ta = await mount(false);
-  act(() => useApp.setState({ drafts: { s1: "/export" } }));
-  await act(async () => { });
-  await press(ta, { key: "Enter" });
-  expect(apiMock.exportSessionHtml).toHaveBeenCalledWith("s1");
-  expect(openerMock.openPath).toHaveBeenCalledWith("/tmp/demo/omp-session-x.html");
-  const body = (useApp.getState().eventsBySession["s1"] ?? []).map((m) => (m.kind === "command" ? m.output : "")).join("\n");
-  expect(body).toContain("/tmp/demo/omp-session-x.html");
  });
 
  it("! 前缀 = 本地 shell：命令行 + 输出各落一条流尾 command 行", async () => {

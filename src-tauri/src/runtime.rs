@@ -33,6 +33,10 @@ pub struct SpawnOpts {
     pub model: Option<String>,
     pub thinking: Option<String>,
     pub approval: Option<String>,
+    /// 计划模式（`--plan-yolo`）：启动即只读规划，模型首次 resolve 自动批准后切执行。
+    /// **只给新建会话用**；resume / 重启一律 false——rpc-ui 没有运行中切换的通道
+    /// （见 `docs/plan-mode.md`）。
+    pub plan_yolo: bool,
 }
 
 impl SpawnOpts {
@@ -53,6 +57,9 @@ impl SpawnOpts {
         if let Some(x) = &self.approval {
             a.push("--approval-mode".into());
             a.push(x.clone());
+        }
+        if self.plan_yolo {
+            a.push("--plan-yolo".into());
         }
         a
     }
@@ -1554,6 +1561,7 @@ mod real_rpc_tests {
                     model: None,
                     thinking: None,
                     approval: None,
+                    plan_yolo: false,
                 },
             )
             .await
@@ -1751,6 +1759,7 @@ mod real_rpc_tests {
                     model: None,
                     thinking: None,
                     approval: None,
+                    plan_yolo: false,
                 },
             )
             .await
@@ -1882,6 +1891,7 @@ mod real_rpc_tests {
                     model: None,
                     thinking: None,
                     approval: None,
+                    plan_yolo: false,
                 },
             )
             .await
@@ -2096,6 +2106,7 @@ mod tests {
                 model: Some("nope/x".into()),
                 thinking: None,
                 approval: None,
+                plan_yolo: false,
             },
         )
         .await
@@ -2482,12 +2493,15 @@ mod tests {
             model: None,
             thinking: None,
             approval: None,
+            plan_yolo: true,
         };
         let a = opts.args();
         assert_eq!(&a[0], "--mode");
         assert_eq!(&a[1], "rpc-ui");
         assert_eq!(&a[2], "--cwd");
         assert_eq!(&a[3], "/tmp/x");
+        // 计划模式是启动参数（docs/plan-mode.md）：新建会话开启时必须在 spawn 参数里
+        assert!(a.contains(&"--plan-yolo".to_string()), "plan_yolo 要落到 --plan-yolo，实际：{a:?}");
     }
 
     #[test]

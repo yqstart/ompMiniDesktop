@@ -265,6 +265,22 @@ type AppState = {
  /** Composer 聚焦序号：引用浮层注入草稿后 +1，让输入框拿回焦点接着写。 */
  composerFocusSeq: number;
  /**
+  * 空态输入卡的「计划模式」开关：只对**下一次新建会话**生效（`--plan-yolo`）。
+  * 运行中的会话无法切换计划模式（rpc-ui 没有控制通道，见 `docs/plan-mode.md`），
+  * 所以这个值只在 `activeSessionId === null` 时可见、新建成功后由 Composer 复位。
+  */
+ planModeNext: boolean;
+ /** 计划模式开关写入（空态输入卡；新建成功后调用方复位 false）。 */
+ setPlanModeNext: (on: boolean) => void;
+ /**
+  * **以计划模式启动**的会话（本地标记）：omp 的 `get_state` 不返回 planMode，壳侧只能在
+  * 创建时知道（`createChatIn(..., { plan: true })`）。用于把工具行「计划」chip 标成已启用；
+  * 不持久化，重启后丢失（计划模式本身仍由 omp 进程保持）。
+  */
+ planSessions: string[];
+ /** 记一个计划会话（值没变不写）。 */
+ markPlanSession: (sid: string) => void;
+ /**
   * 待插入的**引用芯片**（右栏文件树 / 快速过滤 / ⌘⇧P 引用浮层 → Composer）：
   * 草稿编辑器是非受控的（Lexical 状态是权威），所以引用不能靠改草稿文本来插入——
   * 外部写入这一条请求，Composer 消费后插进编辑器并清空（`seq` 防重放）。
@@ -751,6 +767,8 @@ export const useApp = create<AppState>((set, get) => ({
   set((s) =>
    s.planCardBySession[sid] === state ? {} : { planCardBySession: { ...s.planCardBySession, [sid]: state } },
   ),
+ setPlanModeNext: (on) => set((s) => (s.planModeNext === on ? {} : { planModeNext: on })),
+ markPlanSession: (sid) => set((s) => (s.planSessions.includes(sid) ? {} : { planSessions: [...s.planSessions, sid] })),
  subagentsOf: (sid) => (sid ? get().subagentsBySession[sid] ?? EMPTY_SUBAGENTS : EMPTY_SUBAGENTS),
  upsertSubagent: (sid, info) =>
   set((s) => {
@@ -812,6 +830,8 @@ export const useApp = create<AppState>((set, get) => ({
  providerUsageOpen: false,
  refPickerTarget: null,
  composerFocusSeq: 0,
+ planModeNext: false,
+ planSessions: [],
  pendingReference: null,
  gitInfoSeq: 0,
 

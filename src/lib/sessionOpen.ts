@@ -76,10 +76,10 @@ function scrollThreadToBottom() {
  */
 export async function createChatIn(
  cwd: string,
- opts: { projectName?: string } = {},
+ opts: { projectName?: string; plan?: boolean } = {},
 ): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
  try {
-  const created = await api.createSession(cwd);
+  const created = opts.plan ? await api.createSession(cwd, true) : await api.createSession(cwd);
   const st = useApp.getState();
   const known = st.sessions.some((s) => s.id === created.id);
   st.set({
@@ -89,6 +89,8 @@ export async function createChatIn(
    sidebarOpen: false,
   });
   await openSessionWithHistory(created.id, created);
+  // 计划会话的本地标记（get_state 不返回 planMode）：工具行据此显示「已启用」
+  if (opts.plan) useApp.getState().markPlanSession(created.id);
   // 后端在「项目偏好的模型 / 思考档被 omp 拒了、这次改用默认档」时会带说明回来：
   // 落到消息流尾的本地说明行（会话内反馈位），否则用户只会觉得「模型怎么自己变了」。
   if (created.notice) appendLocalNote(created.id, fallbackNoticeText(created.notice));

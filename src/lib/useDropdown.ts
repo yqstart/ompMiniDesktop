@@ -125,7 +125,7 @@ export function useDropdown(
   };
   const onKey = (event: KeyboardEvent) => {
    if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || !active()) return;
-   if (!popup.contains(document.activeElement)) return;
+   // 焦点不一定在浮层里（输入框触发、或用户点回编辑器）：Esc 一律关掉当前浮层
    event.preventDefault();
    event.stopImmediatePropagation();
    closeRef.current();
