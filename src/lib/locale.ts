@@ -1381,6 +1381,7 @@ const ZH = {
  usageLimitsNoDataHint: "omp 暂不支持查询这个供应商的用量（模型仍可正常使用）",
  usageLimitsNoDataMore: "另有 {0} 个供应商无用量数据",
  usageLimitsFailedTitle: "用量不可用：{0}",
+ usageLimitsQueryFailed: "查询失败",
  // 统计条读数里「还有 N 个窗口」的折叠标记
  usageLimitsMore: "+{0}",
 
@@ -2900,6 +2901,7 @@ const EN: Record<TextKey, string> = {
  usageLimitsNoDataHint: "omp can't query usage for this provider yet (models still work)",
  usageLimitsNoDataMore: "{0} more provider(s) without usage data",
  usageLimitsFailedTitle: "Usage unavailable: {0}",
+ usageLimitsQueryFailed: "Query failed",
  // 统计条读数里「还有 N 个窗口」的折叠标记
  usageLimitsMore: "+{0}",
  modelLabel: "Model",

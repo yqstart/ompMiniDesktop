@@ -20,14 +20,16 @@
 //! wafer-serverless / yolo-auto / singularityapi-*、google / openai / azure / amazon-bedrock /
 //! google-vertex 等——界面按「无用量数据」直接提示（文案见字典 `pusageNoDataHint`）。
 //!
-//! 上游事实（2026-09-18 实测，omp 18.2.5 / 本机 commandcode 凭据）：
+//! 上游事实（2026-09-18 实测，omp 18.2.5 / 本机 commandcode 凭据；2026-10-21 复测 omp 18.12.4）：
 //!
 //! - **omp 的用量探针清单**（`packages/ai/src/usage/`）里没有下面这些 provider——全量
 //!   `omp usage --json` 会把它们从 `accountsWithoutUsage` 里也滤掉（静默缺席）。
-//! - **commandcode**：官方文档只描述滚动窗口，没有文档化的用量 API；但
-//!   `GET https://api.commandcode.ai/alpha/billing/credits`（Bearer = Provider API key）实测
-//!   **可用**（alpha 前缀即「API key 通道」）。配套 `/alpha/billing/subscriptions` 给月度重置
-//!   时刻；月度总额按 5h/weekly 的 cap 组合反查官方套餐表（反查不到只给剩余额，不猜）。
+//! - **commandcode**：omp 18.12 起自带 5 小时 / 每周 / 余额三行，但**没有月度窗口**；官方也
+//!   没有文档化的月度用量 API。`GET https://api.commandcode.ai/alpha/billing/credits`
+//!   （Bearer = Provider API key）实测**可用**（alpha 前缀即「API key 通道」），
+//!   `credits.monthlyCredits` 是月度剩余；配套 `/alpha/billing/subscriptions` 给 `planId` 与
+//!   月度重置时刻。月度总额先按 5h/weekly 的 cap 组合反查官方套餐表（认不出再按 planId），
+//!   反查不到只给剩余额、不猜百分比。omp 已给报告时只补它缺的窗口（见 `run_probes`）。
 //! - **deepseek**：官方文档化接口 `GET https://api.deepseek.com/user/balance`（Bearer = API key；
 //!   api-docs.deepseek.com/zh-cn/api/get-user-balance）返回
 //!   `{is_available, balance_infos:[{currency,total_balance,granted_balance,topped_up_balance}]}`；
@@ -48,7 +50,8 @@ use std::time::Duration;
 
 use crate::provider_usage::{ExtraProbeFailure, ProviderUsage, ProviderUsageReport, UsageLimit};
 
-/// 注册了补充探针的供应商（只在「已配置且 omp 没给报告」时触发）。
+/// 注册了补充探针的供应商（omp 没给报告时整份补；omp 给了报告时只补缺的窗口——当前只有
+/// commandcode 的月度，见 `run_probes`）。
 pub const EXTRA_PROBES: [&str; 16] = [
     "commandcode",
     "deepseek",
@@ -238,10 +241,11 @@ fn money(v: f64) -> String {
 /// commandcode 官方套餐表（Usage Limits 文档的表格）：(5 小时 cap, 每周 cap) → 月度 credits 总额。
 ///
 /// API key 通道的 credits 响应里**没有 plan 字段**（plan 在 subscriptions 端点），但 5h/weekly 的
-/// cap 组合在官方表里唯一确定套餐——用它反查月额度，比信任 planId 字符串格式更稳（表变了就
-/// 匹配不到：那时月度只显示剩余额，不猜）。
-const COMMANDCODE_MONTHLY_CREDITS: [(f64, f64, f64); 6] = [
-    (3.0, 6.0, 10.0),     // Go
+/// cap 组合在官方表里唯一确定套餐——用它反查月额度。官方 2026-10 的 Go 档是 $2 / $5 两个窗口
+/// （老的 flat $10 Go 是 $3 / $6），两套都认。
+const COMMANDCODE_MONTHLY_CREDITS: [(f64, f64, f64); 7] = [
+    (2.0, 5.0, 10.0),     // Go（按模型分配 credits 的新档）
+    (3.0, 6.0, 10.0),     // Go（老 flat $10 档；官方说明窗口不变、随续费迁移）
     (14.0, 35.0, 70.0),   // GOAT
     (16.0, 40.0, 80.0),   // Pro
     (45.0, 90.0, 150.0),  // Max 10×
@@ -257,14 +261,43 @@ fn monthly_total_for(cap_5h: Option<f64>, cap_weekly: Option<f64>) -> Option<f64
         .map(|(_, _, total)| *total)
 }
 
+/// subscriptions 的 `planId` → 月度 credits 总额（cap 组合对不上时的兜底）。
+///
+/// 官方价目表：Go $10 / GOAT $70 / Pro $80 / Max 10× $150 / Max 20× $300 / Team Pro $40。
+/// 只用明确认得的 plan 名；`provider`（PAYG）与未知 / Enterprise 一律 None——不猜。
+fn monthly_total_for_plan(plan_id: Option<&str>) -> Option<f64> {
+    let id = plan_id?.to_ascii_lowercase();
+    // PAYG（`provider`）没有月度额度；它含 "pro"，必须在套餐判断之前挡掉
+    if id.contains("provider") || id.contains("pay-as-you-go") || id.contains("payg") {
+        return None;
+    }
+    // `individual-goat` 里也含 "go"，所以 goat 必须先判
+    if id.contains("goat") {
+        Some(70.0)
+    } else if id.contains("max-20") {
+        Some(300.0)
+    } else if id.contains("max-10") {
+        Some(150.0)
+    } else if id.contains("team-pro") {
+        Some(40.0)
+    } else if id.contains("pro") {
+        Some(80.0)
+    } else if id.contains("go") {
+        Some(10.0)
+    } else {
+        None
+    }
+}
+
 /// 解析 commandcode 的 `/alpha/billing/credits` 响应（结构见模块文档；字段全容错）。
 ///
-/// `period_end_ms` 来自 subscriptions 端点（月度重置时刻；拿不到为 None）。
-/// 月度行与官方页面同口径：**已用百分比**（总额按 5h/weekly 的 cap 组合反查官方套餐表——
-/// 反查不到时只给剩余额，不猜百分比）。
+/// `period_end_ms` / `plan_id` 来自 subscriptions 端点（月度重置时刻、套餐名；拿不到为 None）。
+/// 月度行与官方页面同口径：**已用百分比**（总额先按 5h/weekly 的 cap 组合反查官方套餐表，
+/// 认不出再按 planId 认套餐；两者都反查不到时只给剩余额，不猜百分比）。
 pub fn parse_commandcode_credits(
     v: &serde_json::Value,
     period_end_ms: Option<i64>,
+    plan_id: Option<&str>,
 ) -> Result<Vec<UsageLimit>, String> {
     let mut limits = vec![];
     let window_limits = v.get("windowLimits");
@@ -307,7 +340,7 @@ pub fn parse_commandcode_credits(
                     (Some(c), Some(u)) => Some((c - u).max(0.0)),
                     _ => None,
                 },
-                unit: "usd".into(),
+                unit: "credits".into(),
             },
             cap,
         ))
@@ -322,10 +355,10 @@ pub fn parse_commandcode_credits(
         cap_weekly = cap;
         limits.push(limit);
     }
-    // 月度：官方页面显示「已用 N%」（总额 = 官方套餐表按 cap 组合反查）；`monthlyCredits` 是剩余。
+    // 月度：官方页面显示「已用 N%」（总额 = 官方套餐表按 cap 组合 / planId 反查）；`monthlyCredits` 是剩余。
     let credits = v.get("credits");
     if let Some(monthly_left) = num(credits.and_then(|c| c.get("monthlyCredits"))) {
-        let total = monthly_total_for(cap_5h, cap_weekly);
+        let total = monthly_total_for(cap_5h, cap_weekly).or_else(|| monthly_total_for_plan(plan_id));
         let (used, limit, fraction, status) = match total {
             Some(t) if t > 0.0 => {
                 let used = (t - monthly_left).max(0.0);
@@ -344,7 +377,7 @@ pub fn parse_commandcode_credits(
         let mut notes = vec![];
         let purchased = num(credits.and_then(|c| c.get("purchasedCredits"))).unwrap_or(0.0);
         if purchased > 0.0 {
-            notes.push(format!("purchased: ${purchased:.2}"));
+            notes.push(format!("purchased: {purchased:.2} credits"));
         }
         limits.push(UsageLimit {
             id: "monthly".into(),
@@ -360,7 +393,7 @@ pub fn parse_commandcode_credits(
             used,
             limit,
             remaining: Some(monthly_left),
-            unit: "usd".into(),
+            unit: "credits".into(),
         });
     }
     if limits.is_empty() {
@@ -817,18 +850,19 @@ pub async fn probe(bin: &str, provider: &str) -> Result<Vec<UsageLimit>, String>
 pub async fn probe_with_key(provider: &str, key: &str) -> Result<Vec<UsageLimit>, String> {
     match provider {
         "commandcode" => {
-            // 两个端点并行：credits（必需）与 subscriptions（尽力——拿「月度重置时刻」，
+            // 两个端点并行：credits（必需）与 subscriptions（尽力——拿「月度重置时刻 + 套餐名」，
             // 免费层 / 失败时为 None，不影响额度本身）
             let credits_fut = fetch_json("https://api.commandcode.ai/alpha/billing/credits", key);
             let subs_fut = fetch_json("https://api.commandcode.ai/alpha/billing/subscriptions", key);
             let (credits, subs) = tokio::join!(credits_fut, subs_fut);
-            let period_end = subs.ok().and_then(|s| {
-                s.get("data")
-                    .and_then(|d| d.get("currentPeriodEnd"))
-                    .and_then(|x| x.as_str())
-                    .and_then(parse_iso_ms)
-            });
-            parse_commandcode_credits(&credits?, period_end)
+            let (period_end, plan_id) = match subs.ok().and_then(|s| s.get("data").cloned()) {
+                Some(data) => (
+                    data.get("currentPeriodEnd").and_then(|x| x.as_str()).and_then(parse_iso_ms),
+                    data.get("planId").and_then(|x| x.as_str()).map(str::to_string),
+                ),
+                None => (None, None),
+            };
+            parse_commandcode_credits(&credits?, period_end, plan_id.as_deref())
         }
         "deepseek" => {
             let v = fetch_json("https://api.deepseek.com/user/balance", key).await?;
@@ -916,15 +950,61 @@ pub async fn probe_with_key(provider: &str, key: &str) -> Result<Vec<UsageLimit>
     }
 }
 
-/// 对「已配置但 omp 没给报告」的供应商逐个跑补充探针，把成功的报告并进 `usage`，
-/// 失败的收集成 `extra_failures`（界面显示「查询失败」而不是「无用量数据」）。
+/// 把补充探针拿到的窗口并进 omp 已有报告：只补**缺失的 `window_id`**，不覆盖 omp 的读数；
+/// 额度窗口排在 `balance` 之前（余额行永远收尾）。
+///
+/// `monthly` 没有上限时（套餐表反查不到，只是余额的另一种说法）不补——留原本的余额行，
+/// 免得同一个读数在浮层里出现两遍。
+pub fn merge_missing_limits(report: &mut ProviderUsageReport, extra: Vec<UsageLimit>) -> usize {
+    let mut added = 0;
+    let mut insert_at = report
+        .limits
+        .iter()
+        .position(|l| l.window_id == "balance")
+        .unwrap_or(report.limits.len());
+    for limit in extra {
+        if report.limits.iter().any(|l| l.window_id == limit.window_id) {
+            continue;
+        }
+        if limit.window_id == "monthly" && limit.limit.is_none() {
+            continue;
+        }
+        report.limits.insert(insert_at, limit);
+        insert_at += 1;
+        added += 1;
+    }
+    added
+}
+
+/// 逐个跑补充探针：omp 没给报告的供应商整份补，omp 已报的 commandcode 只补缺的月度窗口。
+/// 成功的并进 `usage`，失败的收集成 `extra_failures`（界面显示「查询失败」而不是「无用量数据」）。
+///
+/// **omp 已给报告的供应商也会补缺**：omp 18.12 起自带 commandcode 的 5 小时 / 每周 / 余额，
+/// 但没有月度窗口（官方 credits 端点只有 `monthlyCredits` 一个剩余值）——不补的话「月额度」
+/// 就只剩一行 credits 余额，用户看不到月度进度条。只补缺失窗口，omp 以后自己报了月度就以
+/// omp 为准（不会覆盖）。
 pub async fn run_probes(bin: &str, usage: &mut ProviderUsage) -> Vec<ExtraProbeFailure> {
     let mut failures = vec![];
     for provider in EXTRA_PROBES {
-        if !usage.configured_providers.iter().any(|c| c == provider) {
+        if let Some(index) = usage.reports.iter().position(|r| r.provider == provider) {
+            // 已报的供应商不看 configured_providers（模型目录缓存冷启动时可能是空的；
+            // omp 报了它，就说明这份凭据确实配置着）。commandcode 只补 omp 缺的月度窗口。
+            if provider == "commandcode"
+                && !usage.reports[index].limits.iter().any(|l| l.window_id == "monthly")
+            {
+                match probe(bin, provider).await {
+                    Ok(limits) => {
+                        merge_missing_limits(&mut usage.reports[index], limits);
+                    }
+                    Err(message) => failures.push(ExtraProbeFailure {
+                        provider: provider.to_string(),
+                        message: format!("月度额度：{message}"),
+                    }),
+                }
+            }
             continue;
         }
-        if usage.reports.iter().any(|r| r.provider == provider) {
+        if !usage.configured_providers.iter().any(|c| c == provider) {
             continue;
         }
         match probe(bin, provider).await {
@@ -971,7 +1051,7 @@ mod tests {
     #[test]
     fn commandcode_maps_windows_and_monthly_credits() {
         let v: serde_json::Value = serde_json::from_str(COMMANDCODE).unwrap();
-        let limits = parse_commandcode_credits(&v, Some(1791500000000)).expect("实测响应必须能解析");
+        let limits = parse_commandcode_credits(&v, Some(1791500000000), Some("individual-goat")).expect("实测响应必须能解析");
         assert_eq!(limits.len(), 3, "5 小时 / 每周 / 月度三档");
 
         let h5 = &limits[0];
@@ -981,7 +1061,7 @@ mod tests {
         assert!((h5.percent - 2.1874).abs() < 0.01, "used/cap 折算百分比");
         assert_eq!(h5.status, "ok");
         assert_eq!(h5.resets_at, Some(1789727992310));
-        assert_eq!(h5.unit, "usd");
+        assert_eq!(h5.unit, "credits");
         assert!(h5.remaining.unwrap() > 13.6);
 
         let weekly = &limits[1];
@@ -1005,7 +1085,7 @@ mod tests {
           "fiveHour":{"used":1,"cap":7,"resetAt":1},
           "weekly":{"used":2,"cap":9,"resetAt":2}}}"#;
         let v: serde_json::Value = serde_json::from_str(out).unwrap();
-        let limits = parse_commandcode_credits(&v, None).unwrap();
+        let limits = parse_commandcode_credits(&v, None, None).unwrap();
         let monthly = limits.iter().find(|l| l.window_id == "monthly").expect("月度行仍在");
         assert_eq!(monthly.limit, None);
         assert_eq!(monthly.used, None);
@@ -1015,12 +1095,127 @@ mod tests {
     }
 
     #[test]
+    fn commandcode_monthly_total_falls_back_to_plan_id() {
+        // cap 组合不认识（上游调了窗口），但 subscriptions 给了 planId：照样能画月度进度条
+        let out = r#"{"credits":{"monthlyCredits":40},"windowLimits":{
+          "fiveHour":{"used":1,"cap":7,"resetAt":1},
+          "weekly":{"used":2,"cap":9,"resetAt":2}}}"#;
+        let v: serde_json::Value = serde_json::from_str(out).unwrap();
+        let limits = parse_commandcode_credits(&v, None, Some("individual-pro")).unwrap();
+        let monthly = limits.iter().find(|l| l.window_id == "monthly").expect("月度行");
+        assert_eq!(monthly.limit, Some(80.0), "Pro 套餐 $80/月");
+        assert_eq!(monthly.used, Some(40.0));
+        assert_eq!(monthly.percent, 50.0);
+        assert_eq!(monthly.unit, "credits");
+
+        // Go 的新旧两套 cap 都认，planId 不必覆盖它
+        let go_new = serde_json::json!({"credits":{"monthlyCredits":9},
+          "windowLimits":{"fiveHour":{"used":1,"cap":2},"weekly":{"used":1,"cap":5}}});
+        let limits = parse_commandcode_credits(&go_new, None, None).unwrap();
+        assert_eq!(limits.iter().find(|l| l.window_id == "monthly").unwrap().limit, Some(10.0));
+        let go_old = serde_json::json!({"credits":{"monthlyCredits":9},
+          "windowLimits":{"fiveHour":{"used":1,"cap":3},"weekly":{"used":1,"cap":6}}});
+        let limits = parse_commandcode_credits(&go_old, None, None).unwrap();
+        assert_eq!(limits.iter().find(|l| l.window_id == "monthly").unwrap().limit, Some(10.0));
+
+        // 未知 planId 不猜
+        assert_eq!(monthly_total_for_plan(Some("individual-enterprise")), None);
+        assert_eq!(monthly_total_for_plan(Some("provider")), None);
+        assert_eq!(monthly_total_for_plan(Some("individual-max-20x")), Some(300.0));
+        assert_eq!(monthly_total_for_plan(Some("team-pro")), Some(40.0));
+    }
+
+    #[test]
+    fn merge_missing_limits_keeps_omp_windows_and_inserts_monthly_before_balance() {
+        let mut report = ProviderUsageReport {
+            provider: "commandcode".into(),
+            plan_type: None,
+            account_label: None,
+            fetched_at: 1,
+            limits: vec![
+                UsageLimit {
+                    id: "commandcode:5h".into(),
+                    label: "5-hour limit".into(),
+                    window_id: "5h".into(),
+                    window_label: "5-hour".into(),
+                    used_fraction: 0.1,
+                    percent: 10.0,
+                    status: "ok".into(),
+                    resets_at: Some(1),
+                    duration_ms: Some(18_000_000),
+                    notes: vec![],
+                    used: Some(1.4),
+                    limit: Some(14.0),
+                    remaining: Some(12.6),
+                    unit: "credits".into(),
+                },
+                UsageLimit {
+                    id: "commandcode:balance".into(),
+                    label: "Credit balance".into(),
+                    window_id: "balance".into(),
+                    window_label: "Credit balance".into(),
+                    used_fraction: 0.0,
+                    percent: 0.0,
+                    status: "ok".into(),
+                    resets_at: None,
+                    duration_ms: None,
+                    notes: vec![],
+                    used: None,
+                    limit: None,
+                    remaining: Some(5.36),
+                    unit: "credits".into(),
+                },
+            ],
+        };
+        let extra = vec![
+            // omp 已经有的窗口：不覆盖 omp 的读数
+            UsageLimit { id: "probe-5h".into(), window_id: "5h".into(), label: "probe".into(), window_label: "probe".into(), used_fraction: 0.9, percent: 90.0, status: "warning".into(), resets_at: None, duration_ms: None, notes: vec![], used: Some(12.6), limit: Some(14.0), remaining: Some(1.4), unit: "credits".into() },
+            // 缺的月度：插在 balance 之前
+            UsageLimit { id: "monthly".into(), window_id: "monthly".into(), label: "Monthly".into(), window_label: "Monthly".into(), used_fraction: 0.923, percent: 92.3, status: "warning".into(), resets_at: Some(2), duration_ms: None, notes: vec![], used: Some(64.64), limit: Some(70.0), remaining: Some(5.36), unit: "credits".into() },
+        ];
+        assert_eq!(merge_missing_limits(&mut report, extra), 1);
+        let order: Vec<_> = report.limits.iter().map(|l| l.window_id.as_str()).collect();
+        assert_eq!(order, vec!["5h", "monthly", "balance"]);
+        assert_eq!(report.limits[0].percent, 10.0, "omp 的窗口读数不被探针覆盖");
+        assert_eq!(report.limits[1].limit, Some(70.0));
+    }
+
+    #[test]
+    fn merge_missing_limits_skips_monthly_without_limit() {
+        let mut report = ProviderUsageReport {
+            provider: "commandcode".into(),
+            plan_type: None,
+            account_label: None,
+            fetched_at: 1,
+            limits: vec![],
+        };
+        let monthly_only = UsageLimit {
+            id: "monthly".into(),
+            label: "Monthly".into(),
+            window_id: "monthly".into(),
+            window_label: "Monthly".into(),
+            used_fraction: 0.0,
+            percent: 0.0,
+            status: "ok".into(),
+            resets_at: None,
+            duration_ms: None,
+            notes: vec![],
+            used: None,
+            limit: None,
+            remaining: Some(5.0),
+            unit: "credits".into(),
+        };
+        assert_eq!(merge_missing_limits(&mut report, vec![monthly_only]), 0);
+        assert!(report.limits.is_empty(), "没有上限的月度只是余额的另一种说法，不补");
+    }
+
+    #[test]
     fn commandcode_status_reflects_exceeded_and_thresholds() {
         let out = r#"{"credits":{"monthlyCredits":1},"windowLimits":{
           "fiveHour":{"used":14,"cap":14,"exceeded":true,"resetAt":1},
           "weekly":{"used":30,"cap":35,"exceeded":false,"resetAt":2}}}"#;
         let v: serde_json::Value = serde_json::from_str(out).unwrap();
-        let limits = parse_commandcode_credits(&v, None).unwrap();
+        let limits = parse_commandcode_credits(&v, None, None).unwrap();
         assert_eq!(limits[0].status, "exhausted", "exceeded=true → exhausted");
         assert_eq!(limits[1].status, "warning", "85.7% → warning");
         assert_eq!(limits[2].status, "warning", "月度 69/70 = 98.6% → warning");
@@ -1028,11 +1223,11 @@ mod tests {
 
     #[test]
     fn commandcode_missing_data_is_an_error_not_a_fake_zero() {
-        assert!(parse_commandcode_credits(&serde_json::json!({}), None).is_err());
-        assert!(parse_commandcode_credits(&serde_json::json!({"credits":{}}), None).is_err());
+        assert!(parse_commandcode_credits(&serde_json::json!({}), None, None).is_err());
+        assert!(parse_commandcode_credits(&serde_json::json!({"credits":{}}), None, None).is_err());
         // 只有窗口、没有 credits 也成立
         let only_window = serde_json::json!({"windowLimits":{"fiveHour":{"used":1,"cap":2,"resetAt":3}}});
-        let limits = parse_commandcode_credits(&only_window, None).unwrap();
+        let limits = parse_commandcode_credits(&only_window, None, None).unwrap();
         assert_eq!(limits.len(), 1);
     }
 
@@ -1104,6 +1299,51 @@ mod tests {
             }
             Err(e) => eprintln!("跳过：commandcode 探针不可用（{e}）"),
         }
+    }
+
+    /// 真实 omp 原生报告 + 壳侧补月度（默认跳过）：omp 18.12 的 commandcode 报告只有
+    /// 5h / 7d / balance，`run_probes` 必须把月度插在 balance 之前。无 omp / 无凭据时跳过。
+    #[test]
+    #[ignore]
+    fn real_native_commandcode_report_gets_monthly() {
+        let bin = std::env::var("OMP_BIN").unwrap_or_else(|_| "omp".into());
+        let Ok(out) = std::process::Command::new(&bin)
+            .args(["usage", "--json"])
+            .stdin(std::process::Stdio::null())
+            .output()
+        else {
+            eprintln!("跳过：无法运行 {bin}（设 OMP_BIN 指定路径）");
+            return;
+        };
+        if !out.status.success() {
+            eprintln!("跳过：omp usage 退出码 {:?}", out.status.code());
+            return;
+        }
+        let mut usage = crate::provider_usage::parse_usage_json(&String::from_utf8_lossy(&out.stdout))
+            .expect("真实输出必须能解析");
+        let Some(_index) = usage.reports.iter().position(|r| r.provider == "commandcode") else {
+            eprintln!("跳过：本机 commandcode 没有原生报告");
+            return;
+        };
+        // 模型目录缓存冷启动时 configured_providers 是空的：补月度不能依赖它
+        usage.configured_providers.clear();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        let failures = rt.block_on(run_probes(&bin, &mut usage));
+        for f in &failures {
+            eprintln!("补查失败 {}：{}", f.provider, f.message);
+        }
+        let report = usage.reports.iter().find(|r| r.provider == "commandcode").expect("报告还在");
+        let monthly = report.limits.iter().find(|l| l.window_id == "monthly").expect("月度窗口必须补上");
+        assert!(monthly.limit.is_some(), "planId / cap 组合反查不到月总额会让月度退化成余额行：{monthly:?}");
+        let order: Vec<_> = report.limits.iter().map(|l| l.window_id.as_str()).collect();
+        if let Some(balance_at) = order.iter().position(|w| *w == "balance") {
+            let monthly_at = order.iter().position(|w| *w == "monthly").unwrap();
+            assert!(monthly_at < balance_at, "月度要排在余额之前：{order:?}");
+        }
+        println!("原生 commandcode 报告补月度：{order:?} / 已用 {:.2}% / {:?}/{:?}", monthly.percent, monthly.used, monthly.limit);
     }
 
     // ---------- 2026-09-30 新增探针的解析单测（fixture 形状取自各官方文档） ----------

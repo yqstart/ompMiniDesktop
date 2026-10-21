@@ -305,8 +305,8 @@ pub async fn get_provider_usage(state: State<'_, AppState>) -> Result<ProviderUs
         configured.sort();
         usage.configured_providers = configured;
     }
-    // 补充探针：omp 没有实现的供应商（commandcode / deepseek）由壳侧补查——
-    // 只对「已配置且 omp 没给报告」的供应商触发（见 extra_usage.rs）
+    // 补充探针：omp 没有实现的供应商（deepseek 等）由壳侧补查；omp 已报的 commandcode
+    // 也补它缺的月度窗口（omp 18.12 只报 5h / 每周 / 余额，见 extra_usage.rs）
     usage.extra_failures = crate::extra_usage::run_probes(&bin, &mut usage).await;
     Ok(usage)
 }

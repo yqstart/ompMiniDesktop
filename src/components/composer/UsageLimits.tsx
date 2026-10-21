@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { Gauge, Loader, Refresh } from "reicon-react";
+import { AlertTriangle, Gauge, Loader, Refresh } from "reicon-react";
 import type { UsageLimit } from "@shared/types";
-import { fmt, type Text } from "../../lib/locale";
+import { fmt } from "../../lib/locale";
 import {
  formatAgo,
  formatDuration,
@@ -33,10 +33,13 @@ import { useApp } from "../../stores/app";
  * - 条上形态（2026-10-16 修订用户口径）：**只留图标**，读数与窗口名一律下沉——完整读数在**悬停提示**
  *   与**浮层**里（浮层列出全部窗口的读数 + 重置倒计时 + 更新时间）。最紧的窗口到 warn / danger 档时
  *   图标换色（条上不再有数字，颜色是这一项唯一的档位信号，所以图标必须始终可辨、不置灰以外的降级）；
- * - 展开态：按供应商分段列出全部窗口（上游顺序）+ 读数 + 重置倒计时 + 更新时间；
+ * - 展开态（2026-10-21 重做）：按供应商分卡片，每张卡里逐窗口列出名称 / 读数 / 重置倒计时。有比例的
+ *   窗口用**两行**——名称 + 重置在第一行，进度条占满整行宽度、百分比贴右（老的单行布局把条挤在
+ *   固定宽度的名称与倒计时之间，只剩一小截，百分比与倒计时之间又空出一大段）；纯余额窗口一行放完。
  *   读数口径与设置页弹窗共用 `limitReading`——有比例的显示百分比、余额型窗口显示「$X 剩余」。
  * - 一份配额都拿不到（一个供应商都没配）时**整块不渲染**；但「配了供应商、上游却拿不到用量」
- *   （如 omp 未实现探针的 `commandcode`）会**显式列出**并写明原因，不静默少一块；
+ *   （如 omp 未实现探针的供应商）会**显式列出**并写明原因，补充探针失败也会给一行警示——
+ *   沉默比一个置灰按钮糟得多；
  * - 刷新：启动拉一次、页面可见时每 5 分钟一次、打开浮层强制一次（失败保留旧值 + 一行错误）。
  */
 
@@ -92,16 +95,20 @@ export function UsageLimits() {
  if (!hasUsageEntry(usage, error)) return null;
 
  // 全都按上游顺序直出：不按当前模型重排、不按当前模型过滤（那是 2026-10-14 修掉的老口径）
- const { level, items } = entryGlance(usage);
+ const { level } = entryGlance(usage);
  const reports = usage?.reports ?? [];
  const missing = providersWithoutUsage(usage);
+ const failures = usage?.extraFailures ?? [];
  const resetIn = (at: number | null): string =>
   now && at ? fmt(t.usageLimitsResets, formatDuration(at - now, locale)) : "";
  const fetched = latestFetchedAt(usage);
  const updated = now && fetched ? fmt(t.usageLimitsUpdatedAgo, formatAgo(now - fetched, locale)) : "";
  /** 一眼摘要（悬停提示 / 读屏）：家名 + 窗口 + 读数，全部供应商的窗口都列上。 */
- const summary = items
-  .map(({ provider, limit }) => `${provider} ${windowName(t, limit)} ${limitReading(t, limit).text}`)
+ const summary = reports
+  .flatMap((r) => {
+   const names = windowNames(t, r.limits);
+   return r.limits.map((l, i) => `${r.provider} ${names[i]} ${limitReading(t, l).text}`);
+  })
   .join("、");
  // 置灰口径：一次都没拿到数据且最近一次查询失败（某一家没探针不影响别家，不置灰）
  const disabledReason = usageEntryDisabled(usage, error);
@@ -116,8 +123,9 @@ export function UsageLimits() {
     ref={anchorRef}
     onClick={() => setOpen(!open)}
     disabled={unavailable}
-    className={`flex shrink-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 whitespace-nowrap transition-colors duration-100 ${unavailable ? "cursor-default opacity-40" : "cursor-pointer hover:bg-hover"
-     }`}
+    className={`flex shrink-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 whitespace-nowrap transition-colors duration-100 ${
+     unavailable ? "cursor-default opacity-40" : "cursor-pointer hover:bg-hover"
+    }`}
     aria-label={unavailable ? title : aria}
     aria-expanded={open}
     title={title}
@@ -129,98 +137,177 @@ export function UsageLimits() {
    {open && (
     <div
      ref={panelRef}
-     className="absolute right-0 bottom-full z-10 mb-1 w-96 max-w-full rounded-lg border border-border bg-elevated p-2 shadow-pop"
+     className="absolute right-0 bottom-full z-10 mb-1 w-96 max-w-full overflow-hidden rounded-lg border border-border bg-elevated shadow-pop"
     >
-     <div className="flex items-center gap-2 px-1 pb-1.5">
-      <span className="flex-1 truncate text-[11px] text-muted" title={updated || t.usageLimitsTitle}>
-       {t.usageLimitsTitle}
-       {updated && ` · ${updated}`}
-      </span>
+     {/* 头部：标题 + 更新时间 + 刷新。标题是 13px 正文色，更新时间降一档走到 faint——
+         老版把两者挤成同一行 11px muted，扫读时分不出主次 */}
+     <div className="flex items-center gap-2 px-3 pt-2.5 pb-2">
+      <span className="shrink-0 text-[13px] font-medium">{t.usageLimitsTitle}</span>
+      {updated && (
+       <>
+        <span aria-hidden className="text-[11px] text-faint/60">
+         ·
+        </span>
+        <span className="min-w-0 truncate text-[11px] text-faint" title={updated}>
+         {updated}
+        </span>
+       </>
+      )}
       <button
        onClick={() => void loadProviderUsage(true)}
        disabled={loading}
-       className="cursor-pointer rounded p-1 text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-50"
+       className="-mr-1 ml-auto flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-foreground disabled:opacity-50"
        aria-label={t.refresh}
        title={t.refresh}
       >
        {loading ? <Loader size={12} className="animate-spin" aria-hidden /> : <Refresh size={12} aria-hidden />}
       </button>
      </div>
-     {error && (
-      <p role="alert" className="mb-1 rounded bg-danger/10 px-2 py-1 text-[12px] text-danger">
-       {error}
-      </p>
-     )}
-     {loading && !usage && <p className="px-1 py-2 text-[13px] text-muted">{t.usageLimitsLoading}</p>}
-     {reports.map((r) => {
-      // 窗口名整组一起算（同一份报告里重名时补区分），与设置页卡片同口径
-      const names = windowNames(t, r.limits);
-      return (
-       <div key={r.provider} className="mb-1 last:mb-0">
-        <div className="flex items-baseline gap-1.5 px-1 pb-0.5">
-         <span className="min-w-0 truncate text-[13px]" title={r.provider}>
-          {r.planType ?? r.provider}
-         </span>
-         {r.planType && <span className="min-w-0 truncate font-mono text-[11px] text-faint">{r.provider}</span>}
-        </div>
-        {r.limits.map((l, i) => {
-         // 读数口径与设置页弹窗同源（`limitReading`）：百分比窗口画条 + 百分比，
-         // 余额型窗口只给金额（「$X 剩余」），计数型给数量原文——percent 缺省 0 不是读数。
-         const reading = limitReading(t, l);
-         return (
-          <div key={l.id} className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-hover/60">
-           <span className="w-20 shrink-0 truncate text-[12px] text-muted" title={names[i]}>
-            {names[i]}
+     <div className="max-h-[min(60vh,26rem)] overflow-y-auto overscroll-contain px-2 pb-2">
+      {error && (
+       <p
+        role="alert"
+        className="mx-0.5 mb-2 rounded-md border border-danger/20 bg-danger/10 px-2.5 py-1.5 text-[12px] leading-relaxed text-danger"
+       >
+        {error}
+       </p>
+      )}
+      {loading && !usage && <p className="px-1 py-3 text-[12px] text-muted">{t.usageLimitsLoading}</p>}
+      <div className="flex flex-col gap-1.5">
+       {reports.map((r, ri) => {
+        // 窗口名整组一起算（同一份报告里重名时补区分），与设置页卡片同口径
+        const names = windowNames(t, r.limits);
+        // 同一 provider 多账号时补账号标识（单账号不占位；与设置页弹窗口径一致）
+        const multi = reports.filter((x) => x.provider === r.provider).length > 1;
+        return (
+         <section
+          key={`${r.provider}#${ri}`}
+          data-provider={r.provider}
+          className="rounded-md border border-border-soft bg-background px-2.5 py-2"
+         >
+          <div className="flex items-baseline gap-1.5 pb-1">
+           <span className="min-w-0 truncate text-[12px] font-medium" title={r.provider}>
+            {r.planType ?? r.provider}
            </span>
-           {reading.bar && <LimitBar limit={l} className="min-w-0 flex-1" />}
-           <span
-            className={`shrink-0 font-mono text-[12px] tabular-nums ${reading.bar ? "" : "ml-auto"}`}
-            title={reading.title}
-           >
-            {reading.text}
-           </span>
-           <span className="w-32 shrink-0 whitespace-nowrap text-right text-[11px] text-faint">{resetIn(l.resetsAt)}</span>
+           {r.planType && (
+            <span className="min-w-0 truncate font-mono text-[11px] text-faint" title={r.provider}>
+             {r.provider}
+            </span>
+           )}
+           {multi && r.accountLabel && (
+            <span
+             className="ml-auto min-w-0 truncate font-mono text-[10.5px] text-faint"
+             title={r.accountLabel}
+            >
+             {r.accountLabel}
+            </span>
+           )}
           </div>
-         );
-        })}
-       </div>
-      );
-     })}
-     {/* 配了供应商、但 omp 拿不到它的用量（没实现探针）：显式列出来 + 讲清原因，
-         否则用户只会看到「我配的那个供应商不见了」。最多列 4 个，其余折叠成一行。 */}
-     {missing.slice(0, MISSING_MAX).map((p) => (
-      <div key={p} className="rounded-md px-1 py-1 hover:bg-hover/60">
-       <div className="flex items-baseline gap-1.5">
-        <span className="min-w-0 truncate font-mono text-[12px] text-muted" title={p}>
-         {p}
-        </span>
-        <span className="shrink-0 text-[11px] text-faint">{t.usageLimitsNoData}</span>
-       </div>
-       <p className="pt-0.5 text-[11px] text-faint">{t.usageLimitsNoDataHint}</p>
+          {r.limits.length === 0 ? (
+           <p className="py-1 text-[11px] text-faint">{t.usageLimitsNoData}</p>
+          ) : (
+           r.limits.map((l, i) => (
+            <LimitLine key={l.id} limit={l} name={names[i]} reset={resetIn(l.resetsAt)} />
+           ))
+          )}
+         </section>
+        );
+       })}
       </div>
-     ))}
-     {missing.length > MISSING_MAX && (
-      <p className="px-1 pt-0.5 text-[11px] text-faint">
-       {fmt(t.usageLimitsNoDataMore, missing.length - MISSING_MAX)}
-      </p>
-     )}
-     {usage && usage.accountsWithoutUsage.length > 0 && (
-      <p className="px-1 pt-1 text-[11px] text-faint">
-       {fmt(t.usageLimitsAccountsWithout, usage.accountsWithoutUsage.length)}
-      </p>
-     )}
+      {/* 配了供应商、但 omp 拿不到它的用量（没实现探针）：显式列出来 + 讲清原因，
+          否则用户只会看到「我配的那个供应商不见了」。最多列 4 个，其余折叠成一行。 */}
+      {missing.length > 0 && (
+       <div data-block="missing" className="mt-1.5 rounded-md border border-border-soft px-2.5 py-2">
+        <div className="flex items-baseline gap-2">
+         <span className="shrink-0 text-[11px] text-muted">{t.usageLimitsNoData}</span>
+         <span className="min-w-0 truncate font-mono text-[11px] text-faint" title={missing.join("、")}>
+          {missing.slice(0, MISSING_MAX).join("、")}
+         </span>
+        </div>
+        {missing.length > MISSING_MAX && (
+         <p className="pt-0.5 text-[10.5px] text-faint">
+          {fmt(t.usageLimitsNoDataMore, missing.length - MISSING_MAX)}
+         </p>
+        )}
+        <p className="pt-1 text-[10.5px] leading-relaxed text-faint">{t.usageLimitsNoDataHint}</p>
+       </div>
+      )}
+      {/* 补充探针失败（能查但这次没查到）：与「没有查询路径」分开说，别让用户以为供应商丢了 */}
+      {failures.length > 0 && (
+       <div data-block="failures" className="mt-1.5 rounded-md border border-warn/25 bg-warn/5 px-2.5 py-2">
+        <div className="flex items-center gap-1.5 pb-1 text-[11px] font-medium text-warn">
+         <AlertTriangle size={11} aria-hidden className="shrink-0" />
+         {t.usageLimitsQueryFailed}
+        </div>
+        {failures.map((f) => (
+         <div key={f.provider} className="flex items-baseline gap-2 py-0.5">
+          <span className="shrink-0 font-mono text-[11px] text-warn">{f.provider}</span>
+          <span className="min-w-0 truncate text-[10.5px] text-faint" title={f.message}>
+           {f.message}
+          </span>
+         </div>
+        ))}
+       </div>
+      )}
+      {usage && usage.accountsWithoutUsage.length > 0 && (
+       <p className="px-1 pt-1.5 text-[10.5px] text-faint">
+        {fmt(t.usageLimitsAccountsWithout, usage.accountsWithoutUsage.length)}
+       </p>
+      )}
+     </div>
     </div>
    )}
   </div>
  );
 }
 
-/** 窗口名：已知窗口走字典（本应用的口径），未知窗口回退上游原文。 */
-function windowName(t: Text, l: UsageLimit): string {
- if (l.windowId === "5h") return t.usageLimitsWindow5h;
- if (l.windowId === "7d") return t.usageLimitsWindow7d;
- if (l.windowId === "monthly") return t.usageLimitsWindowMonthly;
- return l.windowLabel || l.label;
+/**
+ * 一个窗口：有比例的两行（名称 + 重置 / 进度条 + 百分比），纯余额一行。
+ *
+ * 数值口径与设置页弹窗同源（`limitReading`）：百分比窗口画条 + 百分比，
+ * 余额型窗口只给金额（「$X 剩余」），计数型给数量原文——percent 缺省 0 不是读数。
+ * 百分比在 warn / danger 时跟着换色（数字本身仍在，颜色不作唯一信号）。
+ */
+function LimitLine({ limit, name, reset }: { limit: UsageLimit; name: string; reset: string }) {
+ const t = useText();
+ const reading = limitReading(t, limit);
+ const valueTone =
+  reading.level === "danger" ? "text-danger" : reading.level === "warn" ? "text-warn" : "text-foreground";
+ if (!reading.bar) {
+  return (
+   <div data-window={limit.windowId} data-bar="false" className="flex items-baseline gap-2 py-1">
+    <span className="min-w-0 truncate text-[12px] text-muted" title={name}>
+     {name}
+    </span>
+    {reset && <span className="shrink-0 whitespace-nowrap text-[10.5px] text-faint">{reset}</span>}
+    <span
+     className={`ml-auto shrink-0 font-mono text-[12px] tabular-nums ${valueTone}`}
+     title={reading.title}
+    >
+     {reading.text}
+    </span>
+   </div>
+  );
+ }
+ return (
+  <div data-window={limit.windowId} data-bar="true" className="py-1">
+   <div className="flex items-baseline gap-2">
+    <span className="min-w-0 truncate text-[12px] text-muted" title={name}>
+     {name}
+    </span>
+    {reset && <span className="ml-auto shrink-0 whitespace-nowrap text-[10.5px] text-faint">{reset}</span>}
+   </div>
+   <div className="mt-1 flex items-center gap-2">
+    <LimitBar limit={limit} className="min-w-0 flex-1" />
+    <span
+     className={`w-11 shrink-0 text-right font-mono text-[12px] tabular-nums ${valueTone}`}
+     title={reading.title}
+    >
+     {reading.text}
+    </span>
+   </div>
+  </div>
+ );
 }
 
 /**
@@ -234,8 +321,14 @@ function LimitBar({ limit, className }: { limit: UsageLimit; className?: string 
  // 超限（>100%）时条仍然铺满，不溢出容器
  const width = Math.min(100, Math.max(0, limit.usedFraction * 100));
  return (
-  <span className={`h-1.5 shrink-0 overflow-hidden rounded-sm bg-accent/15 ${className ?? ""}`} aria-hidden>
-   <span className={`block h-full rounded-sm transition-[width] duration-150 ${fill}`} style={{ width: `${width}%` }} />
+  <span
+   className={`block h-1.5 shrink-0 overflow-hidden rounded-full bg-foreground/10 ${className ?? ""}`}
+   aria-hidden
+  >
+   <span
+    className={`block h-full rounded-full transition-[width] duration-200 ${fill}`}
+    style={{ width: `${width}%` }}
+   />
   </span>
  );
 }

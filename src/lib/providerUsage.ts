@@ -133,10 +133,22 @@ export function fmtAmount(unit: string, value: number): string {
  return `${text} ${unit}`;
 }
 
-/** 「已用 / 上限」文案（`$0.31 / $14.00`）；两个绝对值都有才有，否则 null（界面回退百分比或剩余额）。 */
+/** 不带单位的数字（「已用 / 上限」这种同单位一对值时用；整数不打小数点，小数最多两位）。 */
+function fmtBareNumber(value: number): string {
+ const rounded = Math.round(value * 100) / 100;
+ return Number.isInteger(rounded) ? rounded.toLocaleString() : rounded.toFixed(2);
+}
+
+/**
+ * 「已用 / 上限」文案（`$0.31 / $14.00`、`64.64 / 70 credits`）；两个绝对值都有才有，
+ * 否则 null（界面回退百分比或剩余额）。同一单位只写一次，避免 `70.00 credits / 70.00 credits`。
+ */
 export function usedLimitText(l: UsageLimit): string | null {
  if (l.used === null || l.limit === null) return null;
- return `${fmtAmount(l.unit, l.used)} / ${fmtAmount(l.unit, l.limit)}`;
+ const symbol = CURRENCY_SYMBOLS[l.unit.toLowerCase()];
+ if (symbol) return `${symbol}${l.used.toFixed(2)} / ${symbol}${l.limit.toFixed(2)}`;
+ const unit = l.unit ? ` ${l.unit}` : "";
+ return `${fmtBareNumber(l.used)} / ${fmtBareNumber(l.limit)}${unit}`;
 }
 
 /** 「剩余额」文案（`$54.77`）；只在没有上限时用（余额型窗口）。 */
@@ -156,9 +168,16 @@ export function hasBar(l: UsageLimit): boolean {
  *
  * `percent` 字段缺省是 0——**不能拿它当读数**（把 deepseek 的 api 余额窗口显示成
  * 「Balance 0.0% + 空进度条」就是这么来的：percent 没意义、条也不该画）。真的一无所有时给 `—`。
- * `title` = 状态词（有金额细节时带上 `$已用 / $上限`），悬停可见；颜色不作唯一信号。
+ * `title` = 状态词（有金额细节时带上 `$已用 / $上限`，余额型带剩余额，上游 notes 附后），
+ * 悬停可见；颜色不作唯一信号。
  */
-export function limitReading(t: Text, limit: UsageLimit): { bar: boolean; text: string; title: string; state: string } {
+export function limitReading(t: Text, limit: UsageLimit): {
+ bar: boolean;
+ text: string;
+ title: string;
+ state: string;
+ level: "ok" | "warn" | "danger";
+} {
  const level = levelOf(limit);
  const state = level === "danger" ? t.pusageStateDanger : level === "warn" ? t.pusageStateWarn : t.pusageStateOk;
  const money = usedLimitText(limit);
@@ -171,7 +190,12 @@ export function limitReading(t: Text, limit: UsageLimit): { bar: boolean; text: 
    : limit.used !== null
     ? fmtAmount(limit.unit, limit.used)
     : "—";
- return { bar, text, state, title: bar && money !== null ? `${state} · ${money}` : state };
+ // 悬停细节：状态 + 绝对值（余额型给剩余额）+ 上游备注
+ const details = [state];
+ if (money !== null) details.push(money);
+ else if (!bar && remaining !== null) details.push(remaining);
+ for (const note of limit.notes) details.push(note);
+ return { bar, text, state, level, title: details.join(" · ") };
 }
 
 /**

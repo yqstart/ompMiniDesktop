@@ -161,6 +161,11 @@ describe("金额窗口与余额窗口", () => {
   expect(remainingText(money)).toBeNull();
   expect(hasBar(money)).toBe(true);
 
+  // 同单位只写一次（commandcode 的 credits 月度窗口）
+  const credits = limit({ id: "monthly", windowId: "monthly", used: 64.639, limit: 70, remaining: 5.361, unit: "credits", usedFraction: 0.9234, percent: 92.34 });
+  expect(usedLimitText(credits)).toBe("64.64 / 70 credits");
+  expect(hasBar(credits)).toBe(true);
+
   const balance = limit({ id: "balance-cny", windowId: "balance", used: null, limit: null, remaining: 110, unit: "cny" });
   expect(usedLimitText(balance)).toBeNull();
   expect(remainingText(balance)).toBe("¥110.00");
@@ -177,7 +182,13 @@ describe("limitReading（输入卡浮层与设置页卡片共用的读数口径�
  const t = TEXT["zh-CN"] as unknown as Text;
  it("百分比窗口：读数 = 百分比 + 画条，悬停给「状态 · 已用/上限」", () => {
   const r = limitReading(t, limit({ usedFraction: 0.9, percent: 90, status: "warning" }));
-  expect(r).toEqual({ bar: true, text: "90%", state: TEXT["zh-CN"].pusageStateWarn, title: TEXT["zh-CN"].pusageStateWarn });
+  expect(r).toEqual({
+   bar: true,
+   text: "90%",
+   state: TEXT["zh-CN"].pusageStateWarn,
+   level: "warn",
+   title: TEXT["zh-CN"].pusageStateWarn,
+  });
   const money = limitReading(t, limit({ used: 0.306, limit: 14, remaining: 13.69, unit: "usd", usedFraction: 0.0219, percent: 2.19 }));
   expect(money.title).toBe(`${TEXT["zh-CN"].pusageStateOk} · $0.31 / $14.00`);
  });

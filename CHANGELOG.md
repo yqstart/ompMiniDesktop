@@ -6,6 +6,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **供应商用量的月度额度恢复成进度条，浮层按供应商分卡片**（2026-10-21 用户口径）：omp 18.12 起 `omp usage --json` 自带 commandcode 的 5 小时 / 每周 / 余额，但不再有月度窗口——壳侧补充探针现在对 omp 已有报告只补缺的窗口：从官方 `credits.monthlyCredits` + `/subscriptions` 的 `planId` / `currentPeriodEnd` 反查月度总额（planId 认不出再按 5h/weekly cap 组合查官方套餐表），把「余额 5.36 credits」补成「每月 92%」的进度条，omp 的读数不被覆盖。浮层重做：按供应商分卡片，有比例的窗口两行（名称 + 重置倒计时 / 通栏进度条 + 百分比），余额窗口一行放完；百分比在 warn / danger 档同色，补充探针失败单独给「查询失败」块。金额细节进悬停提示（`64.64 / 70 credits`，同单位只写一次）。
+
 ## [0.3.0] - 2026-10-20
 
 ### Added
