@@ -37,6 +37,23 @@ function fmtBytes(n: number): string {
  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/** 记忆目录内的文件分组：核心文件平铺，会话摘要与技能包各自收成一组。 */
+type MemorySection = "core" | "rollouts" | "skills";
+
+/**
+ * `rollout_summaries/<uuid>-<slug>.md` → 可读的两段。
+ * omp 每个被整理过的会话落一份，uuid 是完整会话 id，slug 是标题派生的短名；
+ * 列表里铺全路径（uuid 36 位）既长又难分辨，标题位只留 slug、uuid 取末 8 位做区分。
+ */
+function rolloutTitle(path: string): { slug: string; id: string } {
+ const name = path.startsWith("rollout_summaries/")
+  ? path.slice("rollout_summaries/".length).replace(/\.md$/, "")
+  : path;
+ const m = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-*(.*)$/.exec(name);
+ if (!m) return { slug: name, id: "" };
+ return { slug: m[2] || name.slice(0, 8), id: m[1].slice(-8) };
+}
+
 /**
  * 设置 ›「记忆」：omp 项目记忆（`~/.omp/agent/memories/` 下按 cwd 一目录一份）的唯一管理面。
  *
@@ -57,6 +74,8 @@ export function MemoryPanel() {
  const [reloadKey, setReloadKey] = useState(0);
  /** 项目分组折叠态：key 缺席 = 展开，只有用户点过折叠的才收起。 */
  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+ /** 目录内「会话摘要 / 技能包」分组的展开态：缺省收起——omp 每个会话一份摘要，铺开会盖住核心文件。 */
+ const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
  const [preview, setPreview] = useState<Preview | null>(null);
  const [pending, setPending] = useState<PendingDelete | null>(null);
 
@@ -147,7 +166,11 @@ export function MemoryPanel() {
  const total = rows?.length ?? 0;
 
  /** 一个文件行 + 它的行内预览（预览是设置页里唯一的展开面，不开浮层）。 */
- const renderFile = (group: MemoryProjectView, f: MemoryFileView) => {
+ const renderFile = (
+  group: MemoryProjectView,
+  f: MemoryFileView,
+  display?: { title: string; subtitle?: string; hideKind?: boolean },
+ ) => {
   const key = previewKey(group.dir, f.path);
   const open = preview?.key === key;
   return (
@@ -159,10 +182,18 @@ export function MemoryPanel() {
       aria-label={`${open ? t.memoryHide : t.memoryView} ${f.path}`}
       className="flex min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 text-left"
      >
-      <span className="min-w-0 basis-full truncate font-mono text-[12px] @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0">{f.path}</span>
-      <span className="shrink-0 rounded-sm bg-background px-1.5 py-0.5 text-[11px] text-faint">
-       {kindLabel(f.kind)}
+      <span
+       title={f.path}
+       className="min-w-0 basis-full truncate font-mono text-[12px] @min-[600px]/panel:flex-1 @min-[600px]/panel:basis-0"
+      >
+       {display?.title ?? f.path}
+       {display?.subtitle && <span className="ml-1.5 text-faint">{display.subtitle}</span>}
       </span>
+      {!display?.hideKind && (
+       <span className="shrink-0 rounded-sm bg-background px-1.5 py-0.5 text-[11px] text-faint">
+        {kindLabel(f.kind)}
+       </span>
+      )}
       <span className="shrink-0 font-mono text-[11px] text-faint">
        {f.size === 0 ? t.memoryEmptyFile : fmtBytes(f.size)}
       </span>
@@ -222,6 +253,49 @@ export function MemoryPanel() {
   );
  };
 
+ /** 会话摘要 / 技能包分组行（缺省收起）；组内条目沿用文件行，摘要标题只留 slug + 短 id。 */
+ const renderSection = (
+  group: MemoryProjectView,
+  section: "rollouts" | "skills",
+  files: MemoryFileView[],
+ ) => {
+  if (files.length === 0) return null;
+  const key = `${group.dir}\u0000${section}`;
+  const open = openSections[key] === true;
+  return (
+   <div key={section}>
+    <button
+     onClick={() => setOpenSections((m) => ({ ...m, [key]: !open }))}
+     aria-expanded={open}
+     className="flex min-h-9 w-full cursor-pointer items-center gap-1.5 rounded-md px-1 text-left transition-colors duration-100 hover:bg-hover"
+    >
+     <ChevronRight
+      size={12}
+      aria-hidden
+      className={`shrink-0 text-muted transition-transform duration-100 ${open ? "rotate-90" : ""}`}
+     />
+     <span className="shrink-0 text-xs font-medium text-muted">
+      {section === "rollouts" ? t.memoryKindRollout : t.memoryKindSkill}
+     </span>
+     <span className="shrink-0 font-mono text-[11px] text-faint">
+      {section === "rollouts" ? fmt(t.memorySectionRolloutCount, files.length) : fmt(t.memoryFileCount, files.length)}
+      {" · "}
+      {fmtBytes(files.reduce((n, f) => n + f.size, 0))}
+     </span>
+    </button>
+    {open && (
+     <div className="divide-y divide-border-soft pl-3">
+      {files.map((f) => {
+       if (section !== "rollouts") return renderFile(group, f);
+       const { slug, id } = rolloutTitle(f.path);
+       return renderFile(group, f, { title: slug, subtitle: id ? `#${id}` : undefined, hideKind: true });
+      })}
+     </div>
+    )}
+   </div>
+  );
+ };
+
  return (
   <section aria-label={t.tabMemories} className="settings-panel shrink-0">
    {/* 页头整行已按用户口径退场（2026-10-19）：说明 / 计数 / 刷新钮都不再上界面；
@@ -255,6 +329,23 @@ export function MemoryPanel() {
     <div className="mt-6 space-y-6">
      {rows.map((g) => {
       const folded = collapsed[g.dir] === true;
+      const buckets: Record<MemorySection, MemoryFileView[]> = { core: [], rollouts: [], skills: [] };
+      for (const f of g.files) {
+       const section: MemorySection = f.path.startsWith("rollout_summaries/")
+        ? "rollouts"
+        : f.path.startsWith("skills/")
+         ? "skills"
+         : "core";
+       buckets[section].push(f);
+      }
+      const statsText =
+       [
+        buckets.core.length > 0 ? fmt(t.memoryStatsCore, buckets.core.length) : "",
+        buckets.rollouts.length > 0 ? fmt(t.memorySectionRolloutCount, buckets.rollouts.length) : "",
+        buckets.skills.length > 0 ? fmt(t.memoryStatsSkill, buckets.skills.length) : "",
+       ]
+        .filter(Boolean)
+        .join(" · ") || fmt(t.memoryFileCount, 0);
       return (
        <div key={g.dir}>
         <div className="flex flex-wrap items-center gap-2">
@@ -280,7 +371,7 @@ export function MemoryPanel() {
           </span>
          </button>
          <span className="shrink-0 font-mono text-[11px] text-faint">
-          {fmt(t.memoryFileCount, g.files.length)} · {fmtBytes(g.totalBytes)}
+          {statsText} · {fmtBytes(g.totalBytes)}
          </span>
          <button
           onClick={() =>
@@ -305,7 +396,11 @@ export function MemoryPanel() {
          (g.files.length === 0 ? (
           <p className="mt-1.5 text-[12px] text-faint">{t.memoryDirEmpty}</p>
          ) : (
-          <div className="mt-1.5 divide-y divide-border-soft">{g.files.map((f) => renderFile(g, f))}</div>
+          <div className="mt-1.5 divide-y divide-border-soft">
+           {buckets.core.map((f) => renderFile(g, f))}
+           {renderSection(g, "rollouts", buckets.rollouts)}
+           {renderSection(g, "skills", buckets.skills)}
+          </div>
          ))}
        </div>
       );
