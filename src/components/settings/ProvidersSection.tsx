@@ -7,6 +7,7 @@ import { IPC } from "@shared/ipc";
 import type { ModelCatalog, ModelInfo, ModelsConfigFile, ProviderLoginStatus, ProviderView } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
+import { toggleMyModel } from "../../lib/myModels";
 import {
  emptyProviderForm,
  isDuplicateProviderId,
@@ -39,8 +40,9 @@ import { PICK_CUSTOM, ProviderPicker } from "./ProviderPicker";
  *
  * **供应商配置与挑选模型分开（2026-10-17）**：自定义供应商的表单只配 名称 / 接口地址 /
  * 接口类型 / API Key；模型清单一律到**已配置的供应商行**上点「挑选模型」管——
- * 自定义端点走 `CustomProviderModelsDialog`（「获取可用模型」问端点要清单 → 勾选 → 逐项调参），
- * 登录型仍是在 omp 目录里加星。两种「挑选」语义不同，入口文案相同（都在行上）。
+ * 自定义端点走 `CustomProviderModelsDialog`（「获取可用模型」问端点要清单 → 勾选 → 逐项调参，
+ * 每行行尾星标 = 加入 / 移出「我的模型」），登录型仍是在 omp 目录里加星。两种「挑选」语义不同，
+ * 入口文案相同（都在行上）。
  *
  * 「已配置」= 该供应商出现在 omp 当前模型目录里（有凭证或免钥），这是壳侧能拿到的最接近
  * 「已登录」的真值，不去直读 omp 的凭证库；列表只列已配置的登录型供应商 + models.yml 里的块
@@ -450,6 +452,8 @@ export function ProvidersSection() {
       key={picking.id}
       provider={picking}
       file={file}
+      myModels={myModels}
+      onToggleStar={(selector) => setMyModels(toggleMyModel(myModels, selector))}
       onClose={() => setPicking(null)}
       onSaved={(next) => {
        setFile(next);

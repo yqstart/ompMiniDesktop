@@ -34,7 +34,8 @@ import { StarToggle } from "./StarToggle";
  *   平铺的「可用模型」目录——目录在弹窗里按供应商列出，带搜索过滤）。
  *   自定义供应商的「挑选模型」是**另一套语义**（2026-10-17）：它管的是 `models.yml` 里
  *   这个端点有哪些模型（「获取可用模型」拉候选 → 勾选 → 逐项调参），供应商配置弹窗里
- *   不再内嵌模型编辑区。
+ *   不再内嵌模型编辑区；**每行行尾星标 = 加入 / 移出「我的模型」**（2026-10-21，与登录型
+ *   供应商的挑选面板同一份 `StarToggle` 口径，selector = `provider/id`）。
  * - **模型角色 = 多套本机配置，只有一套激活**（2026-10-20 用户口径，见
  *   `RoleProfilesSection.tsx` / `lib/roleProfiles.ts`）：omp 只有一张全局 `modelRoles`，
  *   激活配置的整表通过 `apply_model_roles` 写入 omp（未配置的角色按 omp 自己的回退规则解析，

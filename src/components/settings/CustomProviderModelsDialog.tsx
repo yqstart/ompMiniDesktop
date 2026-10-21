@@ -16,6 +16,7 @@ import {
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
 import { DialogShell } from "./DialogShell";
+import { StarToggle } from "./StarToggle";
 import { Switch } from "./Switch";
 
 /**
@@ -34,16 +35,28 @@ import { Switch } from "./Switch";
  * 口径参考 DeepSeek Harness 的「获取可用模型」：请求 URL / 认证头 / 响应解析全在
  * `src-tauri/src/provider_models.rs`；这里只管交互——拉取结果**不落盘**，真正写文件在
  * 「保存」（`setProviderModels` 保真编辑 + 后端预校验 / 备份 / 原子写 / 乐观锁）。
+ *
+ * **行尾星标 = 加入 / 移出「我的模型」**（`lib/myModels.ts`，本应用偏好、不写 omp 配置）：
+ * 自定义端点的模型同样要能从「挑选模型」收藏——与登录型供应商的挑选面板同一份口径
+ * （`StarToggle` 共用实现）。selector = `provider.id/id`，与该模型进目录后的
+ * `ModelInfo.selector` 同形；新加的行在「保存」后才进目录，提前收藏会在「我的模型」里
+ * 标「已不可用」，保存后自动恢复。
  */
 export function CustomProviderModelsDialog({
  provider,
  file,
+ myModels,
+ onToggleStar,
  onSaved,
  onClose,
 }: {
  provider: { id: string; name: string };
  /** 打开时的 `models.yml` 快照（写入用它的 hash 做乐观锁）。 */
  file: ModelsConfigFile;
+ /** 我的模型（selector 列表）：行首星标的选中态。 */
+ myModels: string[];
+ /** 星标开关（父层落 localStorage 与 store）。 */
+ onToggleStar: (selector: string) => void;
  /** 写入成功：回传新快照（父层据此刷新供应商行与模型目录）。 */
  onSaved: (file: ModelsConfigFile) => void;
  onClose: () => void;
@@ -159,6 +172,8 @@ export function CustomProviderModelsDialog({
   : found;
  const shownPicked = shown.filter((m) => picked.has(m.id)).length;
  const inList = new Set(ids);
+ /** 我的模型选中态：selector 与 omp 目录同形（`provider/id`）。 */
+ const starred = new Set(myModels);
 
  return (
   <DialogShell
@@ -286,6 +301,8 @@ export function CustomProviderModelsDialog({
         const duplicateId = m.id.trim() !== "" && ids.some((id, j) => j !== i && id === m.id.trim());
         const invalidLimit = !isValidModelLimit(m.contextWindow) || !isValidModelLimit(m.maxTokens);
         const open = expanded === i;
+        /** 收藏用的 selector：与该模型进 omp 目录后的 `ModelInfo.selector` 同形。 */
+        const selector = `${provider.id}/${m.id.trim()}`;
         return (
          <div key={i} className="border-t border-border-soft py-3 first:border-t-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -315,6 +332,14 @@ export function CustomProviderModelsDialog({
            >
             <Trash2 size={12} aria-hidden />
            </button>
+           {/* 行尾星标：id 为空或重复时不摆（selector 不唯一，收藏会指错模型） */}
+           {m.id.trim() !== "" && !duplicateId && (
+            <StarToggle
+             on={starred.has(selector)}
+             name={m.name.trim() || m.id.trim()}
+             onClick={() => onToggleStar(selector)}
+            />
+           )}
           </div>
             {(duplicateId || m.id.trim() === "" || invalidLimit) && (
              <p className="mt-1.5 text-xs text-danger">

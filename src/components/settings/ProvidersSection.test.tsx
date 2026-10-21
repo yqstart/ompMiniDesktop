@@ -176,6 +176,33 @@ describe("添加供应商向导", () => {
   expect(container.querySelector('[role="dialog"]')!.textContent).toContain("添加所选");
  });
 
+ it("自定义清单的行尾星标 = 加入 / 移出「我的模型」", async () => {
+  h.file = {
+   path: "/tmp/models.yml",
+   exists: true,
+   hash: "h1",
+   text: "providers:\n  my-gw:\n    baseUrl: https://gw.example.com/v1\n    api: openai-completions\n    models:\n      - id: alpha\n        name: Alpha\n",
+  };
+  act(() => root.render(<ProvidersSection />));
+  await flush();
+
+  act(() => byText("挑选模型")!.click());
+  await flush();
+  const dialog = container.querySelector('[role="dialog"][aria-modal="true"]');
+  expect(dialog).not.toBeNull();
+
+  // 行尾星标与登录型供应商的挑选面板同一口径：selector = provider/id
+  const add = dialog!.querySelector('[aria-label="加入我的模型 Alpha"]');
+  expect(add).not.toBeNull();
+  act(() => (add as HTMLButtonElement).click());
+  expect(useApp.getState().myModels).toEqual(["my-gw/alpha"]);
+
+  const remove = dialog!.querySelector('[aria-label="移出我的模型 Alpha"]');
+  expect(remove).not.toBeNull();
+  act(() => (remove as HTMLButtonElement).click());
+  expect(useApp.getState().myModels).toEqual([]);
+ });
+
  it("清单形状界面表达不了（只读）：打开不自动探测，就地给只读说明", async () => {
   h.file = {
    path: "/tmp/models.yml",
