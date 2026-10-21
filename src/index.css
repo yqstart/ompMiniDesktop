@@ -233,6 +233,57 @@ kbd {
  overscroll-behavior: contain;
 }
 
+/* 轮次定位轨（`thread/TurnRail.tsx`）的轨内滚动：轮次一多就在这条轨里滚。
+   两端淡出只在那一端真的还有内容时挂（组件按 scrollTop 加类）——短轨淡了会像缺一截；
+   滚动条口径仍归上面的全 app 规则（不画滑块）。 */
+.turn-rail-scroll {
+ overscroll-behavior: contain;
+}
+
+/* 轨上的刻度：键盘焦点框画在杠所在的 20×10 区域（组件里的 accent 描边），不套全局按钮
+   焦点环——28px 宽的外框比「当前轮」那道杠还抢眼，焦点与当前轮就分不清了（上游同口径）。 */
+.turn-rail-mark:focus-visible {
+ outline: none;
+}
+
+.turn-rail-fade-top {
+ -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 24px);
+ mask-image: linear-gradient(to bottom, transparent 0, #000 24px);
+}
+
+.turn-rail-fade-bottom {
+ -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent 100%);
+ mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent 100%);
+}
+
+.turn-rail-fade-top.turn-rail-fade-bottom {
+ -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
+ mask-image: linear-gradient(to bottom, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
+}
+
+/* 预览卡：只淡入 + `top` 短过渡（在两道刻度之间移动时卡片滑过去，不是瞬移）。
+   `top` 由标记中心实测写入，轨内滚动时不动它（上游「预览跟指针，不跟滚动」同口径）。 */
+@keyframes turn-rail-preview-in {
+ from {
+  opacity: 0;
+ }
+
+ to {
+  opacity: 1;
+ }
+}
+
+.turn-rail-preview {
+ animation: turn-rail-preview-in 0.12s ease-out;
+ transition: top 0.14s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+ .turn-rail-preview {
+  transition: none;
+ }
+}
+
 /* 可见焦点环（MASTER §5）。输入框类由容器接管焦点样式，此处排除避免生硬外框。 */
 :where(button, a, select, [tabindex]):focus-visible {
  outline: 2px solid color-mix(in srgb, var(--accent) 75%, transparent);

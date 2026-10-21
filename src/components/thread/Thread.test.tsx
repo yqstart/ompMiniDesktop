@@ -533,3 +533,84 @@ describe("回到底部按钮与贴底跟随（V47 / V49）", () => {
   });
  });
 });
+
+/**
+ * 轮次定位轨（2026-10-21，DeepSeek Harness 的 TurnNavigator 形态）：
+ * 每个用户消息一道刻度、当前读到的那一轮带 `aria-current`、点击未加载轮次先放历史页。
+ * jsdom 没有真实布局（scrollHeight / clientHeight 恒 0）——按组件口径这就是「贴底」，
+ * 所以默认高亮落在最新一轮；阅读线的几何口径由 `lib/turnRail.test` 覆盖。
+ */
+describe("轮次定位轨", () => {
+ const SID = "s-turn-rail";
+ const TURNS: ViewMsg[] = [
+  { kind: "user", id: "u1", text: "第一个问题", mentions: [] },
+  { kind: "text", id: "t1", seq: 0, text: "第一轮回答", complete: true },
+  { kind: "user", id: "u2", text: "第二个问题", mentions: [] },
+  { kind: "text", id: "t2", seq: 0, text: "第二轮回答", complete: true },
+ ];
+
+ const mount = async (msgs: ViewMsg[], limit = THREAD_PAGE) => {
+  useApp.setState({
+   locale: "zh-CN",
+   eventsBySession: { [SID]: msgs },
+   activeSessionId: SID,
+   statusBySession: { [SID]: { state: "idle" } },
+   sessions: [
+    { id: SID, projectId: "p1", title: "t", cwd: "/tmp", updatedAt: 0, archived: false, missing: false } as never,
+   ],
+   projects: [{ id: "p1", name: "p", path: "/tmp" } as never],
+   threadLimitSid: SID,
+   threadLimit: limit,
+  });
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  await act(async () => {
+   root.render(createElement(Thread));
+  });
+  return { container, root };
+ };
+
+ const railOf = (container: HTMLElement) => container.querySelector(`nav[aria-label="${TEXT["zh-CN"].turnRailLabel}"]`);
+
+ it("每条用户消息一道刻度：用户行带 data-turn，贴底时高亮最新一轮", async () => {
+  const { container, root } = await mount(TURNS);
+  const rail = railOf(container);
+  expect(rail).not.toBeNull();
+  const marks = rail!.querySelectorAll("button[data-turn]");
+  expect([...marks].map((m) => m.getAttribute("data-turn"))).toEqual(["1", "2"]);
+  expect(marks[0].getAttribute("aria-label")).toBe("跳转到第 1 轮");
+  expect(marks[1].getAttribute("aria-current")).toBe("true");
+  // 锚点在消息列里（不是轨上的按钮）：跳轮 / 阅读线都靠它
+  const anchors = container.querySelectorAll(".thread-scroll [data-turn]");
+  expect([...anchors].map((a) => a.getAttribute("data-turn"))).toEqual(["1", "2"]);
+  await act(async () => {
+   root.unmount();
+  });
+ });
+
+ it("只有一轮时整条轨不出现（没有可跳的目标，也不占右缘点击面积）", async () => {
+  const { container, root } = await mount([TURNS[0], TURNS[1]]);
+  expect(railOf(container)).toBeNull();
+  await act(async () => {
+   root.unmount();
+  });
+ });
+
+ it("更早的历史页还没展开时：刻度仍可见（标为「加载并跳转」），点击先放页再出锚点", async () => {
+  // limit = 2 → 渲染窗口只含第二轮；第一轮是 unloaded 刻度
+  const { container, root } = await mount(TURNS, 2);
+  expect(container.querySelector('.thread-scroll [data-msg-id="u1"]')).toBeNull();
+  const mark = container.querySelector(`button[aria-label="加载并跳转到第 1 轮"]`) as HTMLButtonElement | null;
+  expect(mark).not.toBeNull();
+  await act(async () => {
+   mark!.click();
+  });
+  // 放页后第一轮的行真的进了 DOM（跳转由 Thread 的 layout effect 紧接着落地）
+  expect(container.querySelector('.thread-scroll [data-turn="1"]')).not.toBeNull();
+  expect(container.querySelector(`button[aria-label="跳转到第 1 轮"]`)).not.toBeNull();
+  await act(async () => {
+   root.unmount();
+  });
+ });
+});

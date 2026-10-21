@@ -868,6 +868,16 @@ export type GoalState = {
  goal: Goal | null;
 };
 
+/**
+ * `get_state.goal` 的线上形状（omp 18.12.4 实测）：**有目标时是 GoalModeState**
+ * （`{enabled,mode,goal}`），没有目标是 `null`；而 `goal_updated` 帧 / `goal` 命令回包的
+ * `.goal` 是 Goal 本体。
+ *
+ * 后端 `SessionMeta::from_state` 已归一成 Goal 本体再推给前端；前端仍统一走
+ * `lib/useSessionEvents.ts` 的 `goalFromWire` 收两种形状（状态包不会渲染成空白目标条）。
+ */
+export type GoalWire = Goal | GoalState | null;
+
 /** 会话统计（`get_session_stats` 原样透传；`/status` 弹窗与上下文面板用）。 */
 export type SessionStats = {
  sessionId: string;
@@ -1060,8 +1070,8 @@ export type SessionRuntime = {
  /** 待发队列真值（`get_state.queuedMessages`：`{steering,followUp}` 芯片文本；
   *  `queue_update` 帧是实时权威，这里是回读兜底）。 */
  queuedMessages?: { steering?: string[]; followUp?: string[] } | null;
- /** goal 目标模式状态（`get_state.goal` 原样透传；null = 没有目标）。 */
- goal?: Goal | null;
+ /** goal 目标模式（后端归一后的 Goal 本体；null = 没有目标。线上原始形状见 `GoalWire`）。 */
+ goal?: GoalWire;
  /** fast 模式（`get_state.fastModeEnabled/Active`；模型不支持时两者皆 false）。 */
  fastModeEnabled?: boolean | null;
  fastModeActive?: boolean | null;
@@ -1085,7 +1095,7 @@ export type TodoTask = { content: string; status: string; blocker?: string };
 /** 任务清单的一个阶段（上游无 id）。 */
 export type TodoPhase = { name: string; tasks: TodoTask[] };
 
-/** 任务清单浮卡的 UI 状态（会话级；无记录 = 计划首次出现自动展开，见 store 的 `applyPlans`）。 */
+/** 任务清单浮卡的 UI 状态（会话级；无记录 = 收起，首次出现默认收起，见 store 的 `applyPlans`）。 */
 export type PlanCardState = "expanded" | "collapsed";
 
 /** 可用命令的一条子命令（omp `subcommands[]` 原样透传；本期只作行内说明，不做二级补全）。 */

@@ -181,11 +181,44 @@ fn user_message_text(v: &serde_json::Value) -> Option<String> {
                 .then(|| b.get("text").and_then(|t| t.as_str()))
                 .flatten()
         })?;
+    // 壳侧发送时补的附件顺序注记（`[omp image order: …]`）只给模型看：派生标题不背它
+    let text = strip_image_order_note(text);
     let clean = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if clean.is_empty() {
         return None;
     }
     Some(clean.chars().take(200).collect())
+}
+
+/// 剥掉壳侧补在正文末尾的附件顺序注记（格式与 `src/lib/imageRefs.ts` 严格对应）。
+/// 只有整行都是 `#<数字>=image <数字>` 才认（用户自己写的同款结尾也不展示，
+/// 它只可能在末行，删掉不影响消息语义）。
+fn strip_image_order_note(text: &str) -> &str {
+    let Some((head, tail)) = text.rsplit_once("\n\n[omp image order: ") else {
+        return text;
+    };
+    let Some(body) = tail.strip_suffix(']') else {
+        return text;
+    };
+    let well_formed = !body.is_empty()
+        && body.split(", ").all(|entry| {
+            let Some((slot, index)) = entry.split_once("=image ") else {
+                return false;
+            };
+            let Some(slot) = slot.strip_prefix('#') else {
+                return false;
+            };
+            is_digits(slot) && is_digits(index)
+        });
+    if well_formed {
+        head
+    } else {
+        text
+    }
+}
+
+fn is_digits(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// 头段取完整行：文件不以换行结尾时，最后一行是被窗口切断的残行，丢掉。
@@ -343,6 +376,28 @@ mod tests {
             ),
         );
         assert_eq!(parse_session_head(&p2).first_user_text.map(|s| s.chars().count()), Some(200));
+    }
+
+    /// 发送时补的附件顺序注记（`[omp image order: …]`）只给模型看：
+    /// 首条用户文本 / 派生标题必须剥掉它，否则短消息的标题会变成「#1 [omp imag…」。
+    #[test]
+    fn user_message_text_strips_image_order_note() {
+        let line = serde_json::json!({
+            "message": {
+                "role": "user",
+                "content": [{ "type": "text", "text": "如图#1\n\n[omp image order: #1=image 1]" }]
+            }
+        });
+        assert_eq!(user_message_text(&line).as_deref(), Some("如图#1"));
+        assert_eq!(
+            strip_image_order_note("如图#1\n\n[omp image order: #1=image 1, #3=image 2]"),
+            "如图#1"
+        );
+        // 用户自己写的普通结尾不剥（格式不匹配）
+        assert_eq!(
+            strip_image_order_note("正文\n\n[omp image order: 手写]"),
+            "正文\n\n[omp image order: 手写]"
+        );
     }
 
     #[test]

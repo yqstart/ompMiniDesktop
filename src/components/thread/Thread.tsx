@@ -7,8 +7,11 @@ import { api } from "@shared/api";
 import { isRemoteClient } from "@shared/remote";
 import { openBtwPanel } from "../../lib/btw";
 import { buildThreadLayout } from "../../lib/threadLayout";
+import { buildTurnRail, turnJumpTop, type TurnRailItem } from "../../lib/turnRail";
+import { NEAR_BOTTOM_PX } from "../../lib/threadScroll";
 import type { ViewMsg } from "@shared/types";
 import { PlanCard } from "./PlanCard";
+import { TurnRail } from "./TurnRail";
 import { ToolRow } from "./ToolRow";
 import { ToolRunRow } from "./ToolRunRow";
 import { TurnRow } from "./TurnRow";
@@ -26,11 +29,14 @@ const EMPTY_EVENTS: ViewMsg[] = [];
 /** 一次划选最多引用的字符数：超长选区截断，避免把整篇对话塞进草稿 / 旁问。 */
 const MAX_SELECTION = 2000;
 
-/**
- * 「还在底部」的距离阈值（px）：粘性判定（`onScroll`）与「回到底部」按钮共用同一口径——
- * 两个数字一旦分家，就会出现「按钮还在，视口其实已贴底」这种自相矛盾的状态。
- */
-const NEAR_BOTTOM_PX = 80;
+/** 跳轮用瞬时还是平滑滚动：系统偏好减少动效时瞬时（与 `lib/streamReveal` 同口径）。 */
+function prefersReducedMotion(): boolean {
+ return (
+  typeof window !== "undefined" &&
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches
+ );
+}
 
 export function Thread() {
  const { projects, activeSessionId, eventsBySession, statusBySession, threadLimitSid, threadLimit, growThreadLimit, sessions } =
@@ -186,11 +192,71 @@ export function Thread() {
  // 消息列布局（v2 §2.1）：相邻同类工具行聚合成摘要行 + 每轮末尾的时长行；
  // running 时跳过压在流尾的进行中轮次（没有时长可报）
  const layout = useMemo(() => buildThreadLayout(shown, status === "running"), [shown, status]);
+ /**
+  * 轮次定位轨的数据面（2026-10-21）：从**完整**消息流派生会话里每一轮的序号 / 预览 /
+  * 是否在渲染窗口里——历史页收起时标记仍在（`loaded=false`），点击先放页再落地，
+  * 编号与完整会话一致（不随分页重排）。
+  */
+ const railItems = useMemo(() => buildTurnRail(events, hidden), [events, hidden]);
+ const turnByMsgId = useMemo(() => new Map(railItems.map((item) => [item.id, item.turn])), [railItems]);
+ /** 未加载轮次的落地意图：放页是同步的 store 更新，等下一帧 DOM 里有锚点行后再跳。
+  *  带上会话 id——放页与渲染之间切了会话，这条意图就作废（轮次号在新会话里没有意义）。 */
+ const pendingTurn = useRef<{ turn: number; sid: string | null } | null>(null);
  const loadEarlier = () => {
   const el = scroller.current;
   if (el) keepOffset.current = el.scrollHeight - el.scrollTop;
   growThreadLimit(THREAD_PAGE);
  };
+ /**
+  * 把某一轮的锚点行滚到视口顶部（`turnJumpTop` 留 24px 呼吸位并夹住滚动范围）。
+  * 跳轮 = 读者接管：先撤掉贴底跟随——平滑滚动途中到达的流式增量不许把视口拽回底部。
+  * 但落点本来就在贴底阈值内时（短会话 / 点最新一轮）不亮「回到底部」——那里没有可回的距离。
+  */
+ const scrollToTurnRow = useCallback(
+  (el: HTMLDivElement, row: HTMLElement, behavior: ScrollBehavior) => {
+   const origin = el.getBoundingClientRect().top;
+   const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+   const top = turnJumpTop(row.getBoundingClientRect().top - origin, el.scrollTop, maxTop);
+   stick.current = false;
+   syncAway(maxTop - top >= NEAR_BOTTOM_PX);
+   // jsdom（单测）没有 Element.scrollTo：退回写 scrollTop，两条路到达同一个落点
+   if (behavior === "smooth" && typeof el.scrollTo === "function") el.scrollTo({ top, behavior });
+   else el.scrollTop = top;
+  },
+  [syncAway],
+ );
+ /** 点击轨上某一轮：已加载 = 直接滚；未加载 = 先把窗口放大到刚好含这一条。 */
+ const jumpToTurn = useCallback(
+  (item: TurnRailItem) => {
+   const el = scroller.current;
+   if (!el) return;
+   if (!item.loaded) {
+    const need = events.length - item.index;
+    if (need > limit) growThreadLimit(need - limit);
+    pendingTurn.current = { turn: item.turn, sid: activeSessionId };
+    return;
+   }
+   const row = el.querySelector<HTMLElement>(`[data-turn="${item.turn}"]`);
+   if (row) scrollToTurnRow(el, row, prefersReducedMotion() ? "auto" : "smooth");
+  },
+  [activeSessionId, events.length, limit, growThreadLimit, scrollToTurnRow],
+ );
+ // 未加载轮次放页后的落地：等锚点行真的进了 DOM 再跳（同步 setState 的下一轮渲染）
+ useLayoutEffect(() => {
+  const pending = pendingTurn.current;
+  if (!pending) return;
+  if (pending.sid !== activeSessionId) {
+   pendingTurn.current = null;
+   return;
+  }
+  const el = scroller.current;
+  if (!el) return;
+  const row = el.querySelector<HTMLElement>(`[data-turn="${pending.turn}"]`);
+  if (!row) return;
+  pendingTurn.current = null;
+  // 整页历史刚插到上方：瞬时落地（平滑滚动会穿过一段与被点轮次无关的旧内容）
+  scrollToTurnRow(el, row, "auto");
+ });
  /**
   * 划选浮条定位（mouseup）：要求选区非空、且 anchor 与 focus 都在消息列容器内——
   * 跨到左栏 / 输入框的选区不算「划中对话内容」。位置取选区末端的矩形，越界往回收
@@ -278,8 +344,9 @@ export function Thread() {
  return (
   <>
    {/* 相对定位外壳：回底按钮要相对「消息列视口」固定——scroller 内部是滚动内容，
-       挂进去会随内容滚走，所以按钮是 scroller 的兄弟、absolute 贴外壳底边 */}
-   <div className="relative flex min-h-0 min-w-0 w-full flex-1 flex-col">
+       挂进去会随内容滚走，所以按钮是 scroller 的兄弟、absolute 贴外壳底边。
+       同时是**轮次定位轨的容器查询容器**（窄窗 < 900px 时轨道收起） */}
+   <div className="@container/thread relative flex min-h-0 min-w-0 w-full flex-1 flex-col">
     <div
      ref={scroller}
      onScroll={(e) => {
@@ -335,6 +402,7 @@ export function Thread() {
          m={item.m}
          sessionId={activeSessionId}
          cwd={cwd}
+         turn={item.m.kind === "user" ? turnByMsgId.get(item.m.id) : undefined}
          tight={isTrace(item.m) && prevTrace}
         />
        );
@@ -342,6 +410,9 @@ export function Thread() {
       {workingVisible && <WorkingRow tight={isTrace(shown[shown.length - 1])} />}
      </div>
     </div>
+    {/* 轮次定位轨：消息列右缘的刻度（scroller 的兄弟，不随内容滚走） */}
+    {/* `key` = 会话：换会话重挂，高亮 / 预览 / 轨内滚动位置都不从上一段会话带过来 */}
+    <TurnRail key={activeSessionId ?? "none"} items={railItems} scroller={scroller} planCardH={planCardH} onJump={jumpToTurn} />
     <PlanCard onHeightChange={syncPlanCardH} />
     {awayFromBottom && (
      // 回到底部（V47）：离底（> NEAR_BOTTOM_PX）时浮在消息列视口底部中央，点击 = 恢复跟随并读底。
@@ -521,18 +592,22 @@ const ThreadRow = memo(function ThreadRow({
  m,
  sessionId,
  cwd,
+ turn,
  tight,
 }: {
  m: ViewMsg;
  sessionId: string | null;
  cwd: string;
+ /** 用户消息的轮次序号（轮次定位轨的锚点）；其余消息为空。 */
+ turn?: number;
  /** 上一条也是执行痕迹：间距收紧，成串的工具行读成一段。 */
  tight?: boolean;
 }) {
  const t = useText();
  return (
   // `data-msg-id`：会话内查找（⌘F）靠它把命中定位回消息行（另一并行任务消费）
-  <div className={`text-sm leading-[1.7] ${tight ? "mb-1" : "mb-4"}`} data-msg-id={m.id}>
+  // `data-turn`：轮次定位轨的锚点（只有用户消息有）——轨道按它量阅读线、跳轮
+  <div className={`text-sm leading-[1.7] ${tight ? "mb-1" : "mb-4"}`} data-msg-id={m.id} data-turn={turn}>
    {m.kind === "user" && (
     <div className="ml-auto w-fit max-w-[72%]">
      {/* 用户气泡走 `--hover` 级中性填充（MASTER §4.4：右侧窄灰泡、圆角 lg）：一句「这是我说的」

@@ -12,11 +12,13 @@ import { api } from "@shared/api";
 import { useApp } from "../stores/app";
 import { TEXT } from "./locale";
 import { mergeViewMsgs, type IncomingViewMsg } from "./mergeEvents";
+import { viewMsgsFromJsonlLines } from "./viewmsg";
 import {
  __resetFolds,
  __resetHistoryLru,
  forgetSession,
  frameToViewMsgs,
+ goalFromWire,
  latestBtwTurn,
  syncSessionRuntime,
  todoPhasesOf,
@@ -50,7 +52,7 @@ function open(sid: string, state?: SessionStatus["state"]) {
 beforeEach(() => {
  __resetHistoryLru();
  __resetFolds();
- useApp.setState({ eventsBySession: {}, statusBySession: {}, plansBySession: {}, attachmentsBySession: {}, queuedBySession: {}, goalBySession: {} });
+ useApp.setState({ eventsBySession: {}, statusBySession: {}, plansBySession: {}, planCardBySession: {}, planDismissedBySession: {}, attachmentsBySession: {}, queuedBySession: {}, goalBySession: {} });
 });
 
 describe("trimSessionHistories：非活跃会话的历史只留最近 3 个", () => {
@@ -185,16 +187,65 @@ describe("队列真值与 goal 回读（V40）", () => {
   expect(useApp.getState().goalOf("s1")).toBeNull();
  });
 
- it("forgetSession 一并清掉队列与 goal", () => {
+ /**
+  * 回归（2026-10-21 用户实测）：omp 18.12.4 的 **`get_state.goal` 是 GoalModeState**
+  * `{enabled,mode,goal}`，不是 Goal 本体。运行中每 3s 的 `get_state` 回读若原样落库，
+  * 目标条会变成「目标 · 进行中」+ 空白（objective 读不到），点编辑也预填不出文字。
+  */
+ it("get_state.goal 是状态包时取内层 Goal（运行中回读不把目标冲成空白）", async () => {
+  useApp.setState({ activeSessionId: "s1", goalBySession: {} });
+  vi.mocked(api.getSessionRuntime).mockResolvedValue(
+   rt({
+    goal: {
+     enabled: true,
+     mode: "active",
+     goal: { id: "g1", objective: "跑通测试", status: "active", tokensUsed: 10, timeUsedSeconds: 30 },
+    },
+   }),
+  );
+  await syncSessionRuntime("s1");
+  expect(useApp.getState().goalOf("s1")).toEqual({
+   id: "g1",
+   objective: "跑通测试",
+   status: "active",
+   tokensUsed: 10,
+   timeUsedSeconds: 30,
+  });
+  // 状态包但没有目标（enabled:false / goal:null）= 没有目标
+  vi.mocked(api.getSessionRuntime).mockResolvedValue(rt({ goal: { enabled: false, mode: "off", goal: null } }));
+  await syncSessionRuntime("s1");
+  expect(useApp.getState().goalOf("s1")).toBeNull();
+ });
+
+ it("goalFromWire：两种线上形状都收，空壳不产出空白目标", () => {
+  const goal = { id: "g1", objective: "跑通测试", status: "paused", tokensUsed: 1, timeUsedSeconds: 2 };
+  // goal_updated 帧 / 命令回包：Goal 本体
+  expect(goalFromWire(goal)).toEqual(goal);
+  // get_state：GoalModeState 包装
+  expect(goalFromWire({ enabled: true, mode: "active", goal })).toEqual(goal);
+  // 无目标 / 半截对象
+  expect(goalFromWire(null)).toBeNull();
+  expect(goalFromWire({ enabled: true, mode: "active", goal: null })).toBeNull();
+  expect(goalFromWire({ enabled: true, goal: {} })).toBeNull();
+  expect(goalFromWire({ objective: "", id: "g1" })).toBeNull();
+ });
+
+ it("forgetSession 一并清掉队列 / goal / 计划状态（含完成清单的收起签名）", () => {
   open("s1", "idle");
   useApp.setState({
    queuedBySession: { s1: { steering: ["a"], followUp: [] } },
    goalBySession: { s1: { id: "g", objective: "o", status: "active", tokensUsed: 0, timeUsedSeconds: 0 } },
+   plansBySession: { s1: [{ name: "阶段", tasks: [{ content: "甲", status: "completed" }] }] },
+   planCardBySession: { s1: "collapsed" },
+   planDismissedBySession: { s1: "[]" },
   });
   forgetSession("s1");
   const st = useApp.getState();
   expect("s1" in st.queuedBySession).toBe(false);
   expect("s1" in st.goalBySession).toBe(false);
+  expect("s1" in st.plansBySession).toBe(false);
+  expect("s1" in st.planCardBySession).toBe(false);
+  expect("s1" in st.planDismissedBySession).toBe(false);
  });
 
  it("latestBtwTurn：有 followUps 取最后一项，否则话题本身", () => {
@@ -410,10 +461,41 @@ describe("任务清单：todo 帧解析与回读收敛", () => {
   vi.mocked(api.getSessionRuntime).mockResolvedValueOnce({ todoPhases: PHASES } as never);
   await syncSessionRuntime("s1");
   expect(useApp.getState().plansBySession["s1"]).toEqual(PHASES);
-  expect(useApp.getState().planCardBySession["s1"]).toBe("expanded");
+  // 首次出现默认收起（2026-10-21 用户口径）
+  expect(useApp.getState().planCardBySession["s1"]).toBe("collapsed");
   vi.mocked(api.getSessionRuntime).mockResolvedValueOnce({ todoPhases: [] } as never);
   await syncSessionRuntime("s1");
   expect("s1" in useApp.getState().plansBySession).toBe(false);
   expect("s1" in useApp.getState().planCardBySession).toBe(false);
+ });
+});
+
+/**
+ * 发送时补的「附件顺序」注记只给模型看（2026-10-21 方案 A）：实时回显与历史回放都要剥掉，
+ * 否则用户消息气泡里会多一行内部注记、乐观回显还会因为文本不同而渲染成两条。
+ */
+describe("附件顺序注记：展示层剥离", () => {
+ const annotated = "如图#1，参考#2\n\n[omp image order: #1=image 1, #2=image 2]";
+
+ it("历史回放：用户消息气泡显示原文", () => {
+  const out = viewMsgsFromJsonlLines(
+   [{ type: "message", message: { role: "user", content: [{ type: "text", text: annotated }] } }],
+   TEXT["zh-CN"],
+  );
+  const user = out.find((m) => m.kind === "user");
+  expect(user?.kind === "user" ? user.text : "").toBe("如图#1，参考#2");
+ });
+
+ it("实时回显：剥掉注记后与乐观回显同文本，合并成一条", () => {
+  const out = mergeViewMsgs(
+   [{ kind: "user", id: "u-local-1", text: "如图#1，参考#2", mentions: [] }] as IncomingViewMsg[],
+   frameToViewMsgs(
+    "s1",
+    { type: "message_start", message: { role: "user", content: [{ type: "text", text: annotated }] } },
+    TEXT["zh-CN"],
+   ) as IncomingViewMsg[],
+  );
+  expect(out).toHaveLength(1);
+  expect(out[0].kind === "user" ? out[0].text : "").toBe("如图#1，参考#2");
  });
 });

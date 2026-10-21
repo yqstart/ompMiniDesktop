@@ -8,7 +8,7 @@ import { TODO_DISPLAY, TODO_PENDING, countTodos, todoStatsText } from "../../lib
  * 任务清单浮卡（v3，DeepSeek Harness 形态）：**贴消息列底部、浮在输入卡上方的宽卡**。
  *
  * - 数据 = `plansBySession`（todo 工具帧 `details.phases` 实时写入 + `get_state.todoPhases`
- *   回读）；开合 = `planCardBySession`（无记录 = 首次出现自动展开，见 store 的 `applyPlans`）；
+ *   回读）；开合 = `planCardBySession`（**无记录 = 收起**；首次出现默认收起，见 store 的 `applyPlans`）；
  * - **两态都是同一张卡**：折叠 = 只留头部行（图标 + 标题 + 统计 + 折叠箭头），展开 = 头部行 +
  *   清单区（超过 `max-h` 内滚）。头部行整行可点 = 开合开关；
  * - 宽度与左缘对齐消息列正文列（`--measure-content`，同一变量、同一基准），**水平居中**——
@@ -29,7 +29,7 @@ export function PlanCard({ onHeightChange }: { onHeightChange?: (height: number)
  const counts = countTodos(phases ?? []);
  const allDone = counts.total > 0 && counts.done === counts.total;
  const visible = !!sid && !!phases && phases.length > 0;
- const expanded = card !== "collapsed";
+ const expanded = card === "expanded";
 
  // 全部完成 → 收成头部行：**只在 `allDone` 翻转的那一下折**（deps 只有 allDone）——
  // 用户随后手动再展开不被打扰；开合态从 store 读实时值（多实例 / 重挂载时

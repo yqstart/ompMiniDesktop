@@ -1,5 +1,6 @@
 import type { DiffStat, MentionFile, ViewMsg } from "@shared/types";
 import { imagesFromContent } from "./attachments";
+import { stripImageOrderNote } from "./imageRefs";
 import { fmt, type Text } from "./locale";
 
 let seq = 0;
@@ -297,12 +298,15 @@ export function viewMsgsFromJsonlLines(lines: unknown[], t: Text): ViewMsg[] {
    const m = o.message as { role?: string; content?: unknown[] } | undefined;
    if (!m) return;
    if (m.role === "user") {
-    const text = Array.isArray(m.content)
-     ? (m.content as Record<string, unknown>[])
-      .filter((b) => b && typeof b === "object" && b.type === "text")
-      .map((b) => String(b.text ?? ""))
-      .join("\n")
-     : "";
+    // 发送时补的附件顺序注记只给模型看：历史回放按同一条格式剥掉（壳内的 `#N` 仍原样）
+    const text = stripImageOrderNote(
+     Array.isArray(m.content)
+      ? (m.content as Record<string, unknown>[])
+        .filter((b) => b && typeof b === "object" && b.type === "text")
+        .map((b) => String(b.text ?? ""))
+        .join("\n")
+      : "",
+    );
     // 图片块（V2 M6）：用户随消息发出的图，渲染在气泡里；
     // 过大的块按 imagesFromContent 的上限省略并计数，不无上限常驻内存。
     const { images, omitted } = imagesFromContent(m.content);
@@ -442,7 +446,8 @@ export function viewMsgFromJsonlLine(line: unknown, t: Text): ViewMsg[] {
    if (b.type === "text") {
     const text = String(b.text ?? "");
     if (m.role === "user") {
-     out.push({ kind: "user", id: nid("u"), text, mentions: [] });
+     // 同历史回放：发送时补的附件顺序注记不在气泡里展示
+     out.push({ kind: "user", id: nid("u"), text: stripImageOrderNote(text), mentions: [] });
     } else if (textHasContent(text)) {
      // 无内容块（空白 / 孤立标点）不落正文行，见 `textHasContent`
      out.push({ kind: "text", id: nid("t"), seq: seq++, text, complete: true });

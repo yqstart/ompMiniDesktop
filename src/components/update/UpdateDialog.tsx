@@ -41,6 +41,8 @@ export function UpdateDialog() {
  const checking = update.status === "checking";
  const available = update.status === "available";
  const latest = update.status === "latest";
+ /** 关闭弹窗 = X 键同一口径：有可用更新时「稍后提醒」（入口常亮），其余直接关。 */
+ const dismiss = () => (available ? deferUpdate() : close());
  // 检查结果里有当前版本就用它（权威），否则用 app 版本（idle / checking 还没有结果）
  const current = available || latest ? update.current : version ?? t.unknown;
  // idle / checking / latest 是「没事可做」的三种状态：同一个版式，区别只在状态行
@@ -61,8 +63,8 @@ export function UpdateDialog() {
         : { icon: <Download size={16} aria-hidden className="shrink-0 text-muted" />, title: t.updateSection };
 
  return (
-  <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={t.updateDialogAria}>
-   <div className="w-[420px] max-w-full rounded-xl border border-border bg-elevated p-6 shadow-dialog">
+  <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={t.updateDialogAria} onClick={dismiss}>
+   <div className="w-[420px] max-w-full rounded-xl border border-border bg-elevated p-6 shadow-dialog" onClick={(e) => e.stopPropagation()}>
     <div className="flex items-center gap-2">
      {status.icon}
      <h2 className="text-[15px] font-semibold">{status.title}</h2>

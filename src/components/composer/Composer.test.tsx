@@ -151,6 +151,9 @@ beforeEach(() => {
   attachmentsBySession: {},
   queuedBySession: {},
   goalBySession: {},
+  plansBySession: {},
+  planCardBySession: {},
+  planDismissedBySession: {},
   sessionApprovals: {},
   approvalRestartBySession: {},
   globalApproval: "write",
@@ -191,6 +194,13 @@ const press = async (el: HTMLElement | null, init: KeyboardEventInit) => {
  expect(el).not.toBeNull();
  await act(async () => {
   el!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
+ });
+};
+
+/** 派发一次 pointerdown（输入卡浮层的「点外部关闭」只看 type + target）。 */
+const pointerDown = async (target: EventTarget) => {
+ await act(async () => {
+  target.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
  });
 };
 
@@ -310,6 +320,63 @@ describe("Composer 工具行（v2）", () => {
  });
 });
 
+/**
+ * 输入卡浮层的「点外部关闭」（2026-10-21 用户实测：`+` / `/` 面板此前只能 Esc 关，
+ * 点消息列 / 输入框都不收）。口径与工具行下拉（`useDropdown`）一致，只是不抢编辑器焦点。
+ */
+describe("Composer 浮层：点外部关闭", () => {
+ const listbox = () => container.querySelector('[role="listbox"]');
+
+ it("`+` 面板：点面板内不关，点面板外关闭", async () => {
+  await mount(false);
+  const plus = container.querySelector<HTMLButtonElement>('button[aria-label="添加上下文"]')!;
+  act(() => plus.click());
+  expect(listbox()).not.toBeNull();
+  // 面板里（点候选区）不关
+  await pointerDown(listbox()!);
+  expect(listbox()).not.toBeNull();
+  // 消息列 / 页面空白 = 面板外
+  await pointerDown(document.body);
+  expect(listbox()).toBeNull();
+ });
+
+ it("`+` 面板：再点 `+` 能关（pointerdown 关掉后 click 不能又打开）", async () => {
+  await mount(false);
+  const plus = container.querySelector<HTMLButtonElement>('button[aria-label="添加上下文"]')!;
+  act(() => plus.click());
+  expect(listbox()).not.toBeNull();
+  // 真实点击顺序 = pointerdown → click；触发按钮要算「里面」，否则永远关不掉
+  await pointerDown(plus);
+  act(() => plus.click());
+  expect(listbox()).toBeNull();
+ });
+
+ it("`/` 面板：点外部关闭，继续打字（token 变）重新打开", async () => {
+  await mount(false);
+  act(() => useApp.setState({ drafts: { s1: "/" } }));
+  await act(async () => { });
+  expect(listbox()).not.toBeNull();
+  await pointerDown(document.body);
+  expect(listbox()).toBeNull();
+  // Esc / 点外部都只记当前 token：接着打字变成新 token 时重新打开（否则补全等于坏了）
+  act(() => useApp.setState({ drafts: { s1: "/mod" } }));
+  await act(async () => { });
+  expect(listbox()).not.toBeNull();
+ });
+
+ it("`@` 补全：点编辑器里不关，点编辑器外关闭", async () => {
+  const ta = await mount(false);
+  act(() => useApp.setState({ drafts: { s1: "@bas" } }));
+  await act(async () => { });
+  expect(listbox()).not.toBeNull();
+  // 点编辑器（挪光标 / 接着改这枚 `@`）不算外部
+  await pointerDown(ta!);
+  expect(listbox()).not.toBeNull();
+  await pointerDown(document.body);
+  expect(listbox()).toBeNull();
+ });
+});
+
 describe("Composer 发送语义（V39/V40：对齐 omp 终端与 codex）", () => {
  it("流式中 Enter = 插话：steer_message + 草稿清空（队列展示由 queue_update 驱动）", async () => {
   const ta = await mount(true);
@@ -372,6 +439,68 @@ describe("Composer 发送语义（V39/V40：对齐 omp 终端与 codex）", () =
   expect((useApp.getState().eventsBySession["s1"] ?? []).some((m) => m.kind === "user")).toBe(true);
  });
 
+ it("新回合发送成功：上一轮全部完成的任务清单收起，且不被同签名回读复活", async () => {
+  const done = [{ name: "阶段", tasks: [{ content: "甲", status: "completed" }] }];
+  const ta = await mount(false);
+  act(() =>
+   useApp.setState({
+    drafts: { s1: "再改一版" },
+    plansBySession: { s1: done },
+    planCardBySession: { s1: "collapsed" },
+    planDismissedBySession: {},
+   }),
+  );
+  await act(async () => { });
+  await press(ta, { key: "Enter" });
+  expect("s1" in useApp.getState().plansBySession).toBe(false);
+  expect("s1" in useApp.getState().planCardBySession).toBe(false);
+  // omp 的 todo 自动清理窗口内，get_state 还会回读这份完成清单：不许复活
+  act(() => useApp.getState().applyPlans("s1", done));
+  expect("s1" in useApp.getState().plansBySession).toBe(false);
+ });
+
+ it("多图 + 正文引用 #N：只给 omp 的文本补附件顺序注记，乐观回显仍是原文", async () => {
+  const ta = await mount(false);
+  const imgs = [
+   { name: "a.png", mimeType: "image/png", dataBase64: "AAA", bytes: 3, slot: 1 },
+   { name: "b.png", mimeType: "image/png", dataBase64: "BBB", bytes: 3, slot: 2 },
+  ];
+  act(() => useApp.setState({ drafts: { s1: "如图#1，参考#2" }, attachmentsBySession: { s1: imgs } }));
+  await act(async () => { });
+  await press(ta, { key: "Enter" });
+  // 注记只进 wire text（模型只按图片顺序看图；删图后编号有空洞也说得清）
+  expect(apiMock.sendMessage).toHaveBeenCalledWith(
+   "s1",
+   "如图#1，参考#2\n\n[omp image order: #1=image 1, #2=image 2]",
+   [
+    { name: "a.png", mimeType: "image/png", dataBase64: "AAA", bytes: 3 },
+    { name: "b.png", mimeType: "image/png", dataBase64: "BBB", bytes: 3 },
+   ],
+  );
+  // 乐观回显 / 历史用原文，不把注记显示给用户
+  const user = (useApp.getState().eventsBySession["s1"] ?? []).find((m) => m.kind === "user");
+  expect(user?.kind === "user" ? user.text : "").toBe("如图#1，参考#2");
+ });
+
+ it("运行中排队：图片消息同样带附件顺序注记", async () => {
+  const ta = await mount(true);
+  act(() =>
+   useApp.setState({
+    drafts: { s1: "#1 这张图" },
+    attachmentsBySession: {
+     s1: [{ name: "a.png", mimeType: "image/png", dataBase64: "AAA", bytes: 3, slot: 1 }],
+    },
+   }),
+  );
+  await act(async () => { });
+  await press(ta, { key: "Tab" });
+  expect(apiMock.followUpMessage).toHaveBeenCalledWith(
+   "s1",
+   "#1 这张图\n\n[omp image order: #1=image 1]",
+   [{ name: "a.png", mimeType: "image/png", dataBase64: "AAA", bytes: 3 }],
+  );
+ });
+
  it("Esc = 中断并交还队列：返回的插话 / 排队文本回输入框", async () => {
   apiMock.abortAndRestoreQueue.mockResolvedValueOnce({
    steering: [{ text: "插话一" }],
@@ -423,6 +552,28 @@ describe("Composer 发送语义（V39/V40：对齐 omp 终端与 codex）", () =
   expect(apiMock.removeQueuedMessage).toHaveBeenCalledWith("s1", "再跑测试", "followUp");
  });
 
+ it("待发区展示 / 编辑回退都剥掉附件顺序注记（队列真值仍带注记用于撤回匹配）", async () => {
+  const queued = "#1 这张图\n\n[omp image order: #1=image 1]";
+  useApp.setState({
+   sessions: [session()],
+   activeSessionId: "s1",
+   drafts: { s1: "" },
+   queuedBySession: { s1: { steering: [queued], followUp: [] } },
+  });
+  act(() => root.render(<Composer />));
+  await act(async () => { });
+  const li = container.querySelectorAll('[role="status"] li')[0];
+  expect(li.textContent).toContain("#1 这张图");
+  expect(li.textContent).not.toContain("omp image order");
+  const edit = li.querySelector<HTMLButtonElement>('button[aria-label="编辑这条（退回输入框）"]');
+  await act(async () => {
+   edit!.click();
+  });
+  // 撤回仍是原始队列文本（含注记），退回草稿的是剥掉注记的原文
+  expect(apiMock.removeQueuedMessage).toHaveBeenCalledWith("s1", queued, "steering");
+  expect(useApp.getState().drafts["s1"]).toBe("#1 这张图");
+ });
+
  it("工具行目标按钮：主输入框进入目标模式，发送即创建目标", async () => {
   const ta = await mount(false);
   // 先清空（mount 自带草稿「你好」）：目标模式只在输入框为空时显示目标 placeholder
@@ -440,6 +591,99 @@ describe("Composer 发送语义（V39/V40：对齐 omp 终端与 codex）", () =
   // goal 只是状态，不会自己开跑：创建成功后还要把同一段文本作为启动消息发出去
   await act(async () => { });
   expect(apiMock.sendMessage).toHaveBeenCalledWith("s1", "把首页加载压到 2 秒内", []);
+ });
+
+ it("目标模式：草稿里粘的图片随启动消息一起发出（不在发送时被丢掉）", async () => {
+  const ta = await mount(false);
+  act(() => useApp.setState({ drafts: { s1: "" } }));
+  await act(async () => { });
+  act(() => container.querySelector<HTMLButtonElement>('button[aria-label="目标"]')!.click());
+  act(() =>
+   useApp.setState({
+    drafts: { s1: "把首页加载压到 2 秒内#1" },
+    attachmentsBySession: {
+     s1: [{ name: "shot.png", mimeType: "image/png", dataBase64: "iVBORw0KGgo=", bytes: 8, slot: 1 }],
+    },
+   }),
+  );
+  await act(async () => { });
+  await press(ta, { key: "Enter" });
+  expect(apiMock.goalCommand).toHaveBeenCalledWith("s1", "create", "把首页加载压到 2 秒内#1");
+  await act(async () => { });
+  // 图片走 `prompt.images` 同一收尾（与普通发送同一条路），不是只发文字；
+  // 正文引用了 #1，wire text 末尾带附件顺序注记（目标本身仍用不带注记的文本）
+  expect(apiMock.sendMessage).toHaveBeenCalledWith(
+   "s1",
+   "把首页加载压到 2 秒内#1\n\n[omp image order: #1=image 1]",
+   [{ name: "shot.png", mimeType: "image/png", dataBase64: "iVBORw0KGgo=", bytes: 8 }],
+  );
+  // 附件随消息发出：输入框里的待发附件清空（不是留在那儿、也不是悄悄丢掉）
+  expect(useApp.getState().attachmentsBySession["s1"]).toEqual([]);
+ });
+
+ it("目标模式 + 运行中：只设目标不发启动消息，附件留在输入框等下一次发送", async () => {
+  const ta = await mount(true);
+  act(() => useApp.setState({ drafts: { s1: "" } }));
+  await act(async () => { });
+  act(() => container.querySelector<HTMLButtonElement>('button[aria-label="目标"]')!.click());
+  act(() =>
+   useApp.setState({
+    drafts: { s1: "把首页加载压到 2 秒内#1" },
+    attachmentsBySession: {
+     s1: [{ name: "shot.png", mimeType: "image/png", dataBase64: "iVBORw0KGgo=", bytes: 8, slot: 1 }],
+    },
+   }),
+  );
+  await act(async () => { });
+  await press(ta, { key: "Enter" });
+  expect(apiMock.goalCommand).toHaveBeenCalledWith("s1", "create", "把首页加载压到 2 秒内#1");
+  // 运行中不打断当前轮：没有启动消息，图片也不能被顺手清掉
+  expect(apiMock.sendMessage).not.toHaveBeenCalled();
+  expect(useApp.getState().attachmentsBySession["s1"]).toHaveLength(1);
+ });
+
+ it("目标模式：只有图片没写目标时不静默吞掉，给出提示（附件留在输入框）", async () => {
+  const ta = await mount(false);
+  act(() => useApp.setState({ drafts: { s1: "" } }));
+  await act(async () => { });
+  act(() => container.querySelector<HTMLButtonElement>('button[aria-label="目标"]')!.click());
+  act(() =>
+   useApp.setState({
+    attachmentsBySession: {
+     s1: [{ name: "shot.png", mimeType: "image/png", dataBase64: "iVBORw0KGgo=", bytes: 8, slot: 1 }],
+    },
+   }),
+  );
+  await act(async () => { });
+  await press(ta, { key: "Enter" });
+  expect(apiMock.goalCommand).not.toHaveBeenCalled();
+  expect(apiMock.sendMessage).not.toHaveBeenCalled();
+  expect(container.textContent).toContain(TEXT["zh-CN"].goalNeedsText);
+  expect(useApp.getState().attachmentsBySession["s1"]).toHaveLength(1);
+ });
+
+ it("目标条编辑键：主输入框预填当前目标并进入目标模式", async () => {
+  const ta = await mount(false);
+  act(() =>
+   useApp.setState({
+    drafts: { s1: "" },
+    goalBySession: {
+     s1: { id: "g1", objective: "把首页加载压到 2 秒内", status: "active", tokensUsed: 0, timeUsedSeconds: 0 },
+    },
+   }),
+  );
+  await act(async () => { });
+  const edit = container.querySelector<HTMLButtonElement>('button[aria-label="编辑目标"]');
+  expect(edit).not.toBeNull();
+  act(() => edit!.click());
+  // 编辑走主输入框：目标文本预填进草稿，工具行目标按钮进入 accent 态
+  expect(useApp.getState().drafts["s1"]).toBe("把首页加载压到 2 秒内");
+  expect(container.querySelector<HTMLButtonElement>('button[aria-label="目标"]')!.getAttribute("aria-pressed")).toBe(
+   "true",
+  );
+  // 改了再发 = 更新目标（发送即 create）
+  await press(ta, { key: "Enter" });
+  expect(apiMock.goalCommand).toHaveBeenCalledWith("s1", "create", "把首页加载压到 2 秒内");
  });
 
  it("壳本地命令已移除：/goal 不再被壳拦截，走 omp 的 run_slash", async () => {

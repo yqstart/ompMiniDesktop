@@ -3,6 +3,7 @@ import { ImagePlus, Send, Stop, X } from "reicon-react";
 import { api } from "@shared/api";
 import type { ImageAttachment } from "@shared/types";
 import { ATTACH_MAX_BYTES } from "../lib/attachments";
+import { withImageOrderNote } from "../lib/imageRefs";
 import { refreshTitleAfterFirstSend } from "../lib/sessionOpen";
 import { useText } from "../lib/useText";
 import { useApp } from "../stores/app";
@@ -102,15 +103,19 @@ export function MobileComposer({
   }
   setBusy(true);
   setError(null);
+  // 正文引用 `#N` 且带图时补附件顺序注记（只进 wire text；界面 / 标题仍用原文）
+  const wireText = withImageOrderNote(text, attachments);
   try {
    if (text.startsWith("/") && attachments.length === 0) {
     await api.runSlash(sid, text);
    } else if (kind === "queue") {
-    await api.followUpMessage(sid, text, attachments.length ? attachments : undefined);
+    await api.followUpMessage(sid, wireText, attachments.length ? attachments : undefined);
    } else if (kind === "steer") {
-    await api.steerMessage(sid, text, attachments.length ? attachments : undefined);
+    await api.steerMessage(sid, wireText, attachments.length ? attachments : undefined);
    } else {
-    await api.sendMessage(sid, text, attachments.length ? attachments : undefined);
+    await api.sendMessage(sid, wireText, attachments.length ? attachments : undefined);
+    // 新回合开始：上一轮已全部完成的任务清单收起（与桌面 Composer 同一口径）
+    useApp.getState().dismissCompletedPlans(sid);
    }
    const st = useApp.getState();
    st.setDraft(sid, "");

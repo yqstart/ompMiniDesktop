@@ -6,6 +6,7 @@ import { applyTheme, loadTheme, saveTheme, type ThemeMode } from "../lib/theme";
 import { loadMyModels, saveMyModels } from "../lib/myModels";
 import { loadCommitLangPrefs, saveCommitLangPrefs, type CommitLangPref } from "../lib/commitLang";
 import { withSlots } from "../lib/attachments";
+import { countTodos } from "../lib/todoDisplay";
 
 type AppState = {
  health: HealthInfo | null;
@@ -159,8 +160,14 @@ type AppState = {
  clearUnread: (sid: string) => void;
  /** 任务清单真值（todo 帧 `details.phases` + `get_state.todoPhases` 回读；按会话隔离）。 */
  plansBySession: Record<string, TodoPhase[]>;
- /** 任务清单浮卡的 UI 状态（会话级）：无记录 = 首次出现自动展开（见 `applyPlans`）。 */
+ /** 任务清单浮卡的 UI 状态（会话级）：无记录 = 折叠（首次出现默认收起，见 `applyPlans`）。 */
  planCardBySession: Record<string, PlanCardState>;
+ /**
+  * 被「新回合」收起的完成清单签名（会话级，`JSON.stringify(phases)`）：omp 的 todo
+  * 自动清理是它自己 UI 的计时器，`get_state` 在窗口内仍会回读同一份已完成的清单——
+  * 不挡掉的话浮卡会在下一次回读时复活（见 `dismissCompletedPlans`）。
+  */
+ planDismissedBySession: Record<string, string>;
  /** 会话级权限覆盖（覆盖层 `sessionApproval` 的水合；徽标显示用）。 */
  sessionApprovals: Record<string, string>;
  /** 输入卡内的下拉互斥槽：同一时刻只开一个（model/thinking/approval/plus/project/branch/context/usage/liveStats/liveTokens）。 */
@@ -198,6 +205,11 @@ type AppState = {
  applyPlans: (sid: string, phases: TodoPhase[]) => void;
  /** 任务清单浮卡开合 / 隐藏（会话级）。 */
  setPlanCard: (sid: string, state: PlanCardState) => void;
+ /**
+  * 新回合开始（发送成功）时把**上一轮已全部完成**的清单收起：清数据 + 浮卡状态，并记下
+  * 这份清单的签名挡掉 omp 在自动清理窗口内的回读。未完成 / 无清单时什么都不做。
+  */
+ dismissCompletedPlans: (sid: string) => void;
  goalOf: (sid: string | null) => Goal | null;
  /** goal 状态写入（`goal_updated` 帧 / 回读的唯一入口）。 */
  setGoal: (sid: string, goal: Goal | null) => void;
@@ -702,6 +714,7 @@ export const useApp = create<AppState>((set, get) => ({
   }),
  plansBySession: {},
  planCardBySession: {},
+ planDismissedBySession: {},
  sessionApprovals: {},
  composerMenu: null,
  threadLimitSid: null,
@@ -743,24 +756,58 @@ export const useApp = create<AppState>((set, get) => ({
  setGoal: (sid, goal) => set((s) => ({ goalBySession: { ...s.goalBySession, [sid]: goal } })),
  applyPlans: (sid, phases) =>
   set((s) => {
+   const sig = JSON.stringify(phases);
    if (phases.length === 0) {
-    // 清单已清空（回读 `[]` / `todo_auto_clear` 帧）：数据与浮卡状态一起删——浮卡退场，
-    // 下一个计划出现重新走「首次自动展开」。
-    if (!(sid in s.plansBySession) && !(sid in s.planCardBySession)) return {};
+    // 清单已清空（回读 `[]` / `todo_auto_clear` 帧）：数据 / 浮卡状态 / 收起签名一起删，
+    // 下一个计划出现重新走「首次默认收起」。
+    if (!(sid in s.plansBySession) && !(sid in s.planCardBySession) && !(sid in s.planDismissedBySession)) return {};
     const plans = { ...s.plansBySession };
     const cards = { ...s.planCardBySession };
+    const dismissed = { ...s.planDismissedBySession };
     delete plans[sid];
     delete cards[sid];
-    return { plansBySession: plans, planCardBySession: cards };
+    delete dismissed[sid];
+    return { plansBySession: plans, planCardBySession: cards, planDismissedBySession: dismissed };
+   }
+   // 新回合已把这份完成清单收起：omp 的 todo 自动清理是它自己 UI 的计时器，
+   // `get_state` 在窗口内仍会回读同一份清单——挡掉，否则浮卡会「复活」
+   if (s.planDismissedBySession[sid] === sig) return {};
+   // 换了一份清单：旧的收起签名作废（否则以后同签名的清单会被误挡）
+   let dismissed: Record<string, string> | null = null;
+   if (sid in s.planDismissedBySession) {
+    dismissed = { ...s.planDismissedBySession };
+    delete dismissed[sid];
    }
    // 值没变不写（todo 工具帧与 `get_state` 回读会把同一份清单送两遍）
-   if (JSON.stringify(s.plansBySession[sid]) === JSON.stringify(phases)) return {};
+   if (JSON.stringify(s.plansBySession[sid]) === sig) {
+    return dismissed ? { planDismissedBySession: dismissed } : {};
+   }
    return {
     plansBySession: { ...s.plansBySession, [sid]: phases },
-    // 首次出现（无浮卡记录）：自动展开一次；用户之后的收起不被覆盖
+    // 首次出现（无浮卡记录）：默认**收起**（2026-10-21 用户口径——任务刚建好时清单
+    // 铺满消息列太吵，先只留头部行的统计）；用户之后的展开 / 收起不被清单更新覆盖
     ...(s.planCardBySession[sid]
      ? {}
-     : { planCardBySession: { ...s.planCardBySession, [sid]: "expanded" as PlanCardState } }),
+     : { planCardBySession: { ...s.planCardBySession, [sid]: "collapsed" as PlanCardState } }),
+    ...(dismissed ? { planDismissedBySession: dismissed } : {}),
+   };
+  }),
+ dismissCompletedPlans: (sid) =>
+  set((s) => {
+   const phases = s.plansBySession[sid];
+   if (!phases || phases.length === 0) return {};
+   const counts = countTodos(phases);
+   // 只收「全部完成」的清单：未完成的任务仍在 omp 的任务状态里，浮卡是它唯一的展示面
+   if (counts.total === 0 || counts.done !== counts.total) return {};
+   const plans = { ...s.plansBySession };
+   const cards = { ...s.planCardBySession };
+   delete plans[sid];
+   delete cards[sid];
+   return {
+    plansBySession: plans,
+    planCardBySession: cards,
+    // 记下被收起清单的签名（见 `applyPlans` 的挡回读分支）
+    planDismissedBySession: { ...s.planDismissedBySession, [sid]: JSON.stringify(phases) },
    };
   }),
  setPlanCard: (sid, state) =>

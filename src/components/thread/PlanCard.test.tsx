@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 /**
  * 任务清单浮卡（v3，贴底宽卡）渲染与开合回归：
- * - 无清单不渲染；展开态列出阶段与任务（状态符号 + 阻塞说明）；
+ * - 无清单不渲染；**首次出现默认收起**（代码刚建好清单时不铺满消息列）；
+ * - 展开态列出阶段与任务（状态符号 + 阻塞说明）；
  * - 头部行 = 开合开关（折叠态只留头部行：标题 + 统计；点它展开）；
  * - 统计文案为「未完成档位」口径（进行中 / 待处理 / 受阻；全完成给完成计数）；
  * - 全部完成自动折成头部行（同一份清单只折一次——手动再展开不被再次折叠）；
@@ -48,7 +49,7 @@ function mount(onHeightChange?: (h: number) => void) {
 
 function seed(plans: Record<string, TodoPhase[]>, card: Record<string, "expanded" | "collapsed">) {
  act(() => {
-  useApp.setState({ activeSessionId: "s1", locale: "zh-CN", plansBySession: plans, planCardBySession: card });
+  useApp.setState({ activeSessionId: "s1", locale: "zh-CN", plansBySession: plans, planCardBySession: card, planDismissedBySession: {} });
  });
 }
 
@@ -56,6 +57,25 @@ describe("任务清单浮卡（PlanCard）", () => {
  it("无清单不渲染", () => {
   seed({}, {});
   expect(mount().textContent).toBe("");
+ });
+
+ it("首次出现默认收起：只留头部行，点头部行才展开", () => {
+  seed({}, {});
+  const c = mount();
+  // 走真实写入面（applyPlans 首次出现写默认档）
+  act(() => {
+   useApp.getState().applyPlans("s1", PHASES);
+  });
+  expect(useApp.getState().planCardBySession["s1"]).toBe("collapsed");
+  expect(c.textContent).toContain("任务");
+  expect(c.textContent).toContain("1 进行中 · 1 待处理");
+  expect(c.textContent).not.toContain("已完成的项");
+  const head = c.querySelector<HTMLButtonElement>('button[title="展开任务清单"]')!;
+  act(() => {
+   head.click();
+  });
+  expect(useApp.getState().planCardBySession["s1"]).toBe("expanded");
+  expect(c.textContent).toContain("已完成的项");
  });
 
  it("展开态列出阶段、任务、阻塞说明与统计", () => {

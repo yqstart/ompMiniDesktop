@@ -33,6 +33,8 @@ import { PlanStartDialog } from "./PlanStartDialog";
 import { MentionList, type MentionRow, type PathCandidate } from "./MentionList";
 import { DraftEditor, type DraftEditorHandle, type DraftTextSource } from "./draft/DraftEditor";
 import { referenceTarget } from "../../lib/workspaceFiles";
+import { useOutsideDismiss } from "../../lib/useDropdown";
+import { stripImageOrderNote, withImageOrderNote } from "../../lib/imageRefs";
 import { SlashMenu, type SlashAction } from "./SlashMenu";
 import { ApprovalModeMenu } from "./ApprovalModeMenu";
 import { FastMenu } from "./FastMenu";
@@ -67,6 +69,9 @@ const NEW_DRAFT = "__new__";
  * 三条入口都在光标处留下 `#N` 占位（N = 附件稳定编号，`commitImages` 唯一收尾）：文字与图片
  * 的对应关系写在正文里（「如图#1」），缩略图角标同编号。实测核对（omp 18.10.4 rpc-ui）：
  * 文本原样进 user 消息、图片按数组序追加为 image 块，`#N` 只是普通文本、上游不做特殊解析。
+ * 2026-10-21 起发送侧补**附件顺序注记**（`lib/imageRefs.ts`）：正文引用了已附带附件的 `#N` 时，
+ * 在 wire text 末尾追加 `[omp image order: #1=image 1, …]`（按图片数组顺序），让模型能按编号
+ * 对位；注记只给模型看，乐观回显 / 历史 / 队列行展示都剥离。
  *
  * 2026-10-20：`+` 菜单的「文件」按类型分流（图片 → 附件，其他文件 → `@` 引用），
  * 「目标」走独立弹窗（不覆盖草稿），「计划」先留入口；`@` 浮层顶部多一行「工作区文件」入口。
@@ -77,6 +82,11 @@ export function Composer() {
   useApp();
  /** 草稿编辑器句柄（Lexical；不受控——编辑器状态是权威，store 里的草稿是它的投影）。 */
  const editorRef = useRef<DraftEditorHandle | null>(null);
+ /** `+` / `/` 共用面板与 `@` 补全的容器（点外部关闭时判断「里面」）。 */
+ const panelRef = useRef<HTMLDivElement>(null);
+ const mentionRef = useRef<HTMLDivElement>(null);
+ /** `+` 触发按钮：同上（它自己 onClick 负责开合，不能被 pointerdown 先关掉）。 */
+ const plusBtnRef = useRef<HTMLButtonElement>(null);
  /** 引用浮层注入草稿后回到输入框接着写（序号信号：同一会话反复注入也能重新聚焦）。 */
  useEffect(() => {
   if (composerFocusSeq > 0) editorRef.current?.focus();
@@ -175,7 +185,8 @@ export function Composer() {
   setGoalModeFor(activeSessionId);
   setAttachError(null);
   // 草稿为空且有目标：预填当前目标，方便直接改；草稿非空则保留用户内容
-  if (!draft.trim() && goal) persistDraft(activeSessionId, goal.objective);
+  // （objective 必须有文字才预填——半截目标对象不该把空串写进草稿）
+  if (!draft.trim() && goal?.objective) persistDraft(activeSessionId, goal.objective);
  };
  // `@` 补全状态：mentionIdx 为高亮下标，-1 = 无补全；mentionToken 是 `@` 后的路径前缀。
  const [mentionIdx, setMentionIdx] = useState(-1);
@@ -259,6 +270,27 @@ export function Composer() {
  /** 已取完词的 key：对不上就渲染「搜索中」，**不许让浮层无声消失**（用户实测的坑）。 */
  const [mentionLoadedKey, setMentionLoadedKey] = useState<string | null>(null);
  const mentionOpen = !mentionEmpty && mentionDismissed !== mentionQueryKey;
+ // 点浮层外关闭（2026-10-21 用户实测：`+` / `/` 共用面板与 `@` 补全此前只能 Esc 关）：
+ // 面板自身 + 各自触发件算「里面」，其余 pointerdown（消息列 / 工具行 / 输入框）一律关。
+ // 与 `useDropdown` 同一 document pointerdown 口径，但不抢焦点（键盘由编辑器转交）。
+ useOutsideDismiss(
+  panelOpen,
+  () => {
+   setToolsOpen(false);
+   if (slashOpen) setSlashDismissed(slashToken);
+  },
+  (target) => !!panelRef.current?.contains(target) || !!plusBtnRef.current?.contains(target),
+ );
+ useOutsideDismiss(
+  mentionOpen,
+  () => setMentionDismissed(mentionQueryKey),
+  (target) => {
+   if (mentionRef.current?.contains(target)) return true;
+   // 编辑器里点光标 = 接着改这枚 `@`，不算外部（token 真没了浮层会自然关）
+   const el = target instanceof Element ? target : target.parentElement;
+   return !!el?.closest("[data-draft-editor]");
+  },
+ );
  useEffect(() => {
   if (mentionEmpty) return;
   let alive = true;
@@ -723,6 +755,8 @@ export function Composer() {
   }
   const text = await expandMentions(raw, cwd);
   const sentImages = attachments;
+  // 正文里引用了 `#N` 时补一行附件顺序注记（只影响发给 omp 的文本，回显 / 历史仍用原文）
+  const wireText = withImageOrderNote(text, sentImages);
   // 清空 / 回滚都走 persistDraft（带 localStorage 同步）：只清内存的话，
   // 已发送的内容下次启动会被 hydrateDrafts 从 `omp.drafts.v1` 恢复回输入框（幽灵草稿）。
   persistDraft(activeSessionId, "");
@@ -731,7 +765,7 @@ export function Composer() {
    const fn = mode === "steer" ? api.steerMessage : api.followUpMessage;
    await fn(
     activeSessionId,
-    text,
+    wireText,
     sentImages.map((a) => ({ name: a.name, mimeType: a.mimeType, dataBase64: a.dataBase64, bytes: a.bytes })),
    );
    pushHistory(activeSessionId, text);
@@ -773,8 +807,8 @@ export function Composer() {
   try {
    const r = await api.removeQueuedMessage(sid, text, queue);
    if (!r.removed) return;
-   // 队列里存的是发给 omp 的真路径：退回草稿时缩回短标签，与输入框口径一致
-   const back = await shortenMentions(text);
+   // 队列里存的是发给 omp 的真路径 + 附件顺序注记：退回草稿前剥掉注记、缩回短标签
+   const back = await shortenMentions(stripImageOrderNote(text));
    const cur = useApp.getState().draftOf(sid);
    persistDraft(sid, cur.trim() ? `${cur}\n\n${back}` : back);
    if (r.images && r.images.length > 0) {
@@ -817,7 +851,10 @@ export function Composer() {
    const r = await api.abortAndRestoreQueue(sid);
    const items = [...r.steering, ...r.followUp];
    if (items.length > 0) {
-    const text = items.map((i) => i.text).filter((x) => x.trim()).join("\n\n");
+    const text = items
+     .map((i) => stripImageOrderNote(i.text))
+     .filter((x) => x.trim())
+     .join("\n\n");
     if (text) {
      const cur = useApp.getState().draftOf(sid);
      persistDraft(sid, cur.trim() ? `${cur}\n\n${text}` : text);
@@ -966,6 +1003,9 @@ export function Composer() {
  const sendTextTo = async (sid: string, baseCwd: string, raw: string, sentImages: ImageAttachment[]) => {
   // 输入框里是短标签，omp 只认真路径：发送前展开（回显 / 历史 / 回滚都用原文，用户看到的还是自己写的）
   const text = await expandMentions(raw, baseCwd);
+  // 正文引用 `#N` 且带图时，补一行「#N 对应第几张图」的注记（模型只看得到图片顺序；
+  // 注记只进 wire text，乐观回显 / 历史 / 队列展示都用原文）
+  const wireText = withImageOrderNote(text, sentImages);
   // 首条判定：流里还没有 user 消息 = 这是本会话第一条（标题回退只做这一次）
   const isFirst = !(useApp.getState().eventsBySession[sid] ?? []).some((m) => m.kind === "user");
   // 乐观回显：先落一条本地 user 消息，id 带时间戳；
@@ -988,11 +1028,15 @@ export function Composer() {
   try {
    await api.sendMessage(
     sid,
-    text,
+    wireText,
     sentImages.map((a) => ({ name: a.name, mimeType: a.mimeType, dataBase64: a.dataBase64, bytes: a.bytes })),
    );
    pushHistory(sid, raw);
    resetHistory();
+   // 新回合开始：上一轮**已全部完成**的任务清单收起来（用户实测：完成清单一直挂在
+   // 新对话上）。未完成的不动——那还是 omp 的真实任务状态；omp 在自动清理窗口内的
+   // 回读由 store 的收起签名挡掉。
+   useApp.getState().dismissCompletedPlans(sid);
    // 首条发送成功：本地回退先顶上 + 回读 omp 真值（rpc-ui 实测不产标题，回退即终态；
    // TUI 侧改过名时真值覆盖回退）。失败不阻塞发送链路。
    if (isFirst && raw.trim() && sentImages.length === 0) {
@@ -1055,13 +1099,21 @@ export function Composer() {
   // 不发这条就只剩目标条、没有流式输出）。运行中只设目标，避免打断当前轮。
   if (goalMode) {
    const text = draft.trim();
-   if (!text) return;
+   // 目标必须有一段描述：只贴了图没写目标时给提示，别把图片悄悄吞掉
+   if (!text) {
+    if (attachments.length > 0) setAttachError(t.goalNeedsText);
+    return;
+   }
+   // 草稿里粘的图片跟着**启动消息**走（目标本身只是状态、不收附件）；发送失败由
+   // `sendTextTo` 把文字与图片一起还回来。运行中不发启动消息，图片就留在输入框里
+   // 等下一次真正发送——绝不能在这里清掉。
+   const sentImages = attachments;
    try {
     const data = await api.goalCommand(activeSessionId, "create", text);
     useApp.getState().setGoal(activeSessionId, (data.goal ?? null) as Goal | null);
     persistDraft(activeSessionId, "");
     setGoalModeFor(null);
-    if (!running) await sendTextTo(activeSessionId, cwd, text, []);
+    if (!running) await sendTextTo(activeSessionId, cwd, text, sentImages);
    } catch (e) {
     setAttachError(e instanceof Error ? e.message : String(e));
    }
@@ -1120,7 +1172,7 @@ export function Composer() {
        （`complete_path`），Tab/Enter 选中；空 token 时最上面多一行「工作区文件」入口。
        取词中与「没有匹配」都留在浮层里如实说——无声消失会被当成坏了（用户实测）。 */}
    {mentionOpen && (
-    <div className="mx-auto mb-1.5 max-w-(--measure-content)">
+    <div ref={mentionRef} className="mx-auto mb-1.5 max-w-(--measure-content)">
      <MentionList
       rows={mentionRows}
       active={mentionIdx}
@@ -1133,7 +1185,7 @@ export function Composer() {
    {/* `+` 与 `/` 共用同一个面板（2026-10-20 用户口径）：操作组 + 技能；
        `/` 打开时按输入过滤，`+` 打开时列全部技能 */}
    {panelOpen && (
-    <div className="mx-auto mb-1.5 max-w-(--measure-content)">
+    <div ref={panelRef} className="mx-auto mb-1.5 max-w-(--measure-content)">
      <SlashMenu
       cands={panelCands}
       active={slashOpen ? slashIdx : -1}
@@ -1233,7 +1285,7 @@ export function Composer() {
        <QueueRow
         key={`s-${i}-${text}`}
         mode="steer"
-        text={text}
+        text={stripImageOrderNote(text)}
         onEdit={() => void editQueued(text, "steering")}
         onRemove={() => void removeQueued(text, "steering")}
        />
@@ -1242,7 +1294,7 @@ export function Composer() {
        <QueueRow
         key={`f-${i}-${text}`}
         mode="queue"
-        text={text}
+        text={stripImageOrderNote(text)}
         onEdit={() => void editQueued(text, "followUp")}
         onRemove={() => void removeQueued(text, "followUp")}
         onPromote={() => void promoteQueued(text)}
@@ -1275,6 +1327,7 @@ export function Composer() {
          右 = 压缩行动点 / 上下文容量环 / 供应商用量（2026-10-14 从顶栏右端搬进输入卡）+
          模型 / 思考档（两个独立选择器）+ 发送 / 停止 */}
      <button
+      ref={plusBtnRef}
       type="button"
       onClick={() => setToolsOpen((v) => !v)}
       disabled={!activeSessionId || awaiting}

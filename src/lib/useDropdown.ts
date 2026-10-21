@@ -154,3 +154,39 @@ export function useSingleOpen() {
  });
  return { openId, bind };
 }
+
+/**
+ * 「点外部关闭」的**不抢焦点**版：与 `useDropdown` 同一套 document `pointerdown` 口径，
+ * 但不聚焦浮层、也不还原焦点——输入卡的 `+` / `/` 面板与 `@` 补全都是**编辑器转交键盘**
+ * （↑↓/Tab/Enter 由 `DraftEditor` 的 capture 交给 Composer），抢焦点会打断打字。
+ *
+ * `isInside(target)` 判断这次 pointerdown 是否算浮层内部（浮层自身 + 它自己的触发按钮）：
+ * 返回 `true` 时不关。**触发按钮必须算进去**——否则 pointerdown 先关、随后的 click 又开，
+ * 按钮永远关不掉（与 `useDropdown` 的 `ignore` 同一个坑）。
+ * 回调与判定放 ref：只有 `open` 翻转才重装监听，每次渲染的新闭包不会多挂一份。
+ */
+export function useOutsideDismiss(
+ open: boolean,
+ onDismiss: () => void,
+ isInside: (target: Node) => boolean,
+) {
+ const dismissRef = useRef(onDismiss);
+ const insideRef = useRef(isInside);
+ useEffect(() => {
+  dismissRef.current = onDismiss;
+  insideRef.current = isInside;
+ });
+ useEffect(() => {
+  if (!open) return;
+  // capture 阶段：子元素 stopPropagation 不该让浮层关不掉（编辑器只拦键盘，但这里不赌）
+  const onDown = (event: PointerEvent) => {
+   const target = event.target;
+   if (!(target instanceof Node)) return;
+   if (insideRef.current(target)) return;
+   dismissRef.current();
+  };
+  document.addEventListener("pointerdown", onDown, true);
+  return () => document.removeEventListener("pointerdown", onDown, true);
+ }, [open]);
+}
+

@@ -8,6 +8,7 @@ import type { AskQuestion, BtwRecord, BtwTurn, Goal, SessionRuntime, SessionStat
 import { summarizeArgs, mentionFilesOf, diffStatOf, primaryPathOf, TOOL_OUTPUT_FULL_MAX } from "./viewmsg";
 import { fmt, TEXT, type Text } from "./locale";
 import { imagesFromContent } from "./attachments";
+import { stripImageOrderNote } from "./imageRefs";
 import { normalizeCommands } from "./slashCommands";
 import { forgetSessionLiveStats } from "./sessionLiveStats";
 import { scheduleWorkspaceGitRefresh } from "./commitTasks";
@@ -145,7 +146,10 @@ export function frameToViewMsgs(sid: string, frame: Record<string, unknown>, dic
   }
   // message_end 还有 assistant / toolResult 两套终态处理，继续走下面的分支
   if (t === "message_start" && m?.role === "user") {
-   const text = (m.content ?? []).filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n");
+   // 发送时补的附件顺序注记只给模型看：回显按同一条格式剥掉（乐观回显是原文，合并才不翻倍）
+   const text = stripImageOrderNote(
+    (m.content ?? []).filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n"),
+   );
    // 图片块（V2 M6）：随消息发出的图直接渲染在气泡里
    const { images, omitted } = imagesFromContent(m.content);
    out.push({
@@ -594,8 +598,9 @@ function applyRuntime(sid: string, rt: SessionRuntime) {
    followUp: rt.queuedMessages.followUp ?? [],
   });
  }
- // goal 状态（V40）：`get_state.goal` 原样（null = 没有目标）
- useApp.getState().setGoal(sid, rt.goal ?? null);
+ // goal 状态（V40）：`get_state.goal` 是 GoalModeState（`{enabled,mode,goal}`）——归一成
+ // Goal 本体再落库（null / 关闭的状态包都当无目标）；字段缺失（事件推送）不动已有值
+ if (rt.goal !== undefined) useApp.getState().setGoal(sid, goalFromWire(rt.goal));
 }
 
 /**
@@ -685,6 +690,7 @@ export function forgetSession(sid: string): void {
   !(sid in st.statusBySession) &&
   !(sid in st.plansBySession) &&
   !(sid in st.planCardBySession) &&
+  !(sid in st.planDismissedBySession) &&
   !(sid in st.attachmentsBySession) &&
   !(sid in st.queuedBySession) &&
   !(sid in st.goalBySession) &&
@@ -697,6 +703,7 @@ export function forgetSession(sid: string): void {
  const status = { ...st.statusBySession };
  const plans = { ...st.plansBySession };
  const planCards = { ...st.planCardBySession };
+ const planDismissed = { ...st.planDismissedBySession };
  const atts = { ...st.attachmentsBySession };
  const queued = { ...st.queuedBySession };
  const goals = { ...st.goalBySession };
@@ -705,6 +712,7 @@ export function forgetSession(sid: string): void {
  delete status[sid];
  delete plans[sid];
  delete planCards[sid];
+ delete planDismissed[sid];
  delete atts[sid];
  delete queued[sid];
  delete goals[sid];
@@ -714,6 +722,7 @@ export function forgetSession(sid: string): void {
   statusBySession: status,
   plansBySession: plans,
   planCardBySession: planCards,
+  planDismissedBySession: planDismissed,
   attachmentsBySession: atts,
   queuedBySession: queued,
   goalBySession: goals,
@@ -727,12 +736,26 @@ export function forgetSession(sid: string): void {
 }
 
 /**
- * `goal_updated.goal` 帧 / `get_state.goal` → Goal（数字字段缺省 0；结构见 types.ts）。
+ * goal 的两种线上形状归一成 `Goal | null`（数字字段缺省 0；结构见 types.ts）：
+ * - `get_state.goal` = **GoalModeState**（omp 18.12.4 实测 `{enabled,mode,goal}`）——目标在 `.goal`；
+ * - `goal_updated.goal` 帧 / `goal` 命令回包的 `.goal` = Goal 本体（`{id,objective,status,…}`）。
+ *
+ * 形状不合法（没有 string `objective` / `id`）时不产出半截对象：否则目标条会渲染成
+ * 「目标 · 进行中」加一段空白，点编辑也预填不出文字。
  */
-function goalFromFrame(g: Record<string, unknown>): Goal {
+export function goalFromWire(raw: unknown): Goal | null {
+ if (!raw || typeof raw !== "object") return null;
+ const obj = raw as Record<string, unknown>;
+ // 状态包（get_state）：真正的目标在 `.goal`；直接给 Goal 本体的路径照旧兼容
+ const inner = "enabled" in obj || "mode" in obj || "goal" in obj ? obj.goal : obj;
+ if (!inner || typeof inner !== "object") return null;
+ const g = inner as Record<string, unknown>;
+ const objective = typeof g.objective === "string" ? g.objective : "";
+ const id = typeof g.id === "string" ? g.id : "";
+ if (!objective.trim() || !id) return null;
  return {
-  id: String(g.id ?? ""),
-  objective: String(g.objective ?? ""),
+  id,
+  objective,
   status: String(g.status ?? "active"),
   tokensUsed: typeof g.tokensUsed === "number" ? g.tokensUsed : 0,
   timeUsedSeconds: typeof g.timeUsedSeconds === "number" ? g.timeUsedSeconds : 0,
@@ -887,9 +910,9 @@ export function useSessionEvents() {
      return;
     }
     // goal 状态（V40）：每次变更（用户命令 / agent 的 goal 工具 / 续跑）推全量快照。
+    // `goal_updated.goal` 是 Goal 本体（`get_state.goal` 的状态包由 `goalFromWire` 一并收）
     if (p?.type === "goal_updated") {
-     const g = p.goal as Record<string, unknown> | null | undefined;
-     useApp.getState().setGoal(sid, g ? goalFromFrame(g) : null);
+     useApp.getState().setGoal(sid, goalFromWire(p.goal));
      return;
     }
     // 旁问帧（V40）：面板开着本会话时消费（关掉后重开会拉全量历史，帧不必缓存）。

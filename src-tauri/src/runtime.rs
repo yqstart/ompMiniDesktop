@@ -278,8 +278,8 @@ pub struct SessionMeta {
     /// 待发队列真值（`get_state.queuedMessages` 原样透传：`{steering,followUp,liveSteered}`）。
     /// V40：队列芯片文本可撤回 / 提升（`queue_update` 事件是实时权威，这里是回读兜底）。
     pub queued_messages: Option<serde_json::Value>,
-    /// goal 目标模式状态（`get_state.goal` 原样透传：`{id,objective,status,tokensUsed,…}`；
-    /// 无目标时为 `None`——原字段是 `null`）。
+    /// goal 目标模式（`get_state.goal` 归一后的 **Goal 本体**：`{id,objective,status,tokensUsed,…}`；
+    /// 无目标时为 `None`——omp 原字段是 `null`，或有目标时是 GoalModeState）。
     pub goal: Option<serde_json::Value>,
     /// fast 模式（`get_state.fastModeEnabled/Active`；V41——模型不支持时两者皆 false）。
     pub fast_mode_enabled: Option<bool>,
@@ -324,7 +324,7 @@ impl SessionMeta {
             }),
             queued_count: d.get("queuedMessageCount").and_then(|x| x.as_i64()),
             queued_messages: d.get("queuedMessages").filter(|q| !q.is_null()).cloned(),
-            goal: d.get("goal").filter(|g| !g.is_null()).cloned(),
+            goal: goal_from_state(d.get("goal")),
             fast_mode_enabled: d.get("fastModeEnabled").and_then(|x| x.as_bool()),
             fast_mode_active: d.get("fastModeActive").and_then(|x| x.as_bool()),
             fast_mode_supported: m.map(fast_mode_supported),
@@ -367,6 +367,28 @@ impl SessionMeta {
         }
         Some((usage, duration, ttft))
     }
+}
+
+/// `get_state.goal` → Goal 本体（没有目标 / 形状不合法 → `None`）。
+///
+/// 实测（omp 18.12.4 rpc-ui）：有目标时 `get_state.goal` 是 **GoalModeState**
+/// `{enabled,mode,goal:{id,objective,status,tokensUsed,timeUsedSeconds,…}}`，而
+/// `goal_updated` 帧与 `goal` 命令回包的 `.goal` 是 Goal 本体——这里统一折成本体，
+/// 前端只需要认一种形状（旧口径直接给 Goal 的也照样收）。
+fn goal_from_state(g: Option<&serde_json::Value>) -> Option<serde_json::Value> {
+    let g = g.filter(|x| !x.is_null())?;
+    // 状态包：真正的目标在 `.goal`；`{enabled:false}` 时可能没有这个键
+    let inner = if g.get("enabled").is_some() || g.get("mode").is_some() {
+        g.get("goal").filter(|x| !x.is_null())?
+    } else {
+        g
+    };
+    // 没有 objective 的空壳不算目标：落到前端只会渲染出一条空白目标条
+    inner
+        .get("objective")
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.trim().is_empty())?;
+    Some(inner.clone())
 }
 
 /// 提取精简模型引用（provider/id/name）。
@@ -2513,6 +2535,49 @@ mod tests {
 
         // 无 id 的畸形 data 不产出模型
         assert!(SessionMeta::from_state(&serde_json::json!({"model": {"provider": "x"}})).model.is_none());
+    }
+
+    /// `get_state.goal` 的线上形状（omp 18.12.4 实测）：有目标时是 GoalModeState
+    /// `{enabled,mode,goal}`——必须折成 Goal 本体再给前端，否则目标条拿不到 objective
+    /// （渲染成空白条、编辑也预填不出文字）。
+    #[test]
+    fn session_meta_unwraps_goal_mode_state() {
+        let goal = serde_json::json!({
+            "id": "g1",
+            "objective": "跑通测试",
+            "status": "active",
+            "tokensUsed": 10,
+            "timeUsedSeconds": 30,
+            "createdAt": 1792548982129_i64,
+            "updatedAt": 1792548982129_i64
+        });
+        let state = serde_json::json!({ "goal": { "enabled": true, "mode": "active", "goal": goal } });
+        let m = SessionMeta::from_state(&state);
+        let g = m.goal.as_ref().expect("goal 应折成 Goal 本体");
+        assert_eq!(g["objective"], serde_json::json!("跑通测试"));
+        assert_eq!(g["status"], serde_json::json!("active"));
+        // 前端字段名继续按原样透传（camelCase 由 serde rename_all 保证）
+        assert_eq!(serde_json::to_value(&m).unwrap()["goal"]["objective"], serde_json::json!("跑通测试"));
+
+        // 旧口径 / 其它路径直接给 Goal 本体：照样收
+        let direct = serde_json::json!({ "goal": goal });
+        assert_eq!(
+            SessionMeta::from_state(&direct).goal.unwrap()["tokensUsed"],
+            serde_json::json!(10)
+        );
+
+        // 没有目标：null / 关闭的状态包 / 没有 objective 的空壳都当无目标
+        assert!(SessionMeta::from_state(&serde_json::json!({ "goal": null })).goal.is_none());
+        assert!(
+            SessionMeta::from_state(&serde_json::json!({ "goal": { "enabled": false, "mode": "off" } }))
+                .goal
+                .is_none()
+        );
+        assert!(
+            SessionMeta::from_state(&serde_json::json!({ "goal": { "enabled": true, "goal": {} } }))
+                .goal
+                .is_none()
+        );
     }
 
     /// Fast 闪电的显隐判据（与 omp `service-tier.ts` 的 `ty` + `Cve`/`Cu` 对齐）：
