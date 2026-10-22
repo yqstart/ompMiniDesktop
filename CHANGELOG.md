@@ -6,6 +6,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **「系统授权 › 自动化」不再把「System Events 没在跑」读成未授权**（2026-10-22 用户实测）：`AEDeterminePermissionToAutomateTarget` 按 bundle id 寻址时**要求目标进程正在运行**，而 System Events 由 launchd 按需拉起、平时不常驻——归零状态下这个 API 一律返回 `-600`（procNotFound），于是系统设置里 System Events / Chrome 的开关全开着、面板仍显示「去授权」。现在 -600 时后端先 `open -g -b com.apple.systemevents` 把它拉起来（启动 app 不发 Apple Event、不会弹授权框；拉起有效就不留门槛——用户手动退出 System Events 后下一轮轮询即可恢复，只有拉起本身失败才 30s 内不再重试），短暂等待后重查，再按 0 / -1743 / -1744 给出真实读数。回归测试从冷状态（先杀掉 System Events）验证查询不再停在 -600。
+
 ## [0.3.2] - 2026-10-22
 
 ### Added

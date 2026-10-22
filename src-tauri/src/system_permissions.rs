@@ -11,7 +11,10 @@
 //! - 辅助功能（Accessibility）：`AXIsProcessTrusted()`；
 //! - 屏幕录制（Screen Capture）：`CGPreflightScreenCaptureAccess()`（macOS 10.15+）；
 //! - 自动化（AppleEvents）：`AEDeterminePermissionToAutomateTarget` 以 System Events 为
-//!   目标、`askUserIfNeeded = false`（**不会弹窗**；-1744 = 尚未决定，按未授权显示）。
+//!   目标、`askUserIfNeeded = false`（**不会弹窗**；-1744 = 尚未询问，按未授权显示）。
+//!   这个 API 按 bundle id 寻址时**要求目标进程正在运行**（否则 -600 `procNotFound`），
+//!   而 System Events 是 launchd 按需拉起的 agent、平时不常驻——所以 -600 时先启动它再查
+//!   （启动 app 不发 Apple Event、不触发授权框）。
 //!
 //! 非 macOS（Windows）返回 `supported: false`，界面据此只显示一句「仅 macOS 可用」。
 
@@ -29,7 +32,10 @@ pub struct SystemPermissions {
     pub automation: bool,
 }
 
-/// 读四项授权。纯本地查询（无子进程、无网络），可随面板高频轮询。
+/// 读四项授权。纯本地查询（无网络），可随面板高频轮询。
+///
+/// 唯一的子进程例外：自动化检测发现 System Events 没在运行时，会 `open -b` 拉起它一次
+/// （见 `launch_system_events` 的限流），否则那个 API 只会返回 -600、把已授权读成未授权。
 #[tauri::command]
 pub fn get_system_permissions() -> SystemPermissions {
     platform::detect()
@@ -57,6 +63,8 @@ mod platform {
     use super::{settings_anchor, SystemPermissions};
     use std::ffi::c_void;
     use std::path::PathBuf;
+    use std::sync::Mutex;
+    use std::time::Instant;
 
     // ApplicationServices: Boolean AXIsProcessTrusted(void)
     #[link(name = "ApplicationServices", kind = "framework")]
@@ -80,6 +88,10 @@ mod platform {
     const TYPE_APPLICATION_BUNDLE_ID: u32 = 0x6275_6E64; // 'bund'
     const CORE_SUITE: u32 = 0x636F_7265; // 'core'
     const GET_DATA: u32 = 0x6765_7464; // 'getd'
+
+    // `AEDeterminePermissionToAutomateTarget` 的返回码（其余非 0 值一律按未授权）。
+    const NO_ERR: i32 = 0;
+    pub(super) const PROC_NOT_FOUND: i32 = -600; // 目标进程没在运行，与授权无关
 
     #[link(name = "CoreServices", kind = "framework")]
     extern "C" {
@@ -137,8 +149,56 @@ mod platform {
     }
 
     /// 自动化（AppleEvents）以 System Events 为探针：omp 的 osascript 路径第一个碰的就是它。
-    /// `AEDeterminePermissionToAutomateTarget(.., false)` 只查不弹；返回值 0 = 已允许。
+    ///
+    /// `AEDeterminePermissionToAutomateTarget(.., false)` 只查不弹（0 = 已允许，-1743 = 已拒绝，
+    /// -1744 = 尚未询问）。但 bundle id 寻址**要求目标进程正在运行**——System Events 由 launchd
+    /// 按需拉起、平时不常驻，不在跑时一律返回 -600，直接查会把「已授权」读成未授权。所以
+    /// -600 时先启动它再查一次。
     fn automation_allowed() -> bool {
+        match query_automation() {
+            NO_ERR => true,
+            PROC_NOT_FOUND => recover_by_launching(),
+            _ => false,
+        }
+    }
+
+    /// -600 的恢复路径：拉起 System Events 再查。
+    ///
+    /// 限流只针对**拉起无效**的情形（`open` 失败 / 拉起后仍解析不到）：那种情况下每 2s 轮询都
+    /// spawn 一个 `open` 是白费，30s 内不再重试。拉起有效时不留门槛——用户手动退出 System
+    /// Events 后，下一轮轮询就能把它拉回来，不必等 30s、也不会闪过「未授权」。
+    fn recover_by_launching() -> bool {
+        static LAST_FAILURE: Mutex<Option<Instant>> = Mutex::new(None);
+        let Ok(mut last_failure) = LAST_FAILURE.lock() else { return false };
+        if last_failure.is_some_and(|at| at.elapsed().as_secs() < 30) {
+            return false;
+        }
+        launch_system_events();
+        // `open` 返回时通常已能解析到进程；没赶上就短暂等待（最多 250ms）——
+        // 等的是「进程出现」，-1743 / -1744 这类授权结论等待也不会变。
+        for attempt in 0..6 {
+            if attempt > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            match query_automation() {
+                NO_ERR => {
+                    *last_failure = None;
+                    return true;
+                }
+                PROC_NOT_FOUND => continue,
+                _ => {
+                    // 进程起来了：结论是授权本身（已拒绝 / 尚未询问），与拉起无关。
+                    *last_failure = None;
+                    return false;
+                }
+            }
+        }
+        *last_failure = Some(Instant::now());
+        false
+    }
+
+    /// 查一次授权状态（纯查询：不发 Apple Event、不弹系统确认框）。
+    pub(super) fn query_automation() -> i32 {
         const BUNDLE: &[u8] = b"com.apple.systemevents";
         let mut target = AEDesc { descriptor_type: 0, data_handle: std::ptr::null_mut() };
         // SAFETY: 只读传入 bundle id 字节，desc 由 AECreateDesc 填充、随后由本函数释放。
@@ -151,17 +211,29 @@ mod platform {
             )
         };
         if created != 0 {
-            return false;
+            return i32::from(created);
         }
         // SAFETY: target 是上面创建的有效 AEDesc。
-        let allowed = unsafe {
-            AEDeterminePermissionToAutomateTarget(&target, CORE_SUITE, GET_DATA, 0) == 0
+        let status = unsafe {
+            AEDeterminePermissionToAutomateTarget(&target, CORE_SUITE, GET_DATA, 0)
         };
         // SAFETY: 与 AECreateDesc 配对释放；失败也必须在同一条路径上释放。
         unsafe {
             AEDisposeDesc(&mut target);
         }
-        allowed
+        status
+    }
+
+    /// 启动 System Events（agent，无窗口、发事件前本来也要由系统拉起）。
+    /// 启动 app 不涉及 Apple Event，不会触发授权框。
+    ///
+    /// 只在 `-600`（目标没在跑）时调用；重复调用的闸门在 `recover_by_launching`。
+    fn launch_system_events() {
+        // `-g` 不把任何窗口提到前台；`open` 返回时 LaunchServices 已登记进程，
+        // 紧接着的查询就能解析到它（实测无需额外等待）。
+        let _ = std::process::Command::new("open")
+            .args(["-g", "-b", "com.apple.systemevents"])
+            .status();
     }
 }
 
@@ -211,5 +283,19 @@ mod tests {
         assert!(state.supported);
         #[cfg(not(target_os = "macos"))]
         assert!(!state.supported);
+    }
+
+    /// 回归（2026-10-22 用户实测：系统设置里开关全开，面板仍显示未授权）：
+    /// `AEDeterminePermissionToAutomateTarget` 按 bundle id 寻址要求目标进程在运行，
+    /// System Events 由 launchd 按需拉起、平时不常驻，不在跑时返回 -600。
+    /// `detect()` 必须在这一档先拉起它、再查一次——不能把 -600 当授权结论。
+    ///
+    /// 这里只验证机制（不再读到 -600），不断言具体的授权值：那取决于跑测试的可执行文件
+    /// 自己的 TCC 身份（0 = 已允许 / -1743 = 已拒绝 / -1744 = 尚未询问，都是合法结果）。
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn automation_probe_does_not_confuse_missing_target_with_denial() {
+        let _ = super::platform::detect();
+        assert_ne!(super::platform::query_automation(), super::platform::PROC_NOT_FOUND);
     }
 }
