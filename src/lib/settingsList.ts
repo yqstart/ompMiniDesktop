@@ -5,6 +5,8 @@
  * 并把两个页签**合并成一页**（117 项）；**四稿按「桌面壳里有没有可观测差异」再筛**——
  * 桌面端跑的是 `omp --mode rpc-ui`，终端 TUI 的一切在壳里没有对应物，留着只会让用户改了
  * 没变化：删 37 项（外观整组只剩图片处理两项，其余按主题并组）→ **80 项**。
+ * **五稿（2026-10-22 用户口径）**：把 omp 的浏览器自动化配置整组上浮 → **87 项**（`browser.headless`
+ * 从三稿的删除名单里解禁——当时按「壳里看不见」删掉，现在正是要看得见的那个键）。
  *
  * 判据（进本清单的唯一理由 = 改这个键，壳里看得见差别，按上游 `omp config list` 的
  * description 逐项核对，含糊项以真机 rpc-ui 探针定夺）：
@@ -18,7 +20,7 @@
  *
  * 维护契约（`settingsList.test.ts` 守着）：
  * - 无重复；每一项在名称表（`ompSettingNames.ts`，覆盖上游 519 项全量）里都有条目；
- *   规模 ≤ 80（防扩回全量）；三稿 / 四稿删掉的键不得回流（测试逐个钉住）；
+ * - 规模 ≤ 87（防扩回全量）；三稿 / 四稿删掉的键不得回流（测试逐个钉住）；
  * - 顺序照上游人读清单（面板按上游分组渲染，组内顺序 = `omp config list` 的顺序）；
  * - 上游升级后新增的键**不会自动进来**——加之前先按上面的判据过一遍，再改本清单与测试。
  */
@@ -123,7 +125,18 @@ export const SETTINGS_LIST: readonly string[] = [
  "github.enabled",
  "web_search.enabled",
  "dev.autoqa",
+ // —— tools › 浏览器自动化（2026-10-22 用户口径：可见性这一组全部上浮——「omp 的浏览器
+ //    操作看不见」在壳里无从下手，必须能在设置页里开关窗口 / 接自己的 Chrome。
+ //    `browser.cmux` / `browser.tern` 不进来：那是 cmux / Tern 两个宿主的开关，
+ //    桌面壳既不是它们、也观测不到差异，按四稿判据排除）
  "browser.enabled",
+ "browser.cdpUrl",
+ "browser.relay",
+ "browser.relayUrl",
+ "browser.headless",
+ "browser.freezeOnTurnEnd",
+ "browser.idleCloseSec",
+ "browser.screenshotDir",
 ];
 
 /** 上面数组的成员表（面板 / 搜索过滤时每项 O(1) 命中；静态键集用 Record，不用 Set）。 */
@@ -149,13 +162,19 @@ export const SETTING_SECTION_OVERRIDES: Record<string, string> = {
 /**
  * 行内标注（键名下第二行的附加信息）：
  * - `tuiOnly`：只影响 omp 自己的终端 TUI（plan / goal 是功能总闸，实测 RPC / 壳侧无可观测差异）；
- * - `minusOneIsDefault`：数字的 `-1` 表示「用 omp 默认」（当前值为 -1 时行内提示）。
+ * - `minusOneIsDefault`：数字的 `-1` 表示「用 omp 默认」（当前值为 -1 时行内提示）；
+ * - `visibleWhenOff`：双重否定的布尔项（`browser.headless`）——值为 false 时补一句人话
+ *   「窗口可见」，不让人靠悬停读上游的 "disable to show browser UI"。
  */
-export const SETTING_NOTES: Record<string, { tuiOnly?: true; minusOneIsDefault?: true }> = {
+export const SETTING_NOTES: Record<
+ string,
+ { tuiOnly?: true; minusOneIsDefault?: true; visibleWhenOff?: true }
+> = {
  "plan.enabled": { tuiOnly: true },
  "goal.enabled": { tuiOnly: true },
  "compaction.thresholdPercent": { minusOneIsDefault: true },
  temperature: { minusOneIsDefault: true },
+ "browser.headless": { visibleWhenOff: true },
 };
 
 /**

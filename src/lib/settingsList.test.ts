@@ -13,8 +13,9 @@ const zh = TEXT["zh-CN"];
 const en = TEXT.en;
 
 /**
- * 「常用设置」页展示清单的维护契约（docs/v3-schedule.md §4.1；四稿筛选 2026-10-15）：
- * ① 无重复；② 每项有中英短名（行标题不退化）；③ 规模 80（不多不少——四稿按「壳里可观测」定稿）；
+ * 「常用设置」页展示清单的维护契约（docs/v3-schedule.md §4.1；四稿筛选 2026-10-15，五稿 2026-10-22）：
+ * ① 无重复；② 每项有中英短名（行标题不退化）；③ 规模 87（五稿在四稿 80 项上按用户口径并入
+ * 浏览器自动化 7 项——`browser.enabled` 原本就在）；
  * ④ 三稿 / 四稿明确删掉的键不得回流；⑤ 翻译 / 标注 / 归位表的键都在清单里、字典键中英非空；
  * ⑥ 字典里的每个 `sv*` 键都被翻译表引用（无孤儿——删键时要同步清翻译）。
  *
@@ -22,7 +23,8 @@ const en = TEXT.en;
  * （`ompSettingNames.test.ts`）——传递保证清单里的键都是本机上游真实存在的。
  */
 
-/** 三稿明确删掉的 33 项（用户口径）：不得回流到清单里。 */
+/** 三稿明确删掉的 33 项（用户口径）：不得回流到清单里。
+ *  `browser.headless` 于 2026-10-22 解禁（五稿：浏览器可见性整组上浮），其余 32 项照旧。 */
 const REMOVED_WAVE3 = [
  "colorBlindMode",
  "tui.imeSafeCursor",
@@ -56,7 +58,6 @@ const REMOVED_WAVE3 = [
  "vault.enabled",
  "security.enabled",
  "ask.enabled",
- "browser.headless",
 ];
 
 /**
@@ -110,8 +111,8 @@ const REMOVED_WAVE4 = [
 ];
 
 describe("常用设置展示清单", () => {
- it("80 项、无重复", () => {
-  expect(SETTINGS_LIST).toHaveLength(80);
+ it("87 项、无重复", () => {
+  expect(SETTINGS_LIST).toHaveLength(87);
   expect(new Set(SETTINGS_LIST).size).toBe(SETTINGS_LIST.length);
  });
 
@@ -123,13 +124,13 @@ describe("常用设置展示清单", () => {
   expect(missing, `缺名称：${missing.join(", ")}`).toEqual([]);
  });
 
- it("规模钉在四稿定稿的 80 项（加项必须先过判据并改这里，防被扩回全量）", () => {
-  expect(SETTINGS_LIST.length).toBeLessThanOrEqual(80);
+ it("规模钉在五稿定稿的 87 项（加项必须先过判据并改这里，防被扩回全量）", () => {
+  expect(SETTINGS_LIST.length).toBeLessThanOrEqual(87);
   expect(SETTINGS_LIST.length).toBeGreaterThanOrEqual(60);
  });
 
- it("三稿删掉的 33 项不在清单里（不得回流）", () => {
-  expect(REMOVED_WAVE3).toHaveLength(33);
+ it("三稿删掉的 32 项不在清单里（不得回流；browser.headless 已按五稿解禁）", () => {
+  expect(REMOVED_WAVE3).toHaveLength(32);
   const back = REMOVED_WAVE3.filter((k) => SETTINGS_LIST.includes(k));
   expect(back, `回流：${back.join(", ")}`).toEqual([]);
  });

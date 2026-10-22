@@ -495,6 +495,7 @@ function SettingRow({
       {status && ` · ${status}`}
       {note?.tuiOnly && ` · ${t.ompSettingsTuiOnly}`}
       {note?.minusOneIsDefault && value === -1 && ` · -1 = ${t.ompSettingsDefault}`}
+      {note?.visibleWhenOff && value === false && ` · ${t.ompSettingsBrowserVisible}`}
      </div>
     </div>
     <button

@@ -202,3 +202,27 @@ describe("枚举设置", () => {
   expect(document.body.textContent).not.toContain("xhigh");
  });
 });
+
+describe("浏览器可见性标注", () => {
+ it("关掉「无头浏览器」时行内补一句「窗口可见」", async () => {
+  vi.mocked(api.getOmpSettingsCatalog).mockResolvedValue(
+   catalog([catalogItem({ key: "browser.headless", value: false })]),
+  );
+  act(() => {
+   root.render(<GeneralSettingsPanel />);
+  });
+  await flush();
+  expect(container.textContent).toContain("窗口可见");
+ });
+
+ it("开着「无头浏览器」时不补这句（默认态不喧哗）", async () => {
+  vi.mocked(api.getOmpSettingsCatalog).mockResolvedValue(
+   catalog([catalogItem({ key: "browser.headless", value: true })]),
+  );
+  act(() => {
+   root.render(<GeneralSettingsPanel />);
+  });
+  await flush();
+  expect(container.textContent).not.toContain("窗口可见");
+ });
+});

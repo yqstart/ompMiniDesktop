@@ -6,6 +6,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **常用设置 ›「工具」组：浏览器自动化配置整组上浮**（2026-10-22 用户口径）：此前设置页里只有一个 `browser.enabled`，`browser.headless` 还躺在三稿的删除名单里——结果是「omp 的浏览器操作看不见」在壳里根本无从下手。现在 `browser.cdpUrl` / `relay` / `relayUrl` / `headless` / `freezeOnTurnEnd` / `idleCloseSec` / `screenshotDir` 一并可选（清单 80 → 87 项）。**让操作可见 = 关掉「无头浏览器」**：行内会补一句「窗口可见（omp 另开一个浏览器窗口）」，省得去悬停读上游那句 "disable to show browser UI"；omp 随后启动的是自带的有头 Chrome for Testing 窗口，配置改动在下一次 browser 调用（或新会话）生效。`browser.cmux` / `browser.tern` 仍不进：那是 cmux / Tern 两个宿主的开关，桌面壳里没有可观测差异。壳侧不做内置浏览器。
+
 ### Changed
 
 - **死代码清理**（2026-10-22，全量 review）：移除已退场功能留下的无调用者链路——`/fork` 的前端映射 / `fork_session` / `fork_at` 与 `openForkedSession`、`/branch` 的 `branch_session`、`/slow` 的 `set_slow_mode`、未注册的 `locate_omp` 前端绑定、`useSingleOpen`、`SessionActions`、`SLASH_GROUPS`、`resetRemoteAuth`、仅测试调用的 `providerSelectors` / `highestThinking` / `referenceInsertText` / `appendReference`，以及 `s_*` / `sa*` 两组无人引用的文案键；后端删除未使用的 `walkdir` 依赖与模板残留的 `lib.rs` 目标。`lint` 改为覆盖仓库根配置（`eslint .`），`@eslint/js` 对齐 ESLint 9。

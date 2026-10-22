@@ -740,6 +740,7 @@ const ZH = {
  ompSettingsReset: "恢复 omp 默认值",
  ompSettingsTuiOnly: "仅 TUI 生效",
  ompSettingsDefault: "默认",
+ ompSettingsBrowserVisible: "窗口可见（omp 另开一个浏览器窗口）",
  ompSettingsMissing: "未找到 omp——先用顶部横幅的「重新检测 / 指定路径」指定；omp 就绪后，安装信息与诊断在左栏字标行 omp 版本 chip 的弹窗里。",
  // 设置面板（设置 ›「常用设置」）的文案；展示哪些键由 `lib/settingsList.ts` 的清单过滤，
  // 分组 / 枚举取值来自上游人读清单，值与说明来自 --json
@@ -2257,6 +2258,7 @@ const EN: Record<TextKey, string> = {
  ompSettingsReset: "Reset to omp's default",
  ompSettingsTuiOnly: "TUI only",
  ompSettingsDefault: "Default",
+ ompSettingsBrowserVisible: "Window visible (omp opens a separate browser window)",
  ompSettingsMissing: "omp not found — use “Re-check / Set path” in the banner at the top first; once omp is ready, its install info and diagnostics live in the dialog behind the omp version chip on the sidebar wordmark row.",
  allSettingsNotSet: "Not set",
  allSettingsRedacted: "Value hidden",
