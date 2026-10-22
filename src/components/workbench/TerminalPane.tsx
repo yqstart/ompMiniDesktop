@@ -37,27 +37,27 @@ export function TerminalPane({ id, cwd, visible }: { id: string; cwd: string; vi
  const [atBottom, setAtBottom] = useState(true);
  /** 脚本页签投递过来的待运行命令（见 `store.runInTerminal`）。 */
  const pendingRun = useApp((s) => s.pendingTerminalRun);
- /** 已消费的命令序号：首帧输出与超时兜底两条路都会走到，同一条不许写两次。 */
+ /** 已消费的命令序号：pendingRun 生效与 spawn 完成两条路都会走到，同一条不许写两次。 */
  const consumedRunRef = useRef(0);
- /** 是否已经收到过 PTY 输出（= shell 起来了，可以直接写命令）。 */
- const sawOutputRef = useRef(false);
+ /** PTY 是否已 spawn 成功：命令只能写进有主儿的终端（spawn 还没回来时先不写）。 */
+ const spawnedRef = useRef(false);
 
  /**
   * 把投递过来的命令写进 PTY。
   *
-  * 什么时候算「能写了」：PTY 的输入有 tty 缓冲，spawn 之后写进去字符不会丢，但 shell 启动时会先跑
-  * rc 文件——那期间写进去的字符可能被 rc 里的命令读走。所以默认等**首帧输出**（提示符出来 = shell
-  * 已经能读输入）；shell 万一没有任何输出，由下面的 1.5s 超时兜底。
+  * 写入时机交给后端（`terminalWriteReady`）：shell 启动期还在跑 rc 时终端是 cooked 模式，这时写进去
+  * 命令会先被 tty 行规程回显一遍、行编辑器起来后再把输入缓冲连提示符重画一遍——界面上就成了
+  * 两行同样的命令（实际只执行一次）。后端等行编辑器把终端切到 raw（提示符出来、能读输入了）再写。
   */
  const flushPendingRun = useCallback(() => {
   const p = useApp.getState().pendingTerminalRun;
   if (!p || p.terminalId !== id || consumedRunRef.current === p.seq) return;
   consumedRunRef.current = p.seq;
-  void api.terminalWrite(id, `${p.command}\r`).catch(() => {});
+  void api.terminalWriteReady(id, `${p.command}\r`).catch(() => {});
   useApp.getState().clearTerminalRun(p.seq);
  }, [id]);
 
- // 投递来的命令：已经出过输出的终端立刻写；否则等首帧输出，或 1.5s 后兜底写
+ // 投递来的命令（正常在 PTY 建好那一刻就写；这里兜「终端已存在、命令后到」的情况）
  useEffect(() => {
   if (!pendingRun || pendingRun.terminalId !== id) return;
   if (status === "exited") {
@@ -68,12 +68,7 @@ export function TerminalPane({ id, cwd, visible }: { id: string; cwd: string; vi
    termRef.current?.write(`\r\n\x1b[33m${t.termRunNoShell}\x1b[0m\r\n`);
    return;
   }
-  if (sawOutputRef.current) {
-   flushPendingRun();
-   return;
-  }
-  const timer = window.setTimeout(() => flushPendingRun(), 1500);
-  return () => window.clearTimeout(timer);
+  if (spawnedRef.current) flushPendingRun();
  }, [pendingRun, id, flushPendingRun, status, t]);
 
  // xterm 实例（仅随组件建立 / 销毁）
@@ -141,8 +136,9 @@ export function TerminalPane({ id, cwd, visible }: { id: string; cwd: string; vi
   let alive = true;
   setStatus("running");
   setExitCode(null);
-  // 新 shell 还没出提示符：投递来的命令要重新等首帧输出（见 `sawOutputRef`）
-  sawOutputRef.current = false;
+  // spawn 完成前写命令没有落点（或落到上一次的旧进程）：命令统一在 spawn 成功后写，
+  // 由后端等 shell 进入可输入状态（见 `flushPendingRun`）
+  spawnedRef.current = false;
   // spawn 前先量一次尺寸；测不到就用 xterm 当前 cols/rows（可见后会补一次 resize）
   try {
    fit.fit();
@@ -160,9 +156,6 @@ export function TerminalPane({ id, cwd, visible }: { id: string; cwd: string; vi
     if (!alive) return;
     if (e.type === "data") {
      termRef.current?.write(e.data);
-     // 首帧输出 = shell 已经起来（提示符出来了）：把脚本页签投递过来的命令写进去
-     sawOutputRef.current = true;
-     flushPendingRun();
     } else {
      setStatus("exited");
      setExitCode(e.code);
@@ -170,6 +163,10 @@ export function TerminalPane({ id, cwd, visible }: { id: string; cwd: string; vi
    };
    try {
     await api.terminalSpawn({ id, cwd, cols, rows }, channel);
+    if (!alive) return;
+    // PTY 有主儿了：脚本页签投递来的命令交给后端，由它等行编辑器进入 raw 再写
+    spawnedRef.current = true;
+    flushPendingRun();
    } catch (err) {
     if (!alive) return;
     const txt = TEXT[useApp.getState().locale];

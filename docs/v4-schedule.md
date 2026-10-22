@@ -49,7 +49,7 @@
 7. **终端不许长出终端形态的会话模型**：不做 π 标题解析、不做目录行 / 标签栏、不做覆盖层注入——一个终端就是「一个 cwd 的登录 shell」。
 8. **焦点与尺寸**：隐藏态不 fit、不推尺寸；可见时才 `fit()` + `terminal_resize` + `focus()`（隐藏态测不到尺寸是 xterm 的既有约束）。终端容器**底部留 24px**（`absolute inset-x-0 top-0 bottom-6`）——最后一行不贴面板底，且必须用「抬高容器」而不是 `padding-bottom`：FitAddon 算可用高度时会再减一次容器 padding（`getComputedStyle().height` 已是 content 高），padding 会双重扣减。
 9. **宽度可拖**（260–640，默认 320，localStorage 持久化）：手柄在右栏左缘，交互与左栏 `SidebarShell` 同一套（3px 隐身热区 / 悬停与拖拽中高亮 / 手柄聚焦时 ←→ 每次 8px 微调）；宽度按「指针到右栏右缘的距离」算（不受主区外边距影响），并以「给中列留 420px」为窗口上限——窗口变窄自动收回超限值，不许把消息列挤没。
-10. **脚本页签（V43）**：**项目脚本只读识别、自定义脚本只存本应用偏好**——后端 `discover_scripts` 不执行命令、不写盘；自定义脚本按 cwd 存 `omp.scripts.v1`，不往用户仓库写文件。**识别口径**：`package.json`（包管理器按锁文件 / `packageManager`）、`Cargo.toml`（+ `.cargo` 的 `[alias]`）、`go.mod`、`manage.py` / `pyproject.toml`、`Makefile` / `justfile` / `Taskfile` 一律**行扫描**（不为几个清单文件引 TOML / YAML 依赖；认不出的写法就是没有，不猜）。**执行口径**：面板只投递（`runInTerminal` → `pendingTerminalRun`），由该 cwd 的 `TerminalPane` 在**首帧输出后**写进 PTY（1.5s 超时兜底、`consumedRunRef` 防重复）——脚本面板自己不 spawn 进程；终端没开过就顺带把右栏与终端页签拉起来。
+10. **脚本页签（V43）**：**项目脚本只读识别、自定义脚本只存本应用偏好**——后端 `discover_scripts` 不执行命令、不写盘；自定义脚本按 cwd 存 `omp.scripts.v1`，不往用户仓库写文件。**识别口径**：`package.json`（包管理器按锁文件 / `packageManager`）、`Cargo.toml`（+ `.cargo` 的 `[alias]`）、`go.mod`、`manage.py` / `pyproject.toml`、`Makefile` / `justfile` / `Taskfile` 一律**行扫描**（不为几个清单文件引 TOML / YAML 依赖；认不出的写法就是没有，不猜）。**执行口径**：面板只投递（`runInTerminal` → `pendingTerminalRun`），由该 cwd 的 `TerminalPane` 在 PTY 建好后写进 PTY——写入走 `terminal_write_ready`：后端等 shell 进入行编辑器 raw 模式（`pty.rs` 的 `shell_ready`，8s 超时兜底）再落字，否则 cooked 期写入会被 tty 回显、行编辑器再重画一遍，命令在终端里出现两遍（`consumedRunRef` 防重复投递）——脚本面板自己不 spawn 进程；终端没开过就顺带把右栏与终端页签拉起来。
 
 ## 3. 验收清单
 

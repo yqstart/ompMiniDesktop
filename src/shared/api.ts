@@ -500,8 +500,13 @@ export const api = {
   */
  terminalSpawn: (opts: TerminalSpawnOpts, onEvent: Channel<TerminalEvent>) =>
   call<void>(IPC.terminalSpawn, { opts, onEvent }),
- /** 键盘输入写入 PTY（xterm 的 onData 原样透传）。 */
+ /** 键盘输入写入 PTY（xterm 的 onData 原样透传；同步、按调用顺序落字）。 */
  terminalWrite: (id: string, data: string) => call<void>(IPC.terminalWrite, { id, data }),
+ /**
+  * 脚本注入：先等 shell 进入可输入状态（行编辑器 raw 模式）再写——提示符出来之前写，
+  * 命令会被 tty 回显 + 行编辑器重画成两行。只有脚本页签用它。
+  */
+ terminalWriteReady: (id: string, data: string) => call<void>(IPC.terminalWriteReady, { id, data }),
  /** 面板尺寸变化 → PTY 行列数。 */
  terminalResize: (id: string, cols: number, rows: number) =>
   call<void>(IPC.terminalResize, { id, cols, rows }),

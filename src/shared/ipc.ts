@@ -176,6 +176,8 @@ export const IPC = {
  /** 打开终端：PTY 里的登录 shell，输出经 Channel 回传（见 `pty.rs`）。 */
  terminalSpawn: "terminal_spawn",
  terminalWrite: "terminal_write",
+ /** 脚本注入：等 shell 进入可输入状态再写（见 `pty.rs` 的 `terminal_write_ready`）。 */
+ terminalWriteReady: "terminal_write_ready",
  terminalResize: "terminal_resize",
  /** 关闭终端（kill 子进程；已退出时是 no-op）。 */
  terminalKill: "terminal_kill",

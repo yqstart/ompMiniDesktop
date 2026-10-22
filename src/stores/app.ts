@@ -99,7 +99,8 @@ type AppState = {
  removeCustomScript: (cwd: string, id: string) => void;
  /**
   * 待投递到终端的命令（V43 / V44）：脚本页签点「运行」时落这里，**目标是那一次新开的终端**
-  * （`terminalId`），由对应的 `TerminalPane` 在 shell 起来并收到首帧输出后写进 PTY。
+  * （`terminalId`），由对应的 `TerminalPane` 在 PTY 建好后写进 PTY（后端等 shell 进入
+  * 行编辑器 raw 模式再落字，见 `pty.rs` 的 `shell_ready`）。
   * 运行期状态，不持久化。
   */
  pendingTerminalRun: { terminalId: string; command: string; seq: number } | null;

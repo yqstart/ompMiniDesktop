@@ -155,6 +155,7 @@ fn main() {
             mention_label,
             pty::terminal_spawn,
             pty::terminal_write,
+            pty::terminal_write_ready,
             pty::terminal_resize,
             pty::terminal_kill,
             // —— V43（右栏工作台）：项目脚本识别 ——

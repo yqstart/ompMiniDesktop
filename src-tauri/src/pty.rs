@@ -40,6 +40,10 @@ pub struct TerminalHandle {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
+    /// 最近一次 PTY 输出的时刻（Windows 的就绪判据用：ConPTY 没有 termios，
+    /// 只能按「提示符画完、安静下来」判断；Unix 走 raw 模式检测，不读它）。
+    #[cfg(windows)]
+    last_output: Arc<Mutex<Option<std::time::Instant>>>,
 }
 
 /// 终端进程表（前端 id → 句柄）。
@@ -295,9 +299,22 @@ pub async fn terminal_spawn(
     let pid = child.process_id();
 
     let seq = SPAWN_SEQ.fetch_add(1, Ordering::Relaxed);
+    #[cfg(windows)]
+    let last_output: Arc<Mutex<Option<std::time::Instant>>> = Arc::new(Mutex::new(None));
     {
         let mut map = state.terminals.lock().unwrap_or_else(|e| e.into_inner());
-        map.insert(opts.id.clone(), TerminalHandle { seq, pid, writer, master, killer });
+        map.insert(
+            opts.id.clone(),
+            TerminalHandle {
+                seq,
+                pid,
+                writer,
+                master,
+                killer,
+                #[cfg(windows)]
+                last_output: last_output.clone(),
+            },
+        );
     }
 
     // 读线程：阻塞读 → 增量解码 → 推 Channel；EOF（shell 退出）或前端断开后收尾。
@@ -313,8 +330,15 @@ pub async fn terminal_spawn(
                 Ok(n) => {
                     pending.extend_from_slice(&buf[..n]);
                     let text = drain_utf8(&mut pending);
-                    if !text.is_empty() && on_event.send(TerminalEvent::Data { data: text }).is_err() {
+                    if text.is_empty() {
+                        continue;
+                    }
+                    if on_event.send(TerminalEvent::Data { data: text }).is_err() {
                         break;
+                    }
+                    #[cfg(windows)]
+                    {
+                        *last_output.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::time::Instant::now());
                     }
                 }
                 Err(_) => break,
@@ -335,11 +359,81 @@ pub async fn terminal_spawn(
     Ok(())
 }
 
-/// 键盘输入写入 PTY。
+/// 等 shell 就绪的上限：超时就照写（命令晚跑总比永远不跑好）。
+/// 行编辑器正常几百毫秒内就切 raw；没有行编辑的 shell 只能靠这个上限兜底。
+const SHELL_READY_WAIT: Duration = Duration::from_secs(8);
+
+/// PTY 的行编辑器是否已经把终端切到 raw 模式（ICANON、ECHO 全关）。
+///
+/// zsh 的 zle / bash 的 readline / fish 都在提示符出来前做这次切换。**早于这个时刻写命令**，
+/// 字符先被 tty 行规程回显一遍，行编辑器起来后又把输入缓冲连提示符一起重画一次——界面上就是
+/// 「命令出现两遍」（2026-10-22 用户实测：点脚本后终端里两行同样的命令，实际只执行一次）。
+/// raw 之后写入不再回显，行编辑器只会把命令画进正在编辑的那一行。
+#[cfg(unix)]
+fn termios_is_raw(master: &dyn MasterPty) -> bool {
+    let Some(fd) = master.as_raw_fd() else { return true };
+    let mut t: libc::termios = unsafe { std::mem::zeroed() };
+    // 拿不到 termios（非 tty / 平台差异）时不挡写入：宁可按旧行为执行，也不要让命令永远不跑
+    if unsafe { libc::tcgetattr(fd, &mut t) } != 0 {
+        return true;
+    }
+    t.c_lflag & (libc::ICANON | libc::ECHO) == 0
+}
+
+/// 终端是否可以喂命令：Unix 等行编辑器 raw（见 [`termios_is_raw`]）；Windows（ConPTY 没有
+/// termios）退回「出过输出、并且安静了 250ms」——提示符画完 shell 就在等输入，此时写只会被
+/// 控制台回显一次。
+#[cfg(unix)]
+fn shell_ready(handle: &TerminalHandle) -> bool {
+    termios_is_raw(handle.master.as_ref())
+}
+
+#[cfg(windows)]
+fn shell_ready(handle: &TerminalHandle) -> bool {
+    let last = *handle.last_output.lock().unwrap_or_else(|e| e.into_inner());
+    matches!(last, Some(at) if at.elapsed() >= Duration::from_millis(250))
+}
+
+/// 轮询等终端可写（见 [`shell_ready`]）；等待期间终端被关掉 = NOT_FOUND。
+async fn wait_shell_ready(map: &TerminalMap, id: &str) -> Result<(), CmdError> {
+    let deadline = std::time::Instant::now() + SHELL_READY_WAIT;
+    loop {
+        {
+            let map = map.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(h) = map.get(id) else {
+                return Err(cmd_err("NOT_FOUND", "终端不存在".into(), None));
+            };
+            if shell_ready(h) {
+                return Ok(());
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// 写入 PTY（键盘输入，立刻透传；用户打什么就写什么，不许排队等提示符）。
 #[tauri::command]
 pub fn terminal_write(state: State<'_, AppState>, id: String, data: String) -> Result<(), CmdError> {
-    let mut map = state.terminals.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(h) = map.get_mut(&id) else {
+    write_now(&state.terminals, &id, &data)
+}
+
+/// 脚本注入：等 shell 进入可输入状态再写（见 [`shell_ready`]）。
+///
+/// 单独一条命令而不是给 `terminal_write` 加参数：键盘输入必须保持同步、按调用顺序落进 PTY，
+/// 只有脚本注入需要等待。等待期间终端被关掉 = NOT_FOUND。
+#[tauri::command]
+pub async fn terminal_write_ready(state: State<'_, AppState>, id: String, data: String) -> Result<(), CmdError> {
+    let map = state.terminals.clone();
+    wait_shell_ready(&map, &id).await?;
+    write_now(&map, &id, &data)
+}
+
+fn write_now(map: &TerminalMap, id: &str, data: &str) -> Result<(), CmdError> {
+    let mut map = map.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(h) = map.get_mut(id) else {
         return Err(cmd_err("NOT_FOUND", "终端不存在".into(), None));
     };
     h.writer.write_all(data.as_bytes()).map_err(|e| cmd_err("TERMINAL_WRITE", e.to_string(), None))?;
@@ -439,5 +533,77 @@ mod tests {
         assert!(out.contains("READY"), "PTY 输出不含 READY：{out:?}");
         let status = child.wait().expect("wait");
         assert_eq!(status.exit_code(), 3);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_ready_tracks_line_editor_raw_mode() {
+        // 复现行编辑器的终端模式切换：启动期是 cooked（写命令会被 tty 回显两遍），
+        // 提示符出来前切 `stty raw -echo`（= zle / readline 的动作）后才算可写。
+        let size = PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 };
+        let args = vec!["-c".to_string(), "sleep 1; stty raw -echo; sleep 1".to_string()];
+        let spawned = spawn_terminal("/bin/sh", &args, "/tmp", size).expect("spawn");
+        let SpawnedTerminal { master, mut child, .. } = spawned;
+        assert!(!termios_is_raw(master.as_ref()), "shell 行编辑器起来之前不该判为可写");
+        let deadline = std::time::Instant::now() + Duration::from_secs(4);
+        let mut ready = false;
+        while std::time::Instant::now() < deadline {
+            if termios_is_raw(master.as_ref()) {
+                ready = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(ready, "`stty raw -echo` 之后应判为可写");
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ready_gate_prevents_double_command_line() {
+        // 回归（2026-10-22 用户实测「点脚本后终端里命令出现两遍」）：
+        // cooked 期（shell 还没把终端交给行编辑器）写命令，tty 先回显一遍，zle 起来后又把
+        // 输入缓冲连提示符重画一遍 → 两行；等 `termios_is_raw` 再写只剩 zle 自己那一行。
+        if !Path::new("/bin/zsh").is_file() {
+            return; // 没有 zsh 的平台跳过（本测试用 zsh 的 zle 做基准）
+        }
+        fn command_lines(wait_ready: bool) -> usize {
+            let size = PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 };
+            let args = vec!["-f".to_string(), "-l".to_string()];
+            let spawned = spawn_terminal("/bin/zsh", &args, "/tmp", size).expect("spawn");
+            let SpawnedTerminal { mut reader, mut writer, master, mut child, .. } = spawned;
+            // 输出必须被持续读走：行编辑器的 tcsetattr 会等输出队列清空，不读就永远进不了 raw
+            let out = Arc::new(Mutex::new(Vec::new()));
+            let sink = out.clone();
+            let reader_thread = std::thread::spawn(move || {
+                let mut buf = [0u8; 4096];
+                loop {
+                    match reader.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => sink.lock().unwrap().extend_from_slice(&buf[..n]),
+                    }
+                }
+            });
+            if wait_ready {
+                let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                while std::time::Instant::now() < deadline && !termios_is_raw(master.as_ref()) {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                assert!(termios_is_raw(master.as_ref()), "zsh 的 zle 未进入 raw 模式");
+            }
+            writer.write_all(b"echo MARK\r").expect("write");
+            std::thread::sleep(Duration::from_millis(700));
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = reader_thread.join();
+            let bytes = out.lock().unwrap();
+            bytes.windows(b"echo MARK".len()).filter(|w| *w == b"echo MARK").count()
+        }
+
+        let immediate = command_lines(false);
+        let ready = command_lines(true);
+        assert!(immediate > 1, "cooked 期写入应复现两行命令（tty 回显 + zle 重画）：{immediate}");
+        assert_eq!(ready, 1, "等行编辑器 raw 再写，命令只应出现一次：{ready}");
     }
 }
