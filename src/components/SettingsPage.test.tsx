@@ -25,6 +25,8 @@ vi.mock("@shared/api", () => ({
   listMemories: vi.fn(),
   listArchivedSessions: vi.fn(),
   getOmpConstraints: vi.fn(),
+  getSystemPermissions: vi.fn(),
+  openSystemPermission: vi.fn(),
  },
 }));
 
@@ -109,7 +111,7 @@ afterEach(() => {
 });
 
 describe("设置视图框架", () => {
- it("顶部条 + 四组九条目导航；切条目显示对应面板", async () => {
+ it("顶部条 + 四组十条目导航；切条目显示对应面板", async () => {
   vi.mocked(api.getOmpSettingsCatalog).mockResolvedValue(catalog([catalogItem({ key: "todo.enabled" })]));
   act(() => {
    root.render(<SettingsPage visible />);
@@ -118,7 +120,7 @@ describe("设置视图框架", () => {
 
   expect(container.textContent).toContain("返回聊天");
   const tabs = [...container.querySelectorAll<HTMLElement>('[role="tab"]')].map((b) => b.textContent?.trim());
-  expect(tabs).toEqual(["常用设置", "omp 约束", "远程控制", "模型", "插件", "技能", "记忆", "使用统计", "已归档对话"]);
+  expect(tabs).toEqual(["常用设置", "omp 约束", "系统授权", "远程控制", "模型", "插件", "技能", "记忆", "使用统计", "已归档对话"]);
   // 四组组标题（窄导航下 sr-only，但仍在无障碍树里）
   for (const group of ["通用", "模型", "扩展", "数据"]) {
    expect(container.textContent).toContain(group);
@@ -132,6 +134,33 @@ describe("设置视图框架", () => {
   });
   expect(container.querySelector('[data-testid="panel-models"]')).toBeTruthy();
   expect(container.querySelector('[data-testid="panel-plugins"]')).toBeNull();
+ });
+
+ it("系统授权条目：点击后显示四项授权读数", async () => {
+  vi.mocked(api.getOmpSettingsCatalog).mockResolvedValue(catalog([catalogItem({ key: "todo.enabled" })]));
+  vi.mocked(api.getSystemPermissions).mockResolvedValue({
+   supported: true,
+   diskAccess: false,
+   accessibility: true,
+   screenCapture: false,
+   automation: true,
+  });
+  act(() => {
+   root.render(<SettingsPage visible />);
+  });
+  await flush();
+
+  act(() => {
+   container.querySelector<HTMLButtonElement>("#settings-tab-system")?.click();
+  });
+  // 面板首读挂在 setTimeout(0) 上（避开 set-state-in-effect），等一拍宏任务再断言
+  await act(async () => {
+   await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+  });
+
+  expect(container.textContent).toContain("完全磁盘访问权限");
+  expect(container.textContent).toContain("屏幕录制");
+  expect(container.textContent?.match(/已授权/g)?.length).toBe(2);
  });
 
  it("搜索：跨条目命中、点击结果跳转并定位闪烁；Esc 先清空再关闭", async () => {

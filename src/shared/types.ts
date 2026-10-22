@@ -432,6 +432,23 @@ export type OmpSettingsCatalog = {
  items: OmpCatalogItem[];
 };
 
+// ---------- 设置 ›「系统授权」：macOS TCC ----------
+
+/**
+ * 四项授权的检测结果（`get_system_permissions`）。`supported: false` = 非 macOS，
+ * 界面只显示一句「仅 macOS 可用」，不摆四条假的已授权。
+ */
+export type SystemPermissions = {
+ supported: boolean;
+ diskAccess: boolean;
+ accessibility: boolean;
+ screenCapture: boolean;
+ automation: boolean;
+};
+
+/** 授权类型 → 系统设置里对应的面板（`open_system_permission` 的参数）。 */
+export type SystemPermissionKind = "disk" | "accessibility" | "screenCapture" | "automation";
+
 // ---------- V21 左栏：工作区（容器）→ 项目 → 目录行 ----------
 
 /**

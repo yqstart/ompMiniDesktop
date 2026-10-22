@@ -20,6 +20,7 @@ pub mod runtime;
 pub mod session_scan;
 pub mod settings;
 pub mod skills;
+pub mod system_permissions;
 pub mod usage;
 pub mod workspace_fs;
 pub mod wsl;

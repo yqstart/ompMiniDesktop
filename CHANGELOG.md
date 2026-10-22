@@ -6,6 +6,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **设置 ›「系统授权」：macOS 四项隐私授权可查、可一键跳转**（2026-10-22）：设置「通用」组新增条目，直接读 TCC 的**实际生效状态**——完全磁盘访问（能否读 `~/Library/Application Support/com.apple.TCC/TCC.db`）、辅助功能（`AXIsProcessTrusted()`）、屏幕录制（`CGPreflightScreenCaptureAccess()`）、自动化（`AEDeterminePermissionToAutomateTarget`，目标 System Events、只查不弹），每行右侧是「已授权」或「去授权」（`open` 深链到系统设置对应面板）。**不再看系统设置里那个开关**：ad-hoc 签名 / 证书轮换会让 TCC 记录与当前签名身份对不上（tccd `Failed to match existing code requirement`），开关看着开着、API 全是 false——computer use 报「没有权限」时在这里一眼能看出哪一项没落地。面板每 2 秒回读一次（纯本地查询、单飞）+ 窗口重新获得焦点立刻读；屏幕录制未授权时提示要退出并重新打开应用。
+
 ### Fixed
 
 - **未进入工作区的项目不再出现「引用工作区文件」入口**（2026-10-22 用户口径）：项目在左栏「未分组」里时没有任何跨项目可引用，`+` / `/` 面板却仍摆着这一行，点开只会看到「没有可引用的其他项目」。现在统一按 `hasWorkspaceRefs`（`lib/workspaceFiles.ts`，口径 = `referenceScope` 里有其他有效成员项目）判断：未分组 / 单成员工作区 / 目录不属于任何项目时，`+` / `/` 面板的「工作区文件」整行、`@` 补全顶部的入口、⌘⇧P 快捷键**都不出现 / 不响应**；文件与压缩不受影响。

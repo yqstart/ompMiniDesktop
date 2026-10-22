@@ -24,6 +24,7 @@ mod runtime;
 mod session_scan;
 mod settings;
 mod skills;
+mod system_permissions;
 mod title_prompt;
 mod usage;
 mod workspace_fs;
@@ -189,6 +190,9 @@ fn main() {
             settings::get_omp_settings_catalog,
             settings::set_omp_setting,
             settings::reset_omp_setting,
+            // 设置 ›「系统授权」：macOS TCC 四项授权检测 + 跳转系统设置
+            system_permissions::get_system_permissions,
+            system_permissions::open_system_permission,
             // 设置 ›「omp 约束」：全局 AGENTS.md / RULES.md / rules/*.md 的读写
             constraints::get_omp_constraints,
             constraints::write_omp_constraint,

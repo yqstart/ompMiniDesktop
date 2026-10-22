@@ -73,6 +73,9 @@ export const IPC = {
  // 写一个设置项 / 恢复默认（cwd 钉 agentDir，写 omp 全局配置）
  setOmpSetting: "set_omp_setting",
  resetOmpSetting: "reset_omp_setting",
+ // 系统授权（设置 ›「系统授权」）：macOS TCC 四项授权检测 + 跳转系统设置
+ getSystemPermissions: "get_system_permissions",
+ openSystemPermission: "open_system_permission",
  // omp 约束（设置 ›「omp 约束」）：全局 AGENTS.md / RULES.md / rules/*.md 的读写
  getOmpConstraints: "get_omp_constraints",
  writeOmpConstraint: "write_omp_constraint",

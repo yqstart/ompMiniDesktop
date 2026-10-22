@@ -1,7 +1,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
 import { isRemoteClient, remoteInvoke } from "./remote";
-import type { BtwRecord, ChangeSet, CheckoutView, CommitEvent, ConstraintFile, ConstraintsView, ConstraintKind, ContextBreakdown, DirListing, DiscoveredModel, FallbackChainsInfo, GitInfo, Goal, GoalState, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PathSearch, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PullOutcome, RemotePairing, RemoteStatus, RemoteTailscale, ScriptCatalog, SessionLiveStats, SessionPage, SessionRuntime, SessionStats, SessionView, SkillFileContent, SkillsView, TerminalEvent, TerminalSpawnOpts, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
+import type { BtwRecord, ChangeSet, CheckoutView, CommitEvent, ConstraintFile, ConstraintsView, ConstraintKind, ContextBreakdown, DirListing, DiscoveredModel, FallbackChainsInfo, GitInfo, Goal, GoalState, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PathSearch, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PullOutcome, RemotePairing, RemoteStatus, RemoteTailscale, ScriptCatalog, SessionLiveStats, SessionPage, SessionRuntime, SessionStats, SessionView, SkillFileContent, SkillsView, SystemPermissionKind, SystemPermissions, TerminalEvent, TerminalSpawnOpts, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -356,6 +356,14 @@ export const api = {
  setOmpSetting: (key: string, value: unknown) => call<OmpSetting>(IPC.setOmpSetting, { key, value }),
  /** 恢复该键的 schema 默认值（`omp config reset`，把默认值写回全局配置）。 */
  resetOmpSetting: (key: string) => call<OmpSetting>(IPC.resetOmpSetting, { key }),
+ /**
+  * 系统授权（设置 ›「系统授权」）：读 macOS TCC 四项授权的**实际生效状态**——
+  * 不是系统设置里那个开关（签名身份变了以后记录会与当前 app 对不上，开关看着开着但无效）。
+  * 纯本地查询，可随面板轮询。非 macOS 回 `supported: false`。
+  */
+ getSystemPermissions: () => call<SystemPermissions>(IPC.getSystemPermissions),
+ /** 打开系统设置里对应的授权面板（`disk` / `accessibility` / `screenCapture` / `automation`）。 */
+ openSystemPermission: (kind: SystemPermissionKind) => call<void>(IPC.openSystemPermission, { kind }),
  /**
   * omp 约束（设置 ›「omp 约束」）：全局上下文约束 `AGENTS.md`、sticky 硬规则 `RULES.md`
   * 与独立规则 `rules/*.{md,mdc}` 的清单（含文件内容；规则文件体量很小，一次读全）。
