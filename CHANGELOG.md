@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-22
+
 ### Added
 
 - **设置 ›「系统授权」：macOS 四项隐私授权可查、可一键跳转**（2026-10-22）：设置「通用」组新增条目，直接读 TCC 的**实际生效状态**——完全磁盘访问（能否读 `~/Library/Application Support/com.apple.TCC/TCC.db`）、辅助功能（`AXIsProcessTrusted()`）、屏幕录制（`CGPreflightScreenCaptureAccess()`）、自动化（`AEDeterminePermissionToAutomateTarget`，目标 System Events、只查不弹），每行右侧是「已授权」或「去授权」（`open` 深链到系统设置对应面板）。**不再看系统设置里那个开关**：ad-hoc 签名 / 证书轮换会让 TCC 记录与当前签名身份对不上（tccd `Failed to match existing code requirement`），开关看着开着、API 全是 false——computer use 报「没有权限」时在这里一眼能看出哪一项没落地。面板每 2 秒回读一次（纯本地查询、单飞）+ 窗口重新获得焦点立刻读；屏幕录制未授权时提示要退出并重新打开应用。
