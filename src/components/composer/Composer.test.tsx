@@ -197,6 +197,20 @@ const press = async (el: HTMLElement | null, init: KeyboardEventInit) => {
  });
 };
 
+/** 让当前会话（cwd `/w/alpha`）进入一个多成员工作区：「引用工作区文件」入口的前置条件。 */
+const enterWorkspace = () => {
+ act(() =>
+  useApp.setState({
+   projects: [
+    { id: "pa", name: "Alpha", path: "/w/alpha", workspaceId: "w1", missing: false, sessionCount: 0 },
+    { id: "pb", name: "Beta", path: "/w/beta", workspaceId: "w1", missing: false, sessionCount: 0 },
+   ],
+   workspaceGroups: [{ id: "w1", name: "全栈", createdAt: 0, projectIds: ["pa", "pb"] }],
+   checkouts: [],
+  }),
+ );
+};
+
 /** 派发一次 pointerdown（输入卡浮层的「点外部关闭」只看 type + target）。 */
 const pointerDown = async (target: EventTarget) => {
  await act(async () => {
@@ -206,6 +220,8 @@ const pointerDown = async (target: EventTarget) => {
 
 describe("Composer 工具行（v2）", () => {
  it("卡底工具行 = + 菜单 + 执行模式菜单 + 模型·思考档 + 圆形发送键；统计条里有容量环", async () => {
+  // 「引用工作区文件」入口要求当前项目在多成员工作区里（2026-10-22 口径）
+  enterWorkspace();
   useApp.setState({
    sessions: [session()],
    activeSessionId: "s1",
@@ -254,6 +270,19 @@ describe("Composer 工具行（v2）", () => {
   const sendBtn = container.querySelector<HTMLButtonElement>('button[aria-label="发送"]');
   expect(sendBtn).not.toBeNull();
   expect(sendBtn?.className).toContain("rounded-full");
+ });
+
+ it("项目未进入工作区：`+` 面板不出现「引用工作区文件」", async () => {
+  useApp.setState({ sessions: [session()], activeSessionId: "s1" });
+  act(() => root.render(<Composer />));
+  await act(async () => {});
+  const plus = container.querySelector<HTMLButtonElement>('button[aria-label="添加上下文"]');
+  expect(plus).not.toBeNull();
+  act(() => plus?.click());
+  // 文件 / 压缩照常，工作区文件整行不出现（没有可引用的范围，不是禁用）
+  expect(container.textContent).toContain(TEXT["zh-CN"].plusFileTitle);
+  expect(container.textContent).toContain(TEXT["zh-CN"].plusCompactTitle);
+  expect(container.textContent).not.toContain(TEXT["zh-CN"].refPickTitle);
  });
 
  it("`+` 面板选技能：命令插到最前（omp 只认行首，正文中间不会加载技能）", async () => {
@@ -922,6 +951,23 @@ describe("Composer `@` 路径补全", () => {
   await typeInto(ta!, "@zzzz");
   await afterDebounce();
   expect(container.textContent).toContain(TEXT["zh-CN"].mentionListEmpty);
+ });
+
+ it("空 token 的「工作区文件」入口：项目没进工作区时不出现", async () => {
+  apiMock.completePath.mockResolvedValue([]);
+  const ta = await mount(false);
+  await typeInto(ta!, "@");
+  await afterDebounce();
+  expect(container.textContent).not.toContain(TEXT["zh-CN"].mentionWorkspaceTitle);
+ });
+
+ it("空 token 的「工作区文件」入口：项目在多成员工作区里才出现", async () => {
+  enterWorkspace();
+  apiMock.completePath.mockResolvedValue([]);
+  const ta = await mount(false);
+  await typeInto(ta!, "@");
+  await afterDebounce();
+  expect(container.textContent).toContain(TEXT["zh-CN"].mentionWorkspaceTitle);
  });
 
  it("选中候选：写进草稿的是短标签，文件收尾空格、目录补斜杠", async () => {

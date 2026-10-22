@@ -35,6 +35,20 @@ export function referenceScope(
  return { primary, others: members.filter((p) => p.id !== primary.id) };
 }
 
+/**
+ * 当前目录能不能引用「工作区文件」：口径 = `referenceScope` 里有可引用的其他成员项目。
+ * 未进入工作区的项目（未分组）/ 单成员工作区 / 目录不属于任何项目 → false，
+ * 引用入口（`+` 与 `/` 面板、`@` 浮层、⌘⇧P）一律不出现——没有工作区就没有跨项目可引用。
+ */
+export function hasWorkspaceRefs(
+ cwd: string,
+ workspaceGroups: readonly WorkspaceView[],
+ checkouts: readonly CheckoutView[],
+ projects: readonly ProjectView[],
+): boolean {
+ return referenceScope(cwd, workspaceGroups, checkouts, projects).others.length > 0;
+}
+
 /** 浮层候选（一个文件一行）：按项目展开。 */
 export type RefItem = {
  projectId: string;

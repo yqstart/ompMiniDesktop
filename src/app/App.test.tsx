@@ -9,7 +9,7 @@ import { isMacKeyboard } from "../lib/platform";
 import { TEXT } from "../lib/locale";
 import { api } from "@shared/api";
 import { IPC } from "@shared/ipc";
-import type { CheckoutView, ModelInfo, SessionView } from "@shared/types";
+import type { CheckoutView, ModelInfo, ProjectView, SessionView, WorkspaceView } from "@shared/types";
 
 /** 事件监听注册表（mock 的 `listen` 把回调存这里，测试直接触发）。 */
 const eventListeners = vi.hoisted(() => new Map<string, (e: { payload: unknown }) => void>());
@@ -138,6 +138,21 @@ const SESSION: SessionView = {
  running: false,
 };
 
+/**
+ * 「引用工作区文件」的前置状态：会话所在项目 p1 与 p2 同属一个工作区。
+ * 未传入时当前项目不在工作区里 —— 入口不出现（2026-10-22 用户口径）。
+ */
+const WORKSPACE_PROJECTS: ProjectView[] = [
+ { id: "p1", name: "Alpha", path: "/a/main", workspaceId: "w1", missing: false, sessionCount: 0 },
+ { id: "p2", name: "Beta", path: "/b/main", workspaceId: "w1", missing: false, sessionCount: 0 },
+];
+const WORKSPACE_GROUP: WorkspaceView = { id: "w1", name: "全栈", createdAt: 0, projectIds: ["p1", "p2"] };
+
+/** 把当前会话的项目放进多成员工作区（⌘⇧P 能打开引用浮层的前提）。 */
+function enterWorkspace() {
+ act(() => useApp.setState({ projects: WORKSPACE_PROJECTS, workspaceGroups: [WORKSPACE_GROUP] }));
+}
+
 /** 快捷键的修饰键按平台分叉（与 `useHotkeys` 的判定同源）。 */
 const mod = isMacKeyboard() ? { metaKey: true } : { ctrlKey: true };
 
@@ -159,6 +174,8 @@ beforeEach(() => {
  });
  useApp.setState({
   checkouts: [CHECKOUT],
+  projects: [],
+  workspaceGroups: [],
   settingsTabOpen: false,
   settingsTabActive: false,
   settingsSearchOpen: false,
@@ -260,6 +277,7 @@ describe("应用外壳：左栏、设置视图与快捷键", () => {
 
 describe("引用工作区文件快捷键（V22）", () => {
  it("⌘⇧P：目标 = 当前聊天会话（浮层注入 Composer 草稿）", async () => {
+  enterWorkspace();
   act(() => {
    useApp.setState({ activeSessionId: "s-1", sessions: [SESSION] });
   });
@@ -271,7 +289,16 @@ describe("引用工作区文件快捷键（V22）", () => {
   expect(container.textContent).toContain(TEXT["zh-CN"].refPickTitle);
  });
 
+ it("项目不在工作区时 ⌘⇧P 不打开引用浮层（没有可引用的其他项目）", () => {
+  act(() => {
+   useApp.setState({ activeSessionId: "s-1", sessions: [SESSION] });
+  });
+  press({ key: "p", ...mod, shiftKey: true });
+  expect(useApp.getState().refPickerTarget).toBeNull();
+ });
+
  it("输入框聚焦时 ⌘⇧P 照常打开（typing 守卫放行引用键）", () => {
+  enterWorkspace();
   act(() => {
    useApp.setState({ activeSessionId: "s-1", sessions: [SESSION], refPickerTarget: null });
   });
@@ -302,6 +329,7 @@ describe("引用工作区文件快捷键（V22）", () => {
  });
 
  it("浮层打开时 ⌘T 被对话框守卫挡住（不新建会话、不叠加浮层）", async () => {
+  enterWorkspace();
   act(() => {
    useApp.setState({ activeSessionId: "s-1", sessions: [SESSION] });
   });

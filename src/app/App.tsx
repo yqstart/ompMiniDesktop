@@ -18,6 +18,7 @@ import { UpdateDialog } from "../components/update/UpdateDialog";
 import { OmpUpdateDialog } from "../components/update/OmpUpdateDialog";
 import { OmpInstallDialog } from "../components/update/OmpInstallDialog";
 import { ProviderUsageDialog } from "../components/usage/ProviderUsageDialog";
+import { hasWorkspaceRefs } from "../lib/workspaceFiles";
 import { newChatInDefaultCheckout } from "../lib/checkouts";
 import { openSessionWithHistory } from "../lib/sessionOpen";
 import { loadLastSession, saveLastSession } from "../lib/lastSession";
@@ -189,8 +190,11 @@ function useHotkeys() {
     return;
    }
    if (refPick) {
-    // 引用工作区文件（V22；注入 Composer 草稿）：设置视图激活 / 没有会话时不触发
+    // 引用工作区文件（V22；注入 Composer 草稿）：设置视图激活 / 没有会话时不触发。
+    // 项目没进工作区（或工作区没有其他成员）时引用范围为空——与 `+` / `/` 面板、`@` 入口同口径，不打开。
     if (s.settingsTabActive || !s.activeSessionId) return;
+    const cwd = s.sessions.find((x) => x.id === s.activeSessionId)?.cwd ?? "";
+    if (!cwd || !hasWorkspaceRefs(cwd, s.workspaceGroups, s.checkouts, s.projects)) return;
     s.set({ refPickerTarget: { sessionId: s.activeSessionId } });
     return;
    }

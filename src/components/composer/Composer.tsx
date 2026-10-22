@@ -32,7 +32,7 @@ import { GoalRow } from "./GoalRow";
 import { PlanStartDialog } from "./PlanStartDialog";
 import { MentionList, type MentionRow, type PathCandidate } from "./MentionList";
 import { DraftEditor, type DraftEditorHandle, type DraftTextSource } from "./draft/DraftEditor";
-import { referenceTarget } from "../../lib/workspaceFiles";
+import { hasWorkspaceRefs, referenceTarget } from "../../lib/workspaceFiles";
 import { useOutsideDismiss } from "../../lib/useDropdown";
 import { stripImageOrderNote, withImageOrderNote } from "../../lib/imageRefs";
 import { SlashMenu, type SlashAction } from "./SlashMenu";
@@ -78,7 +78,7 @@ const NEW_DRAFT = "__new__";
  */
 export function Composer() {
  const t = useText();
- const { activeSessionId, draftOf, setDraft, statusBySession, sessions, attachmentsOf, addAttachments, removeAttachment, clearAttachments, queuedOf, currentModel, currentRuntime, models, composerFocusSeq, checkouts, planModeNext, setPlanModeNext, planSessions } =
+ const { activeSessionId, draftOf, setDraft, statusBySession, sessions, attachmentsOf, addAttachments, removeAttachment, clearAttachments, queuedOf, currentModel, currentRuntime, models, composerFocusSeq, checkouts, workspaceGroups, planModeNext, setPlanModeNext, planSessions } =
   useApp();
  /** 草稿编辑器句柄（Lexical；不受控——编辑器状态是权威，store 里的草稿是它的投影）。 */
  const editorRef = useRef<DraftEditorHandle | null>(null);
@@ -132,6 +132,15 @@ export function Composer() {
  // 卡上顶行（2026-10-20 从卡内移出）：项目 + 分支 + 提交；git 查询与右栏共用 `useGitInfo`
  const projects = useApp((s) => s.projects);
  const { project } = resolveContext(projects, sessions, activeSessionId);
+ /**
+  * 「引用工作区文件」的可用性（2026-10-22 用户口径）：**项目没进入工作区就不能引用工作区文件**。
+  * 口径 = `referenceScope` 里有可引用的其他成员项目（未分组 / 单成员工作区 / 不属任何项目 → false）；
+  * `+` 与 `/` 面板的操作行、`@` 浮层的入口都按它决定是否出现。
+  */
+ const workspaceRefAvailable = useMemo(
+  () => cwd !== "" && hasWorkspaceRefs(cwd, workspaceGroups, checkouts, projects),
+  [cwd, workspaceGroups, checkouts, projects],
+ );
  const { info: git, loading: gitLoading, reload: reloadGit } = useGitInfo(cwd);
  // 空态（v2 §4）：本会话还没有任何消息 → 输入卡上移，与问候语一起构成居中的「问候 + 输入卡」
  const empty = useApp((s) => (s.activeSessionId ? (s.eventsBySession[s.activeSessionId]?.length ?? 0) === 0 : false));
@@ -316,12 +325,12 @@ export function Composer() {
   };
  }, [mentionQueryKey, mentionToken, cwd, activeSessionId, mentionEmpty]);
 
- /** 浮层行：路径候选 + 刚打 `@`（token 为空）时插在最前面的「工作区文件」入口。 */
+ /** 浮层行：路径候选 + 刚打 `@`（token 为空）且当前项目在工作区里时插在最前面的「工作区文件」入口。 */
  const mentionRows = useMemo<MentionRow[]>(() => {
   if (!mentionOpen) return [];
   const paths: MentionRow[] = mentionCands.map((cand) => ({ kind: "path", cand }));
-  return mentionToken === "" ? [{ kind: "workspace" }, ...paths] : paths;
- }, [mentionOpen, mentionCands, mentionToken]);
+  return mentionToken === "" && workspaceRefAvailable ? [{ kind: "workspace" }, ...paths] : paths;
+ }, [mentionOpen, mentionCands, mentionToken, workspaceRefAvailable]);
 
  // 选中一行（点击、Tab、Enter 三个入口共用）：
  // - **工作区文件** → 收掉刚打出的 `@`，打开跨项目引用浮层（⌘⇧P 同一入口，选完由它投递芯片）；
@@ -656,6 +665,9 @@ export function Composer() {
 
  /** `+` 菜单「工作区文件」：⌘⇧P 的跨项目引用浮层（投递口径完全一致）。 */
  const openWorkspacePicker = () => {
+  // 项目没进工作区（或工作区没有其他成员）时引用范围为空：面板里不会出现这个入口，
+  // 这里再挡一次（`@` 浮层入口 / ⌘⇧P 同口径），不开一个只能看到「没有可引用项目」的空浮层。
+  if (!workspaceRefAvailable) return;
   if (activeSessionId) useApp.getState().set({ refPickerTarget: { sessionId: activeSessionId } });
  };
 
@@ -1194,6 +1206,7 @@ export function Composer() {
       onHover={hoverSlash}
       onAction={pickSlashAction}
       compactDisabled={running}
+      workspaceAvailable={workspaceRefAvailable}
      />
     </div>
    )}

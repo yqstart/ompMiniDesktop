@@ -13,6 +13,7 @@ import {
  referenceLabel,
  referenceScope,
  referenceTarget,
+ hasWorkspaceRefs,
  relativeToCwd,
  type RefItem,
 } from "./workspaceFiles";
@@ -81,6 +82,34 @@ describe("引用浮层范围（referenceScope）", () => {
  it("未知 cwd：两个字段都空", () => {
   expect(referenceScope("/no/such/dir", [group("w1", ["fe"])], [], [project("fe", "/p/fe", "w1")]))
    .toEqual({ primary: null, others: [] });
+ });
+});
+
+describe("工作区文件引用入口的可用性（hasWorkspaceRefs）", () => {
+ const workspaces = [group("w1", ["fe", "be"])];
+ const projects = [project("fe", "/p/fe", "w1"), project("be", "/p/be", "w1")];
+
+ it("项目在多成员工作区：可用", () => {
+  expect(hasWorkspaceRefs("/p/fe", workspaces, [checkout("/p/fe", "fe")], projects)).toBe(true);
+ });
+
+ it("未进入工作区的项目：不可用（没有跨项目可引用）", () => {
+  expect(hasWorkspaceRefs("/p/fe", [], [checkout("/p/fe", "fe")], [project("fe", "/p/fe", null)])).toBe(false);
+  // 有工作区、但当前项目不在里面
+  expect(hasWorkspaceRefs("/p/fe", workspaces, [checkout("/p/fe", "fe")], [project("fe", "/p/fe", null), ...projects.slice(1)]))
+   .toBe(false);
+ });
+
+ it("单成员工作区 / 其他成员目录丢失 / 未知 cwd：不可用", () => {
+  expect(hasWorkspaceRefs("/p/fe", [group("w1", ["fe"])], [checkout("/p/fe", "fe")], [project("fe", "/p/fe", "w1")]))
+   .toBe(false);
+  expect(hasWorkspaceRefs(
+   "/p/fe",
+   workspaces,
+   [checkout("/p/fe", "fe")],
+   [project("fe", "/p/fe", "w1"), project("be", "/p/be", "w1", true)],
+  )).toBe(false);
+  expect(hasWorkspaceRefs("/no/such/dir", workspaces, [], projects)).toBe(false);
  });
 });
 

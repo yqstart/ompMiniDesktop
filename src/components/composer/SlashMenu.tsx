@@ -23,6 +23,7 @@ export function SlashMenu({
  onHover,
  onAction,
  compactDisabled = false,
+ workspaceAvailable = false,
 }: {
  cands: SlashCandidate[];
  /** 高亮下标（`-1` = 无高亮）。 */
@@ -35,6 +36,11 @@ export function SlashMenu({
  onAction: (a: SlashAction) => void;
  /** 运行中禁用「压缩」：omp 不会在任务跑着的时候处理 compact 请求（与工具行 CompactButton 同口径）。 */
  compactDisabled?: boolean;
+ /**
+  * 「引用工作区文件」是否可用（`lib/workspaceFiles` 的 `hasWorkspaceRefs`）：项目未进入工作区 /
+  * 工作区没有其他成员时**整行不出现**——不是禁用，是这条动作没有可引用的范围。
+  */
+ workspaceAvailable?: boolean;
 }) {
  const t = useText();
  const boxRef = useRef<HTMLDivElement>(null);
@@ -74,7 +80,7 @@ export function SlashMenu({
       {t.slashActionGroup}
      </div>
      {action(<FilePlus size={13} aria-hidden />, t.plusFileTitle, "file")}
-     {action(<FolderFiles size={13} aria-hidden />, t.refPickTitle, "workspace")}
+     {workspaceAvailable && action(<FolderFiles size={13} aria-hidden />, t.refPickTitle, "workspace")}
      {action(<MinimizeSquare size={13} aria-hidden />, t.plusCompactTitle, "compact")}
     </div>
    )}
