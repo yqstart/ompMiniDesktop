@@ -34,6 +34,16 @@
 | 排期 5 | 会话读数 | 输入卡底部统计条（会话统计 / Token 用量 / 上下文 / 供应商用量）；工具行的容量环与供应商用量搬下来（**已实施**） | [`v5-schedule.md`](v5-schedule.md) |
 | 排期 6 | omp 约束 | 设置 ›「omp 约束」：全局 `AGENTS.md` / `RULES.md` / `rules/*.md` 的列表、整份 Markdown 编辑、预览、新建 / 删除；乐观锁 + 备份 + 原子写（**已实施**） | [`v6-schedule.md`](v6-schedule.md) |
 
+## 专题文档
+
+| 文档 | 内容 |
+|---|---|
+| [`windows.md`](windows.md) | Windows 原生支持与 WSL 桥接边界 |
+| [`plan-mode.md`](plan-mode.md) | 计划模式的能力边界与落地方式 |
+| [`remote-control.md`](remote-control.md) | 手机远程控制：配对、白名单 RPC、安全模型 |
+| [`storage-maintenance.md`](storage-maintenance.md) | 存储维护：缓存 / 日志清理与闲置会话回收 |
+| [`benchmark-codex-desktop.md`](benchmark-codex-desktop.md) / [`benchmark-zcode-desktop.md`](benchmark-zcode-desktop.md) | 对标调研 |
+
 ## 版本号与发版约定
 
 - 0.x 系列、语义化版本；`package.json` / `src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml`（+ `Cargo.lock`）四处同步。
