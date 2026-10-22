@@ -23,7 +23,7 @@ const read = (rel) => fs.readFileSync(path.join(root, rel), "utf8");
 const ipc = read("src/shared/ipc.ts");
 const api = read("src/shared/api.ts");
 const mainRs = read("src-tauri/src/main.rs");
-const rsFiles = ["commands/mod.rs", "providers.rs", "memories.rs", "usage.rs", "settings.rs", "system_permissions.rs", "models_config.rs", "constraints.rs", "provider_models.rs", "git_commit.rs", "git_ops.rs", "commit_msg.rs", "provider_usage.rs", "title_prompt.rs", "project_files.rs", "plugins.rs", "skills.rs", "omp_update.rs", "context.rs", "pty.rs", "workspace_fs.rs", "project_scripts.rs", "live_stats.rs", "remote/mod.rs"]
+const rsFiles = ["commands/mod.rs", "providers.rs", "memories.rs", "usage.rs", "settings.rs", "system_permissions.rs", "models_config.rs", "constraints.rs", "provider_models.rs", "git_commit.rs", "git_ops.rs", "commit_msg.rs", "provider_usage.rs", "title_prompt.rs", "project_files.rs", "plugins.rs", "skills.rs", "omp_update.rs", "context.rs", "pty.rs", "workspace_fs.rs", "project_scripts.rs", "live_stats.rs", "images.rs", "storage.rs", "remote/mod.rs"]
  .map((f) => read(`src-tauri/src/${f}`));
 const providersRs = rsFiles[1];
 

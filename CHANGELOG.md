@@ -8,13 +8,19 @@
 
 ### Added
 
+- **设置 ›「存储维护」：omp 缓存 / 日志清理 + 闲置会话回收**（2026-10-22）：新条目给出磁盘占用读数（omp 图片缓存 / 会话记录 / 日志 / 数据库、壳侧粘贴临时文件 / 设置备份 / 用量账本）与常驻会话进程数；清理分两档——**安全清理**（未被任何会话引用的图片缓存、按 7 / 14 / 30 天过期的日志与粘贴临时文件、设置备份、数据库 WAL）与**深度优化**（由 omp 归档冷会话 / 压缩空闲会话，默认不勾）。清理前先跑 `omp gc` 的 dry-run 给可回收读数，执行必须过确认框；**不删除任何会话内容**。内存一段可立即回收闲置 ≥30 分钟的会话进程（运行中 / 等审批 / 等后台投递不碰，下次发消息自动恢复）。口径见 `docs/storage-maintenance.md`。
+
 - **常用设置 ›「工具」组：浏览器自动化配置整组上浮**（2026-10-22 用户口径）：此前设置页里只有一个 `browser.enabled`，`browser.headless` 还躺在三稿的删除名单里——结果是「omp 的浏览器操作看不见」在壳里根本无从下手。现在 `browser.cdpUrl` / `relay` / `relayUrl` / `headless` / `freezeOnTurnEnd` / `idleCloseSec` / `screenshotDir` 一并可选（清单 80 → 87 项）。**让操作可见 = 关掉「无头浏览器」**：行内会补一句「窗口可见（omp 另开一个浏览器窗口）」，省得去悬停读上游那句 "disable to show browser UI"；omp 随后启动的是自带的有头 Chrome for Testing 窗口，配置改动在下一次 browser 调用（或新会话）生效。`browser.cmux` / `browser.tern` 仍不进：那是 cmux / Tern 两个宿主的开关，桌面壳里没有可观测差异。壳侧不做内置浏览器。
 
 ### Changed
 
+- **会话图片：可点开预览、复制到剪贴板、另存为**（2026-10-22）：消息气泡里的图片变成可点缩略图，点开全屏预览；顶栏「复制图片」走后端 `arboard` 解码写系统剪贴板，「保存图片」走系统另存为对话框。历史图片按需从 omp 的 blobs 目录读取（40 张 / 48M 字符 LRU + 单飞），不把整段历史的 base64 常驻内存；手机 PWA 保留预览、隐藏复制 / 保存（不在远程白名单）。
+
 - **死代码清理**（2026-10-22，全量 review）：移除已退场功能留下的无调用者链路——`/fork` 的前端映射 / `fork_session` / `fork_at` 与 `openForkedSession`、`/branch` 的 `branch_session`、`/slow` 的 `set_slow_mode`、未注册的 `locate_omp` 前端绑定、`useSingleOpen`、`SessionActions`、`SLASH_GROUPS`、`resetRemoteAuth`、仅测试调用的 `providerSelectors` / `highestThinking` / `referenceInsertText` / `appendReference`，以及 `s_*` / `sa*` 两组无人引用的文案键；后端删除未使用的 `walkdir` 依赖与模板残留的 `lib.rs` 目标。`lint` 改为覆盖仓库根配置（`eslint .`），`@eslint/js` 对齐 ESLint 9。
 
 ### Fixed
+
+- **历史会话里的图片不再显示成坏图**（2026-10-22）：omp 写 jsonl 时把图片外置成 `blob:sha256:<hash>`（实体在 `~/.omp/agent/blobs/`），旧版壳侧把它当 base64 拼成 `data:image/...;base64,blob:sha256:…`，重开会话后图片全部显示不出来（实时帧是 base64，所以刚发完时正常）。现在 `imagesFromContent` 识别 blob 引用、`MessageImage` 经 `read_blob_image` 按需读实体（hash 形状校验 + 只读 blobs 目录 + 10MB 上限），远程白名单同步放行该只读命令。
 
 - **「系统授权 › 自动化」不再把「System Events 没在跑」读成未授权**（2026-10-22 用户实测）：`AEDeterminePermissionToAutomateTarget` 按 bundle id 寻址时**要求目标进程正在运行**，而 System Events 由 launchd 按需拉起、平时不常驻——归零状态下这个 API 一律返回 `-600`（procNotFound），于是系统设置里 System Events / Chrome 的开关全开着、面板仍显示「去授权」。现在 -600 时后端先 `open -g -b com.apple.systemevents` 把它拉起来（启动 app 不发 Apple Event、不会弹授权框；拉起有效就不留门槛——用户手动退出 System Events 后下一轮轮询即可恢复，只有拉起本身失败才 30s 内不再重试），短暂等待后重查，再按 0 / -1743 / -1744 给出真实读数。回归测试从冷状态（先杀掉 System Events）验证查询不再停在 -600。
 

@@ -19,6 +19,8 @@ import { UiRequestCard } from "./UiRequestCard";
 import { MentionChips } from "./MentionChips";
 import { AssistantText } from "./AssistantText";
 import { ChatEmptyState } from "./ChatEmptyState";
+import { MessageImage, type ImagePreview } from "./MessageImage";
+import { ImageLightbox } from "./ImageLightbox";
 import { useElapsedSeconds, formatElapsed } from "../../lib/useElapsed";
 import { useRevealedText } from "../../lib/streamReveal";
 
@@ -42,6 +44,10 @@ export function Thread() {
   useApp();
  const t = useText();
  const cwd = sessions.find((s) => s.id === activeSessionId)?.cwd ?? "";
+ /** 图片预览浮层（2026-10-22）：消息气泡与历史回放共用，回调保持稳定引用（ThreadRow 是 memo）。 */
+ const [preview, setPreview] = useState<ImagePreview | null>(null);
+ const openImage = useCallback((p: ImagePreview) => setPreview(p), []);
+ const closePreview = useCallback(() => setPreview(null), []);
  const scroller = useRef<HTMLDivElement>(null);
  // 划选浮条（V40）：划中正文后在选区上方浮出「引用到输入框 / 旁问」。
  // 位置在 mouseup 时算一次（fixed 定位），滚动 / Esc / 点别处 / 动作执行后即关。
@@ -401,6 +407,7 @@ export function Thread() {
          m={item.m}
          sessionId={activeSessionId}
          cwd={cwd}
+         onImageOpen={openImage}
          turn={item.m.kind === "user" ? turnByMsgId.get(item.m.id) : undefined}
          tight={isTrace(item.m) && prevTrace}
         />
@@ -454,6 +461,7 @@ export function Thread() {
      </button>
     </div>
    )}
+   <ImageLightbox preview={preview} onClose={closePreview} />
   </>
  );
 }
@@ -593,6 +601,7 @@ const ThreadRow = memo(function ThreadRow({
  cwd,
  turn,
  tight,
+ onImageOpen,
 }: {
  m: ViewMsg;
  sessionId: string | null;
@@ -601,6 +610,8 @@ const ThreadRow = memo(function ThreadRow({
  turn?: number;
  /** 上一条也是执行痕迹：间距收紧，成串的工具行读成一段。 */
  tight?: boolean;
+ /** 点图片打开预览（父层持有浮层；引用稳定，memo 不受影响）。 */
+ onImageOpen: (p: ImagePreview) => void;
 }) {
  const t = useText();
  return (
@@ -616,11 +627,12 @@ const ThreadRow = memo(function ThreadRow({
       {(m.images?.length ?? 0) > 0 && (
        <div className={`flex flex-wrap gap-2 ${m.text ? "mt-2" : ""}`}>
         {m.images?.map((img, i) => (
-         <img
-          key={i}
-          src={`data:${img.mimeType};base64,${img.data}`}
+         <MessageImage
+          key={img.blob ?? `${img.mimeType}:${img.data?.slice(0, 24) ?? ""}:${i}`}
+          img={img}
+          index={i}
           alt={fmt(t.imageAlt, i + 1)}
-          className="max-h-64 max-w-[240px] rounded-lg border border-border object-contain"
+          onOpen={onImageOpen}
          />
         ))}
        </div>

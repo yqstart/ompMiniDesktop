@@ -18,6 +18,7 @@ oh-my-pi（`omp`）的桌面端：**聊天形态的 omp 工作台**（Tauri v2 +
 | `docs/windows.md` | Windows 支持：原生链路 / WSL 桥接 / 平台分叉表 / 验证与已知边界（**P0+P1 已实施**，2026-10-19）|
 | `docs/plan-mode.md` | 计划模式（omp plan mode）能力边界与落地方案（2026-10-20：启动级 `--plan-yolo` 可用；运行中切换 / 交互审批无 RPC）|
 | `docs/remote-control.md` | 手机远程控制：内嵌 HTTP/WS + 扫码配对 PWA、白名单 RPC、安全模型、Tailscale、验收（0.3.0 P0 已实施）|
+| `docs/storage-maintenance.md` | 存储维护：omp 图片缓存 / 日志 / 粘贴临时文件 / WAL 的读数与清理、壳侧闲置会话回收、深度优化风险（2026-10-22）|
 | `docs/benchmark-codex-desktop.md` | Codex Desktop 对标调研（含截图证据与设计语言合约）|
 | `docs/benchmark-zcode-desktop.md` | Zcode Desktop 对标调研 |
 | `design-system/MASTER.md` | 设计系统（颜色 / 布局 / 组件 / 层级真相；改 UI 先读）|
@@ -38,10 +39,10 @@ src/
   mobile/                    # 手机 PWA（独立入口 mobile.html）：配对页 / 会话列表 / MobileComposer / 复用 Thread 与 useSessionEvents
   components/sidebar/        # 左栏：ChatSidebar（常驻命令行 + 会话树 + 项目拖拽排序控制器）/ SidebarTop / SidebarBottom / WorkspaceGroupDialog / RowAction / DropLine / OmpUpdateChip / AppUpdateChip
   components/workbench/      # 右栏工作台（V42 / V43 / V44）：WorkbenchPanel（停靠 + 文件/脚本/终端三页签 + 宽度拖拽 + 终端标签行）/ FileTree（只读目录树 + 快速过滤 + 变更标色 + 引用注入）/ FileIcon（Material 类型图标）/ ScriptsPanel（项目脚本识别 + 自定义脚本）/ TerminalPane（xterm.js + PTY 管道，一实例一终端）
-  components/thread/         # 消息列：ChatView / TopBar / Thread / AssistantText / ToolRow / ToolRunRow / TurnRow / ApprovalCard / UiRequestCard / ChatEmptyState / PlanCard（任务清单浮卡）/ TurnRail（轮次定位轨）/ FindBar / BtwPanel / SessionStatsBar（卡底统计条）/ ContextMeter / SessionStatsDialog / DiffDialog…
+  components/thread/         # 消息列：ChatView / TopBar / Thread / AssistantText / ToolRow / ToolRunRow / TurnRow / ApprovalCard / UiRequestCard / ChatEmptyState / PlanCard（任务清单浮卡）/ TurnRail（轮次定位轨）/ FindBar / BtwPanel / SessionStatsBar（卡底统计条）/ ContextMeter / SessionStatsDialog / DiffDialog / MessageImage（消息图片：base64 直显 + 历史 blob 按需读）/ ImageLightbox（图片预览 + 复制 / 另存为）…
   components/composer/       # 输入卡（v2）：Composer（**卡内顶行**：项目/分支 + 提交键 → 输入区 → 卡底工具行：`+`/目标/计划/执行模式/Fast/模型/思考档/发送；**卡下统计条**（卡外）：SessionStatsBar = 会话统计/Token 用量/上下文/供应商用量；`@`/`/` 补全浮层也在卡外、卡片上方）/ CommitButton / ApprovalModeMenu / FastMenu（Fast 服务档位：单个闪电图标，点击开 / 关 priority，开启变黄；Ultra 不在 rpc-ui 展示）/ ModelMenu / ThinkingMenu / GoalRow（目标条：展示 / 暂停·继续 / 清除；编辑走主输入框）/ MentionList / SlashMenu / UsageLimits
   components/pickers/        # 选择器：ProjectPicker / BranchPicker（挂在输入卡的卡内顶行；分支清单点选即切）
-  components/settings/       # GeneralSettingsPanel / ConstraintsPanel（omp 约束：全局 AGENTS.md / RULES.md / rules/*.md 的整份 Markdown 编辑）/ SystemPermissionsPanel（系统授权：macOS TCC 四项检测 + 跳转系统设置）/ ModelsPanel（供应商 / 我的模型 / 模型角色多配置入口）/ RoleProfilesSection（模型角色配置列表 + 编辑弹窗 + 激活态）/ PluginsPanel / SkillsPanel / ProvidersSection（供应商：登录型 + 自定义）/ CustomProviderEditForm（只配供应商字段）/ CustomProviderModelsDialog（自定义端点的模型清单：获取可用模型 + 勾选 + 调参）/ ProviderModelsDialog（登录型的星标挑选）/ MemoryPanel / UsagePanel / SettingsSearch（v3 顶部搜索）/ Highlight（命中高亮）…
+  components/settings/       # GeneralSettingsPanel / ConstraintsPanel（omp 约束：全局 AGENTS.md / RULES.md / rules/*.md 的整份 Markdown 编辑）/ SystemPermissionsPanel（系统授权：macOS TCC 四项检测 + 跳转系统设置）/ StoragePanel（存储维护：占用读数 + 安全清理 + 深度优化 + 闲置会话回收）/ ModelsPanel（供应商 / 我的模型 / 模型角色多配置入口）/ RoleProfilesSection（模型角色配置列表 + 编辑弹窗 + 激活态）/ PluginsPanel / SkillsPanel / ProvidersSection（供应商：登录型 + 自定义）/ CustomProviderEditForm（只配供应商字段）/ CustomProviderModelsDialog（自定义端点的模型清单：获取可用模型 + 勾选 + 调参）/ ProviderModelsDialog（登录型的星标挑选）/ MemoryPanel / UsagePanel / SettingsSearch（v3 顶部搜索）/ Highlight（命中高亮）…
   components/usage/ update/ git/   # 供应商用量 / 更新弹窗 / 提交面板
   components/SettingsPage.tsx / ReferencePicker.tsx / HealthBanner.tsx …
   lib/                       # viewmsg / mergeEvents / threadLayout / termTheme（终端配色）/ useSessionEvents / sessionOpen / streamReveal / mdBlocks / streamCaret / usePopoverAnchor（卡内浮层锚到被点的项）/ useGitInfo / localNote / promptHistory / useVisibleRefresh（设置页焦点回读）/ btw / checkouts / workspaceGroups / projectDrag / useElapsed / useText / locale / theme / platform / settingsTabs / settingsSearch / useSettingsSearchSources / roleProfiles（模型角色多套配置的本机存储与外部收编）/ …
@@ -50,6 +51,8 @@ src/
 src-tauri/src/
   remote/                    # 手机远程控制（V50）：内嵌 axum HTTP/WS、扫码配对/设备、RPC 白名单、事件镜像与待审批、Tailscale（见 docs/remote-control.md）
   runtime.rs                 # 会话的 RPC 运行时（spawn 握手 → pump → kill_all；事件面泛型）
+  images.rs                  # 会话图片：omp blob 读取（read_blob_image）+ 系统剪贴板复制 + 另存为
+  storage.rs                 # 存储维护：目录读数 / omp gc 清理（blobs·wal·archive·compress）/ 闲置会话回收
   pty.rs                     # 右栏终端：PTY 里的登录 shell（spawn / write / resize / kill / kill_all，输出走 Channel）
   proc.rs                    # 进程与环境工具（登录 shell PATH 探测 / 进程组强杀；runtime / pty / git_commit / commit_msg / omp_update 复用）
   wsl.rs                     # WSL UNC 识别 + wsl.exe 终端启动（P1；不跨发行版驱动 omp，见 docs/windows.md）
@@ -118,6 +121,9 @@ scripts/                     # e2e-ipc-selfcheck / generate-icons / generate-mat
   - **去重键唯一口径 = `usage.rs` 的 `usage_key`**：`sid|responseId` 优先，`responseId` 缺失（失败 / 重试调用）退回 `sid|时间戳|四段用量`；jsonl 解析与账本记录共用这一处，口径不一致就会重复计数。实测同一轮在实时帧与 jsonl 里的 `responseId` / `message.timestamp` / `usage` **完全一致**（探针：`rid=e4445cd1… ts=1792128700867 total=4260` 两边同值），**两路都有时以 jsonl 为准**（jsonl 先扫、先占键；账本随后扫，去重剩下的就是「jsonl 里已经没有的」）。两路都不看对方的状态，只认这一个全局键——**不许**再加时间窗口 / 「会话文件在不在」之类的额外判据（试过：老会话后来追加过消息时按 mtime 判会误杀，按数据时间窗判要么重复要么漏）。
   - 派生指标（命中率 / 活跃天数 / 连续天数 / 热力图）与 jsonl 同一条口径：账本事件同样进活跃日与热力图；返回的 `extras` = 只由账本补上、jsonl 里已经没有的条数（**仅数据面**——2026-10-19 用户口径：设置页不再拿它写来源说明行，界面只留读数）。账本读不完（超预算）与 jsonl 预算一样置 `truncated`，不假装统计完了。
   - 记账失败（磁盘满 / 权限）只影响「已删除会话的补记」，**不许拖累会话线程**；本应用只读 omp，账本写在自己的应用数据目录里。
+- **会话图片（2026-10-22 修复历史回放坏图）**：实时帧（`message_start` / `message_end`）里的图片是 **base64**；omp 写 jsonl 时把它外置成 `blob:sha256:<hash>`（实体在 `~/.omp/agent/blobs/<sha256>`，另有同 inode 的 `<hash>.<ext>` 副本）。`lib/attachments.ts` 的 `blobRefOf` 只认 64 位小写 hex，`imagesFromContent` 命中即产出 `{mimeType, blob}`（不参与 base64 长度上限），**绝不许**把 blob 引用当 base64 拼 `data:` URL（这正是旧版历史图片坏图的根因）。`thread/MessageImage.tsx` 统一两种来源：base64 直显，blob 经 `api.readBlobImage` 按需读（`lib/blobImages.ts` 40 张 / 48M 字符 LRU + 单飞；远程白名单含 `read_blob_image`，手机也能看历史图）。点图开 `thread/ImageLightbox.tsx`：复制走后端 `copy_image`（`images.rs`：`image` 解码 → RGBA → `arboard` 主线程写系统剪贴板），另存为走系统保存对话框 + `save_image_file`（只接受 PNG / JPEG / WebP / GIF 扩展名）；手机端只保留预览（复制 / 保存不在远程白名单）。
+- **存储维护（2026-10-22，口径见 `docs/storage-maintenance.md`）**：设置 › 数据 ›「存储维护」（`components/settings/StoragePanel.tsx` + `src-tauri/src/storage.rs`）。读数 `get_storage_stats` 只扫目录（快）：blobs **只数无扩展名主文件**（硬链接副本不重复计），日志目录是 `~/.omp/logs`（与 agent 同级，不是 `agent/logs`）。清理前 `preview_storage_cleanup` 跑 `omp gc --json`（dry-run）；执行 `clean_storage` 才加 `--apply`。安全项 = 未被引用的图片缓存（`--blobs`，引用口径由 omp 扫全部会话 jsonl，壳侧不猜）/ 日志（跳过最近 1 小时）/ 粘贴临时文件 / 设置备份 / WAL；深度项 = `--archive` / `--compress`（默认不勾，确认框追加风险说明）。**会话 jsonl 永远不由壳侧删除**。`reclaim_idle_sessions` 复用 `runtime::reclaim_idle_now`（只收 `ACT_IDLE` 且已落盘、闲置 ≥30 分钟；运行中 / 等审批 / 等后台投递不碰）。
+
 - **设置写入口径**：omp 侧只经 `omp` CLI（`config set/reset`、`auth-broker`…）；**直接写文件的例外**：`models.yml`（hash 乐观锁 + 预校验 + 备份 + 原子写）与「omp 约束」的 `AGENTS.md` / `RULES.md` / `rules/*.md`（同款乐观锁 + 备份 + 原子写；上游没有写这些文件的 CLI）。本应用偏好不写 omp 配置。
 - **omp 约束（设置 ›「omp 约束」，2026-10-19）**：编辑 omp 的**全局**约束与规则文件——只碰 `<agentDir>` 下三处：`AGENTS.md`（native 用户级上下文文件，每次会话启动注入）、`RULES.md`（sticky 规则，始终 always-apply、每轮重挂）、`rules/*.{md,mdc}`（独立规则，文件名即规则名，`enabled: false` 停用）；三种文件都是整份 Markdown 直接编辑（**选中默认展示预览**，点「编辑」才进编辑态）。项目级 `.omp/` 由 omp 自己发现，本页不碰。
   - **数据面**（`constraints.rs`）：`get_omp_constraints`（固定两份文件 + rules/ 列表，一次读全）/ `write_omp_constraint`（`expectHash` 乐观锁 → 备份到 `<appData>/omp-mini/backups/constraints/` → 原子写 → 回读）/ `create_omp_rule` / `delete_omp_rule`（先备份再删）。文件名白名单：`rules/` 下单层 `.md` / `.mdc`、不以 `.` 开头、无路径分隔符 / 控制字符 / Windows 非法字符；内容上限 2 MiB；规则 frontmatter 必须有结束行。`expectHash = ""` 表示「打开时文件不存在」——外部创建了也算冲突；`null` = 冲突对话框里的显式强制覆盖。

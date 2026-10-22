@@ -33,6 +33,11 @@ sha2 = "0.10"
 rand = "0.9"
 base64 = "0.22"
 subtle = "2"
+# 会话图片：解码 omp 的 blob（PNG / JPEG / WebP / GIF）后写入系统剪贴板。
+# arboard 负责平台剪贴板（macOS NSPasteboard / Windows 剪贴板 / Linux X11+Wayland），
+# image 只开这四种格式的 decoder——不启用默认的全量编码器，避免白编译一串无用格式。
+arboard = "3"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 
 [profile.release]
 opt-level = 3

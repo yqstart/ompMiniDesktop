@@ -60,6 +60,12 @@ struct IdArgs {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HashArgs {
+    hash: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SendArgs {
     id: String,
     #[serde(default)]
@@ -177,6 +183,13 @@ pub async fn dispatch(ctx: &Ctx, cmd: &str, args: Value) -> Result<Value, CmdErr
             let a: IdArgs = serde_json::from_value(args).map_err(|e| bad(&format!("参数不合法：{e}")))?;
             let id = session_id(&a.id)?;
             crate::commands::get_history(state, id).await
+        }
+        // 历史回放里的图片引用：只读 omp 的 `blobs/<sha256>`（hash 形状由后端校验），
+        // 手机端也要能看到会话图片；写剪贴板 / 另存为不在远程白名单里。
+        "read_blob_image" => {
+            let a: HashArgs = serde_json::from_value(args).map_err(|e| bad(&format!("参数不合法：{e}")))?;
+            let out = crate::images::read_blob_image(state, a.hash).await?;
+            json(out)
         }
         "get_session_runtime" => {
             let a: IdArgs = serde_json::from_value(args).map_err(|e| bad(&format!("参数不合法：{e}")))?;

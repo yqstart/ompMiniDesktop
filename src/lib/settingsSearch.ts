@@ -294,5 +294,36 @@ export function searchSettings(
   if (hits.length > 0) groups.push({ tab: "constraints", hits });
  }
 
+ // 存储维护（2026-10-22）：条目名 + 各清理项关键词，命中即跳到该条目
+ const storageKeywords: string[] = [
+  t.tabStorage,
+  t.tabStorageHint,
+  t.storageSafeTitle,
+  t.storageDeepTitle,
+  t.storageOptBlobs,
+  t.storageOptLogs,
+  t.storageOptPaste,
+  t.storageOptBackups,
+  t.storageOptWal,
+  t.storageOptArchive,
+  t.storageOptCompress,
+  t.storageReclaim,
+ ];
+ const storageHit = storageKeywords.find((s) => has(s, q));
+ if (storageHit) {
+  groups.push({
+   tab: "storage",
+   hits: [
+    {
+     id: "storage:entry",
+     tab: "storage",
+     focusKey: null,
+     title: t.tabStorage,
+     sub: storageHit === t.tabStorage || storageHit === t.tabStorageHint ? t.tabStorageHint : storageHit,
+    },
+   ],
+  });
+ }
+
  return groups;
 }

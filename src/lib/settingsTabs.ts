@@ -5,7 +5,7 @@ import type { Text } from "./locale";
  * 类型与文案键映射放这里（纯数据），`SettingsPage` 与搜索视图共用——
  * 搜索视图不许反向 import 页面组件（会成环）。
  */
-export type SettingsTab = "general" | "constraints" | "system" | "remote" | "models" | "plugins" | "skills" | "memories" | "usage" | "archived";
+export type SettingsTab = "general" | "constraints" | "system" | "remote" | "models" | "plugins" | "skills" | "memories" | "usage" | "archived" | "storage";
 
 /** 条目 → 标题文案键（导航条目与搜索分组标题共用）。 */
 export const SETTINGS_TAB_LABEL_KEYS: Record<SettingsTab, keyof Text> = {
@@ -19,6 +19,7 @@ export const SETTINGS_TAB_LABEL_KEYS: Record<SettingsTab, keyof Text> = {
  memories: "tabMemories",
  usage: "tabUsage",
  archived: "tabArchived",
+ storage: "tabStorage",
 };
 
 /**

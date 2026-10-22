@@ -192,6 +192,28 @@ pub fn start_idle_reaper<R: tauri::Runtime>(app: AppHandle<R>) {
     });
 }
 
+/// 立即回收闲置会话进程（设置 ›「存储维护」的手动入口，返回回收数量）。
+///
+/// 与定时回收同一判定：`idle` 超阈值 + 已落盘——运行中 / 等审批 / 等后台投递的会话一律不碰。
+pub async fn reclaim_idle_now(state: &tauri::State<'_, crate::commands::AppState>, idle_ms: i64) -> usize {
+    let now = now_ms();
+    let victims: Vec<String> = {
+        let rt = state.runtime.lock().await;
+        rt.iter()
+            .filter(|(_, r)| {
+                idle_recyclable(&r.activity, now, idle_ms)
+                    && r.session_file.as_ref().map(|f| f.exists()).unwrap_or(false)
+            })
+            .map(|(k, _)| k.clone())
+            .collect()
+    };
+    let count = victims.len();
+    for sid in victims {
+        crate::commands::kill_runtime(state, &sid);
+    }
+    count
+}
+
 pub struct RunningChild {
     pub tx: mpsc::UnboundedSender<String>,
     pub child: Child,

@@ -449,6 +449,51 @@ export type SystemPermissions = {
 /** 授权类型 → 系统设置里对应的面板（`open_system_permission` 的参数）。 */
 export type SystemPermissionKind = "disk" | "accessibility" | "screenCapture" | "automation";
 
+// ---------- 存储维护（2026-10-22）：omp 侧占用读数 / 清理 ----------
+
+/** 一项存储读数；`key` 由前端映射文案（后端不掺文案）。 */
+export type StorageItem = { key: string; path: string; bytes: number; files: number };
+
+export type StorageStats = {
+ agentDir: string;
+ appDataDir: string;
+ items: StorageItem[];
+ /** 当前常驻的会话进程数（壳侧内存里最重的一块）。 */
+ runtimes: number;
+};
+
+/** 清理前的 dry-run 读数（`omp gc` 的候选字节 + 壳侧按阈值的可删字节）。 */
+export type StoragePreview = {
+ blobBytes: number;
+ blobFiles: number;
+ archiveSessions: number;
+ walBytes: number;
+ logsBytes: number;
+ pasteBytes: number;
+ backupBytes: number;
+ errors: string[];
+};
+
+/** 清理计划：`blobs/wal` 是安全项，`archive/compress` 是深度优化项（动会话文件系统）。 */
+export type StorageCleanPlan = {
+ blobs: boolean;
+ wal: boolean;
+ logs: boolean;
+ paste: boolean;
+ backups: boolean;
+ archive: boolean;
+ compress: boolean;
+ olderDays?: number;
+ dryRun?: boolean;
+};
+
+export type StorageCleanResult = {
+ freedBytes: number;
+ deletedFiles: number;
+ archivedSessions: number;
+ errors: string[];
+};
+
 // ---------- V21 左栏：工作区（容器）→ 项目 → 目录行 ----------
 
 /**
@@ -824,8 +869,14 @@ export type SkillFileContent = {
 
 // ==================== 会话与消息流 ====================
 
-/** 消息里的一张图片：与 omp jsonl / prompt.images 的 image 内容块同构（base64，不带 data: 前缀）。 */
-export type ImageBlock = { mimeType: string; data: string };
+/**
+ * 消息里的一张图片：实体有两种来源。
+ * - 实时帧 / `prompt.images`：`data` = base64（不带 `data:` 前缀）；
+ * - 历史 jsonl：omp 把 base64 外置成 `blob:sha256:<hash>`，这里只留 `blob`（hash），
+ *   渲染时经 `api.readBlobImage` 按需读取（见 `lib/blobImages.ts`）——历史回放不把
+ *   所有图片都以 base64 常驻内存。
+ */
+export type ImageBlock = { mimeType: string; data?: string; blob?: string };
 
 /**
  * `@文件` 提及被 omp 读进上下文后，`fileMention` 消息里的一条文件记录（V2 M6b）。

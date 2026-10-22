@@ -1,7 +1,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { IPC } from "./ipc";
 import { isRemoteClient, remoteInvoke } from "./remote";
-import type { BtwRecord, ChangeSet, CheckoutView, CommitEvent, ConstraintFile, ConstraintsView, ConstraintKind, ContextBreakdown, DirListing, DiscoveredModel, FallbackChainsInfo, GitInfo, Goal, GoalState, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PathSearch, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PullOutcome, RemotePairing, RemoteStatus, RemoteTailscale, ScriptCatalog, SessionLiveStats, SessionPage, SessionRuntime, SessionStats, SessionView, SkillFileContent, SkillsView, SystemPermissionKind, SystemPermissions, TerminalEvent, TerminalSpawnOpts, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
+import type { BtwRecord, ChangeSet, CheckoutView, CommitEvent, ConstraintFile, ConstraintsView, ConstraintKind, ContextBreakdown, DirListing, DiscoveredModel, FallbackChainsInfo, GitInfo, Goal, GoalState, HealthInfo, ImageAttachment, MemoryFileContent, MemoryProjectView, ModelCatalog, ModelRolesInfo, ModelsConfigFile, OmpInfo, OmpSetting, OmpSettingsCatalog, OmpUpdateEvent, OmpUpdateStatus, Overlay, PathCheck, PathSearch, PluginDoctorFinding, PluginFeatures, PluginsView, ProjectFiles, ProjectView, ProviderLoginStatus, ProviderUsage, ProviderView, PullOutcome, RemotePairing, RemoteStatus, RemoteTailscale, ScriptCatalog, SessionLiveStats, SessionPage, SessionRuntime, SessionStats, SessionView, SkillFileContent, SkillsView, SystemPermissionKind, SystemPermissions, StorageCleanPlan, StorageCleanResult, StoragePreview, StorageStats, TerminalEvent, TerminalSpawnOpts, TitlePromptLang, TitlePromptOutcome, UsageStats, WorkspaceGitState, WorkspaceView } from "./types";
 
 /**
  * 前端调用 Tauri commands 的唯一入口。
@@ -159,6 +159,12 @@ export const api = {
   call<void>(IPC.compactSession, { id, customInstructions }),
  /** 图片附件走「系统文件选择器 → 后端读文件」：WebView 拿不到任意本地路径的内容。 */
  readImageFile: (path: string) => call<ImageAttachment>(IPC.readImageFile, { path }),
+ /** 历史会话的图片引用（`blob:sha256:<hash>`）：后端只读 omp 的 blobs 目录，返回 base64。 */
+ readBlobImage: (hash: string) => call<ImageAttachment>(IPC.readBlobImage, { hash }),
+ /** 复制图片到系统剪贴板（解码在主线程写 NSPasteboard / OLE 剪贴板）。 */
+ copyImage: (dataBase64: string) => call<void>(IPC.copyImage, { dataBase64 }),
+ /** 另存为：路径由前端系统保存对话框给出，后端只写字节。 */
+ saveImageFile: (path: string, dataBase64: string) => call<void>(IPC.saveImageFile, { path, dataBase64 }),
  /** 输入框 @提及 的存在性提示（后端只 stat，不读内容、不写任何东西）。 */
  checkPaths: (base: string, paths: string[]) => call<PathCheck[]>(IPC.checkPaths, { base, paths }),
  /** `@` 路径补全（只读目录列举，不读文件内容）。 */
@@ -526,4 +532,15 @@ export const api = {
  remoteTailscaleProbe: () => call<RemoteTailscale>(IPC.remoteTailscaleProbe),
  remoteTailscaleEnable: () => call<RemoteStatus>(IPC.remoteTailscaleEnable),
  remoteTailscaleDisable: () => call<RemoteStatus>(IPC.remoteTailscaleDisable),
+
+ // ---------- 存储维护（2026-10-22）：omp 侧占用 / 清理 / 壳侧闲置回收 ----------
+ /** 目录占用读数（只读；不跑 `omp gc`）。 */
+ getStorageStats: () => call<StorageStats>(IPC.getStorageStats),
+ /** 清理前 dry-run：`omp gc` 的候选字节 + 壳侧按年龄阈值的可删字节。 */
+ previewStorageCleanup: (olderDays?: number) =>
+  call<StoragePreview>(IPC.previewStorageCleanup, { olderDays: olderDays ?? null }),
+ /** 执行清理（`dryRun` 时只算不删）。 */
+ cleanStorage: (plan: StorageCleanPlan) => call<StorageCleanResult>(IPC.cleanStorage, { plan }),
+ /** 立即回收闲置（30 分钟以上）的会话进程，返回回收数量。 */
+ reclaimIdleSessions: () => call<number>(IPC.reclaimIdleSessions),
 };

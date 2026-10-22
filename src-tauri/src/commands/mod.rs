@@ -1364,7 +1364,7 @@ pub struct ImageAttachment {
 }
 
 /// 单张图片上限：与前端 `ATTACH_MAX_BYTES` 对齐，后端再兜一道（RPC 帧别被几十 MB 撑爆）。
-const IMAGE_MAX_BYTES: usize = 10 * 1024 * 1024;
+pub(crate) const IMAGE_MAX_BYTES: usize = 10 * 1024 * 1024;
 
 /// 记住会话所属项目的「上次使用」模型与思考档（覆盖层 `lastModel` / `lastThinking`）。
 ///

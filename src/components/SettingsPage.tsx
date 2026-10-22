@@ -1,4 +1,4 @@
-import { Archive, ArrowLeft, BookOpen, ChartBar, Key, Lock, Notebook, Plug, Puzzle, Sliders, Mobile } from "reicon-react";
+import { Archive, ArrowLeft, BookOpen, ChartBar, HardDrive, Key, Lock, Notebook, Plug, Puzzle, Sliders, Mobile } from "reicon-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useText } from "../lib/useText";
 import { useApp } from "../stores/app";
@@ -10,6 +10,7 @@ import { ArchivedSessions } from "./ArchivedSessions";
 import { ConstraintsPanel } from "./settings/ConstraintsPanel";
 import { RemotePanel } from "./settings/RemotePanel";
 import { SystemPermissionsPanel } from "./settings/SystemPermissionsPanel";
+import { StoragePanel } from "./settings/StoragePanel";
 import { GeneralSettingsPanel } from "./settings/GeneralSettingsPanel";
 import { MemoryPanel } from "./settings/MemoryPanel";
 import { PluginsPanel } from "./settings/PluginsPanel";
@@ -29,6 +30,7 @@ const TAB_ICONS = {
  memories: Notebook,
  usage: ChartBar,
  archived: Archive,
+ storage: HardDrive,
 } satisfies Record<SettingsTab, unknown>;
 
 /**
@@ -42,7 +44,7 @@ const TAB_GROUPS: { label: keyof Text; tabs: SettingsTab[] }[] = [
  { label: "settingsGroupGeneral", tabs: ["general", "constraints", "system", "remote"] },
  { label: "settingsGroupModel", tabs: ["models"] },
  { label: "settingsGroupExt", tabs: ["plugins", "skills"] },
- { label: "settingsGroupData", tabs: ["memories", "usage", "archived"] },
+ { label: "settingsGroupData", tabs: ["memories", "usage", "archived", "storage"] },
 ];
 
 /**
@@ -245,6 +247,8 @@ export function SettingsPage({ visible = true }: { visible?: boolean }) {
         <MemoryPanel />
        ) : tab === "usage" ? (
         <UsagePanel />
+       ) : tab === "storage" ? (
+        <StoragePanel />
        ) : (
         <GeneralSettingsPanel focusRequest={focusRequest} onFocusDone={clearFocusRequest} />
        )}

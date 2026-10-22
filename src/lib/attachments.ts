@@ -29,6 +29,14 @@ export function mimeFromName(name: string): string | null {
  return EXT_MIME[ext] ?? null;
 }
 
+/** mime → 保存文件名用的扩展名（未知按 png 兜底：预览与另存为都只认这四种格式）。 */
+export function extFromMime(mime: string): string {
+ if (mime === "image/jpeg") return "jpg";
+ if (mime === "image/webp") return "webp";
+ if (mime === "image/gif") return "gif";
+ return "png";
+}
+
 export function isAllowedMime(mime: string): boolean {
  return (ATTACH_MIME as readonly string[]).includes(mime);
 }
@@ -95,10 +103,23 @@ export async function attachmentFromFile(file: File, t: Text): Promise<ImageAtta
  return { name: file.name, mimeType: mime, dataBase64: bytesToBase64(buf), bytes: buf.byteLength };
 }
 
+/** omp 历史 jsonl 的图片外置引用：`blob:sha256:<64 位小写十六进制>` → hash；其余返回 null。 */
+const BLOB_REF = /^blob:sha256:([a-f0-9]{64})$/;
+
+export function blobRefOf(data: unknown): string | null {
+ if (typeof data !== "string") return null;
+ return BLOB_REF.exec(data)?.[1] ?? null;
+}
+
 /**
  * 从消息内容块里取图片（实时帧与 jsonl 同构）。
- * 只认 `type:"image"`；`data` 缺失或超过 `maxChars` 的块跳过并计数——
- * 历史回放不做无上限 base64 常驻，宁可少渲染也不把内存吃光。
+ *
+ * 两种实体形态：
+ * - `data` = base64（实时帧 / `prompt.images`）；
+ * - `data` = `blob:sha256:<hash>`（omp 落盘时的外置引用）→ 只留 `blob` 哈希，
+ *   由渲染层按需读 `blobs` 目录。**不许**把它当 base64 拼 data URL（会得到坏图）。
+ *
+ * base64 超过 `maxChars` 的块跳过并计数——历史回放不做无上限 base64 常驻。
  */
 export function imagesFromContent(
  content: unknown,
@@ -118,6 +139,17 @@ export function imagesFromContent(
     : typeof b.source?.media_type === "string"
      ? b.source.media_type
      : "image/png";
+  const blob = blobRefOf(data);
+  if (blob) {
+   images.push({ mimeType, blob });
+   continue;
+  }
+  // `blob:` 前缀只可能是 omp 的外置引用（base64 字符集不含 `:`）；形状不对就没法还原，
+  // 记成省略——**不许**当 base64 落到 data URL（那是坏图）。
+  if (data.startsWith("blob:")) {
+   omitted += 1;
+   continue;
+  }
   if (!data || data.length > maxChars) {
    omitted += 1;
    continue;

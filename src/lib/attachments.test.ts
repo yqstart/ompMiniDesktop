@@ -71,6 +71,21 @@ describe("图片附件：内容块提取", () => {
   expect(omitted).toBe(1);
  });
 
+ it("历史 jsonl 的 blob 引用只留 hash，不当 base64 处理", () => {
+  const hash = "0123456789abcdef".repeat(4);
+  const { images, omitted } = imagesFromContent(
+   [
+    { type: "image", data: `blob:sha256:${hash}`, mimeType: "image/webp" },
+    { type: "image", data: "blob:sha256:XYZ", mimeType: "image/png" },
+   ],
+   16,
+  );
+  // blob 引用不受 base64 长度上限影响（实体在 blobs 目录，渲染时才读）
+  expect(images).toEqual([{ mimeType: "image/webp", blob: hash }]);
+  // 形状不对的 blob 引用无法还原：记省略，不落成坏图
+  expect(omitted).toBe(1);
+ });
+
  it("非数组内容（缺失/异常）安全返回空", () => {
   expect(imagesFromContent(undefined)).toEqual({ images: [], omitted: 0 });
   expect(imagesFromContent("nope")).toEqual({ images: [], omitted: 0 });

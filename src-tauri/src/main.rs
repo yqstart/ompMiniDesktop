@@ -6,6 +6,7 @@ mod extra_usage;
 mod git_commit;
 mod git_info;
 mod git_ops;
+mod images;
 mod live_stats;
 mod memories;
 mod models_config;
@@ -24,6 +25,7 @@ mod runtime;
 mod session_scan;
 mod settings;
 mod skills;
+mod storage;
 mod system_permissions;
 mod title_prompt;
 mod usage;
@@ -120,6 +122,13 @@ fn main() {
             save_paste,
             run_bash,
             read_image_file,
+            images::read_blob_image,
+            images::copy_image,
+            images::save_image_file,
+            storage::get_storage_stats,
+            storage::preview_storage_cleanup,
+            storage::clean_storage,
+            storage::reclaim_idle_sessions,
             check_paths,
             complete_path,
             stop_session,

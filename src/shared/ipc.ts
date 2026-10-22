@@ -115,6 +115,17 @@ export const IPC = {
  runSlash: "run_slash",
  compactSession: "compact_session",
  readImageFile: "read_image_file",
+/** omp blob 图片（历史会话里的 `blob:sha256:<hash>` 引用）按需读取。 */
+readBlobImage: "read_blob_image",
+/** 把一张图写进系统剪贴板（历史 blob 与实时 base64 共用）。 */
+copyImage: "copy_image",
+/** 另存为本地文件（路径来自系统保存对话框）。 */
+saveImageFile: "save_image_file",
+/** 存储维护：占用读数 / 清理预览 / 执行清理 / 立即回收闲置会话。 */
+getStorageStats: "get_storage_stats",
+previewStorageCleanup: "preview_storage_cleanup",
+cleanStorage: "clean_storage",
+reclaimIdleSessions: "reclaim_idle_sessions",
  checkPaths: "check_paths",
  completePath: "complete_path",
  stopSession: "stop_session",
