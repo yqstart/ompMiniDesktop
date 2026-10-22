@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { clampThinking, highestThinking, resolveThinking, thinkingLevelsOf, THINKING_ORDER } from "./thinking";
+import { clampThinking, resolveThinking, thinkingLevelsOf, THINKING_ORDER } from "./thinking";
 
 // efforts 取自 `omp models --json` 实测值（omp 18.1.22）
 const OPUS5 = ["low", "medium", "high", "xhigh", "max"]; // Claude Opus 5
 const GEMINI = ["low", "medium", "high"]; // google/gemini-3.5-flash
 const DEEPSEEK_PRO = ["low", "high", "max"]; // deepseek-v4-pro（跳过 medium/xhigh）
-const SPARK = ["minimal", "low", "medium", "high", "xhigh"]; // meta/muse-spark-1.3
 
 describe("thinkingLevelsOf", () => {
   it("off 恒定在首位（omp 的 efforts 不含 off，但 off 可生效）", () => {
@@ -22,19 +21,6 @@ describe("thinkingLevelsOf", () => {
   it("全集序恒定（用于下拉渲染顺序）", () => {
     expect(THINKING_ORDER[0]).toBe("off");
     expect(THINKING_ORDER[THINKING_ORDER.length - 1]).toBe("max");
-  });
-});
-
-describe("highestThinking", () => {
-  it("取该模型最强可用档", () => {
-    expect(highestThinking(OPUS5)).toBe("max");
-    expect(highestThinking(GEMINI)).toBe("high");
-    expect(highestThinking(DEEPSEEK_PRO)).toBe("max");
-    expect(highestThinking(SPARK)).toBe("xhigh");
-  });
-  it("不支持思考的模型 = off", () => {
-    expect(highestThinking(null)).toBe("off");
-    expect(highestThinking(["bogus"])).toBe("off");
   });
 });
 

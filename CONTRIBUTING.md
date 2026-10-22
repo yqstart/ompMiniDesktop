@@ -10,7 +10,7 @@
 | pnpm | 11 及以上 |
 | Rust | stable（已验证 1.97）+ `cargo-tauri` |
 | `omp` | 18.x |
-| 系统 | macOS arm64（首发；Windows / Linux 打包延后） |
+| 系统 | macOS（Apple Silicon / Intel）、Windows x64、Linux x64；Windows 细节见 [`docs/windows.md`](docs/windows.md) |
 
 额外依赖见 [Tauri 前置条件](https://v2.tauri.app/start/prerequisites/)。
 
@@ -29,10 +29,10 @@ pnpm tauri:dev
 pnpm build
 ```
 
-常用检查（提交前请全过）：
+常用检查（提交前请全过；等价于 typecheck + lint + test + e2e:ipc）：
 
 ```bash
-pnpm typecheck && pnpm test && pnpm e2e:ipc
+pnpm check
 ```
 
 仅检查 Rust 侧（含单测）：
@@ -47,13 +47,13 @@ cargo test --manifest-path src-tauri/Cargo.toml
 ## 贡献方向
 
 - 按排期推进（见 [`docs/roadmap.md`](docs/roadmap.md)）：排期 1 形态收敛 / 排期 2 聊天对标 / 排期 3 设置重构（三者已随 0.1.0 交付）
-- 当前主战场：聊天形态的体验打磨（消息流、输入卡、右栏上下文面板、设置视图）与四平台产物验证
+- 当前主战场：聊天形态的体验打磨（消息流、输入卡、右栏工作台、设置视图）与四平台产物验证
 - Windows / Linux 打包验证
 - 文档与翻译
 
-明确不做（请勿提交）：编辑器 / 文件树 / 内置浏览器 / SSH / 移动端 / PR 集成、
-分屏与多窗口、worktree 生命周期管理、云同步 / 定时任务、终端形态的新功能
-（终端形态已随排期 1 退场）。
+明确不做（请勿提交）：编辑器 / 内置浏览器 / SSH / PR 集成、
+分屏与多窗口、worktree 生命周期管理、云同步 / 定时任务、终端形态的会话模型
+（终端只作为右栏工作台的页签存在）；手机端只做远程控制 PWA，不做原生移动端 App。
 
 ## 提交约定
 

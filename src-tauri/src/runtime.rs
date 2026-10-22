@@ -5,7 +5,7 @@
 //!
 //! 用 `rpc-ui` 而非 `rpc`：上游把 `hasUI=true` 的 RPC 变体单独出一个模式，
 //! 差别是会话会挂上 `ask` 工具（模型能主动向用户提问，UI 请求走既有的
-//! `extension_ui_request` 桥）。实测对比与帧形状见 docs/rpc-memo.md §1。
+//! `extension_ui_request` 桥）。实测对比与帧形状见 `CHANGELOG.md` 的 0.1.0 节。
 
 use std::{
     collections::HashMap,
@@ -144,7 +144,7 @@ impl Default for SessionActivity {
 }
 
 /// 闲置回收阈值：idle 且这么久没有任何帧 → 回收（kill）长驻进程。
-/// 内存大头就是这些常驻 omp 进程（每个 0.5–1GB，实测见 docs/v17-schedule.md），
+/// 内存大头就是这些常驻 omp 进程（每个 0.5–1GB，实测），
 /// 而「浏览过的会话」会一直留着——不回收，开十个会话就是十个进程。
 /// 回收后**重新打开 / 直接发消息都会自动 resume**（`send_prompt` 的自动恢复），
 /// 所以这个阈值不需要保守到「用户回来第一眼看不到会话」的程度。
@@ -721,7 +721,7 @@ fn with_stderr_reason(mut e: crate::commands::CmdError, err: &StderrBuf) -> crat
 /// 为什么不用调用方给的 key 作 map 键：像 `create_session` 这样的调用方手里只有占位键
 /// （`new-<ts>`），真身份要握手才知道；而事件三通道与 pump 的 map 查询（真值快照 /
 /// 命令面缓存 / 偏好回写）**从第一帧起**就得按会话 id 走——占位键会把新建会话的帧发到
-/// 无人订阅的通道（实测见 `docs/v34-schedule.md` §1.3）。这里统一以 sid 为键，
+/// 无人订阅的通道（实测）。这里统一以 sid 为键，
 /// 调用方拿到的返回值即最终身份、无需换名。
 ///
 /// 失败时会把 omp 写在 stderr 的原因接进错误（见 [`with_stderr_reason`]）。
@@ -2777,7 +2777,7 @@ mod tests {
 
     #[test]
     fn spawn_args_use_rpc_ui_mode() {
-        // rpc-ui（hasUI=true）而非 rpc：多挂 ask 工具，见 docs/rpc-memo.md §1
+        // rpc-ui（hasUI=true）而非 rpc：多挂 ask 工具。
         let opts = SpawnOpts {
             bin: "omp".into(),
             cwd: "/tmp/x".into(),

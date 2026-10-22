@@ -69,11 +69,6 @@ export function removeManyMyModels(list: string[], selectors: string[]): string[
  return list.filter((s) => !drop.has(s));
 }
 
-/** 某个供应商当前在目录里的全部 selector（挑选面板的全选 / 清空 / 计数用）。 */
-export function providerSelectors(catalog: ModelInfo[], provider: string): string[] {
- return catalog.filter((m) => m.provider === provider).map((m) => m.selector);
-}
-
 /** 按存储顺序解析成 `{selector, model}`；目录里没有的模型 `model: null`（设置页要照样列出来给人清理）。 */
 export function myModelEntries(
  list: string[],
@@ -88,7 +83,7 @@ export function myModelEntries(
  * 星标模型（按 `myModels` 存储顺序），`others` = 其余模型（**星标项不重复出现**，调用方
  * 按供应商分组用）。存储里目录已不存在的 selector 直接忽略（只留在设置页的「我的模型」
  * 列表里标「已不可用」清理）；`myModels` 为空或一个都对不上时返回空组 + `list` 原数组。
- * 设置模型的弹窗（`ModelPickList`）与聊天下拉（`ModelPicker`）共用这一份口径。
+ * 设置模型的弹窗（`ModelPickList`）与聊天下拉（`ModelMenu`）共用这一份口径。
  */
 export function splitStarredModels(
  list: ModelInfo[],

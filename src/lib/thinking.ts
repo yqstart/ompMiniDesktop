@@ -1,5 +1,5 @@
 /**
- * 思考档工具：可用档推导 + 默认档夹取 + 最高档选择 + 真值归一。
+ * 思考档工具：可用档推导 + 默认档夹取 + 真值归一。
  *
  * 硬约束（omp 18.10.3 rpc-ui 实测）：
  * - 合法档 = 当前模型 `thinking.efforts`，但 `off` 恒定合法（不在 efforts 内亦生效）；
@@ -16,12 +16,6 @@ export const THINKING_ORDER = ["off", "minimal", "low", "medium", "high", "xhigh
 export function thinkingLevelsOf(efforts: readonly string[] | null | undefined): string[] {
   const set = new Set(efforts ?? []);
   return THINKING_ORDER.filter((lv) => lv === "off" || set.has(lv));
-}
-
-/** 该模型支持的最高档；无可用档（不支持思考）= off。 */
-export function highestThinking(efforts: readonly string[] | null | undefined): string {
-  const levels = thinkingLevelsOf(efforts);
-  return levels[levels.length - 1] ?? "off";
 }
 
 /**

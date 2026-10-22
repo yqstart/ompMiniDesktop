@@ -842,7 +842,6 @@ mod tests {
             run(dir, &["config", "user.name", "omp e2e"]);
         }
         let a_str = a.to_string_lossy().to_string();
-        let b_str = b.to_string_lossy().to_string();
 
         // 首个提交（A 推上去，B 跟上）
         std::fs::write(a.join("f.txt"), "base\n").unwrap();

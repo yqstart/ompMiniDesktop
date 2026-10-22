@@ -18,11 +18,11 @@ import { DiffDialog } from "./DiffDialog";
  *   （切走期间到达的帧就丢了）并丢掉滚动位置；
  * - 事件订阅（`useSessionEvents`）与完成通知（`useTaskNotifications`）挂在这里：
  *   它们跟随 `activeSessionId` 建立 / 释放（后台会话继续收流）；
- * - `StatusBar` 本身是不可见的 aria-live 区域（状态已收敛进输入框内的状态胶囊），
+ * - `StatusBar` 本身是不可见的 aria-live 区域（运行状态显示在左栏会话状态点与输入卡发送键），
  *   保留是为了读屏播报；
  * - V40 浮层与面板都挂在这里：查找条（⌘F）、旁问面板（/btw）、统计弹窗（/status）、
  *   改动弹窗（工具卡「查看改动」）——各自按 store 开关自渲染，不占常驻布局；
- * - 右栏上下文面板（v2）不是这一列的兄弟，装配在 `App` 主区（`ChatView` 之侧）：
+ * - 右栏工作台（`WorkbenchPanel`）不是这一列的兄弟，装配在 `App` 主区（`ChatView` 之侧）：
  *   窄屏时它是 fixed 抽屉，不该被这一列的 `overflow-hidden` 语义影响。
  */
 export function ChatView({ visible = true }: { visible?: boolean }) {

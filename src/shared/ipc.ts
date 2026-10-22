@@ -1,7 +1,6 @@
 /** Tauri command / event 通道常量，前后端共用命名。 */
 export const IPC = {
  // commands
- locateOmp: "locate_omp",
  getHealth: "get_health",
  getModels: "get_models",
  refreshModels: "refresh_models",
@@ -115,7 +114,6 @@ export const IPC = {
  followUpMessage: "follow_up_message",
  runSlash: "run_slash",
  compactSession: "compact_session",
- branchSession: "branch_session",
  readImageFile: "read_image_file",
  checkPaths: "check_paths",
  completePath: "complete_path",
@@ -141,8 +139,6 @@ export const IPC = {
  promoteQueuedMessage: "promote_queued_message",
  /** 中断并交还队列（Esc 语义：omp TUI 的 Esc 等价物）→ `{steering,followUp}`。 */
  abortAndRestoreQueue: "abort_and_restore_queue",
- /** 全量复制当前会话另起一份（`/fork`）→ 新 SessionView。 */
- forkSession: "fork_session",
  /** goal 目标模式：get / create / resume / pause / drop。 */
  goalCommand: "goal_command",
  getSessionStats: "get_session_stats",
@@ -160,7 +156,6 @@ export const IPC = {
  cancelSubagent: "cancel_subagent",
  getSubagentMessages: "get_subagent_messages",
  setFastMode: "set_fast_mode",
- setSlowMode: "set_slow_mode",
  exportSessionHtml: "export_session_html",
  /** 大段粘贴转文件引用（V41）：文本落 `<appData>/omp-mini/paste/`，返回绝对路径。 */
  savePaste: "save_paste",

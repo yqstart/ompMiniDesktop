@@ -89,7 +89,7 @@ plan            => Unknown command: plan
 - **计划阶段模型 = `modelRoles.plan`**（2026-10-20 补）：omp 的 TUI 进入计划模式会把活动模型切到 `plan` 角色，但 rpc-ui 的 `--plan-yolo` 启动路径不会自己做这一步。壳侧在 spawn 前读项目 cwd 的有效 `modelRoles.plan`：配置了就用 `--model @plan`（角色 selector 的 `:档位` 后缀交给 omp 解析），**不传**项目 `last_model` / `last_thinking`；没配置时沿用项目偏好。批准后仍由 omp 的 `--plan-yolo-into` 默认切到 `smol` 角色（未配置时 omp 按默认档兜底）。
 - **入口（2026-10-20 修订）**：工具行 `+` 旁的「计划」chip **常驻**（不再随空态消失）。
   - **空态**（没有活动会话）= 切换下一次新建会话的开关：空态第一条消息 = `createChatIn(dir, { plan: true })` → 新建 `--plan-yolo` 会话 → 发送 → 开关复位（一次性）；点项目选择器同样带着开关新建（`ProjectPicker` → `startChatInProject({ plan })`）。
-  - **有会话**（2026-10-20 修订）：若当前会话**完全空**（无对话内容 / 无草稿 / 无附件 / 未运行）→ 直接**开 / 关**计划模式：`runSessionBatch("delete",[sid])` 删掉这个没有 jsonl 的空会话，再用同一目录 `createChatIn(cwd, { plan: !active })` 新建（已计划就换回普通会话；只换 id，不给用户留两个空会话）。否则打开 `composer/PlanStartDialog.tsx`：未计划 = 说明「运行中不能切换」+ 「用当前目录新建计划会话」；已计划 = 「计划模式（已启用），运行中无法关闭」+ 「新建普通会话」。`+` 菜单「计划」也走同一入口。计划会话在 `store.planSessions` 本地标记，工具行 chip 显示 accent（`get_state` 不返回 planMode）。
+  - **有会话**（2026-10-20 修订）：若当前会话**完全空**（无对话内容 / 无草稿 / 无附件 / 未运行）→ 直接**开 / 关**计划模式：`runSessionBatch("delete",[sid])` 删掉这个没有 jsonl 的空会话，再用同一目录 `createChatIn(cwd, { plan: !active })` 新建（已计划就换回普通会话；只换 id，不给用户留两个空会话）。否则打开 `composer/PlanStartDialog.tsx`：未计划 = 说明「运行中不能切换」+ 「用当前目录新建计划会话」；已计划 = 「计划模式（已启用），运行中无法关闭」+ 「新建普通会话」。计划会话在 `store.planSessions` 本地标记，工具行 chip 显示 accent（`get_state` 不返回 planMode）。
   - 已打开的会话不能切——运行中没有 RPC，重启 resume 的语义也不是「继续当前任务」。
 - **展示（已做）**：
   - `write` 的 `path` 以 `local://` 且以 `-plan.md` 结尾 → 工具行标成「计划」（`lib/toolLine.ts` 的 `toolVerbPlan`）。
@@ -97,9 +97,9 @@ plan            => Unknown command: plan
 - **代价**：自动批准，没有人工确认；计划阶段用 `plan` 角色（未配置则项目偏好），执行阶段默认 smol 角色（可用 `--plan-yolo-into` 指定），与用户偏好模型可能不同。
 - **风险**：`--plan-yolo` 与 `--goal` 互斥（`create_session` 目前不带 `--goal`，不冲突）；计划文件在 omp 的 `local://` 存储里，壳侧无法直接打开，只能从工具参数读全文。
 
-### 方案 B（不推荐）：壳侧提示词计划
+### 方案 B（不推荐、未实施）：壳侧提示词计划
 
-`+` 菜单「计划」发送一条「只读分析 → 输出计划」的结构化提示，用户确认后再发「执行」。**没有 omp 的只读强制**，模型可能越界写文件；配合 `always-ask` 也只能在写入审批时兜底。属于「看起来像计划模式」的壳侧约定，与项目「不塞假命令」的口径冲突。
+原设想由工具行「计划」chip 发送一条「只读分析 → 输出计划」的结构化提示，用户确认后再发「执行」。**没有 omp 的只读强制**，模型可能越界写文件；配合 `always-ask` 也只能在写入审批时兜底。属于「看起来像计划模式」的壳侧约定，与项目「不塞假命令」的口径冲突，已否决。
 
 ### 方案 C（后续）：omp 扩展桥
 
@@ -107,7 +107,7 @@ plan            => Unknown command: plan
 
 ## 当前决定（2026-10-20 已落地）
 
-- **入口 = 空态输入卡的「计划」开关**（用户口径）：只有没有活动会话时显示；打开后空态第一条消息 = 新建 `--plan-yolo` 会话再发送，成功后开关复位。`+` 菜单的「计划」在有会话时只落一条指引说明（去空态开开关），不塞假命令。
+- **入口 = 工具行常驻的「计划」chip**（用户口径）：空态（没有活动会话）点击 = 切换下一次新建会话的计划开关，空态第一条消息 = 新建 `--plan-yolo` 会话再发送，成功后复位；有会话时若当前会话完全空（无内容 / 无草稿 / 未运行）→ 直接开 / 关（删掉空会话、同目录重建），否则打开 `PlanStartDialog` 说明「运行中不能切换」并给出新建计划 / 普通会话的动作。**`+` / `/` 面板里没有「计划」项**（入口只在工具行）。
 - **实现落点**：
   - 后端：`runtime.rs` 的 `SpawnOpts.plan_yolo` / `SpawnOpts::args`；`commands/mod.rs` 的 `spawn_new`、`create_session(plan: Option<bool>)`、`create_session_in(..., plan)`。
   - 前端：`shared/api.ts` 的 `createSession(cwd, plan?)`；`lib/sessionOpen.ts` 的 `createChatIn(..., { plan })`；`stores/app.ts` 的 `planModeNext` / `setPlanModeNext`；`composer/Composer.tsx` 的空态草稿键 `NEW_DRAFT = "__new__"`、`sendFirstInNewChat`、`sendTextTo`、常驻「计划」入口；`composer/PlanStartDialog.tsx`（有会话时的说明 + 新建计划会话）；`pickers/ProjectPicker.tsx` / `lib/projects.ts`（点项目也带 plan）；`lib/toolLine.ts` 的计划文件标记。

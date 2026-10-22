@@ -125,7 +125,7 @@ type AppState = {
  activeSessionId: string | null;
  /** 会话消息流（ViewMsg 归一；高频流式增量只改这里）。 */
  eventsBySession: Record<string, ViewMsg[]>;
- /** 会话运行状态（`omp-status://<id>` 事件的落点；状态胶囊 / 通知用）。 */
+ /** 会话运行状态（`omp-status://<id>` 事件的落点；左栏状态点 / 通知用）。 */
  statusBySession: Record<string, SessionStatus>;
  /** 输入草稿（按会话隔离，内存态）。 */
  drafts: Record<string, string>;
@@ -249,7 +249,7 @@ type AppState = {
   */
  globalApproval: string | null;
  setGlobalApproval: (mode: string) => void;
- /** 会话统计弹窗显隐（`/status` 与上下文面板入口；V40）。 */
+ /** 会话统计弹窗显隐（`/status` 入口；V40）。 */
  statsOpen: boolean;
  setStatsOpen: (v: boolean) => void;
  /** 文件改动弹窗的目标路径（工具卡「查看改动」按钮；null = 关闭；V40）。 */

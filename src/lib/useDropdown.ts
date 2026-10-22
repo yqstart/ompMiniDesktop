@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 function isVisible(element: HTMLElement) {
  if (!element.isConnected || element.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
  if (getComputedStyle(element).visibility === "hidden") return false;
@@ -142,17 +142,6 @@ export function useDropdown(
  }, [ignore, open]);
 
  return ref;
-}
-
-/** 同一工具行内同时只允许一个下拉打开。 */
-export function useSingleOpen() {
- const [openId, setOpenId] = useState<string | null>(null);
- const bind = (id: string) => ({
-  open: openId === id,
-  setOpen: (v: boolean) => setOpenId(v ? id : null),
-  close: () => setOpenId((cur) => (cur === id ? null : cur)),
- });
- return { openId, bind };
 }
 
 /**

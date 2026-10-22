@@ -566,7 +566,7 @@ pub fn apply_chain_edit(
 // ---------- 进程调用 ----------
 
 /// 跑一次 omp CLI 并回 stdout（非零退出把 stderr 尾部当原因）。
-/// `pub(crate)`：`quota.rs` 的 `omp usage --json` 走同一套超时与错误口径。
+/// `pub(crate)`：`provider_usage.rs` 的 `omp usage --json` 走同一套超时与错误口径。
 pub(crate) async fn run_omp(bin: &str, args: &[&str]) -> Result<String, String> {
     run_omp_in(None, bin, args).await
 }

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CheckoutView, ProjectFiles, ProjectView, WorkspaceView } from "@shared/types";
 import {
- appendReference,
  buildRefItems,
  buildRefTree,
  flattenRefTree,
@@ -9,7 +8,6 @@ import {
  isFileRow,
  joinAbs,
  rankRefItems,
- referenceInsertText,
  referenceLabel,
  referenceScope,
  referenceTarget,
@@ -270,35 +268,10 @@ describe("命中高亮（highlightName）", () => {
  });
 });
 
-describe("注入文本（referenceInsertText / joinAbs）", () => {
- it("普通路径：@ 前缀 + 尾部空格", () => {
-  expect(referenceInsertText("/a/b.ts")).toBe("@/a/b.ts ");
- });
-
- it("含空白：引号形式（omp 的 @\"a b.md\" 规则）", () => {
-  expect(referenceInsertText("/a/b c.ts")).toBe('@"/a/b c.ts" ');
- });
-
+describe("路径拼接（joinAbs）", () => {
  it("根带尾斜杠不产生双斜杠", () => {
   expect(joinAbs("/a/", "x.ts")).toBe("/a/x.ts");
   expect(joinAbs("/a", "sub/x.ts")).toBe("/a/sub/x.ts");
- });
-});
-
-describe("聊天草稿追加（appendReference）", () => {
- it("草稿末尾不是空白时先补一个空格（提及要求 @ 在行首或空白之后）", () => {
-  expect(appendReference("看看这个：", "/p/be/src/api.ts")).toBe("看看这个： @/p/be/src/api.ts ");
-  expect(appendReference("first line\nsecond", "/a/b.ts")).toBe("first line\nsecond @/a/b.ts ");
- });
-
- it("空草稿 / 末尾已有空白：不补空格", () => {
-  expect(appendReference("", "/a/b.ts")).toBe("@/a/b.ts ");
-  expect(appendReference("看这个 ", "/a/b.ts")).toBe("看这个 @/a/b.ts ");
-  expect(appendReference("看这个\n", "/a/b.ts")).toBe("看这个\n@/a/b.ts ");
- });
-
- it("路径含空白走引号形式（与注入终端同一份 referenceInsertText）", () => {
-  expect(appendReference("", "/a/b c.ts")).toBe('@"/a/b c.ts" ');
  });
 });
 
@@ -307,7 +280,6 @@ describe("引用路径口径（相对优先，绝对兜底）", () => {
   expect(relativeToCwd("/w/alpha", "/w/alpha/src/a.ts")).toBe("src/a.ts");
   expect(relativeToCwd("/w/alpha/", "/w/alpha/src/a.ts")).toBe("src/a.ts");
   expect(referenceTarget("/w/alpha", "/w/alpha/src/a.ts")).toBe("src/a.ts");
-  expect(appendReference("", referenceTarget("/w/alpha", "/w/alpha/src/a.ts"))).toBe("@src/a.ts ");
  });
 
  it("目录本身 / 目录外的条目：不给相对路径（保留绝对路径）", () => {
@@ -321,9 +293,8 @@ describe("引用路径口径（相对优先，绝对兜底）", () => {
   expect(referenceTarget("/w/alpha", "/w/beta/a.ts")).toBe("/w/beta/a.ts");
  });
 
- it("含空格 / 中文路径照样相对化，注入仍走引号形式", () => {
+ it("含空格 / 中文路径照样相对化", () => {
   expect(referenceTarget("/w/alpha", "/w/alpha/docs/设计 稿.md")).toBe("docs/设计 稿.md");
-  expect(appendReference("", referenceTarget("/w/alpha", "/w/alpha/docs/设计 稿.md"))).toBe('@"docs/设计 稿.md" ');
  });
 
  it("芯片短名：文件给名字，目录补尾斜杠", () => {

@@ -40,13 +40,13 @@
 
 ## 2. 口径（不许违背）
 
-1. **右栏只有一个形态**：工作台（文件 / 终端双页签），停靠在主区第三栏；`⌘⇧G` 开关、**每次启动都收起**（2026-10-19 用户口径，不恢复上次展开态）。
+1. **右栏只有一个形态**：工作台（文件 / 脚本 / 终端三页签），停靠在主区第三栏；`⌘⇧G` 开关、**每次启动都收起**（2026-10-19 用户口径，不恢复上次展开态）。
 2. **常驻挂载**：收起右栏 / 切页签 / 切设置视图都只改 `hidden`——终端进程、xterm 回看缓冲、文件树展开位置都不丢（`WorkbenchPanel` 不许写成 `if (!open) return null`）。
-3. **目标目录 = 当前会话 cwd**（`resolveContext`），会话切换即跟着切；没有会话时两个页签都给空态文案。
+3. **目标目录 = 当前会话 cwd**（`resolveContext`），会话切换即跟着切；没有会话时三个页签都给空态文案。
 4. **终端多开、标签切换**（`store.terminals` + `activeTerminalId`，V44 用户口径：不分屏）：终端页签内一条标签行（切换 / `+` 新建 / 关闭），每个标签一个常驻 shell；上限 6、超出淘汰最旧的**非活跃**项（组件卸载 = `terminal_kill`）；终端在创建时定格 cwd，**切会话不改目录也不被杀**（切会话只影响「新建终端用哪个目录」）；应用退出统一 `pty::kill_all`。点脚本**每次新开一个终端**跑它（标签名 = 脚本名）。
 5. **高频字节流只进 xterm**，不进 store（与聊天流式同一治理口径）。
-6. **文件树只读**：`list_dir` 不写盘、不读文件内容；打开交给系统默认程序（`openPath`，失败退 `revealItemInDir`）；「引用到输入框」与 `⌘⇧P` 引用浮层共用 `appendReference` 这一条注入口径。
-7. **终端不许长出终端形态的会话模型**：不做 π 标题解析、不做目录行 / 标签栏、不做覆盖层注入——一个终端就是「一个 cwd 的登录 shell」。
+6. **文件树只读**：`list_dir` 不写盘、不读文件内容；打开交给系统默认程序（`openPath`，失败退 `revealItemInDir`）；「引用到输入框」写**最短唯一后缀**短标签（`mention_label` → `store.pendingReference` → 输入框芯片），与 `⌘⇧P` 引用浮层同一条投递口径。
+7. **终端不许长出终端形态的会话模型**：不做 π 标题解析、不做目录行 / 会话标签栏、不做覆盖层注入——一个终端就是「一个 cwd 的登录 shell」（工作台内的终端标签行是 V44 的多开入口，不是会话模型）。
 8. **焦点与尺寸**：隐藏态不 fit、不推尺寸；可见时才 `fit()` + `terminal_resize` + `focus()`（隐藏态测不到尺寸是 xterm 的既有约束）。终端容器**底部留 24px**（`absolute inset-x-0 top-0 bottom-6`）——最后一行不贴面板底，且必须用「抬高容器」而不是 `padding-bottom`：FitAddon 算可用高度时会再减一次容器 padding（`getComputedStyle().height` 已是 content 高），padding 会双重扣减。
 9. **宽度可拖**（260–640，默认 320，localStorage 持久化）：手柄在右栏左缘，交互与左栏 `SidebarShell` 同一套（3px 隐身热区 / 悬停与拖拽中高亮 / 手柄聚焦时 ←→ 每次 8px 微调）；宽度按「指针到右栏右缘的距离」算（不受主区外边距影响），并以「给中列留 420px」为窗口上限——窗口变窄自动收回超限值，不许把消息列挤没。
 10. **脚本页签（V43）**：**项目脚本只读识别、自定义脚本只存本应用偏好**——后端 `discover_scripts` 不执行命令、不写盘；自定义脚本按 cwd 存 `omp.scripts.v1`，不往用户仓库写文件。**识别口径**：`package.json`（包管理器按锁文件 / `packageManager`）、`Cargo.toml`（+ `.cargo` 的 `[alias]`）、`go.mod`、`manage.py` / `pyproject.toml`、`Makefile` / `justfile` / `Taskfile` 一律**行扫描**（不为几个清单文件引 TOML / YAML 依赖；认不出的写法就是没有，不猜）。**执行口径**：面板只投递（`runInTerminal` → `pendingTerminalRun`），由该 cwd 的 `TerminalPane` 在 PTY 建好后写进 PTY——写入走 `terminal_write_ready`：后端等 shell 进入行编辑器 raw 模式（`pty.rs` 的 `shell_ready`，8s 超时兜底）再落字，否则 cooked 期写入会被 tty 回显、行编辑器再重画一遍，命令在终端里出现两遍（`consumedRunRef` 防重复投递）——脚本面板自己不 spawn 进程；终端没开过就顺带把右栏与终端页签拉起来。

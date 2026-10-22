@@ -4,8 +4,8 @@
 //! **与 `usage.rs` 的分工**：那边统计的是**本地**会话 jsonl 的 token 消耗（设置 › 使用统计），
 //! 这边展示的是**供应商侧**的配额窗口——只有 omp 自己拿得到（各 provider 的上游用量接口），
 //! 壳侧不直连任何配额 API、不读凭证库，只解析 `omp usage --json` 的输出（与供应商页走
-//! `omp auth-broker` 同款做法）。V6 曾在输入框上下文条给过同一份数据的入口（`quota.rs`），
-//! V11 随聊天界面删除，本模块是它在设置页的恢复版（上游事实见 `docs/v6-schedule.md` / `docs/v15-schedule.md`）。
+//! `omp auth-broker` 同款做法）。V6 曾在输入框上下文条给过同一份数据的入口（当时的
+//! `quota.rs`，已删除），V11 随聊天界面删除，本模块是它在设置页的恢复版。
 //!
 //! 上游事实（omp 18.2.1 / 18.2.5 实测）：
 //! - `omp usage --json` 输出 `{generatedAt, reports[], accountsWithoutUsage[], disabledCredentials[], capacity{}}`；

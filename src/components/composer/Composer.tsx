@@ -885,7 +885,7 @@ export function Composer() {
  };
 
  /**
-  * 执行模式循环（V40/V41）：实现提取到 `lib/sessionApproval.ts`（命令中心共用）——
+  * 执行模式循环（V40/V41）：实现提取到 `lib/sessionApproval.ts`——
   * always-ask → write → yolo；idle 时自动重启 runtime 生效、running 挂起到本轮结束。
   */
  const cycleApproval = async () => {

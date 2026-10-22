@@ -3,7 +3,6 @@ import { ArrowDown, Bulb, ChevronRight, Sparkles } from "reicon-react";
 import { THREAD_PAGE, useApp } from "../../stores/app";
 import { fmt } from "../../lib/locale";
 import { useText } from "../../lib/useText";
-import { api } from "@shared/api";
 import { isRemoteClient } from "@shared/remote";
 import { openBtwPanel } from "../../lib/btw";
 import { buildThreadLayout } from "../../lib/threadLayout";
@@ -663,17 +662,4 @@ const ThreadRow = memo(function ThreadRow({
  );
 });
 
-export function SessionActions() {
- const { activeSessionId } = useApp();
- const t = useText();
- if (!activeSessionId) return null;
- return (
-  <button
-   onClick={() => activeSessionId && api.stop(activeSessionId).catch(() => undefined)}
-   className="cursor-pointer text-[13px] text-muted hover:text-foreground"
-   aria-label={t.stop}
-  >
-   {t.stop}
-  </button>
- );
-}
+

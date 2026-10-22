@@ -308,30 +308,6 @@ export function highlightName(name: string, terms: readonly string[]): { text: s
  return parts.length > 0 ? parts : [{ text: name, hit: false }];
 }
 
-/**
- * 注入文本：omp 提及语法（含空白 → `@"a b.md"`）加尾部空格。
- * 尾空格让 `@` 的补全查询立刻结束（路径完整粘贴后不残留补全浮层）。
- * 含双引号是已知极端边界，不做转义（上游不支持）。
- *
- * 传进来的应当是**注入路径**（见 `referenceTarget`）：会话目录内的条目给相对路径，
- * 目录外（跨项目引用）才用绝对路径——omp 的 `@` 补全本身就产相对路径，两边同一口径。
- */
-export function referenceInsertText(path: string): string {
- const quoted = /[\s"]/.test(path) ? `"${path}"` : path;
- return `@${quoted} `;
-}
-
-/**
- * 把引用追加到**聊天草稿**尾部（v1 起引用只有一个注入目标：Composer 草稿）。
- * 草稿末尾不是空白时先补一个空格——omp 的提及要求 `@` 在行首或紧跟在空白之后
- * （`lib/mentions.ts` 与上游 `extractFileMentions` 同一口径），否则那一行不会被展开
- * 成 fileMention（实测：`…是：@/tmp/x` 不算提及、`…是： @/tmp/x` 才算）。
- */
-export function appendReference(draft: string, path: string): string {
- const head = draft.length > 0 && !/\s$/.test(draft) ? `${draft} ` : draft;
- return `${head}${referenceInsertText(path)}`;
-}
-
 /** 项目根 + 仓库相对路径 → 绝对路径（POSIX；壳目标平台 macOS/Linux）。 */
 export function joinAbs(root: string, rel: string): string {
  return `${root.replace(/\/+$/, "")}/${rel}`;

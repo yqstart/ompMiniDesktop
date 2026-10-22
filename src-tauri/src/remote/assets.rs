@@ -23,7 +23,7 @@ pub async fn static_handler(State(ctx): State<Ctx>, uri: Uri) -> Response {
         Some(asset) => respond(&path, asset.0, asset.1),
         None => {
             let msg = if path.ends_with(".html") || path == "mobile.html" {
-                "移动端页面还没有构建：请在仓库根目录运行 `pnpm build`（或 `pnpm build:mobile`）。"
+                "移动端页面还没有构建：请在仓库根目录运行 `pnpm build`。"
             } else {
                 "not found"
             };

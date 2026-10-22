@@ -183,23 +183,6 @@ export function isDefaultTitle(title: string | null | undefined): boolean {
 }
 
 /**
- * 复制会话后的统一打开（V40 `/fork`）：把新视图落 store、切选中、拉历史、滚底。
- *
- * `view` = `fork_session` 的返回值（新会话，进程已在跑）——
- * 与 `openSessionWithHistory` 的分工：那边负责「已有会话的打开」，这里负责「刚 fork
- * 出来的新会话的接管」（会话行先进列表，侧栏随 `activeSessionId` 变化自行防抖重拉）。
- */
-export async function openForkedSession(view: SessionView, opts: { draft?: string } = {}): Promise<void> {
- const st = useApp.getState();
- st.set({
-  sessions: [view, ...st.sessions.filter((s) => s.id !== view.id)],
-  statusBySession: { ...st.statusBySession, [view.id]: { state: "idle" } },
-  ...(opts.draft !== undefined ? { drafts: { ...st.drafts, [view.id]: opts.draft } } : {}),
- });
- await openSessionWithHistory(view.id, view);
-}
-
-/**
  * 打开会话的**唯一实现**（会话弹窗 / 目录行 / 空态共用，避免两处漂移）：
  * 选中即读底 → 起/聚焦长驻 RPC → 补拉运行时真值 → 拉历史去重合并 → 再读底。
  *
@@ -214,7 +197,7 @@ export async function openForkedSession(view: SessionView, opts: { draft?: strin
  * （默认口径是保留本地行标题——那是给「刚发首条消息的乐观标题」用的，恢复态不适用）。
  *
  * 全程不抛错：会话打不开（文件被删 / omp 缺失）时仍允许看旧缓存，
- * 状态胶囊会报 exited / omp 不可用，不由这里弹错——结果由返回值表达，恢复路径据此回到空态。
+ * 左栏会话状态点与输入卡会体现 exited / omp 不可用，不由这里弹错——结果由返回值表达，恢复路径据此回到空态。
  */
 export async function openSessionWithHistory(
  id: string,
@@ -295,7 +278,7 @@ export async function openSessionWithHistory(
   await syncSessionRuntime(opened.id);
   ok = true;
  } catch {
-  // 打不开时保留旧缓存可读，状态胶囊会报 exited / 不可用
+  // 打不开时保留旧缓存可读，左栏会话状态点会报 exited / 不可用
  }
  try {
   const page = await api.getHistory(realId);

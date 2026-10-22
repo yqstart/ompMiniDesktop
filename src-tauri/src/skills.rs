@@ -1,6 +1,6 @@
 //! 技能（Skill，设置 ›「技能」）：把 omp 的技能发现与逐项启停映射进设置页。
 //!
-//! 上游事实（omp 18.3.5 实测，明细见 `docs/v23-schedule.md`）：
+//! 上游事实（omp 18.3.5 实测）：
 //! - `omp skill list [dir] --json` → `{skills: [{name, description, filePath, baseDir, source, hide}],
 //!   warnings: []}`。`source` = `<provider>:<level>`，实测值：`native:user`（`<agentDir>/skills`）、
 //!   `native:project`（`.omp/skills`）、`agents:user|project`（`~/.agents`、`.agents`）、

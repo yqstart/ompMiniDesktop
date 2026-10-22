@@ -28,7 +28,7 @@ export function approvalName(t: Text, mode: string | null | undefined): string {
  return mode;
 }
 
-/** 在途的全局档读取（单飞：App 启动、菜单挂载、命令中心循环共用同一次）。 */
+/** 在途的全局档读取（单飞：App 启动、菜单挂载共用同一次）。 */
 let globalLoad: Promise<string | null> | null = null;
 
 /**
@@ -105,7 +105,7 @@ function scheduleApprovalRestart(sid: string): void {
 }
 
 /**
- * 会话执行模式循环（Shift+Tab 与命令中心共用）：`always-ask → write → yolo → always-ask`。
+ * 会话执行模式循环（Shift+Tab 与执行模式菜单共用）：`always-ask → write → yolo → always-ask`。
  * omp 的档位是启动参数（`--approval-mode`），运行中改不了——写本会话覆盖后按
  * [`scheduleApprovalRestart`] 的节奏生效，不打断进行中的轮次。返回新档位（失败返回 null）。
  */

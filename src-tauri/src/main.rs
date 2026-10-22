@@ -68,7 +68,6 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            locate_omp,
             set_omp_path,
             get_health,
             get_overlay,
@@ -101,12 +100,10 @@ fn main() {
             follow_up_message,
             run_slash,
             compact_session,
-            branch_session,
-            // —— V40（对标 codex / zcode）：队列真值 / 分叉 / 目标 / 旁问 / 统计 / 重启 / diff ——
+            // —— V40（对标 codex / zcode）：队列真值 / 目标 / 旁问 / 统计 / 重启 / diff ——
             remove_queued_message,
             promote_queued_message,
             abort_and_restore_queue,
-            fork_session,
             goal_command,
             get_session_stats,
             btw_ask,
@@ -114,12 +111,11 @@ fn main() {
             get_btw_history,
             restart_session_runtime,
             git_file_diff,
-            // —— V41（对标二期）：子代理 / fast·slow 模式 / 会话导出 ——
+            // —— V41（对标二期）：子代理 / fast 模式 / 会话导出 ——
             get_subagents,
             cancel_subagent,
             get_subagent_messages,
             set_fast_mode,
-            set_slow_mode,
             export_session_html,
             save_paste,
             run_bash,

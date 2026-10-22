@@ -1,6 +1,7 @@
 # 对标调研：Codex Desktop
 
 > 用途：v2「聊天对标」的布局 / 流式 / 聊天框依据，`design-system/MASTER.md` 的母版来源。
+> **本文是 2026-10-14 的调研快照**；文中「本站现状」列（双栏 / `ContextBar` / 七页签 / ⌘K 等）已被后续版本取代，当前实现见 `../AGENTS.md` 与 `MASTER.md`。
 > 证据：OpenAI 官方文档（ChatGPT 桌面应用、Codex app、设置参考）、Codex app 截图 7 张（社区复刻项目 `Yrd980/codex-web-ui-clone` 的 `docs/references/codex-app-screenshots/`，逆向自真实应用）、同仓库 `DESIGN.md` 设计合约（对 Codex 设计语言的逆向整理）。整理日期：2026-10-14。
 
 ## 1. 产品概览

@@ -13,7 +13,7 @@ import { StarToggle } from "./StarToggle";
  *
  * 分组（无查询时）：**星标模型**（按「我的模型」存储顺序）置顶成组，其余按供应商分组
  * （星标项不在供应商组里重复出现）；分区口径 = `lib/myModels.ts` 的 `splitStarredModels`
- * （与聊天下拉 `ModelPicker` 共用一份）。有查询时不分组、按过滤结果平铺。每行行首的星标
+ * （与聊天下拉 `ModelMenu` 共用一份）。有查询时不分组、按过滤结果平铺。每行行首的星标
  * 开关 = 加入 / 移出「我的模型」——只影响排序，不改变这里的候选范围。
  */
 export function ModelPickList({

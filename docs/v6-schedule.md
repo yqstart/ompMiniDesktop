@@ -16,7 +16,7 @@
 | 命令 | `get_omp_constraints` / `write_omp_constraint` / `create_omp_rule` / `delete_omp_rule`（注册在 `main.rs`） |
 | `src/lib/constraints.ts` | frontmatter 拆分与字段解析（`yaml`，只读）、规则类型摘要、名称与内容校验、搜索用描述 |
 | `src/components/settings/ConstraintsPanel.tsx` | 文件列表 + 编辑器：整份 Markdown（含 frontmatter）直接编辑 + 预览（**默认预览**）、新建 / 删除、保存 / 重新加载 / 冲突处理 |
-| 导航与搜索 | `SettingsTab` 加 `constraints`；通用组 = 常用设置 + omp 约束；`settingsSearch` 加约束数据源与文件命中；`focusRequest` 选中文件 |
+| 导航与搜索 | `SettingsTab` 加 `constraints`；通用组 = 常用设置 + omp 约束 + 系统授权 + 远程控制（后两项 0.3.x 补入）；`settingsSearch` 加约束数据源与文件命中；`focusRequest` 选中文件 |
 
 ### 1.2 上游事实（omp 18.11.1）
 

@@ -895,7 +895,7 @@ export type GoalState = {
  */
 export type GoalWire = Goal | GoalState | null;
 
-/** 会话统计（`get_session_stats` 原样透传；`/status` 弹窗与上下文面板用）。 */
+/** 会话统计（`get_session_stats` 原样透传；`/status` 弹窗用）。 */
 export type SessionStats = {
  sessionId: string;
  sessionFile: string;
@@ -1158,19 +1158,6 @@ export type GitInfo = {
  /** 降级原因（tooltip 与日志用）。 */
  error: string | null;
 };
-
-/** 思考档全集（docs/v1-schedule.md §4）。 */
-export const THINKING_LEVELS = [
- "off",
- "minimal",
- "low",
- "medium",
- "high",
- "xhigh",
- "max",
- "auto",
-] as const;
-export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 /**
  * omp `extension_ui_request` 里**需要用户回包**的交互方法（V2 M5 实测口径）。

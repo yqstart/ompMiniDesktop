@@ -232,7 +232,7 @@ fn probe_omp(bin: &str) -> Result<(Option<String>, std::path::PathBuf, Vec<Strin
     Ok((version, agent_dir, errors))
 }
 
-#[tauri::command]
+/// 诊断用：解析一次 omp 定位与版本（`set_omp_path` / `get_health` 内部调用）。
 pub async fn locate_omp(state: State<'_, AppState>) -> Result<OmpInfo, CmdError> {
     let resolved = discover_omp_path(&state);
     let (mut version, mut agent_dir, mut errors) = (None, resolve_agent_dir(None), vec![]);
@@ -1235,6 +1235,17 @@ pub fn owner_project(projects: &[(String, String)], cwd: &str) -> Option<String>
     projects.iter().find(|p| p.1 == owner).map(|p| p.0.clone())
 }
 
+/// 等锁版 kill：`kill_runtime` 的 `try_lock` 在锁被占时**会静默跳过移除**
+/// （同步路径可接受：下次打开会 resume），但归档 / 删除 / 重启这类路径不行——旧 key
+/// 留在表里，会话会被列表刷新补回来或状态收敛错位。语义与 `kill_runtime` 一致
+/// （哨兵 → stdin 关闭 → 进程退出）。
+async fn kill_runtime_awaited(state: &State<'_, AppState>, id: &str) {
+    let mut m = state.runtime.lock().await;
+    if let Some(r) = m.remove(id) {
+        let _ = r.tx.send(String::new());
+    }
+}
+
 /// 批量归档：逐个标记 archived=true，一次落盘；返回成功数与失败明细。
 #[tauri::command]
 pub async fn archive_sessions(state: State<'_, AppState>, ids: Vec<String>) -> Result<serde_json::Value, CmdError> {
@@ -1912,30 +1923,13 @@ pub async fn compact_session(app: AppHandle, state: State<'_, AppState>, id: Str
     Ok(())
 }
 
-/// 从某条消息另起分支：下发 `branch{entryId}` 后返回原会话视图，
-/// 新会话身份随后续事件流推出（分支落盘后可 resume）。
-#[tauri::command]
-pub async fn branch_session(app: AppHandle, state: State<'_, AppState>, id: String, entry_id: String) -> Result<SessionView, CmdError> {
-    let tx = {
-        let map = state.runtime.lock().await;
-        let Some(r) = map.get(&id) else {
-            return Err(cmd_err("NOT_RUNNING", "会话未运行，无法分支".into(), None));
-        };
-        r.tx.clone()
-    };
-    let req = serde_json::json!({"id": format!("b-{}", chrono::Utc::now().timestamp_millis()), "type": "branch", "entryId": entry_id});
-    tx.send(format!("{}\n", serde_json::to_string(&req).unwrap()))
-        .map_err(|_| cmd_err("RPC_IO", "分支失败，进程可能已退出".into(), None))?;
-    open_session(app, state, id).await
-}
-
 // ---------- V40：对标 codex / zcode 的命令面（要读返回值的 RPC 请求） ----------
 
 /// 向会话进程发一条请求并等它的 `response` 回包（V40 新面）。
 ///
 /// 等法 = 临时挂一个 `omp-event://<id>` 监听、按请求 `id` 匹配回包就撤监听：
 /// pump 把 response 全量透传到该通道（前端对成功回包不渲染——多一个监听者不影响它），
-/// 这是壳侧第一条**要读返回值**的 RPC 通路（fork / goal / 队列撤回 / 旁问 / 统计）。
+/// 这是壳侧第一条**要读返回值**的 RPC 通路（goal / 队列撤回 / 旁问 / 统计）。
 /// 超时兜底：会话正忙时命令会在 omp 内部排队，迟迟不回不能把界面卡死。
 pub(crate) async fn rpc_request<R: tauri::Runtime>(
     app: &AppHandle<R>,
@@ -2170,65 +2164,6 @@ pub async fn rename_session(
     open_session(app, state, id).await
 }
 
-/// 等锁版 kill（fork 收尾用，V40）：`kill_runtime` 的 `try_lock` 在锁被占时**会静默跳过移除**
-/// （归档等同步路径可接受：下次打开会 resume），fork 场景不行——旧 key 留在表里，
-/// 「同 id 接管」与状态收敛都会错位。语义与 `kill_runtime` 一致（哨兵 → stdin 关闭 → 进程退出）。
-async fn kill_runtime_awaited(state: &State<'_, AppState>, id: &str) {
-    let mut m = state.runtime.lock().await;
-    if let Some(r) = m.remove(id) {
-        let _ = r.tx.send(String::new());
-    }
-}
-
-/// fork 收尾（`/fork` 的 `fork_session` 用）：发起 fork → 拿新身份 →
-/// kill 旧进程 → resume 新会话 → 返回新会话视图。
-///
-/// 为什么 kill 旧进程：pump 的三通道名（`omp-event://<sid>` 等）在 `start_pump` 时与 sid
-/// 绑定，fork 后进程已换身份而通道名留在旧 sid 上；kill + resume（与「闲置回收后自动恢复」
-/// 同一条已验证路径）是唯一不重构 pump 的通路。新会话由本次调用直接拉起，调用方拿到视图
-/// 时进程已在（列表运行标按活动态自会显示，新会话空闲即不转圈），随后
-/// `openSessionWithHistory` 走「已有进程直接聚焦」分支。
-async fn fork_at<R: tauri::Runtime>(
-    app: &AppHandle<R>,
-    state: &State<'_, AppState>,
-    id: &str,
-    entry_id: Option<String>,
-) -> Result<SessionView, CmdError> {
-    if state.runtime.lock().await.get(id).is_none() {
-        spawn_session_runtime(app, state, id).await?;
-    }
-    let ts = chrono::Utc::now().timestamp_millis();
-    let mut req = serde_json::json!({"id": format!("fk-{ts}"), "type": "fork"});
-    if let Some(e) = entry_id {
-        req["entryId"] = serde_json::Value::String(e);
-    }
-    rpc_request(app, state, id, req, 60_000).await?;
-    // fork 响应不含新身份：回读一次 get_state（进程已绑定新会话）
-    let st = rpc_request(
-        app,
-        state,
-        id,
-        serde_json::json!({"id": format!("fk-get-{ts}"), "type": "get_state"}),
-        15_000,
-    )
-    .await?;
-    let new_sid = st
-        .get("sessionId")
-        .and_then(|s| s.as_str())
-        .map(str::to_string)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| cmd_err("RPC_STATE", "fork 后未拿到新会话身份".into(), None))?;
-    kill_runtime_awaited(state, id).await;
-    let head = spawn_session_runtime(app, state, &new_sid).await?;
-    Ok(build_session_view(state, &head.id, &head.title, head.first_user_text.as_deref(), head.cwd.clone(), head.timestamp).await)
-}
-
-/// 全量复制当前会话另起一份（`/fork`）。
-#[tauri::command]
-pub async fn fork_session(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<SessionView, CmdError> {
-    fork_at(&app, &state, &id, None).await
-}
-
 /// 重启会话 runtime（V40）：执行模式（`--approval-mode`）是启动参数，omp 运行中改不了——
 /// 会话 idle 且队列空时 kill + resume 是壳侧能给的「立即生效」路径（队列非空会丢消息，
 /// 一律拒绝；running / awaiting 不打断）。
@@ -2363,22 +2298,6 @@ pub async fn set_fast_mode(
     let req = serde_json::json!({
         "id": format!("fm-{}", chrono::Utc::now().timestamp_millis()),
         "type": "set_fast_mode",
-        "enabled": enabled,
-    });
-    rpc_request(&app, &state, &id, req, 15_000).await
-}
-
-/// slow 模式开关（V41）→ `{enabled}`；模型不支持时失败。
-#[tauri::command]
-pub async fn set_slow_mode(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    id: String,
-    enabled: bool,
-) -> Result<serde_json::Value, CmdError> {
-    let req = serde_json::json!({
-        "id": format!("sl-{}", chrono::Utc::now().timestamp_millis()),
-        "type": "set_slow_mode",
         "enabled": enabled,
     });
     rpc_request(&app, &state, &id, req, 15_000).await
@@ -3925,99 +3844,6 @@ done
         assert_eq!(err.code, "RPC_TIMEOUT");
 
         kill_runtime(&st, &sid);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// `fork_at`（V40 全链：fork → get_state 拿新身份 → kill 旧进程 → resume 新会话 → 视图）。
-    /// stub 回固定新身份；新会话的 jsonl 预置在 agent_dir（resume 要 `session_file_for` 找得到）。
-    #[tokio::test]
-    async fn fork_at_full_chain_with_stub() {
-        use tauri::Manager;
-        let root = std::env::temp_dir().join(format!("omp-v40-fork-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        let agent = root.join("agent");
-        std::fs::create_dir_all(agent.join("sessions").join("--tmp-demo--")).unwrap();
-        // 新会话文件（fork 产物在真实场景由 omp 写盘；这里预置给 resume 读）
-        let new_id = "01a123c6-f958-7524-b1be-53b4fb030bf6";
-        std::fs::write(
-            agent.join("sessions").join("--tmp-demo--").join(format!("2026-10-12T10-00-00Z_{new_id}.jsonl")),
-            format!(
-                "{}\n",
-                serde_json::json!({"type":"session","id":new_id,"timestamp":"2026-10-12T10:00:00.000Z","cwd":"/tmp/demo"})
-            ),
-        )
-        .unwrap();
-
-        // stub：h-state / 首次 get_state（id=h-get）回旧身份；fork 回成功；其余 get_state 回新身份。
-        // 「第一次 h-state 回旧、之后回新」用计数文件区分（同一脚本会被 fork 前后两个进程各跑一次）。
-        let script = format!(
-            r#"#!/bin/sh
-counter="{hcount}"
-printf '{{"type":"ready"}}\n'
-while IFS= read -r line; do
-  case "$line" in
-    *'"h-state"'*)
-      if [ -f "$counter" ]; then
-        printf '%s\n' '{{"type":"response","id":"h-state","command":"get_state","success":true,"data":{{"sessionId":"{new}","sessionFile":"{newfile}"}}}}'
-      else
-        : > "$counter"
-        printf '%s\n' '{{"type":"response","id":"h-state","command":"get_state","success":true,"data":{{"sessionId":"stub-old","sessionFile":"/tmp/stub-old.jsonl"}}}}'
-      fi
-      ;;
-    *'"type":"fork"'*)
-      id=$(printf '%s' "$line" | sed -E 's/.*"id":"([^"]+)".*/\1/')
-      printf '{{"type":"response","id":"%s","command":"fork","success":true,"data":{{"cancelled":false}}}}\n' "$id" ;;
-    *'"type":"get_state"'*)
-      id=$(printf '%s' "$line" | sed -E 's/.*"id":"([^"]+)".*/\1/')
-      printf '{{"type":"response","id":"%s","command":"get_state","success":true,"data":{{"sessionId":"{new}","sessionFile":"{newfile}"}}}}\n' "$id" ;;
-    *) : ;;
-  esac
-done
-"#,
-            hcount = root.join(".hcount").to_string_lossy(),
-            new = new_id,
-            newfile = agent
-                .join("sessions")
-                .join("--tmp-demo--")
-                .join(format!("2026-10-12T10-00-00Z_{new_id}.jsonl"))
-                .to_string_lossy()
-        );
-        let stub = write_v40_stub(&root, &script);
-        let app = tauri::test::mock_builder()
-            .build(tauri::test::mock_context(tauri::test::noop_assets()))
-            .expect("mock app 构建失败");
-        let state = load_state(app.handle());
-        *state.agent_dir.lock().await = agent.clone();
-        *state.omp_path.lock().await = Some(stub.to_string_lossy().to_string());
-        app.manage(state);
-
-        let (sid, _file, _meta) = crate::runtime::spawn_long_lived(
-            app.handle(),
-            app.state::<AppState>().runtime.clone(),
-            crate::runtime::SpawnOpts {
-                bin: stub.to_string_lossy().to_string(),
-                cwd: root.to_string_lossy().to_string(),
-                resume: None,
-                model: None,
-                thinking: None,
-                approval: None,
-                plan_yolo: false,
-            },
-        )
-        .await
-        .expect("stub 握手失败");
-        assert_eq!(sid, "stub-old");
-
-        let st = app.state::<AppState>();
-        let view = super::fork_at(app.handle(), &st, &sid, None).await.expect("fork 全链应成功");
-        assert_eq!(view.id, new_id, "视图应指向新会话");
-        // 旧进程杀掉了、新会话被 resume 拉起（runtime 表里是新 id 的进程）
-        let map = st.runtime.clone();
-        let keys: Vec<String> = map.lock().await.keys().cloned().collect();
-        assert!(!keys.contains(&"stub-old".to_string()), "fork 后旧进程应被清出表");
-        assert!(keys.contains(&new_id.to_string()), "新会话应已被 resume 拉起");
-
-        kill_runtime(&st, new_id);
         let _ = std::fs::remove_dir_all(&root);
     }
 

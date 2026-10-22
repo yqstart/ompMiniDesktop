@@ -148,7 +148,7 @@ function useWorkspaceGitRefresh() {
 
 /**
  * 全局快捷键（v2；非 mac 平台用 Ctrl）：⌘, 打开设置 / ⌘T 新建聊天 / ⌘W 关设置 /
- * ⌘F 会话内查找（设置视图内 = 聚焦设置搜索）/ ⌘⇧G 上下文面板 /
+ * ⌘F 会话内查找（设置视图内 = 聚焦设置搜索）/ ⌘⇧G 右栏工作台 /
  * ⌘[ ⌘] 会话导航 / ⌘⇧P 引用工作区文件。
  */
 function useHotkeys() {

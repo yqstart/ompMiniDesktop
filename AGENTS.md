@@ -8,7 +8,7 @@ oh-my-pi（`omp`）的桌面端：**聊天形态的 omp 工作台**（Tauri v2 +
 
 | 文档 | 说明 |
 |---|---|
-| `docs/roadmap.md` | 版本规划总纲（首个版本 0.1.0 = 形态收敛 + 聊天对标 + 设置重构；0.2.0 = 右栏工作台 + 会话读数 + omp 约束）|
+| `docs/roadmap.md` | 版本规划总纲（0.1.0 = 形态收敛 + 聊天对标 + 设置重构；0.2.0 = 右栏工作台 + 会话读数 + omp 约束；0.3.0 = 手机远程控制）|
 | `docs/v1-schedule.md` | 排期 1：终端形态删除清单 / 迁移清单 / 验收（**已实施**，2026-10-14）|
 | `docs/v2-schedule.md` | 排期 2：布局 / 流式 / 聊天框对标 Codex、ZCode |
 | `docs/v3-schedule.md` | 排期 3：设置重构（功能保留、形态重做）|
@@ -55,7 +55,7 @@ src-tauri/src/
   wsl.rs                     # WSL UNC 识别 + wsl.exe 终端启动（P1；不跨发行版驱动 omp，见 docs/windows.md）
   commands/mod.rs            # RPC 命令面 + 项目 / 工作区 / 会话 / git 命令
   context.rs session_scan.rs overlay.rs git_info.rs git_commit.rs git_ops.rs project_files.rs workspace_fs.rs project_scripts.rs
-  plugins.rs skills.rs settings.rs system_permissions.rs themes.rs models_config.rs constraints.rs title_prompt.rs omp_update.rs
+  plugins.rs skills.rs settings.rs system_permissions.rs models_config.rs constraints.rs title_prompt.rs omp_update.rs commit_msg.rs
   providers.rs memories.rs usage.rs provider_usage.rs extra_usage.rs provider_models.rs live_stats.rs   # usage.rs = 使用统计（jsonl 聚合 + 壳侧账本）；live_stats.rs = 单会话累计统计（卡底统计条）；provider_models.rs = 端点模型探测（「获取可用模型」）
 scripts/                     # e2e-ipc-selfcheck / generate-icons / generate-material-icons（文件树图标子集）/ changelog-notes / fixup-latest-json / make-signing-cert / tauri-build
 ```
@@ -139,7 +139,7 @@ scripts/                     # e2e-ipc-selfcheck / generate-icons / generate-mat
 
 ## 工程约定
 
-- **语言**：界面文案 / 注释 / 文档 / 提交信息用简体中文；标识符英文。界面文案一律走 `lib/locale.ts` 字典（`s_` 前缀为设置项动态键，不许被清理误删）。
+- **语言**：界面文案 / 注释 / 文档 / 提交信息用简体中文；标识符英文。界面文案一律走 `lib/locale.ts` 字典。
 - **版本文案口径**：README / CHANGELOG / 文档里不写「仓库重置 / 版本归零 / 清除历史版本与发版记录」这类字样；版本历史只按实际版本节记录现状与变更。
 - **文档更新**：架构级变更（文件增删 / 数据流变化）同步 `AGENTS.md` 与 `docs/`；UI 变更同步 `design-system/MASTER.md`。
 - **提交信息**：`omp commit` 生成（type 英文 + summary 首词英文过去式 + 其余中文，30 字符内）。

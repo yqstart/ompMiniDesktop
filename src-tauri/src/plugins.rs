@@ -1,6 +1,6 @@
 //! 插件（Plugin，设置 ›「插件」）：把 omp 的插件管理映射进设置页。
 //!
-//! 上游事实（omp 18.3.5 实测，明细与取舍见 `docs/v23-schedule.md`）：
+//! 上游事实（omp 18.3.5 实测）：
 //! - `omp plugin list --json` → `{npm: [...], marketplace: [...]}`：
 //!   - npm / link 条目 `{name, version, path, manifest{description?, features?}, enabledFeatures, enabled}`；
 //!   - 市场条目 `{id, scope, entries[{version, enabled, installPath}], shadowedBy?}`。
@@ -308,15 +308,6 @@ pub fn parse_doctor(out: &str) -> Result<Vec<PluginDoctorFinding>, String> {
             })
         })
         .collect())
-}
-
-/// 安装成功回包里挑名字与版本（npm / link 两条路径都回同一个条目形状）。
-///
-/// 只用于**提示文案**：解析不出来也不报错（安装本身已经成功），界面退回「已安装」。
-pub fn parse_install_result(out: &str) -> Option<(String, String)> {
-    let v: serde_json::Value = serde_json::from_str(out.trim()).ok()?;
-    let name = opt_str(v.get("name"))?;
-    Some((name, str_of(v.get("version"))))
 }
 
 /// `--set` 的参数值。
@@ -657,13 +648,6 @@ mod tests {
         assert!(!f[0].fixed);
         assert!(f[1].fixed);
         assert!(parse_doctor("{}").is_err());
-    }
-
-    #[test]
-    fn install_result_is_best_effort() {
-        let out = r#"{"name":"@oh-my-pi/exa","version":"1.3.3710","path":"/x"}"#;
-        assert_eq!(parse_install_result(out), Some(("@oh-my-pi/exa".into(), "1.3.3710".into())));
-        assert_eq!(parse_install_result("Installed"), None);
     }
 
     #[test]

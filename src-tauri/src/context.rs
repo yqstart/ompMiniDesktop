@@ -1,7 +1,6 @@
 //! 上下文分解（输入框工具行「上下文容量」面板的数据源）。
 //!
-//! 真值与估算的分界必须写清楚，免得把估算当读数用（omp 18.x 实测，探针记录见
-//! `docs/v7-schedule.md`）：
+//! 真值与估算的分界必须写清楚，免得把估算当读数用（omp 18.x 实测）：
 //!
 //! - **已用 / 窗口**：omp `get_state.contextUsage` = `{tokens, contextWindow, percent}`，
 //!   `percent` 实测是 **0–100**（不是 0–1）。同一个 `tokens` 也落在会话 jsonl 的

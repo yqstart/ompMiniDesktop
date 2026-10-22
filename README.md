@@ -2,10 +2,10 @@
 
 [oh-my-pi（`omp`）](https://github.com/ldx/oh-my-pi) 的桌面端：**聊天形态的 omp 工作台**。
 
-把 omp 的编码代理会话带进一个专注的桌面聊天界面——项目与会话管理、流式对话、工具与审批、队列与插话、归档与统计，全部在聊天形态内完成。**不做终端仿真**。
+把 omp 的编码代理会话带进一个专注的桌面聊天界面——项目与会话管理、流式对话、工具与审批、队列与插话、归档与统计，全部在聊天形态内完成。右栏工作台另有一个**终端页签**（PTY 里的登录 shell），但不提供终端形态的会话模型。
 
 > **状态（2026-10-22）**：**v0.3.2** 是补丁版。**v0.3.1** 同样是补丁版；**v0.3.0** 已实现（手机远程控制）；首个版本 **v0.1.0** 三部分一体交付：
-> 1. **只保留聊天形态**——终端形态（PTY / xterm / 工作区树）整体退场；
+> 1. **只保留聊天形态**——0.1.0 删除终端形态（PTY / xterm / 工作区树）；0.2.0 起终端只作为右栏工作台的页签重新引入（登录 shell，不是终端形态的会话模型）；
 > 2. **聊天形态对标 Codex Desktop、Zcode Desktop**——样式、布局、流式对话、聊天框；
 > 3. **设置重构**——功能全量保留，操作方式与展现形式重新设计。
 >
@@ -26,8 +26,9 @@
 ## 它长什么样
 
 - **左栏**：工作区 → 项目 → 会话树（搜索 / 归档 / 拖拽排序 / git 徽章）；
-- **中列**：会话消息流（Markdown / 工具卡 / 审批卡 / 子代理 / 流式渲染）＋ 输入卡（模型 / 思考档 / 执行模式 / 队列）；
-- **设置**：常用设置（`omp config` 目录）/ omp 约束（全局 `AGENTS.md` / `RULES.md` / `rules/*.md`）/ 模型与供应商 / 插件 / 技能 / 记忆 / 使用统计 / 已归档对话；
+- **中列**：会话消息流（Markdown / 工具卡 / 审批卡 / 流式渲染 / 轮次定位轨）＋ 输入卡（项目 / 分支 / 提交键 → 输入区 → `+` / 目标 / 计划 / 执行模式 / Fast / 模型 / 思考档 / 发送）＋ 卡下统计条（会话统计 / Token 用量 / 上下文 / 供应商用量）；
+- **右栏工作台**（⌘⇧G，可拖宽）：文件目录树 / 项目脚本 / 多开终端三页签；
+- **设置**：常用设置（`omp config` 目录）/ omp 约束（全局 `AGENTS.md` / `RULES.md` / `rules/*.md`）/ 系统授权（macOS TCC 四项）/ 远程控制 / 模型与供应商 / 插件 / 技能 / 记忆 / 使用统计 / 已归档对话；
 - **周边**：应用与 omp 运行时更新、供应商用量、跨项目文件引用、提交与推送；
 - **手机**：扫码配对后在手机浏览器继续会话（PWA；局域网 / Tailscale HTTPS；审批只支持允许一次 / 拒绝）。
 
@@ -79,6 +80,8 @@ pnpm file-icons       # 从 material-icon-theme 重新生成右栏文件树的�
 | [`docs/v4-schedule.md`](docs/v4-schedule.md) | 排期 4：右栏工作台 |
 | [`docs/v5-schedule.md`](docs/v5-schedule.md) | 排期 5：会话读数（卡底统计条）|
 | [`docs/v6-schedule.md`](docs/v6-schedule.md) | 排期 6：omp 约束（全局约束 / 规则文件编辑）|
+| [`docs/windows.md`](docs/windows.md) | Windows 支持（原生链路 / WSL 桥接 / 已知边界）|
+| [`docs/plan-mode.md`](docs/plan-mode.md) | 计划模式（omp plan mode）能力边界 |
 | [`docs/remote-control.md`](docs/remote-control.md) | 手机远程控制（PWA + 内嵌 HTTP/WS + Tailscale）|
 | [`docs/benchmark-codex-desktop.md`](docs/benchmark-codex-desktop.md) / [`benchmark-zcode-desktop.md`](docs/benchmark-zcode-desktop.md) | 对标调研 |
 | [`design-system/MASTER.md`](design-system/MASTER.md) | 设计系统 |

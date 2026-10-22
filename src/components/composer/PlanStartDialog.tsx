@@ -12,7 +12,7 @@ import { DialogShell } from "../settings/DialogShell";
  * 并给唯一的落地动作：**用当前目录新建一个计划会话**（`createChatIn(dir, { plan: true })`）。
  *
  * 空态输入卡上的「计划」chip 是快捷开关（设置下一次新建）；有会话时同一个 chip
- * 打开这个弹窗。`+` 菜单的「计划」也走这里。
+ * 打开这个弹窗。
  */
 export function PlanStartDialog({
  dir,

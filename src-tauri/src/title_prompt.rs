@@ -1,6 +1,6 @@
 //! 会话标题语言（`<agentDir>/TITLE_SYSTEM.md`）：把壳的界面语言同步成 omp 的**标题生成 prompt**。
 //!
-//! **上游事实（omp 18.2.10：源码 + 官方文档核对，本机实测见 `docs/v18-schedule.md` §2）**
+//! **上游事实（omp 18.2.10：源码 + 官方文档核对 + 本机实测）**
 //!
 //! - omp 的自动会话标题（含 replan 刷新）可以用 `TITLE_SYSTEM.md` 覆盖生成 prompt：
 //!   **项目级 `<cwd>/.omp/TITLE_SYSTEM.md` 优先，其次用户级 `<agentDir>/TITLE_SYSTEM.md`**

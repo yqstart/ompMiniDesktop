@@ -6,7 +6,7 @@
 //! brew / npm 命令：bun 可用时装 bun 版、否则装预编译二进制（带 sha256 校验），装完的路径
 //! 落在 `~/.local/bin/omp` 或 `~/.bun/bin/omp`，两种都在 `discover_omp_path` 的兜底里。
 //!
-//! 上游事实（omp 18.3.5 实测，明细与取舍见 `docs/v24-schedule.md`）：
+//! 上游事实（omp 18.3.5 实测）：
 //!
 //! **检查**（`omp update --check`，只检查不安装）——成功时退出码 0，结论写在 stdout 的行标签里：
 //! - 有新版本 → `Current version: 18.3.5` + `New version available: 18.4.2`

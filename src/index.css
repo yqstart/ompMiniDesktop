@@ -13,7 +13,6 @@
  --border: rgb(13 13 13 / 12%);
  --border-soft: rgb(13 13 13 / 7%);
  --accent: #0169cc;
- --accent-foreground: #ffffff;
  --primary: #1a1c1f;
  --primary-foreground: #ffffff;
  --danger: #dc2626;
@@ -60,7 +59,6 @@
  --border: rgb(255 255 255 / 10%);
  --border-soft: rgb(255 255 255 / 6%);
  --accent: #339cff;
- --accent-foreground: #0d0d0d;
  --primary: #ffffff;
  --primary-foreground: #0d0d0d;
  --danger: #f87171;
@@ -128,7 +126,6 @@
  --color-border: var(--border);
  --color-border-soft: var(--border-soft);
  --color-accent: var(--accent);
- --color-accent-foreground: var(--accent-foreground);
  --color-primary: var(--primary);
  --color-primary-foreground: var(--primary-foreground);
  --color-danger: var(--danger);

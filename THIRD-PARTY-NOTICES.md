@@ -18,7 +18,7 @@
 ### Xterm.js（@xterm/xterm、@xterm/addon-fit）
 - 仓库：https://github.com/xtermjs/xterm.js
 - 许可证：MIT
-- 说明：终端工作区的终端模拟器与尺寸自适应（V11 起，右侧面板 = PTY 里跑的 omp TUI）。
+- 说明：右栏工作台「终端」页签的终端模拟器与尺寸自适应（PTY 里跑的是登录 shell）。
 
 ### Vite（@vitejs/plugin-react）
 - 仓库：https://github.com/vitejs/vite
@@ -36,7 +36,17 @@
 ### Reicon（reicon-react）
 - 仓库：https://github.com/dqev/reicon
 - 许可证：MIT
-- 说明：界面图标（Outline 权重，填充路径）。每个图标按需具名导入，构建期 tree-shake；图标映射表见 `design-system/MASTER.md` §8。
+- 说明：界面图标（Outline 权重，填充路径）。每个图标按需具名导入，构建期 tree-shake。
+
+### Lexical（lexical、@lexical/react）
+- 仓库：https://github.com/facebook/lexical
+- 许可证：MIT
+- 说明：输入框草稿编辑器（单段落富文本投影、引用芯片节点）。
+
+### Material Icon Theme（material-icon-theme）
+- 仓库：https://github.com/material-extensions/vscode-material-icon-theme
+- 许可证：MIT
+- 说明：右栏文件树的文件类型图标资产（构建期由 `scripts/generate-material-icons.mjs` 裁剪成子集，随包分发）。
 
 ### Markdown 渲染（react-markdown、remark-gfm、rehype-highlight）
 - 仓库：https://github.com/remarkjs/react-markdown · https://github.com/remarkjs/remark-gfm · https://github.com/rehypejs/rehype-highlight
@@ -69,11 +79,12 @@
 ### portable-pty
 - 仓库：https://github.com/wezterm/wezterm（portable-pty crate）
 - 许可证：MIT
-- 说明：终端工作区的 PTY 进程管理（V11 起；每个终端 = 一个跑在 PTY 里的 `omp` TUI）。
+- 说明：右栏工作台终端的 PTY 进程管理（每个终端 = 一个跑在 PTY 里的登录 shell）。
 
-### serde / serde_json / chrono / walkdir
-- 仓库：https://github.com/serde-rs/serde · https://github.com/serde-rs/json · https://github.com/chronotope/chrono · https://github.com/BurntSushi/walkdir
+### serde / serde_json / chrono / libc
+- 仓库：https://github.com/serde-rs/serde · https://github.com/serde-rs/json · https://github.com/chronotope/chrono · https://github.com/rust-lang/libc
 - 许可证：MIT / Apache-2.0（双许可）
+- 说明：`libc` 用于进程组信号与终端 termios 查询。
 
 ### axum / tower-http / futures-util（远程控制 HTTP/WS）
 - 仓库：https://github.com/tokio-rs/axum · https://github.com/tower-rs/tower-http · https://github.com/rust-lang/futures-rs
@@ -88,7 +99,7 @@
 ### reqwest / rustls（HTTP 客户端）
 - 仓库：https://github.com/seanmonstar/reqwest · https://github.com/rustls/rustls
 - 许可证：Apache-2.0 / MIT（reqwest）；Apache-2.0 / ISC / MIT（rustls）
-- 说明：「供应商用量」弹窗（入口在标签栏右上角；V15 交付时是设置页签）的**补充探针**——对 omp 没有用量探针、但上游提供「API key 可用」查询接口的供应商（commandcode / deepseek）做只读 GET；TLS 走 rustls + webpki-roots（纯 Rust，无系统依赖，四平台构建一致）。
+- 说明：「供应商用量」浮层（入口 = 输入卡底部统计条的第四项）的**补充探针**——对 omp 没有用量探针、但上游提供「API key 可用」查询接口的供应商（commandcode / deepseek）做只读 GET；TLS 走 rustls + webpki-roots（纯 Rust，无系统依赖，四平台构建一致）。
 
 ## 上游运行时（不随本仓库分发，需用户另行安装）
 
@@ -97,4 +108,3 @@
 - 本 app 以长驻 `omp --mode rpc-ui` 子进程驱动聊天会话（工作区创建走 `omp worktree add`，
   供应商登录 / 登出走 `omp auth-broker`，设置读写走 `omp config`，用量统计走 `omp usage`，
   补充探针的凭据经 `omp token` 只读取出、只在内存中传递）。
-  `docs/rpc-memo.md` 保留了协议实测备忘。

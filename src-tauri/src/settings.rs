@@ -3,7 +3,7 @@
 //! **读写走 `omp config` CLI 子进程**（与供应商页走 `omp auth-broker` 同款），
 //! 壳侧不直接解析 / 改写 `config.yml` —— YAML 的合并、类型解析、schema 默认值都是 omp 的事。
 //!
-//! 上游事实（omp 18.2.1 实测，明细见 `docs/v8-schedule.md`）：
+//! 上游事实（omp 18.2.1 实测）：
 //! - `omp config list --json` 输出**扁平点路径** → `{value, type, description}`（本机 519 项、
 //!   约 93KB、实测 ~0.2s）。`type` 是 `boolean|number|enum|string|array|record`；**enum 的合法
 //!   取值不在 JSON 里**（只在人读的 `omp config list` 文本里，形如
@@ -30,7 +30,7 @@
 //! 标识符）与类型序列化，不认识具体有哪些键——页面上显示哪些键由前端展示清单
 //! （`src/lib/settingsList.ts`，117 项）限定；上游增删配置项时代码无须改动。
 //!
-//! **设置目录**（`get_omp_settings_catalog`，docs/v28-schedule.md）：后端返回上游的完整目录
+//! **设置目录**（`get_omp_settings_catalog`）：后端返回上游的完整目录
 //! （下述格式与数字在 omp 18.4.4 上复核，519 项 / 11 分组 / 89 枚举），页面再按展示清单过滤——
 //! 全量里内部 / 细调占大头、不铺给用户；要浏览完整清单在终端里 `omp config list`。
 //! `omp config list` 的**人读文本**是分组与枚举取值的唯一来源（JSON 只给 `type: "enum"`，

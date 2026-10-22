@@ -24,7 +24,6 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 }
 
 export const api = {
- locateOmp: () => call<OmpInfo>(IPC.locateOmp),
  getHealth: () => call<HealthInfo>(IPC.getHealth),
  getModels: () => call<ModelCatalog>(IPC.getModels),
  refreshModels: () => call<ModelCatalog>(IPC.refreshModels),
@@ -158,8 +157,6 @@ export const api = {
  /** 上下文压缩：把历史压缩成摘要后继续本会话（满上下文时的接续手段）。 */
  compactSession: (id: string, customInstructions?: string) =>
   call<void>(IPC.compactSession, { id, customInstructions }),
- /** 从某条消息另起分支（探索走偏时的回退手段，不删原分支）。 */
- branchSession: (id: string, entryId: string) => call<SessionView>(IPC.branchSession, { id, entryId }),
  /** 图片附件走「系统文件选择器 → 后端读文件」：WebView 拿不到任意本地路径的内容。 */
  readImageFile: (path: string) => call<ImageAttachment>(IPC.readImageFile, { path }),
  /** 输入框 @提及 的存在性提示（后端只 stat，不读内容、不写任何东西）。 */
@@ -223,8 +220,6 @@ export const api = {
    imagesDropped?: boolean;
    truncated?: boolean;
   }>(IPC.abortAndRestoreQueue, { id }),
- /** 全量复制当前会话（`/fork`）。 */
- forkSession: (id: string) => call<SessionView>(IPC.forkSession, { id }),
  /** goal 目标模式（get / create / resume / pause / drop）。 */
  goalCommand: (id: string, op: "get" | "create" | "resume" | "pause" | "drop", objective?: string) =>
   call<{ goal: Goal | null; state: GoalState | null }>(IPC.goalCommand, { id, op, objective }),
@@ -257,8 +252,6 @@ export const api = {
   ),
  /** fast 模式开关（`{enabled, active}`；模型不支持时失败，错误文本原样给界面）。 */
  setFastMode: (id: string, enabled: boolean) => call<{ enabled: boolean; active: boolean }>(IPC.setFastMode, { id, enabled }),
- /** slow 模式开关（`{enabled}`；不支持时失败）。 */
- setSlowMode: (id: string, enabled: boolean) => call<{ enabled: boolean }>(IPC.setSlowMode, { id, enabled }),
  /** 导出会话为 HTML（omp 写到会话 cwd）→ `{path}` 绝对路径。 */
  exportSessionHtml: (id: string) => call<{ path: string }>(IPC.exportSessionHtml, { id }),
  /** 大段粘贴转文件引用（V41）：文本落 `<appData>/omp-mini/paste/`，返回绝对路径（前端注入 `@<path>`）。 */

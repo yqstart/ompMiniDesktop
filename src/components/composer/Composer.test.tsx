@@ -54,10 +54,8 @@ const { apiMock } = vi.hoisted(() => ({
    extraFailures: [],
   })),
   goalCommand: vi.fn(async (_id: string, _op: string, _obj?: string) => ({ goal: null, state: null })),
-  forkSession: vi.fn(async () => null),
   savePaste: vi.fn(async (_text: string) => ({ path: "/tmp/paste/paste-1.txt" })),
   setFastMode: vi.fn(async (_id: string, _on: boolean) => ({ enabled: true, active: true })),
-  setSlowMode: vi.fn(async (_id: string, _on: boolean) => ({ enabled: true })),
   exportSessionHtml: vi.fn(async (_id: string) => ({ path: "/tmp/demo/omp-session-x.html" })),
   runBash: vi.fn(async (_id: string, _cmd: string) => ({
    exitCode: 0,

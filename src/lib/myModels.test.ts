@@ -5,7 +5,6 @@ import {
   myModelEntries,
   normalizeMyModels,
   orderModelsByStars,
-  providerSelectors,
   removeManyMyModels,
   splitStarredModels,
   toggleMyModel,
@@ -41,11 +40,6 @@ describe("我的模型", () => {
     expect(addManyMyModels(["a/b"], ["c/d", "a/b", "e/f"])).toEqual(["a/b", "c/d", "e/f"]);
     expect(removeManyMyModels(["a/b", "c/d", "e/f"], ["c/d", "x/y"])).toEqual(["a/b", "e/f"]);
     expect(removeManyMyModels(["a/b"], [])).toEqual(["a/b"]);
-  });
-
-  it("providerSelectors 只取该供应商在目录里的模型", () => {
-    expect(providerSelectors(CATALOG, "opencode-go")).toEqual(["opencode-go/deepseek-v4.1-flash", "opencode-go/muse-spark"]);
-    expect(providerSelectors(CATALOG, "nope")).toEqual([]);
   });
 
   it("myModelEntries 按存储顺序解析，目录里没有的模型为 null", () => {

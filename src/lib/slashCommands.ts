@@ -17,9 +17,6 @@ export const SKILL_PREFIX = "skill:";
 
 export type SlashGroup = "local" | "command" | "skill";
 
-/** 分组顺序：壳命令（本地拦截）置顶、omp 命令其次、技能最后。 */
-export const SLASH_GROUPS: readonly SlashGroup[] = ["local", "command", "skill"];
-
 export type SlashCandidate = {
  /** 完整命令名（插入用；技能含 `skill:` 前缀）。 */
  name: string;

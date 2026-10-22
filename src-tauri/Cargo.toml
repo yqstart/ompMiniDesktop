@@ -6,10 +6,6 @@ authors = ["ompMiniDesktop"]
 edition = "2021"
 license = "MIT"
 
-[lib]
-name = "omp_mini_desktop_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
-
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -25,7 +21,6 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-
 libc = "0.2"
 portable-pty = "0.9"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "io-util", "sync", "time", "net"] }
-walkdir = "2"
 chrono = { version = "0.4", features = ["serde"] }
 tauri-plugin-notification = "2.5.1"
 # 手机远程控制（V50）：内嵌 HTTP/WS 服务 + 扫码配对。

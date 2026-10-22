@@ -285,9 +285,4 @@ export async function remotePending(sid: string): Promise<Record<string, unknown
   return Array.isArray(out?.frames) ? out.frames : [];
 }
 
-/** 401 后重新配对：清掉本地的失败态（页面会重新走 `remoteMe`）。 */
-export function resetRemoteAuth() {
-  authFailed = false;
-  attempts = 0;
-  ensureSocket();
-}
+

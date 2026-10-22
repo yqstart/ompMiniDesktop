@@ -108,7 +108,7 @@ Windows 壳的列表 / 历史 / 统计全部以 `state.agent_dir` 为唯一真�
 
 ## 五、验证
 
-已在本机（macOS）执行：
+已在本机（macOS）执行（**以下数字是 2026-10-19 当日快照**，只作当时基线）：
 
 ```bash
 cargo test --manifest-path src-tauri/Cargo.toml   # 293 passed（含 WSL / Windows 路径单测）
