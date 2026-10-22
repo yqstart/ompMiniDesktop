@@ -49,8 +49,9 @@ const NEW_DRAFT = "__new__";
 
 /**
  * 会话输入卡（v2 §3 形态，对齐 Codex / ZCode 的输入卡）：
- * **卡上顶行**（2026-10-20 从卡内移出）= 项目 + 分支选择器 + 提交键，与卡片同宽、左缘对齐，
- * 但**不在卡片内部**（外部独立一行）；
+ * **卡内顶行**（2026-10-22 用户口径：从卡外搬回卡内）= 项目 + 分支选择器 + 提交键，
+ * 卡片自己就是这一行与输入区的共同外框（不再有卡片外那根孤零零的裸行）；
+ * 目标条 / 任务清单浮卡因此直接叠在卡片上方，与卡面同一套圆角 / 描边 / 浮起层级；
  * **输入区** = 附件条 + 提及芯片 + 待发区 + 自动增高输入框；
  * **卡底工具行** = 左「`+` 菜单（添加：文件 / 工作区文件 / 目标 / 计划；指令：压缩）+ 执行模式菜单」，
  * 右「压缩行动点 + Fast 服务档位 + 模型 · 思考档 ▾ + 圆形发送 / 停止」；**卡底统计条** = `SessionStatsBar`，
@@ -59,7 +60,7 @@ const NEW_DRAFT = "__new__";
  * Token 用量 / 上下文占用 / 供应商用量（2026-10-16 对齐 DeepSeek Harness 的 composer dock）——
  * 「我要不要再开一轮」的读数（跑了多少步、烧了多少 token、上下文还剩多少、配额还剩多少）都在那一行里，
  * 点开各自给明细。上下文容量环与供应商用量 2026-10-14 从顶栏右端搬进输入卡、2026-10-16 从工具行挪进统计条；
- * 提交入口 = 卡上顶行的提交键（与右栏「变更」区块同一浮层链路）。
+ * 提交入口 = 卡内顶行的提交键（与右栏「变更」区块同一浮层链路）。
  * `@` / `/` 补全浮层 2026-10-20 也移到卡片外部（卡片上方的独立块，不再撑高卡片）。
  * 待发区（V40）：omp 的队列真值（`queue_update`）——可撤回 / 编辑 / 提升，Esc 中断还原
  * （「排队」按钮 2026-10-13 按用户口径退场，排队只走 Tab / ⌘Ctrl+Enter）。
@@ -129,7 +130,7 @@ export function Composer() {
  const archived = sessions.find((s) => s.id === activeSessionId)?.archived;
  // @文件 提及（V2 M6b）：展开由 omp 做，这里只把草稿里的提及显示成芯片并问一次「路径存在吗」
  const cwd = sessions.find((s) => s.id === activeSessionId)?.cwd ?? "";
- // 卡上顶行（2026-10-20 从卡内移出）：项目 + 分支 + 提交；git 查询与右栏共用 `useGitInfo`
+ // 卡内顶行（2026-10-22 从卡外搬回卡内）：项目 + 分支 + 提交；git 查询与右栏共用 `useGitInfo`
  const projects = useApp((s) => s.projects);
  const { project } = resolveContext(projects, sessions, activeSessionId);
  /**
@@ -1210,17 +1211,6 @@ export function Composer() {
      />
     </div>
    )}
-   {/* 卡上顶行（2026-10-20 从输入卡内部移出）：项目 / 分支 / 提交——与卡片同宽、左缘对齐，
-       不再是卡片的一部分；与「+」菜单等共用 composerMenu 互斥槽 */}
-   <div className="mx-auto flex max-w-(--measure-content) items-center gap-0.5 px-2 pb-1.5">
-    <ProjectPicker project={project} />
-    {git?.isRepo ? (
-     <>
-      <BranchPicker git={git} cwd={cwd} loading={gitLoading} onReload={reloadGit} />
-      <CommitButton cwd={cwd} />
-     </>
-    ) : null}
-   </div>
    <div
     onDragOver={(e) => {
      if (!e.dataTransfer.types.includes("Files")) return;
@@ -1234,9 +1224,22 @@ export function Composer() {
      setDragging(false);
      void readImages(Array.from(e.dataTransfer.files)).then((added) => commitImages(added));
     }}
-    className={`mx-auto max-w-(--measure-content) rounded-xl border bg-surface transition-colors duration-100 ${dragging ? "border-accent bg-accent/5" : awaiting ? "border-warn/60" : "border-border focus-within:border-accent/70"
+    className={`mx-auto max-w-(--measure-content) rounded-xl border bg-surface transition-colors duration-100 ${dragging ? "border-accent bg-accent/5" : awaiting ? "border-warn/60" : "border-border has-[.draft-editor:focus]:border-accent/70"
      }`}
    >
+    {/* 卡内顶行（2026-10-22 用户口径：项目 / 分支 / 提交回到输入卡内部）：卡片自己是
+        这一行与输入区的共同外框，行与工具行同一份左右内边距；`has-[.draft-editor:focus]`
+        让高亮只跟编辑焦点走——点项目 / 分支这类行钮不再把整张卡点亮（原先 `focus-within`
+        只包着编辑器，现在卡片里有了别的按钮）。与「+」菜单等共用 composerMenu 互斥槽。 */}
+    <div className="flex items-center gap-0.5 px-2 pt-1">
+     <ProjectPicker project={project} />
+     {git?.isRepo ? (
+      <>
+       <BranchPicker git={git} cwd={cwd} loading={gitLoading} onReload={reloadGit} />
+       <CommitButton cwd={cwd} />
+      </>
+     ) : null}
+    </div>
     {awaiting && <div className="px-4 pt-2.5 text-[13px] text-warn">{t.resolveApprovalFirst}</div>}
     {attachments.length > 0 && (
      <div className="flex flex-wrap gap-2 px-3 pt-3">

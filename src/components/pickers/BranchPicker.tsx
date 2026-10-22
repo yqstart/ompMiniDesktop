@@ -9,7 +9,7 @@ import { useText } from "../../lib/useText";
 import type { GitInfo } from "@shared/types";
 
 /**
- * 输入框上方的 git 分支指示器（截图右侧那个）：指示 + **切换**。
+ * 输入卡内顶行的 git 分支指示器（截图右侧那个）：指示 + **切换**。
  *
  * - 收起态：分支名（detached HEAD 显示短 sha + 「游离」角标）；有未提交改动时带一个
  *   warn 圆点，切分支前能一眼看到。

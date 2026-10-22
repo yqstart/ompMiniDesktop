@@ -10,6 +10,10 @@
 
 - **设置 ›「系统授权」：macOS 四项隐私授权可查、可一键跳转**（2026-10-22）：设置「通用」组新增条目，直接读 TCC 的**实际生效状态**——完全磁盘访问（能否读 `~/Library/Application Support/com.apple.TCC/TCC.db`）、辅助功能（`AXIsProcessTrusted()`）、屏幕录制（`CGPreflightScreenCaptureAccess()`）、自动化（`AEDeterminePermissionToAutomateTarget`，目标 System Events、只查不弹），每行右侧是「已授权」或「去授权」（`open` 深链到系统设置对应面板）。**不再看系统设置里那个开关**：ad-hoc 签名 / 证书轮换会让 TCC 记录与当前签名身份对不上（tccd `Failed to match existing code requirement`），开关看着开着、API 全是 false——computer use 报「没有权限」时在这里一眼能看出哪一项没落地。面板每 2 秒回读一次（纯本地查询、单飞）+ 窗口重新获得焦点立刻读；屏幕录制未授权时提示要退出并重新打开应用。
 
+### Changed
+
+- **项目 / 分支 / 提交搬回输入卡内部**（2026-10-22 用户口径）：此前它们悬在卡片上方当一根裸行，把「任务清单浮卡 → 目标条 → 输入卡」的整摞切断，看着像两块拼起来的 UI。现在这行是**卡内顶行**（与工具行同一份左右内边距），卡片自己就是这一行与输入区的共同外框；目标条与任务清单浮卡因此直接叠在卡上方，圆角 / 描边 / 浮起层级统一成 `rounded-xl` + `--border` + `--elevated` + `--shadow-pop`，整摞读成一个整体。输入卡焦点高亮改按编辑器焦点（`has-[.draft-editor:focus]`），点项目 / 分支这类行钮不再把整张卡点亮。
+
 ### Fixed
 
 - **点击脚本后终端里命令只出现一次**（2026-10-22 用户实测）：脚本注入原先按「首帧输出」判断 shell 就绪（另有 1.5s 兜底），但行编辑器起来之前 zsh 会先输出 `%` 占位提示符（首帧输出 ≠ 提示符就绪）——那一刻终端还是 cooked 模式，写进去的命令先被 tty 行规程回显一遍，行编辑器起来后又把输入缓冲连提示符重画一遍，界面上就成了两行同样的命令（实际只执行一次）。现在注入改走新的 `terminal_write_ready`：后端轮询 PTY 的 termios，等行编辑器把终端切到 raw（提示符出来、能读输入，`pty.rs` 的 `shell_ready`）再落字，8s 超时兜底；键盘输入仍走原来的同步 `terminal_write`（不排队）。真实 zsh PTY 回归用例覆盖「立刻写 = 两行 / 等 raw = 一行」。

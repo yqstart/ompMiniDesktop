@@ -15,6 +15,9 @@ const ICON_BTN =
  *
  * - 一条 36px 高的浮起条（与输入卡同宽、贴在卡上方）：目标字形 + 「目标」+ 状态 +
  *   单行目标文本，右侧只有 28px 圆形图标键（暂停/继续、编辑、清除）。
+ * - **与卡面同一套外壳**（2026-10-22 用户口径）：项目 / 分支 / 提交搬回输入卡内之后，
+ *   目标条与任务清单浮卡是卡片上方仅有的两层，圆角 / 描边 / 浮起层级统一成
+ *   `rounded-xl` + `--border` + `--elevated` + `--shadow-pop`（与任务浮卡同档），整摞读成一个整体。
  * - **编辑不在条内**（2026-10-20 用户口径）：点「编辑」/ 工具行「目标」按钮 =
  *   让**主输入框**进入目标输入模式（`Composer` 的 `goalMode`），发送即设置 / 更新目标；
  *   条只在目标存在后出现，不再就地展开编辑框。
@@ -50,7 +53,7 @@ export function GoalRow({ onEdit }: { onEdit: () => void }) {
    role="region"
    aria-label={fmt(t.goalRowAria, goal.objective, paused ? t.goalPaused : t.goalInProgress)}
   >
-   <div className="flex h-9 items-center gap-2.5 rounded-md border border-border-soft bg-elevated pr-1 pl-3 shadow-pop">
+   <div className="flex h-9 items-center gap-2.5 rounded-xl border border-border bg-elevated pr-1 pl-3 shadow-pop">
     <Target size={14} className="shrink-0 text-faint" aria-hidden />
     <span className="flex shrink-0 items-baseline gap-1.5">
      <span className="text-[13px] font-medium text-foreground">{t.goalLabel}</span>
