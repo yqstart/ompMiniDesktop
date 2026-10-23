@@ -3,7 +3,7 @@ import { fmt } from "./locale";
 /**
  * 会话行的时间展示（2026-10-13）：行内 = 紧凑相对时间，悬停 = 完整绝对时间。
  *
- * 取证（见 `docs/v42-schedule.md` 补记）：
+ * 取证：
  * - **ZCode**（`zai-org/ZCode` 桌面端 `packages/ui/src/lib/taskListItemPresentation.ts` 直读）：
  *   任务 / 会话列表行 = `now / {n}m / {n}h / {n}d`（中文「刚刚 / {n}分 / {n}小时 / {n}天」）——
  *   恒定 ≤3 字符，行尾永不截断；

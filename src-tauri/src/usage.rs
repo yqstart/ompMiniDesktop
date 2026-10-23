@@ -1,7 +1,7 @@
 //! 使用统计（Usage）：把 omp 本地会话记录里的 token 用量聚合成设置页的三项指标
 //! （tokens 用量 / Cache 命中率 / 活跃天数）。
 //!
-//! 上游事实（omp 18.x 实测，明细见 `docs/v5-schedule.md`）：
+//! 上游事实（omp 18.x 实测）：
 //! - 用量真值只在 jsonl 的 **assistant 消息**里：`message.usage` =
 //!   `{input, output, cacheRead, cacheWrite, totalTokens, …}`，且实测逐条满足
 //!   `totalTokens = input + output + cacheRead + cacheWrite`

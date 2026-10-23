@@ -10,7 +10,7 @@ describe("文件图标取词", () => {
  it("扩展名决定图标，大小写不敏感", () => {
   expect(iconIdFor("a.ts", false)).toBe("typescript");
   expect(iconIdFor("A.TSX", false)).toBe("react_ts");
-  expect(iconIdFor("v1-schedule.md", false)).toBe("markdown");
+  expect(iconIdFor("notes.md", false)).toBe("markdown");
   expect(iconIdFor("logo.svg", false)).toBe("svg");
  });
 

@@ -53,7 +53,7 @@ export function mentionFilesOf(message: Record<string, unknown>): MentionFile[] 
 }
 
 /**
- * 按工具名定制参数摘要行（docs/v1-design.md §8.3）。
+ * 按工具名定制参数摘要行。
  * 无参数时返回空串：占位文案（「无参数」）由渲染层按当前界面语言给，数据层不掺文案。
  */
 export function summarizeArgs(name: string, args: Record<string, unknown>): string {

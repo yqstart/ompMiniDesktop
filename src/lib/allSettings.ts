@@ -1,5 +1,5 @@
 /**
- * 设置面板的纯逻辑（设置 ›「常用设置」，docs/v28-schedule.md 三稿）。
+ * 设置面板的纯逻辑（设置 ›「常用设置」，三稿）。
  *
  * 数据来自后端 `get_omp_settings_catalog`（`omp config list` 文本 + `--json` 两路合并）：
  * 分组与 enum 取值表来自人读文本，类型化值与上游说明来自 JSON。这里只做**展示与编辑**的

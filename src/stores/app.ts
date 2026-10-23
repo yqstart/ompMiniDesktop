@@ -279,7 +279,7 @@ type AppState = {
  composerFocusSeq: number;
  /**
   * 空态输入卡的「计划模式」开关：只对**下一次新建会话**生效（`--plan-yolo`）。
-  * 运行中的会话无法切换计划模式（rpc-ui 没有控制通道，见 `docs/plan-mode.md`），
+  * 运行中的会话无法切换计划模式（rpc-ui 没有控制通道），
   * 所以这个值只在 `activeSessionId === null` 时可见、新建成功后由 Composer 复位。
   */
  planModeNext: boolean;

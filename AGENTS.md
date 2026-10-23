@@ -2,31 +2,20 @@
 
 oh-my-pi（`omp`）的桌面端：**聊天形态的 omp 工作台**（Tauri v2 + React 19 + TS + Tailwind v4 + Zustand，包管理 pnpm）。
 
-> 改代码前先读 `docs/roadmap.md`（版本规划）与对应版本排期。
-
 ## 文档索引
+
+当前不设 `docs/`：架构、数据流与设计口径都写在本文件；其余文档在仓库根。
 
 | 文档 | 说明 |
 |---|---|
-| `docs/roadmap.md` | 版本规划总纲（0.1.0 = 形态收敛 + 聊天对标 + 设置重构；0.2.0 = 右栏工作台 + 会话读数 + omp 约束；0.3.0 = 手机远程控制）|
-| `docs/v1-schedule.md` | 排期 1：终端形态删除清单 / 迁移清单 / 验收（**已实施**，2026-10-14）|
-| `docs/v2-schedule.md` | 排期 2：布局 / 流式 / 聊天框对标 Codex、ZCode |
-| `docs/v3-schedule.md` | 排期 3：设置重构（功能保留、形态重做）|
-| `docs/v4-schedule.md` | 排期 4：右栏工作台——文件目录 + 项目脚本 + 多开终端（**已实施**）|
-| `docs/v5-schedule.md` | 排期 5：会话读数——输入卡底部统计条（会话统计 / Token 用量 / 上下文 / 供应商用量）（**已实施**）|
-| `docs/v6-schedule.md` | 排期 6：设置 ›「omp 约束」——全局 AGENTS.md / RULES.md / rules/*.md 的编辑（整份 Markdown 直接编辑，2026-10-19 去掉表单）（**已实施**）|
-| `docs/windows.md` | Windows 支持：原生链路 / WSL 桥接 / 平台分叉表 / 验证与已知边界（**P0+P1 已实施**，2026-10-19）|
-| `docs/plan-mode.md` | 计划模式（omp plan mode）能力边界与落地方案（2026-10-20：启动级 `--plan-yolo` 可用；运行中切换 / 交互审批无 RPC）|
-| `docs/remote-control.md` | 手机远程控制：内嵌 HTTP/WS + 扫码配对 PWA、白名单 RPC、安全模型、Tailscale、验收（0.3.0 P0 已实施）|
-| `docs/storage-maintenance.md` | 存储维护：omp 图片缓存 / 日志 / 粘贴临时文件 / WAL 的读数与清理、壳侧闲置会话回收、深度优化风险（2026-10-22）|
-| `docs/benchmark-codex-desktop.md` | Codex Desktop 对标调研（含截图证据与设计语言合约）|
-| `docs/benchmark-zcode-desktop.md` | Zcode Desktop 对标调研 |
-| `design-system/MASTER.md` | 设计系统（颜色 / 布局 / 组件 / 层级真相；改 UI 先读）|
+| `AGENTS.md` | 本文件：工程导航、核心数据流、设计约定、范围边界（改代码前读）|
 | `CHANGELOG.md` | 更新日志（发版节 = Release 说明）|
+| `CONTRIBUTING.md` | 开发环境、检查、贡献与提交约定 |
+| `SECURITY.md` | 安全问题报告与威胁模型 |
 
 ## 技术基线
 
-- 壳：Tauri v2（`src-tauri/`，identifier `com.omnidesktop.mini`；自绘标题栏用 `data-tauri-drag-region` + `core:window:allow-start-dragging` 权限（**要整条可拖就写 `="deep"`**：裸属性只认直接命中该元素的 mousedown，内容包在子容器里等于拖不动；按钮 / 输入框等 clickable 元素由拖拽脚本自动短路）；macOS 产物走自签名证书，见 `scripts/`；Windows 保留系统标题栏、不做 72px 红绿灯留白，见 `docs/windows.md`）。
+- 壳：Tauri v2（`src-tauri/`，identifier `com.omnidesktop.mini`；自绘标题栏用 `data-tauri-drag-region` + `core:window:allow-start-dragging` 权限（**要整条可拖就写 `="deep"`**：裸属性只认直接命中该元素的 mousedown，内容包在子容器里等于拖不动；按钮 / 输入框等 clickable 元素由拖拽脚本自动短路）；macOS 产物走自签名证书，见 `scripts/`；Windows 保留系统标题栏、不做 72px 红绿灯留白）。
 - 前端：React 19 + Vite + Tailwind v4 + Zustand。
 - 后端：Rust + tokio + serde；`reqwest`（供应商用量补充探针）。
 - 工具链：Node 22 + pnpm 11；Rust stable。上游运行时：`omp` 18.x（不随仓库分发）。
@@ -49,13 +38,13 @@ src/
   shared/                    # api（invoke 唯一入口，远程模式走 HTTP/WS）/ ipc / types / remote（远程 transport + 401 处理）
   stores/app.ts              # Zustand 全局状态（会话 / 消息流 / 队列 / 未读标 / 右栏开关 / 引用浮层 / 设置视图 / 更新 / 提交任务 / 工作区）
 src-tauri/src/
-  remote/                    # 手机远程控制（V50）：内嵌 axum HTTP/WS、扫码配对/设备、RPC 白名单、事件镜像与待审批、Tailscale（见 docs/remote-control.md）
+  remote/                    # 手机远程控制（V50）：内嵌 axum HTTP/WS、扫码配对/设备、RPC 白名单、事件镜像与待审批、Tailscale
   runtime.rs                 # 会话的 RPC 运行时（spawn 握手 → pump → kill_all；事件面泛型）
   images.rs                  # 会话图片：omp blob 读取（read_blob_image）+ 系统剪贴板复制 + 另存为
   storage.rs                 # 存储维护：目录读数 / omp gc 清理（blobs·wal·archive·compress）/ 闲置会话回收
   pty.rs                     # 右栏终端：PTY 里的登录 shell（spawn / write / resize / kill / kill_all，输出走 Channel）
   proc.rs                    # 进程与环境工具（登录 shell PATH 探测 / 进程组强杀；runtime / pty / git_commit / commit_msg / omp_update 复用）
-  wsl.rs                     # WSL UNC 识别 + wsl.exe 终端启动（P1；不跨发行版驱动 omp，见 docs/windows.md）
+  wsl.rs                     # WSL UNC 识别 + wsl.exe 终端启动（P1；不跨发行版驱动 omp）
   commands/mod.rs            # RPC 命令面 + 项目 / 工作区 / 会话 / git 命令
   context.rs session_scan.rs overlay.rs git_info.rs git_commit.rs git_ops.rs project_files.rs workspace_fs.rs project_scripts.rs
   plugins.rs skills.rs settings.rs system_permissions.rs models_config.rs constraints.rs title_prompt.rs omp_update.rs commit_msg.rs
@@ -122,7 +111,7 @@ scripts/                     # e2e-ipc-selfcheck / generate-icons / generate-mat
   - 派生指标（命中率 / 活跃天数 / 连续天数 / 热力图）与 jsonl 同一条口径：账本事件同样进活跃日与热力图；返回的 `extras` = 只由账本补上、jsonl 里已经没有的条数（**仅数据面**——2026-10-19 用户口径：设置页不再拿它写来源说明行，界面只留读数）。账本读不完（超预算）与 jsonl 预算一样置 `truncated`，不假装统计完了。
   - 记账失败（磁盘满 / 权限）只影响「已删除会话的补记」，**不许拖累会话线程**；本应用只读 omp，账本写在自己的应用数据目录里。
 - **会话图片（2026-10-22 修复历史回放坏图）**：实时帧（`message_start` / `message_end`）里的图片是 **base64**；omp 写 jsonl 时把它外置成 `blob:sha256:<hash>`（实体在 `~/.omp/agent/blobs/<sha256>`，另有同 inode 的 `<hash>.<ext>` 副本）。`lib/attachments.ts` 的 `blobRefOf` 只认 64 位小写 hex，`imagesFromContent` 命中即产出 `{mimeType, blob}`（不参与 base64 长度上限），**绝不许**把 blob 引用当 base64 拼 `data:` URL（这正是旧版历史图片坏图的根因）。`thread/MessageImage.tsx` 统一两种来源：base64 直显，blob 经 `api.readBlobImage` 按需读（`lib/blobImages.ts` 40 张 / 48M 字符 LRU + 单飞；远程白名单含 `read_blob_image`，手机也能看历史图）。点图开 `thread/ImageLightbox.tsx`：复制走后端 `copy_image`（`images.rs`：`image` 解码 → RGBA → `arboard` 主线程写系统剪贴板），另存为走系统保存对话框 + `save_image_file`（只接受 PNG / JPEG / WebP / GIF 扩展名）；手机端只保留预览（复制 / 保存不在远程白名单）。
-- **存储维护（2026-10-22，口径见 `docs/storage-maintenance.md`）**：设置 › 数据 ›「存储维护」（`components/settings/StoragePanel.tsx` + `src-tauri/src/storage.rs`）。读数 `get_storage_stats` 只扫目录（快）：blobs **只数无扩展名主文件**（硬链接副本不重复计），日志目录是 `~/.omp/logs`（与 agent 同级，不是 `agent/logs`）。清理前 `preview_storage_cleanup` 跑 `omp gc --json`（dry-run）；执行 `clean_storage` 才加 `--apply`。安全项 = 未被引用的图片缓存（`--blobs`，引用口径由 omp 扫全部会话 jsonl，壳侧不猜）/ 日志（跳过最近 1 小时）/ 粘贴临时文件 / 设置备份 / WAL；深度项 = `--archive` / `--compress`（默认不勾，确认框追加风险说明）。**会话 jsonl 永远不由壳侧删除**。`reclaim_idle_sessions` 复用 `runtime::reclaim_idle_now`（只收 `ACT_IDLE` 且已落盘、闲置 ≥30 分钟；运行中 / 等审批 / 等后台投递不碰）。
+- **存储维护（2026-10-22）**：设置 › 数据 ›「存储维护」（`components/settings/StoragePanel.tsx` + `src-tauri/src/storage.rs`）。读数 `get_storage_stats` 只扫目录（快）：blobs **只数无扩展名主文件**（硬链接副本不重复计），日志目录是 `~/.omp/logs`（与 agent 同级，不是 `agent/logs`）。清理前 `preview_storage_cleanup` 跑 `omp gc --json`（dry-run）；执行 `clean_storage` 才加 `--apply`。安全项 = 未被引用的图片缓存（`--blobs`，引用口径由 omp 扫全部会话 jsonl，壳侧不猜）/ 日志（跳过最近 1 小时）/ 粘贴临时文件 / 设置备份 / WAL；深度项 = `--archive` / `--compress`（默认不勾，确认框追加风险说明）。**会话 jsonl 永远不由壳侧删除**。`reclaim_idle_sessions` 复用 `runtime::reclaim_idle_now`（只收 `ACT_IDLE` 且已落盘、闲置 ≥30 分钟；运行中 / 等审批 / 等后台投递不碰）。
 
 - **设置写入口径**：omp 侧只经 `omp` CLI（`config set/reset`、`auth-broker`…）；**直接写文件的例外**：`models.yml`（hash 乐观锁 + 预校验 + 备份 + 原子写）与「omp 约束」的 `AGENTS.md` / `RULES.md` / `rules/*.md`（同款乐观锁 + 备份 + 原子写；上游没有写这些文件的 CLI）。本应用偏好不写 omp 配置。
 - **omp 约束（设置 ›「omp 约束」，2026-10-19）**：编辑 omp 的**全局**约束与规则文件——只碰 `<agentDir>` 下三处：`AGENTS.md`（native 用户级上下文文件，每次会话启动注入）、`RULES.md`（sticky 规则，始终 always-apply、每轮重挂）、`rules/*.{md,mdc}`（独立规则，文件名即规则名，`enabled: false` 停用）；三种文件都是整份 Markdown 直接编辑（**选中默认展示预览**，点「编辑」才进编辑态）。项目级 `.omp/` 由 omp 自己发现，本页不碰。
@@ -147,7 +136,7 @@ scripts/                     # e2e-ipc-selfcheck / generate-icons / generate-mat
 
 - **语言**：界面文案 / 注释 / 文档 / 提交信息用简体中文；标识符英文。界面文案一律走 `lib/locale.ts` 字典。
 - **版本文案口径**：README / CHANGELOG / 文档里不写「仓库重置 / 版本归零 / 清除历史版本与发版记录」这类字样；版本历史只按实际版本节记录现状与变更。
-- **文档更新**：架构级变更（文件增删 / 数据流变化）同步 `AGENTS.md` 与 `docs/`；UI 变更同步 `design-system/MASTER.md`。
+- **文档更新**：架构级变更（文件增删 / 数据流变化）同步 `AGENTS.md`；界面与交互变更把口径补进本文件对应章节；用户可见的变更写 `CHANGELOG.md`。
 - **提交信息**：`omp commit` 生成（type 英文 + summary 首词英文过去式 + 其余中文，30 字符内）。
 - **输入框**：全 app 禁系统输入提示（`lib/inputAssist.ts` 全局挂 `spellcheck=false` 等），组件不许各自写。
 - **滚动条**：全 app 不显示滚动条（`index.css` 全局规则），滚动照常。
@@ -180,6 +169,6 @@ pnpm file-icons             # 从 material-icon-theme 重新生成右栏文件�
 
 ## 范围边界
 
-- **做**：聊天唯一形态（v1 已实施）、Codex / ZCode 对标（v2 已实施）、设置重构（v3 已实施）、**右栏工作台**——文件目录 + 项目脚本 + 多开终端（V42 / V43 / V44 已实施，口径见 `docs/v4-schedule.md`）、**会话读数**——输入卡底部统计条（排期 5 已实施，口径见 `docs/v5-schedule.md`）、**omp 约束**——全局 `AGENTS.md` / `RULES.md` / `rules/*.md` 的编辑（整份 Markdown 直接编辑；0.2.0 / 排期 6 已实施，口径见 `docs/v6-schedule.md`）、**手机远程控制**——手机浏览器 PWA + 内嵌 HTTP/WS + 扫码配对（0.3.0，口径见 `docs/remote-control.md`）。
-- **不做**：编辑器（文件只读浏览，打开交给系统默认程序；**omp 约束页只编辑 omp 的全局约束 / 规则 Markdown，不是通用文件编辑器**）/ 内置浏览器 / SSH / 原生移动端 App / 远程桌面 / PR 集成；分屏 / 多窗口；worktree 生命周期管理；云同步 / 定时任务。**手机端只作为远程控制 PWA 存在**（不是独立移动端产品形态；见 `docs/remote-control.md`）。
-- 终端**只作为右栏工作台的页签**存在：同一页签内允许多开（标签行切换，V44 用户口径），但不许长出终端形态的会话模型（π 标题解析 / 目录行 / 覆盖层注入 / 独立窗口 / 任意分屏）；也不许把文件树升级成编辑器或全屏工作区（`docs/v1-schedule.md` §1 的删除清单仍然有效，`docs/v4-schedule.md` 是唯一例外口）。
+- **做**：聊天唯一形态、Codex / ZCode 对标、设置重构、**右栏工作台**——文件目录 + 项目脚本 + 多开终端（V42 / V43 / V44）、**会话读数**——输入卡底部统计条、**omp 约束**——全局 `AGENTS.md` / `RULES.md` / `rules/*.md` 的编辑（整份 Markdown 直接编辑）、**手机远程控制**——手机浏览器 PWA + 内嵌 HTTP/WS + 扫码配对。
+- **不做**：编辑器（文件只读浏览，打开交给系统默认程序；**omp 约束页只编辑 omp 的全局约束 / 规则 Markdown，不是通用文件编辑器**）/ 内置浏览器 / SSH / 原生移动端 App / 远程桌面 / PR 集成；分屏 / 多窗口；worktree 生命周期管理；云同步 / 定时任务。**手机端只作为远程控制 PWA 存在**（不是独立移动端产品形态）。
+- 终端**只作为右栏工作台的页签**存在：同一页签内允许多开（标签行切换，V44 用户口径），但不许长出终端形态的会话模型（π 标题解析 / 目录行 / 覆盖层注入 / 独立窗口 / 任意分屏）；也不许把文件树升级成编辑器或全屏工作区。

@@ -25,7 +25,7 @@ type Preview =
 /**
  * 设置 ›「技能」：omp 技能（`omp skill list`）的发现结果 + 逐项启停。
  *
- * 口径（上游实测见 `docs/v23-schedule.md`）：
+ * 口径（上游实测）：
  * - **发现范围 = cwd**：项目级技能由 omp 从该目录向上走到仓库根逐级发现（`.omp/skills`、
  *   `.agents/skills`、`.claude/skills`…），所以页首有「全局 / 某个项目」的范围选择。
  * - **启停写的是全局配置的 `disabledExtensions`（`skill:<名字>`），按名字对所有项目生效**——

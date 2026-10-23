@@ -5,7 +5,7 @@
  * 分类错了顶多图标不好看，不影响补全行为。认不出的一律 `file`。
  *
  * 类别只决定**图标形状**，不决定颜色：全项目的单强调色约束对这里同样有效
- * （目录 `accent`、文件一律灰阶，见 design-system/MASTER.md §2）。
+ * （目录 `accent`、文件一律灰阶）。
  */
 
 import { splitPath } from "./toolLine";

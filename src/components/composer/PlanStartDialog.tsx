@@ -7,8 +7,8 @@ import { DialogShell } from "../settings/DialogShell";
 /**
  * 计划模式入口弹窗（2026-10-20，方案 A 的可发现入口）：
  *
- * 计划模式是 **omp 的启动参数**（`--plan-yolo`）——rpc-ui 没有运行中切换的通道
- * （见 `docs/plan-mode.md`），所以已打开会话不能切。这里把「切不了」说清楚，
+ * 计划模式是 **omp 的启动参数**（`--plan-yolo`）——rpc-ui 没有运行中切换的通道，
+ * 所以已打开会话不能切。这里把「切不了」说清楚，
  * 并给唯一的落地动作：**用当前目录新建一个计划会话**（`createChatIn(dir, { plan: true })`）。
  *
  * 空态输入卡上的「计划」chip 是快捷开关（设置下一次新建）；有会话时同一个 chip

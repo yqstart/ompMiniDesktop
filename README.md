@@ -11,9 +11,9 @@
 - **右栏工作台**（⌘⇧G，可拖宽）：文件目录树 / 项目脚本 / 多开终端三页签；
 - **设置**：常用设置（`omp config` 目录）/ omp 约束（全局 `AGENTS.md` / `RULES.md` / `rules/*.md`）/ 系统授权（macOS TCC 四项）/ 远程控制 / 模型与供应商 / 插件 / 技能 / 记忆 / 使用统计 / 已归档对话；
 - **周边**：应用与 omp 运行时更新、供应商用量、跨项目文件引用、提交与推送；
-- **手机**：扫码配对后在手机浏览器继续会话（PWA；局域网 / Tailscale HTTPS；审批只支持允许一次 / 拒绝，见 [`docs/remote-control.md`](docs/remote-control.md)）。
+- **手机**：扫码配对后在手机浏览器继续会话（PWA；局域网 / Tailscale HTTPS；审批只支持允许一次 / 拒绝）。
 
-界面视觉与布局按 [`design-system/MASTER.md`](design-system/MASTER.md) 对齐 Codex / ZCode 范式。
+界面视觉与布局按 [`AGENTS.md`](AGENTS.md) 的设计约定对齐 Codex / ZCode 范式。
 
 ## 技术栈
 
@@ -48,15 +48,13 @@ pnpm icon             # 从 design-system/icon/omp-mini-icon.svg 重生成应用
 pnpm file-icons       # 从 material-icon-theme 重新生成右栏文件树的图标子集
 ```
 
-macOS 签名证书见 `scripts/make-signing-cert.sh`；版本号同步位置与发版流程见 [`docs/roadmap.md`](docs/roadmap.md) 的「版本号与发版约定」，每个版本的变更记录写 [`CHANGELOG.md`](CHANGELOG.md)。
+macOS 签名证书见 `scripts/make-signing-cert.sh`；版本号同步位置与发版流程见 [`AGENTS.md`](AGENTS.md) 的「发版与更新」，每个版本的变更记录写 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 文档
 
 | 文档 | 内容 |
 |---|---|
-| [`docs/roadmap.md`](docs/roadmap.md) | 版本规划；各排期与专题文档的索引入口 |
 | [`CHANGELOG.md`](CHANGELOG.md) | 变更记录（版本节即 Release 说明）|
-| [`design-system/MASTER.md`](design-system/MASTER.md) | 设计系统（颜色 / 布局 / 组件 / 层级）|
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 开发环境 / 检查 / 贡献与提交约定 |
 | [`AGENTS.md`](AGENTS.md) | 工程导航与架构约定（改代码前读）|
 | [`SECURITY.md`](SECURITY.md) | 安全问题报告 |

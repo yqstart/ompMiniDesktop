@@ -21,7 +21,7 @@ type InstallDraft = { source: string; scope: "user" | "project"; projectPath: st
 /**
  * 设置 ›「插件」：omp 插件（`omp plugin`）的唯一管理面。
  *
- * 口径（上游实测见 `docs/v23-schedule.md`）：
+ * 口径（上游实测）：
  * - **可见范围 = cwd**：项目 `package.json` 里装的插件与项目级市场安装都由 omp 按目录发现，
  *   所以页首有「全局 / 某个项目」的范围选择；全局 = 钉 agentDir（只看用户级）。
  * - **特性开关按「整个集合」写**（`--set`）：上游 `enabledFeatures: null` 表示沿用每个特性

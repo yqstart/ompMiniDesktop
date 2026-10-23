@@ -10,7 +10,7 @@
 | pnpm | 11 及以上 |
 | Rust | stable（已验证 1.97）+ `cargo-tauri` |
 | `omp` | 18.x |
-| 系统 | macOS（Apple Silicon / Intel）、Windows x64、Linux x64；Windows 细节见 [`docs/windows.md`](docs/windows.md) |
+| 系统 | macOS（Apple Silicon / Intel）、Windows x64、Linux x64 |
 
 额外依赖见 [Tauri 前置条件](https://v2.tauri.app/start/prerequisites/)。
 
@@ -46,7 +46,6 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 ## 贡献方向
 
-- 按排期推进（见 [`docs/roadmap.md`](docs/roadmap.md)）：排期 1 形态收敛 / 排期 2 聊天对标 / 排期 3 设置重构（三者已随 0.1.0 交付）
 - 当前主战场：聊天形态的体验打磨（消息流、输入卡、右栏工作台、设置视图）与四平台产物验证
 - Windows / Linux 打包验证
 - 文档与翻译
@@ -57,10 +56,9 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 ## 提交约定
 
-- 中文描述，一事一 PR；UI 变更请附截图；架构变更请同步 `AGENTS.md` 与 `docs/`。
+- 中文描述，一事一 PR；UI 变更请附截图；架构变更请同步 `AGENTS.md`（设计约定同在本文件）。
 - 禁止事项：不新增伪实时轮询（实时性走事件通道或既有轮询口径）；前端不自算 token 用量；
   会话改名走 omp 原生能力（`set_session_name` / `/rename`），壳侧不留本地覆盖。
-- 组件命名与视觉以 [`design-system/MASTER.md`](design-system/MASTER.md) §4 为准，禁止同义重复组件。
 - 不得提交密钥、Token、私钥、签名证书与个人路径（见 [SECURITY.md](SECURITY.md)）。
 
 ## 行为准则

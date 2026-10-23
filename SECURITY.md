@@ -40,4 +40,4 @@
 - 审批通过的命令经 `omp --mode rpc-ui` 子进程执行：`yolo` 档会跳过所有确认，请确认理解风险后再用
 - 删除会话不可恢复（删 `*.jsonl` 及同名前缀目录）；移除项目仅解绑，不删用户文件
 - 示例路径、session id 一律用占位符，不得出现真实用户目录
-- **手机远程控制（0.3.0）**：默认关闭；只暴露会话控制白名单 RPC；设备 token 只存哈希、可撤销；审批仅 once / deny；局域网 HTTP 明文有 UI 警告，外网建议 Tailscale HTTPS。完整威胁模型与验收见 [`docs/remote-control.md`](docs/remote-control.md)
+- **手机远程控制（0.3.0）**：默认关闭；只暴露会话控制白名单 RPC；设备 token 只存哈希、可撤销；审批仅 once / deny；局域网 HTTP 明文有 UI 警告，外网建议 Tailscale HTTPS。

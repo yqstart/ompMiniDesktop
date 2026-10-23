@@ -7,7 +7,7 @@
 //! - 会话：同样包一层 bash，在里面 `exec omp ...`（omp 必须在 WSL 的 PATH 里）
 //! - 文件树 / 引用：`\\wsl$\...` 是普通 UNC 路径，Windows 侧直接读，无需转换
 //! - 会话历史：omp 在 WSL 内把 jsonl 写进它自己的 `~/.omp`；Windows 侧列表暂不合并
-//!   （见 `docs/windows.md`，这是已知边界，不是静默丢数据）
+//!   （已知边界，不是静默丢数据）
 //!
 //! 纯字符串逻辑，不依赖 `cfg(windows)`：在 macOS / Linux 上也能编译与单测；
 //! 只有真正命中 WSL UNC 路径时才会 spawn `wsl.exe`（非 Windows 上不会命中）。

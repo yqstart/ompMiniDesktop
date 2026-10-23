@@ -8,7 +8,7 @@
  * - 「记住选择」= 写 localStorage（键 `omp.commitLang.v1`，`{ projectId: lang }`）；
  *   不记住则只在本次运行期间生效（内存态在 store 的 `commitLangPrefs`）。
  *
- * 上游实测（omp 18.2.10，见 `docs/v14-schedule.md` §7）：`--context` 能改变摘要主体与正文的语言，
+ * 上游实测（omp 18.2.10）：`--context` 能改变摘要主体与正文的语言，
  * 但**摘要首词仍必须是英文过去式动词**——校验器硬约束（「添加」「新增」「已添加」都被拒，
  * 只有 `added … 文件` 通过），壳侧不代偿、只能如实提示。
  */

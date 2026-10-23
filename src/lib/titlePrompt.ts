@@ -1,7 +1,7 @@
 /**
  * 会话标题语言（V18）：把壳的**界面语言**同步成 omp 的自动会话标题 prompt。
  *
- * 上游事实（omp 18.2.10：源码 + 官方文档，实测见 `docs/v18-schedule.md` §2）：
+ * 上游事实（omp 18.2.10：源码 + 官方文档）：
  * - 自动会话标题的生成 prompt 可以用 `TITLE_SYSTEM.md` 覆盖——**项目级
  *   `<cwd>/.omp/TITLE_SYSTEM.md` 优先，其次用户级 `<agentDir>/TITLE_SYSTEM.md`**；
  * - 上游没有 CLI / 设置项改标题 prompt（`--no-title` 只是关自动标题），
