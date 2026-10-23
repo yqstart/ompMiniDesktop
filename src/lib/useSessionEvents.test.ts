@@ -228,6 +228,10 @@ describe("队列真值与 goal 回读（V40）", () => {
   expect(goalFromWire({ enabled: true, mode: "active", goal: null })).toBeNull();
   expect(goalFromWire({ enabled: true, goal: {} })).toBeNull();
   expect(goalFromWire({ objective: "", id: "g1" })).toBeNull();
+  // 已完成的目标仍是一条记录（目标条显示「已完成」）
+  expect(goalFromWire({ ...goal, status: "complete" })?.status).toBe("complete");
+  // dropped = omp 已删除目标（dropGoal 的最后一帧）：归一成无目标，条必须退场
+  expect(goalFromWire({ ...goal, status: "dropped" })).toBeNull();
  });
 
  it("forgetSession 一并清掉队列 / goal / 计划状态（含完成清单的收起签名）", () => {

@@ -8,7 +8,7 @@ import {
 } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ArrowUp, ClipboardList, Hourglass, PenLine, Plus, Target, Timer, TriangleWarning, X } from "reicon-react";
-import type { Goal, ImageAttachment, ViewMsg } from "@shared/types";
+import type { ImageAttachment, ViewMsg } from "@shared/types";
 import { useApp } from "../../stores/app";
 import { api } from "@shared/api";
 import { attachmentFromFile, attachmentFromOmpImage, dataUrl } from "../../lib/attachments";
@@ -21,6 +21,7 @@ import { createChatIn, refreshTitleAfterFirstSend } from "../../lib/sessionOpen"
 import { resolveNewChatCheckout } from "../../lib/checkouts";
 import { runSessionBatch } from "../../lib/sessionBatch";
 import { useText } from "../../lib/useText";
+import { goalFromWire } from "../../lib/useSessionEvents";
 import { ProjectPicker } from "../pickers/ProjectPicker";
 import { BranchPicker } from "../pickers/BranchPicker";
 import { CommitButton } from "./CommitButton";
@@ -1123,7 +1124,7 @@ export function Composer() {
    const sentImages = attachments;
    try {
     const data = await api.goalCommand(activeSessionId, "create", text);
-    useApp.getState().setGoal(activeSessionId, (data.goal ?? null) as Goal | null);
+    useApp.getState().setGoal(activeSessionId, goalFromWire(data.goal));
     persistDraft(activeSessionId, "");
     setGoalModeFor(null);
     if (!running) await sendTextTo(activeSessionId, cwd, text, sentImages);

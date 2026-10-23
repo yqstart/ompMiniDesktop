@@ -61,6 +61,7 @@ scripts/               # e2e-ipc-selfcheck / 图标生成 / changelog-notes / fi
 - **`/` 开头的命令不被 running 改道**：`steer` / `follow_up` 不注入技能，一律走 `run_slash`。
 - 状态收敛：终态 `agent_end` 与 `session_settled`（含 `awaitingAsyncWork`）→ idle；`open_session` 回包不许把前端状态压成 idle。
 - `SessionView.running` 由进程表活动态派生（running / awaiting-approval），不存「进程在任」快照。
+- **目标续跑必须开 rpc**：桌面壳跑 `--mode rpc-ui`，而 omp 的 `goal.continuationModes` 默认只有 `interactive`——起进程必须把 `PI_CONFIG_FILES` overlay 追加到配置链尾，把 `rpc` 加进去，否则目标 `active` 时回合结束不会自己续跑（目标条「进行中」、会话已 idle）。目标条按 omp 的 GoalStatus 全量映射，`dropped` 归一成无目标。
 
 ### 数据与持久化
 

@@ -742,6 +742,9 @@ export function forgetSession(sid: string): void {
  *
  * 形状不合法（没有 string `objective` / `id`）时不产出半截对象：否则目标条会渲染成
  * 「目标 · 进行中」加一段空白，点编辑也预填不出文字。
+ *
+ * `status === "dropped"` 归一成 `null`（omp 的 `dropGoal` 会先发一帧 `goal_updated`
+ * 带 dropped 目标，再静默清状态——落到 store 就是一条永远不会退场的目标条）。
  */
 export function goalFromWire(raw: unknown): Goal | null {
  if (!raw || typeof raw !== "object") return null;
@@ -753,6 +756,7 @@ export function goalFromWire(raw: unknown): Goal | null {
  const objective = typeof g.objective === "string" ? g.objective : "";
  const id = typeof g.id === "string" ? g.id : "";
  if (!objective.trim() || !id) return null;
+ if (g.status === "dropped") return null;
  return {
   id,
   objective,

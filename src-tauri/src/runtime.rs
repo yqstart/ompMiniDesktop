@@ -25,6 +25,31 @@ use tokio::{
 
 use crate::commands::cmd_err;
 
+/// 桌面端目标续跑覆盖层（`PI_CONFIG_FILES` 加载，不改用户磁盘上的 omp 配置）。
+///
+/// omp 的 `goal.continuationModes` 默认只有 `["interactive"]`：目标在 `agent_end` 后
+/// 只在 TUI 里自动续跑。桌面壳跑的是 `rpc-ui`，不把 `"rpc"` 加进这一层，目标会停在
+/// 「进行中」而会话已经 idle（用户实测）。`PI_CONFIG_FILES` 是 omp 的进程级配置链，
+/// 每次 spawn 把本文件追加到链尾（老版本不认时只是忽略，不会启动失败）；写不了文件
+/// 时返回 `None`，会话照常启动。
+const GOAL_CONTINUATION_OVERLAY: &str = "\
+# ompMiniDesktop：桌面壳是 rpc-ui 模式，目标模式要能像 TUI 一样在回合间续跑。
+goal:
+  continuationModes:
+    - interactive
+    - rpc
+";
+
+/// 把目标续跑覆盖层写到应用数据目录（幂等：内容一致就不重写），返回文件路径。
+fn goal_continuation_overlay<R: tauri::Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    let path = app.path().app_data_dir().ok()?.join("omp-mini").join("goal-continuation.yml");
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(GOAL_CONTINUATION_OVERLAY) {
+        // 原子写：omp 若读到半截 YAML 会直接启动失败。
+        let _ = crate::models_config::write_atomic(&path, GOAL_CONTINUATION_OVERLAY);
+    }
+    path.is_file().then_some(path)
+}
+
 #[derive(Debug, Clone)]
 pub struct SpawnOpts {
     pub bin: String,
@@ -767,15 +792,26 @@ async fn spawn_long_lived_inner<R: tauri::Runtime>(
     opts: SpawnOpts,
     err_buf: &StderrBuf,
 ) -> Result<(String, String, SessionMeta), crate::commands::CmdError> {
-    let mut child = tokio::process::Command::new(&opts.bin)
-        .args(opts.args())
+    let mut cmd = tokio::process::Command::new(&opts.bin);
+    cmd.args(opts.args())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         // stderr 收进管道而不是丢掉：omp 起不来时**原因只写在 stderr**
         // （实测 `--model` / `--thinking` 取值非法 → `Error: Model "x" not found` 后立刻退出，
         // stdout 一帧都没有）。早先接 `Stdio::null()` 时，壳只能报「omp 进程意外退出」，
         // 真正的原因被扔掉了（用户实测：新建会话失败，看不出为什么）。
-        .stderr(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    // 桌面壳是 rpc-ui：目标模式的回合间续跑要显式打开（见 GOAL_CONTINUATION_OVERLAY）。
+    // 用 `PI_CONFIG_FILES` 而不是 `--config`：老版本不认这个变量时只是忽略 overlay，
+    // 会话照常启动；`--config` 要是未被识别，omp 会直接退出。
+    if let Some(cfg) = goal_continuation_overlay(app) {
+        let chain = crate::skills::overlay_chain(
+            std::env::var("PI_CONFIG_FILES").ok().as_deref(),
+            &cfg,
+        );
+        cmd.env("PI_CONFIG_FILES", chain);
+    }
+    let mut child = cmd
         .spawn()
         .map_err(|e| cmd_err("SPAWN_FAILED", format!("启动 omp 失败：{e}"), None))?;
 

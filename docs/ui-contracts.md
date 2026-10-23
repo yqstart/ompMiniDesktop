@@ -68,8 +68,10 @@ Store 里的草稿是**编辑器的投影**：
 - **目标条**：36px 高的浮起条，与输入卡同宽、贴在卡上方（`--measure-content`、`mb-1.5`）。
   - 中性 `--elevated` 底 + `--border-soft` 描边 + `--shadow-pop`。
   - 左侧目标字形 + 「目标」+ 状态 + 单行目标文本（截断，完整文本在悬停提示里）。
+  - 状态按 omp 的 GoalStatus 完整映射：`active` → 「进行中」、`paused` → 「已暂停」、`complete` → 「已完成」（不再摆暂停键）、`budget-limited` → 「已达预算」；`dropped` 在 `goalFromWire` 归一成无目标，目标条直接退场（否则清除目标后条还挂着「进行中」）。
   - 右侧三枚 28px 圆形图标键：暂停 / 继续、编辑、清除；用时只在 ≥1 分钟时以 `faint` 挂在右侧。
   - **目标条只做展示 + 暂停 / 继续 / 清除**。
+- **回合间续跑**：omp 的 `goal.continuationModes` 默认只有 `["interactive"]`（TUI 专属）。桌面壳跑 `--mode rpc-ui`，起进程时必须把一份 `PI_CONFIG_FILES` overlay 追加到配置链尾（`runtime.rs` 的 `goal-continuation.yml`，落在应用数据目录、幂等原子写），把 `"rpc"` 加进续跑模式；不加的话目标 `active`、`agent_end` 后却不会开下一轮——目标条「进行中」而会话已 idle（用户实测）。
 - **创建 / 编辑都走主输入框**：点工具行「目标」按钮（有会话才显示；输入中 / 有目标 = accent）或目标条上的编辑键 → 主输入框进入目标输入模式（`goalMode`，placeholder 换成目标提示；草稿为空且已有目标时预填目标；再点按钮取消）。
   - 发送 = `api.goalCommand(create)` + **把同一段文本作为启动消息发出去**（omp 的 goal 只是状态，不会自己开跑；不发启动消息就只剩目标条、没有流式输出）。运行中只设目标、不打断当前轮。
   - 成功后清空草稿、退出模式、目标条出现并开始流式输出。

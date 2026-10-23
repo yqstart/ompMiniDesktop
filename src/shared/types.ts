@@ -926,7 +926,10 @@ export type QueuedMessages = {
 export type Goal = {
  id: string;
  objective: string;
- /** omp 原值：active / paused（未知值原样透传）。 */
+ /**
+  * omp 原值：`active` / `paused` / `budget-limited` / `complete` / `dropped`
+  * （未知值原样透传）。`dropped` 在 `goalFromWire` 归一为 null，不落 store。
+  */
  status: string;
  tokensUsed: number;
  timeUsedSeconds: number;
