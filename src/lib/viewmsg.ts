@@ -391,18 +391,20 @@ export function viewMsgsFromJsonlLines(lines: unknown[], t: Text): ViewMsg[] {
    }
    return;
   }
-  if (o.type === "title_change" || o.type === "model_change" || o.type === "thinking_level_change") {
-   if (!userSeen && o.type !== "title_change") return;
+  // 标题变更（`title_change`：壳侧自动补标题注入的 `/rename` 与顶部改名都会落一行）
+  // 只是会话元数据，**不落正文**——标题在顶栏与左栏已经可见，消息列里再给一条
+  // 「标题：xxx」分隔线就是噪音（用户实测：一轮结束后重开会话，流尾凭空多出一行标题）。
+  if (o.type === "title_change") return;
+  if (o.type === "model_change" || o.type === "thinking_level_change") {
+   if (!userSeen) return;
    const label =
     o.type === "model_change"
      ? t.dividerModel
-     : o.type === "thinking_level_change"
-      ? fmt(t.dividerThinking, String((o as Record<string, unknown>).thinkingLevel ?? ""))
-      : fmt(t.dividerTitle, String((o as Record<string, unknown>).title ?? ""));
+     : fmt(t.dividerThinking, String((o as Record<string, unknown>).thinkingLevel ?? ""));
    out.push({
     kind: "divider",
     id: `d:${lid}`,
-    divider: o.type === "model_change" ? "model" : o.type === "thinking_level_change" ? "thinking" : "title",
+    divider: o.type === "model_change" ? "model" : "thinking",
     text: label,
     ...(at != null ? { at } : {}),
    });
@@ -552,18 +554,18 @@ export function viewMsgFromJsonlLine(line: unknown, t: Text): ViewMsg[] {
   }
   return [];
  }
- if (type === "title_change" || type === "model_change" || type === "thinking_level_change") {
+ // 标题变更只更新顶栏 / 左栏（见 `frameToViewMsgs` 的 `title_change` 分支），不落正文
+ if (type === "title_change") return [];
+ if (type === "model_change" || type === "thinking_level_change") {
   const label =
    type === "model_change"
     ? t.dividerModel
-    : type === "thinking_level_change"
-     ? fmt(t.dividerThinking, String((o as Record<string, unknown>).thinkingLevel ?? ""))
-     : fmt(t.dividerTitle, String((o as Record<string, unknown>).title ?? ""));
+    : fmt(t.dividerThinking, String((o as Record<string, unknown>).thinkingLevel ?? ""));
   return [
    {
     kind: "divider",
     id: nid("d"),
-    divider: type === "model_change" ? "model" : type === "thinking_level_change" ? "thinking" : "title",
+    divider: type === "model_change" ? "model" : "thinking",
     text: label,
    },
   ];

@@ -328,6 +328,31 @@ describe("viewMsgsFromJsonlLines：会话初始配置不渲染分隔线", () => 
 });
 
 /**
+ * 回归：消息列流尾凭空多出的「标题：…」分隔行。`title_change` 是会话元数据
+ * （真实 jsonl 形状：壳侧自动补标题注入的 `/rename` 落的一行带 `source: "user"`），
+ * 标题更新走顶栏 / 左栏，历史回放不许把它渲染成正文。
+ */
+describe("标题变更不落正文（title_change 只更新标题）", () => {
+ const userLine = { type: "message", id: "u-1", message: { role: "user", content: [{ type: "text", text: "hi" }] } };
+ const titleLine = {
+  type: "title_change",
+  id: "t-1",
+  parentId: "u-1",
+  timestamp: "2026-10-23T01:43:15.409Z",
+  title: "󰈙 DOC: 更新项目文档",
+  source: "user",
+ };
+
+ it("批量归一：只出用户行，不出「标题：…」分隔线", () => {
+  expect(viewMsgsFromJsonlLines([userLine, titleLine], zh).map((m) => m.kind)).toEqual(["user"]);
+ });
+
+ it("单行归一：同口径", () => {
+  expect(viewMsgFromJsonlLine(titleLine, zh)).toEqual([]);
+ });
+});
+
+/**
  * 无内容文本块不落正文行：omp 的模型偶尔在思考与工具调用之间吐一个孤立标点
  * （本机 12 个会话里 `{"type":"text","text":"."}` 出现 375 次，其中 247 次正是这个形状）。
  * 落成正文行就是「一整行空白 + 一个点」，纯噪声。
