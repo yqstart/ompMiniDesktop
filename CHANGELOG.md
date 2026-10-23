@@ -4,7 +4,7 @@
 
 发版时把 `Unreleased` 条目归入新版本节并写明日期——该节即 Release 说明（`scripts/changelog-notes.mjs` 抽取，缺失会挡发版）。
 
-## [Unreleased]
+## [0.3.3] - 2026-10-23
 
 ### Added
 
