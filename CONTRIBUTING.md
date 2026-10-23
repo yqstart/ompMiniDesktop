@@ -56,7 +56,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 ## 提交约定
 
-- 中文描述，一事一 PR；UI 变更请附截图；架构变更请同步 `AGENTS.md`（设计约定同在本文件）。
+- 中文描述，一事一 PR；UI 变更请附截图；架构变更请同步 `docs/` 对应文档，新增硬约束同步 `AGENTS.md` 铁律。
 - 禁止事项：不新增伪实时轮询（实时性走事件通道或既有轮询口径）；前端不自算 token 用量；
   会话改名走 omp 原生能力（`set_session_name` / `/rename`），壳侧不留本地覆盖。
 - 不得提交密钥、Token、私钥、签名证书与个人路径（见 [SECURITY.md](SECURITY.md)）。

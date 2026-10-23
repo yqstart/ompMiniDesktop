@@ -1,148 +1,110 @@
 # ompMiniDesktop 工程导航
 
-oh-my-pi（`omp`）的桌面端：**聊天形态的 omp 工作台**（Tauri v2 + React 19 + TS + Tailwind v4 + Zustand，包管理 pnpm）。
+oh-my-pi（`omp`）的桌面端：**聊天形态的 omp 工作台**（Tauri v2 + React 19 + TS + Tailwind v4 + Zustand，pnpm）。
+
+**本文件只放导航、铁律、命令与边界。** 实现方案按主题分在 `docs/`（见下表），不要指望在这里读到机制细节。
 
 ## 文档索引
 
-当前不设 `docs/`：架构、数据流与设计口径都写在本文件；其余文档在仓库根。
-
-| 文档 | 说明 |
+| 文档 | 内容 |
 |---|---|
-| `AGENTS.md` | 本文件：工程导航、核心数据流、设计约定、范围边界（改代码前读）|
-| `CHANGELOG.md` | 更新日志（发版节 = Release 说明）|
+| `AGENTS.md` | 本文件：铁律、技术基线、源码目录、命令、范围边界 |
+| `docs/architecture.md` | 进程模型 / 会话身份 / 发送与队列 / 状态收敛 / 标题 / 图片 / 统计 / 内存 / 远程 / 源码地图 |
+| `docs/ui-contracts.md` | 三栏布局 / 输入卡（草稿、面板、目标、计划、`@`、执行模式、思考档、Fast）/ 消息列 / 左栏 / 工作台 |
+| `docs/integrations.md` | 设置页 / 技能 / 模型角色 / 供应商与探测 / 系统授权 / git / 更新链路 |
+| `CHANGELOG.md` | 更新日志（发版节 = Release 说明） |
 | `CONTRIBUTING.md` | 开发环境、检查、贡献与提交约定 |
 | `SECURITY.md` | 安全问题报告与威胁模型 |
 
+**阅读规则**：改哪个方向先读对应 docs（会话/数据面 → architecture；组件交互 → ui-contracts；设置/供应商/git → integrations）。docs 与本文件冲突 = 文档过期：按最近一次用户口径把两者统一（铁律是红线，机制细节以 docs 为准）；口径不明时先问，不许按猜测实现。
+
 ## 技术基线
 
-- 壳：Tauri v2（`src-tauri/`，identifier `com.omnidesktop.mini`；自绘标题栏用 `data-tauri-drag-region` + `core:window:allow-start-dragging` 权限（**要整条可拖就写 `="deep"`**：裸属性只认直接命中该元素的 mousedown，内容包在子容器里等于拖不动；按钮 / 输入框等 clickable 元素由拖拽脚本自动短路）；macOS 产物走自签名证书，见 `scripts/`；Windows 保留系统标题栏、不做 72px 红绿灯留白）。
+- 壳：Tauri v2（`src-tauri/`，identifier `com.omnidesktop.mini`）。自绘标题栏用 `data-tauri-drag-region` + `core:window:allow-start-dragging`；**要整条可拖就写 `="deep"`**（裸属性只认直接命中该元素的 mousedown；clickable 元素由拖拽脚本自动短路）。macOS 产物走自签名证书（`scripts/`）；Windows 保留系统标题栏、不做红绿灯留白。
 - 前端：React 19 + Vite + Tailwind v4 + Zustand。
 - 后端：Rust + tokio + serde；`reqwest`（供应商用量补充探针）。
 - 工具链：Node 22 + pnpm 11；Rust stable。上游运行时：`omp` 18.x（不随仓库分发）。
 
-## 源码结构
+## 源码目录
 
 ```
 src/
-  app/App.tsx                # 顶层装配（左栏 + 中列 + 右栏工作台 + 设置视图 + 全局浮层与快捷键）
-  mobile/                    # 手机 PWA（独立入口 mobile.html）：配对页 / 会话列表 / MobileComposer / 复用 Thread 与 useSessionEvents
-  components/sidebar/        # 左栏：ChatSidebar（常驻命令行 + 会话树 + 项目拖拽排序控制器）/ SidebarTop / SidebarBottom / WorkspaceGroupDialog / RowAction / DropLine / OmpUpdateChip / AppUpdateChip
-  components/workbench/      # 右栏工作台（V42 / V43 / V44）：WorkbenchPanel（停靠 + 文件/脚本/终端三页签 + 宽度拖拽 + 终端标签行）/ FileTree（只读目录树 + 快速过滤 + 变更标色 + 引用注入）/ FileIcon（Material 类型图标）/ ScriptsPanel（项目脚本识别 + 自定义脚本）/ TerminalPane（xterm.js + PTY 管道，一实例一终端）
-  components/thread/         # 消息列：ChatView / TopBar / Thread / AssistantText / ToolRow / ToolRunRow / TurnRow / ApprovalCard / UiRequestCard / ChatEmptyState / PlanCard（任务清单浮卡）/ TurnRail（轮次定位轨）/ FindBar / BtwPanel / SessionStatsBar（卡底统计条）/ ContextMeter / SessionStatsDialog / DiffDialog / MessageImage（消息图片：base64 直显 + 历史 blob 按需读）/ ImageLightbox（图片预览 + 复制 / 另存为）…
-  components/composer/       # 输入卡（v2）：Composer（**卡内顶行**：项目/分支 + 提交键 → 输入区 → 卡底工具行：`+`/目标/计划/执行模式/Fast/模型/思考档/发送；**卡下统计条**（卡外）：SessionStatsBar = 会话统计/Token 用量/上下文/供应商用量；`@`/`/` 补全浮层也在卡外、卡片上方）/ CommitButton / ApprovalModeMenu / FastMenu（Fast 服务档位：单个闪电图标，点击开 / 关 priority，开启变黄；Ultra 不在 rpc-ui 展示）/ ModelMenu / ThinkingMenu / GoalRow（目标条：展示 / 暂停·继续 / 清除；编辑走主输入框）/ MentionList / SlashMenu / UsageLimits
-  components/pickers/        # 选择器：ProjectPicker / BranchPicker（挂在输入卡的卡内顶行；分支清单点选即切）
-  components/settings/       # GeneralSettingsPanel / ConstraintsPanel（omp 约束：全局 AGENTS.md / RULES.md / rules/*.md 的整份 Markdown 编辑）/ SystemPermissionsPanel（系统授权：macOS TCC 四项检测 + 跳转系统设置）/ StoragePanel（存储维护：占用读数 + 安全清理 + 深度优化 + 闲置会话回收）/ ModelsPanel（供应商 / 我的模型 / 模型角色多配置入口）/ RoleProfilesSection（模型角色配置列表 + 编辑弹窗 + 激活态）/ PluginsPanel / SkillsPanel / ProvidersSection（供应商：登录型 + 自定义）/ CustomProviderEditForm（只配供应商字段）/ CustomProviderModelsDialog（自定义端点的模型清单：获取可用模型 + 勾选 + 调参）/ ProviderModelsDialog（登录型的星标挑选）/ MemoryPanel / UsagePanel / SettingsSearch（v3 顶部搜索）/ Highlight（命中高亮）…
-  components/usage/ update/ git/   # 供应商用量 / 更新弹窗 / 提交面板
-  components/SettingsPage.tsx / ReferencePicker.tsx / HealthBanner.tsx …
-  lib/                       # viewmsg / mergeEvents / threadLayout / termTheme（终端配色）/ useSessionEvents / sessionOpen / streamReveal / mdBlocks / streamCaret / usePopoverAnchor（卡内浮层锚到被点的项）/ useGitInfo / localNote / promptHistory / useVisibleRefresh（设置页焦点回读）/ btw / checkouts / workspaceGroups / projectDrag / useElapsed / useText / locale / theme / platform / settingsTabs / settingsSearch / useSettingsSearchSources / roleProfiles（模型角色多套配置的本机存储与外部收编）/ …
-  shared/                    # api（invoke 唯一入口，远程模式走 HTTP/WS）/ ipc / types / remote（远程 transport + 401 处理）
-  stores/app.ts              # Zustand 全局状态（会话 / 消息流 / 队列 / 未读标 / 右栏开关 / 引用浮层 / 设置视图 / 更新 / 提交任务 / 工作区）
+  app/App.tsx          # 顶层装配（三栏 + 设置视图 + 全局浮层与快捷键）
+  mobile/              # 手机 PWA（mobile.html）：配对 / 会话列表 / MobileComposer，复用 Thread 与 useSessionEvents
+  components/          # sidebar / workbench / thread / composer / pickers / settings / usage / update / git
+  lib/                 # 视图消息、流式渲染、滚动、补全、git 读写、设置搜索、主题与 locale
+  shared/              # api（invoke 唯一入口）/ ipc / types / remote（transport + 401）
+  stores/app.ts        # Zustand 全局状态
 src-tauri/src/
-  remote/                    # 手机远程控制（V50）：内嵌 axum HTTP/WS、扫码配对/设备、RPC 白名单、事件镜像与待审批、Tailscale
-  runtime.rs                 # 会话的 RPC 运行时（spawn 握手 → pump → kill_all；事件面泛型）
-  images.rs                  # 会话图片：omp blob 读取（read_blob_image）+ 系统剪贴板复制 + 另存为
-  storage.rs                 # 存储维护：目录读数 / omp gc 清理（blobs·wal·archive·compress）/ 闲置会话回收
-  pty.rs                     # 右栏终端：PTY 里的登录 shell（spawn / write / resize / kill / kill_all，输出走 Channel）
-  proc.rs                    # 进程与环境工具（登录 shell PATH 探测 / 进程组强杀；runtime / pty / git_commit / commit_msg / omp_update 复用）
-  wsl.rs                     # WSL UNC 识别 + wsl.exe 终端启动（P1；不跨发行版驱动 omp）
-  commands/mod.rs            # RPC 命令面 + 项目 / 工作区 / 会话 / git 命令
-  context.rs session_scan.rs overlay.rs git_info.rs git_commit.rs git_ops.rs project_files.rs workspace_fs.rs project_scripts.rs
-  plugins.rs skills.rs settings.rs system_permissions.rs models_config.rs constraints.rs title_prompt.rs omp_update.rs commit_msg.rs
-  providers.rs memories.rs usage.rs provider_usage.rs extra_usage.rs provider_models.rs live_stats.rs   # usage.rs = 使用统计（jsonl 聚合 + 壳侧账本）；live_stats.rs = 单会话累计统计（卡底统计条）；provider_models.rs = 端点模型探测（「获取可用模型」）
-scripts/                     # e2e-ipc-selfcheck / generate-icons / generate-material-icons（文件树图标子集）/ changelog-notes / fixup-latest-json / make-signing-cert / tauri-build
+  remote/              # 手机远程控制（axum HTTP/WS、配对、白名单、事件镜像）
+  runtime.rs images.rs storage.rs pty.rs proc.rs wsl.rs
+  commands/mod.rs context.rs session_scan.rs overlay.rs git_*.rs project_*.rs workspace_fs.rs
+  settings.rs constraints.rs skills.rs plugins.rs providers.rs models_config.rs system_permissions.rs
+  usage.rs live_stats.rs provider_usage.rs provider_models.rs extra_usage.rs memories.rs omp_update.rs
+scripts/               # e2e-ipc-selfcheck / 图标生成 / changelog-notes / fixup-latest-json / 签名证书 / tauri-build
 ```
 
-## 核心数据流（不许违背）
+完整文件职责见 `docs/architecture.md` 的「源码地图」。
 
-- **聊天会话 = per-会话长驻 `omp --mode rpc-ui` 进程**（`runtime.rs`）：握手（negotiate / get_state / 子代理订阅 / ask 对话框开关）→ pump（stdin 写、stdout 读、`rpc_chunk` 重组、帧分类）。事件三通道 **`omp-event/status/state://<sid>` 用会话 id 命名**。kill 走 `kill_runtime`；应用退出 `kill_all`。
-- **会话身份 = 完整 uuid**（jsonl 文件名里的 uuid）：**任何定位 / `--resume` 都不许退回 8 字符前缀**（uuid v7 前 8 位同一分钟内必然相同，会读错历史 / 删错文件 / resume 到别的会话并顶掉它正在跑的进程）。`session_file_for` 只认完整 id。
-- **open-elsewhere = omp 的保护性 fork**：打开一个已被**其他进程**持有的会话时，omp 会把本次打开分到**新身份**（新 jsonl、`parentSession` 指向原会话、标题继承；日志 `Session moved to a new file / reason: open-elsewhere`）——列表里因此会出现两个同名会话（原会话 + 副本），常见触发是两个壳实例（安装版 + dev）同时打开同一会话。**壳侧口径：以 spawn 返回的真实 sid 为准**——`spawn_session_runtime` 身份漂移分支（`sid != 请求 id` 时按新身份的文件读头返回；`send_prompt` 自动恢复同口径），前端 `openSessionWithHistory` 全程用 `opened.id`（激活 / 历史 / 导航栈 / 发消息），漂移时补一条说明分隔行——不许用请求 id 继续（会错位到原会话并反复拉起新进程）。
-- **新建会话的启动参数（`create_session`）**：项目里记的 `last_model` / `last_thinking` 只是**偏好**，不许让它把「新建会话」整条路堵死——omp 对不存在的 `--model` / 非法 `--thinking` 是**直接退出**（实测 `Error: Model "…" not found`，stdout 一帧都没有，壳只看到 EOF）。三层口径（用户实测的坑，2026-10-16 修）：① omp 的 stderr 由 `StderrBuf` 采集并接进错误（`spawn_long_lived` 失败路径统一 `with_stderr_reason`，`stderr_first_line` 只脱壳加的那一层括号）——「进程意外退出」这类错误必须自带原因；② 首发被拒 → 去掉这两个参数**降级重试**一次（omp 用默认档），成功即按 `Plan::Degraded` 清掉项目里那对失效偏好（不自愈的话每次新建都白失败一次），并把 `FallbackNotice` 随回包返回；前端在会话流尾落一条本地说明行（`appendLocalNote`），不许静默换模型；③ 降级后 omp 仍没拿到模型（问题不在偏好上）→ 如实说明，**不动用户的项目偏好**。resume 路径不带这两个参数，故不受影响。**计划模式** = `create_session` 的 `plan` 参数（→ spawn `--plan-yolo`）：只给新建会话（resume / 重启一律不带，rpc-ui 没有运行中切换的通道）；**计划阶段的模型 = `modelRoles.plan`**——plan 角色已配置时 spawn 用 `--model @plan`（角色 selector 的 `:档位` 后缀由 omp 解析，项目 `last_model` / `last_thinking` 不传），未配置时才回退项目偏好；计划批准后 omp 仍按 `--plan-yolo-into` 默认切到 `smol` 角色（未配置时按默认档兜底）；`--plan-yolo` 与 `--goal` 互斥（新建本来就不带 `--goal`），与模型 / 思考档降级互不影响——降级重试仍保留 plan。
-- **发送语义**：idle = Enter 发送（`/` 开头直接走 omp 的 `run_slash`，壳本地命令组已于 2026-10-20 移除）；running = **Enter 插话（steer）/ Tab 排队（follow_up）/ Esc 中断并交还队列**（`abort_and_restore_queue`）。队列 = omp 真值（`queue_update` 帧落 `store.queuedBySession`，`applyQueue` 唯一写入面；行可撤回 / 编辑 / 提升）。**`/` 开头的命令不被 running 改道**（2026-10-20 实测）：omp 只在 `prompt` 入口过命令门，`steer` / `follow_up` 里的 `/skill:<名>` 不会注入技能（一帧 `skill-prompt` 都没有），所以 Enter / Tab / ⌘Ctrl+Enter 遇到 `/` 开头（无附件）一律走 `run_slash`，运行中由 omp 排到下一个边界。**空态（没有活动会话）**输入第一条消息 = 先按目录新建会话（`createChatIn`，目录取 `resolveNewChatCheckout`、退回第一个项目）再把消息发进去；空态草稿存在 `drafts["__new__"]`（`NEW_DRAFT`，`draftOf(null)` 原来直接丢输入），发送成功后清空，计划开关（下条）在这条路径上生效。
-- **输入框 = Lexical 草稿编辑器（2026-10-17，形态照 DeepSeek Harness 的 composer）**：`components/composer/draft/` 三个文件——`DraftEditor.tsx`（Lexical plain-text：读写句柄、capture 阶段把键盘 / 粘贴转给 Composer、`DraftTextSource` 来源标记）、`ReferenceChipNode.ts`（`DecoratorNode`：携带 `{path,label,isDir}`，`getTextContent()` = `@真路径`（目录补尾斜杠），`isKeyboardSelectable() = false`）、`ReferenceChip.tsx`（图标 + 短标签的视觉本体）。**草稿恒定一个段落**，换行是 LineBreakNode——Lexical 不把段落分隔写进 `getTextContent()`，而「按段落自己拼换行」会撞上它的规范化中间态（实测段落数指数增长直到 OOM）。Store 里的草稿是**编辑器的投影**：`sync` 来源（store → 编辑器）**不回写**（否则迟到的投影通知会覆盖更新的草稿，例如发送失败的回滚），`insert`（壳插引用 / `#N` 占位 / 粘贴转文件）回写但不打断历史浏览，`user` 回写并退出历史浏览。外部往草稿插引用走 `store.pendingReference` 通道（编辑器非受控，改草稿文本插不出芯片）。
-- **输入卡 `+` / `/` 共用面板（`composer/SlashMenu.tsx`；2026-10-20 用户口径）**：`+` 按钮与 `/` 打开**同一个**浮层——顶部「操作」组（文件 / 工作区文件 / 压缩）+「技能」组（当前会话命令面里的 `skill:<名>`）；**omp 命令不再列出**（手打其它 `/xxx` 仍走 `run_slash`，由 omp 裁决）。`+` 打开时列全部技能、`/` 打开时按输入过滤；行是**单行**（图标 + 标题 + 命令名 / 描述，三者垂直居中，行高 28px 档）。**Esc / 点面板外关闭**（2026-10-21：`lib/useDropdown.ts` 的 `useOutsideDismiss`——document `pointerdown` capture、**不抢编辑器焦点**；`+` 触发按钮算「里面」，否则 pointerdown 先关、click 又开。`@` 补全同口径，但点编辑器里不算外部——那是接着改这枚 `@`）。**目标 / 计划不在面板里**（工具行常驻按钮，见下两条）。口径：
-  - **文件** = 系统文件选择器，按类型分流：**图片**（png / jpg / jpeg / webp / gif）走附件（`api.readImageFile` → `commitImages`，`#N` 占位与粘贴 / 拖拽同一收尾）；**其他文件**在光标处插引用芯片（`insertReference`，路径 = `lib/workspaceFiles.ts` 的 `referenceTarget(cwd, abs)`——会话目录内相对、目录外绝对，与右栏文件树 / ⌘⇧P 同一条投递口径，omp 按 `@file` 读进上下文）。**不许**给 omp 塞它不支持的通用文件附件。**图片的 `#N` 映射**（2026-10-21 方案 A）：`#N` 只是壳写进正文的普通文本，omp 不解析；发送时若正文引用了**已附带附件**的 `#N`，壳侧在 wire text 末尾补一行 `[omp image order: #1=image 1, #3=image 2]`（`lib/imageRefs.ts`，按图片数组顺序、不是正文出现顺序；没有引用就不补）。这行**只给模型看**：乐观回显 / 历史回放 / 队列行 / 队列编辑与中断还原 / 派生标题都按同格式剥掉（`stripImageOrderNote` + 后端 `user_message_text`）；但 omp 会原样把它落进 jsonl，所以导出文件里仍能看到。删图后的编号空洞、悬空 `#N` 如实按剩余图片位置映射。
-  - **工作区文件** = ⌘⇧P 的跨项目引用浮层（投 `refPickerTarget`），不是第二个文件选择器。**入口只在当前项目处于多成员工作区时出现**（2026-10-22 用户口径，`lib/workspaceFiles.ts` 的 `hasWorkspaceRefs` = `referenceScope().others.length > 0`）：未分组 / 单成员工作区 / 目录不属于任何项目时整行不渲染（不是禁用——没有可引用的范围），文件与压缩不受影响。
-  - **目标 = 输入卡上方的目标条**（`composer/GoalRow.tsx`，2026-10-20 按 DeepSeek Harness 的 composer goal dock 重做）：**36px 高的浮起条**，与输入卡同宽、贴在卡上方（`--measure-content`、`mb-1.5`）；中性 `--elevated` 底 + `--border-soft` 描边 + `--shadow-pop`，左侧目标字形 + 「目标」+ 状态 + 单行目标文本（截断，完整文本在悬停提示里），右侧三枚 **28px 圆形图标键**（暂停/继续、编辑、清除），用时只在 ≥1 分钟时以 `faint` 挂在右侧。**目标条只做展示 + 暂停 / 继续 / 清除**。**创建 / 编辑都走主输入框**（2026-10-20 用户口径）：点**工具行「目标」按钮**（有会话才显示；输入中 / 有目标 = accent）或目标条上的编辑键 → 主输入框进入**目标输入模式**（`goalMode`，placeholder 换成目标提示；草稿为空且已有目标时预填目标；再点按钮取消），输入想法后发送 = `api.goalCommand(create)` + **把同一段文本作为启动消息发出去**（omp 的 goal 只是状态，不会自己开跑；不发启动消息就只剩目标条、没有流式输出；运行中只设目标、不打断当前轮），成功后清空草稿、退出模式、**目标条出现并开始流式输出**。**草稿里粘的图片附件随启动消息一起发**（`sendTextTo(..., sentImages)`，与普通发送同一条 `prompt.images` 通路；目标本身只是状态、不收附件）——目标模式不许把附件直接丢掉；只有图片没有文字时给提示（`goalNeedsText`），不静默发送；运行中只设目标、不发启动消息，图片**留在输入框**等下一次真正发送。没有上方编辑框、没有目标弹窗、`+` 菜单也没有目标项；失败原因落在输入卡的 `attachError`。全部操作走 `api.goalCommand`，成功后 `setGoal` 收敛。**goal 的线上形状不是一种**：`get_state.goal` 有目标时是 **GoalModeState** `{enabled,mode,goal}`（omp 18.12.4 实测），而 `goal_updated.goal` 帧与 `goal` 命令回包的 `.goal` 是 **Goal 本体**——后端 `SessionMeta::from_state` 已把状态包折成本体（`null` / 关闭的状态包 / 没有 `objective` 的空壳都当无目标），前端 `goalFromWire` 在帧与回读两路都收两种形状。**不许**把状态包原样落 `goalBySession`：目标条会读不到 objective（「目标 · 进行中」后面一片空白），点编辑也预填不出文字。**目标编辑不走 `/` 命令**（`/goal` 已移除，目标入口只在工具行按钮）——主输入框由目标模式承接，不要另造一条旁路。
-  - **计划 = 工具行常驻的「计划」入口 + 新会话 `--plan-yolo`**（2026-10-20 方案 A 落地）：工具行 `+` 旁的「计划」chip **始终显示**——**空态**（没有活动会话）点击 = 切换下一次新建会话的计划开关（开启 = `bg-accent/10 text-accent` + `aria-pressed`），空态输入第一条消息 = `createChatIn(dir, { plan: true })` → 后端 `create_session` 的 `plan` → spawn `--plan-yolo`，再把消息发进新会话（空态点项目选择器同样带着开关新建，`ProjectPicker` → `startChatInProject({ plan })`；新建成功后开关复位）；**有会话**点击：若当前会话**完全空**（无对话内容 / 无草稿 / 无附件 / 未运行）→ 直接**开 / 关**计划模式（透明换：`runSessionBatch("delete",[sid])` + 同目录 `createChatIn(cwd, { plan: !active })`，只换 id；已计划就换回普通会话），否则打开 `composer/PlanStartDialog.tsx`（未计划 = 说明不能切换 + 「新建计划会话」；已计划 = 「已启用，运行中无法关闭」+ 「新建普通会话」）。计划会话在 `store.planSessions` 里本地标记（`get_state` 不返回 planMode），工具行 chip 显示 accent。`+` 菜单不再有「计划」项（入口只在工具行）。计划模式的 `write local://<slug>-plan.md` 在工具行标成「计划」（`lib/toolLine.ts`）。**不许**假装能在有内容的运行中会话里切换计划模式。
-  - **压缩** = `api.compactSession`（与工具行 ≥80% 才露面的 `CompactButton` 同一条后端通路）；`running` 时这一行**禁用**（与 `CompactButton` 的 `disabled` 同口径——omp 在任务跑着时不处理 compact 请求，实测不回包），不锁整张菜单。
-  - **技能 = 当前会话命令面里的 `skill:<名>`**（omp `skills.enableSkillCommands` 开启时随 `available_commands_update` 推来，实测为 true）：面板最后一组，单行「Sparkles + 技能名 + 描述（截断）」，点击把 `/skill:<名> ` 插到输入框光标处（接着写任务，Enter 交给 omp）；面板限高滚动。数据源是 `currentRuntime.commands` 过滤出的技能，不再另扫技能目录。
-- **输入框 `@` 提及口径（2026-10-17，两轮用户口径）**：输入框里写的是**短标签**，进上下文的是**真路径**。
-  - **写入的是短标签**（`@components/`、`@FileTree.tsx`）——**最短唯一后缀**：`workspace_fs.rs` 的 `unique_labels(all, targets)` 段数从 1 增长，取第一个全库唯一的后缀，都不唯一就退完整相对路径（绝不产生歧义标签）；条目表 `entries_for(root)` 全量遍历一次（跳依赖目录、带预算、30s 缓存）。来源：右栏文件树 / 快速过滤的「引用到输入框」走 `mention_label(base, path)`（前端串行队列，连点也不乱序）；`@` 补全的候选自带 `label`（`PathCandidate.label`）。会话目录之外（⌘⇧P 跨项目引用）仍写绝对路径——该浮层里**文件与文件夹都能引用**（目录行尾 hover 的链接键，或 ↑↓ 停在目录行后 Enter；`flattenRefTree` 的行序号含目录行，**浏览态打开不预选任何行、↑↓ 才落位**（↓ = 第一条文件行、↑ = 其上一行）；搜索态默认停在第一条文件行，打字后 Enter 仍是引用文件），投 `isDir: true` 后芯片序列化补尾斜杠（`@/abs/dir/`），omp 的 `fileMention` 对目录给条目清单。目录开合口径：**浏览态默认折叠**（打开只铺顶层，点着往下展开；用户点过的记成「与默认相反的例外」，见 `dirCollapsed`），**搜索态默认展开**（命中的深层文件必须可见），查询一变例外即作废。
-  - **取词**在后端 `complete_path`（纯逻辑 `complete_candidates`）：**空 token / 带目录**（`@`、`@components/`）列那一层——目录名是短标签时先按后缀反解出真目录再列，候选仍按用户写的前缀展示（「选中短标签后继续往里打」是连贯的）；**有名字、没写目录**（`@baselin`）递归搜名字（`search_entries`：忽略大小写、名字包含、浅层与前缀命中优先）。浮层三态**必须可见**（`MentionList.status`）：搜索中 / 没有匹配 / 候选——**不许无声消失**。Esc 关掉后继续打字重新打开（`mentionDismissed`，与 `/` 命令面同口径）。
-  - **`@` 浮层也有「工作区文件」入口（2026-10-20）**：刚打出 `@`（token 为空）时 `MentionList` 在最上面插一行入口（`MentionRow` 的 `workspace` 档），与路径候选之间一条细线分隔；**默认高亮仍落第一条路径**（打 `@` 的主诉求是引用文件），↑ 一下才到入口。选中 = 收掉这枚 `@`（`replaceMentionWithText("", "")`，留着会变 `@@标签`）→ 打开 `refPickerTarget` 浮层；**不记 `mentionDismissed`**（key 是 `cwd\0`，记了会让下一次 `@` 打不开浮层）。非空 token（`@baselin`）不显示入口；**入口只对工作区成员出现**（2026-10-22 用户口径，同一个 `hasWorkspaceRefs`）：当前项目没进入工作区（未分组）或工作区里没有其他成员项目时不插这一行。键盘导航（↑↓ / Tab / Enter）与默认落点都按 `mentionRows` 走，不再按 `mentionCands`。
-  - **选中候选分两种动作**（2026-10-17 用户实测「进不了文件夹」后定稿）：**目录 = 下钻**——把光标前的 `@token` 换成一段**路径文本** `@<短标签>/`（`replaceMentionWithText`，光标停在其后），浮层立刻接着列这一层（想引用整个目录就直接发送这段文本，语义与 omp 的 `@dir/` 一致）；**文件 = 引用芯片**（`replaceMention`，显示短标签、序列化真路径、尾随一个空格收口）。**目录不能插成芯片**：原子节点挡住后续输入，用户就打不出下一段路径了。
-  - **取词会接上紧邻的芯片**（`$textBeforeCaret` 从光标往前凑、`$mentionRange` 按字符数找回 `@`）：右栏注入的目录芯片（`@dist/`）后面接着打 `app` 时 token 是 `@dist/app`，补全能继续往下钻。`$mentionRange` 构造的是**跨节点选区**——起点落在芯片上时用「父元素 + 子索引」的 element point（decorator 不能做 text point），整段一次删掉再插入，避免"选中文件静默失败"。
-  - **解析**（`check_paths` → `PathCheck.resolved`）：直接解析（相对 / 绝对）→ **短标签后缀唯一反解**（真路径回填 `resolved`）→ 都不行记不存在。**歧义一律不猜**（两个 `index.ts` → `@index.ts` 就是「不存在 + 警告」）。**展示只保留正文这一种**（2026-10-17 用户口径：别又排 tag 又显路径）——引用不单独排芯片行；完整路径在**输入框的悬停提示**（`title` 逐行 `@标签 → 真路径`）与补全候选里；只有 `exists === false` 的引用才在输入框上方给一行警告（`mentionsMissingHint` + 解析不到的写法原文）。
-  - **发送前还原**（`Composer.expandMentions` → `lib/mentions.ts` 的 `rewriteMentions`）：**只对手打的纯文本短标签**——芯片（`ReferenceChipNode`）序列化出来已经是真路径，`check_paths` 直接解析命中、不改写。`send` / `sendQueued`（steer / followUp）三条路都过一遍（目录写法保留尾斜杠；解不出来就按原文发，芯片此前已用警告色说明）。**回显 / prompt 历史 / 发送失败回滚都用原文**（用户看到的是自己写/插的样子）；队列消息「编辑」退回草稿时反向缩短（`shortenMentions` → `mention_label`）。完整路径两个入口：**芯片自身的悬停提示**（`title` = 真路径）与**输入框整体的悬停提示**（逐行 `@标签 → 真路径`）。
-- **执行模式（权限档）真值**：输入卡上的档位 = **本会话生效档**（覆盖层 `sessionApproval` 优先，否则 omp `tools.approvalMode`）；两个来源都不许「兜底成某一档」——没读到就显示「读取中…」。写入只走 `lib/sessionApproval.ts`：菜单选择 = 写 omp 全局默认（新会话档位）+ 本会话覆盖（idle 重启 runtime 立即生效 / running 挂起到本轮结束），Shift+Tab 循环只动本会话覆盖；启动时 `loadApprovalState()` 水合覆盖层 + 全局档（`get_overlay` 的 wire 是覆盖层文件格式 snake_case，别按 camelCase 猜）。
-- **思考档默认口径**（2026-10-14 拆分模型 / 思考档两个选择器）：默认档 = omp 配置的 `defaultThinkingLevel`（`get_default_thinking_level` → `omp config get`；前端单飞读在 `lib/thinkingDefault.ts`、后端在 `settings::read_default_thinking_level`）。实测（18.10.3 rpc-ui）：切模型时 omp **保留仍然合法的档位**、切到无思考模型直接丢档且切回不恢复——所以壳侧只在「档位缺失 / 对新模型非法」时落默认档（`runtime.rs` 的 `auto_think_level` 夹到该模型支持集；不覆盖用户已选的有效档），前端显示与乐观更新镜像同一口径（`lib/thinking.ts` 的 `clampThinking` / `resolveThinking`），真值经 `omp-state://` 回读收敛。模型目录行**必须带供应商**（同名模型来自 ark.cn / ccproxy / commandcode 多家，只给名字分不出来）。
-- **Fast = 当前模型的服务档位，不是快速模型**（2026-10-20，同日改为单图标 + 只对支持模型显示）：工具行只有**一个闪电图标**（无文案 / 无菜单）：点击开 / 关 omp `set_fast_mode` 的 priority 档位，开启时 `text-warn` 黄色。**只有支持 Fast 的模型才显示闪电**：壳侧按 omp `service-tier.ts` 的 `ty` + `Cve`/`Cu` 规则，从 `get_state.model` / `set_model` 的 `provider` / `api` / `identity.class` 元数据算 `fastModeSupported`（`runtime.rs`），选择模型时即时更新；不支持直接隐藏，不再等点击后报错。`ultra`（`/fast ultra`）只有终端 / TUI 有，rpc-ui 没有通道，界面完全不展示。**tok/s 不保证变快**：Fast 是供应商服务档位（OpenAI `service_tier=priority` / Anthropic `speed=fast` / Google priority），可能降低排队 / 首字延迟，实际速度由供应商决定。`fastModeEnabled/Active` 来自 `get_state`、回包先乐观回填再经 `omp-state://` 收敛；支持判定为真但运行时仍被拒时，错误原文在图标上方就地显示，下一次点击清掉并允许重试；`enabled` 但 `active=false` 时图标仍黄、提示说明未实际启用。**不要**把闪电做成模型行选中即开 Fast 的复合动作；模型目录 `omp models --json` 不暴露 Fast 能力，列表批量打标没有可靠数据源（当前模型的支持判定来自会话 `get_state` 的完整模型元数据）。
-- **模型角色 = 多套本机配置，只有一套激活**（2026-10-20 用户口径）：omp 只有一张全局 `modelRoles`，多套配置是**壳侧概念**（`lib/roleProfiles.ts`，localStorage `omp.modelRoleProfiles.v1`，与「我的模型」同档、不写 omp 配置）。设置 › 模型 ›「模型角色」是**配置列表 + 编辑弹窗**（`RoleProfilesSection.tsx`；点击列表行用 `DialogShell` 打开，不在设置页行内展开）：列表行**只展示名称**（不展示模型信息；点击名称直接打开编辑弹窗）+ 激活态；弹窗里配名称与角色行，新建用同一弹窗的 new 模式（名称 + 角色一起配，创建后不自动激活）。激活 = 把该套整表写进 omp（后端 `apply_model_roles` 整表覆盖 + 回读，`roles_edit` 串行）；未激活配置的编辑只落 localStorage。**同一时间恰好一套激活**：激活中的配置不能删；删除未激活配置走 `ConfirmDialog`。**外部改动以 omp 为真值**：每次回读 `modelRoles` 与 `localStorage` 的 `applied`（上次写入快照）比对，不一致 = 用户在 omp TUI / CLI 改过 → 收进当前激活配置（既有「omp 里改完切回来能看到」契约不变）。Ctrl+P 轮换序仍由 `sync_cycle_order` 从激活配置派生，加载后与每次激活 / 编辑激活配置后同步。**不许**把多套配置做成第二张 omp 配置或让未激活配置影响聊天。
-- **供应商用量入口口径**（卡底统计条的最后一项，2026-10-16 从工具行搬下来）：看**全部已配置供应商**的限额窗口，与当前会话的模型**无关**——条上**只有图标**（2026-10-16 修订用户口径：读数 / 窗口名 / 「+N」都不再上条，只在悬停提示与浮层里；配色档由最紧的窗口定：`entryGlance`），点开才是内容（浮层按上游顺序列全部窗口 + 「配了但没探针」的供应商）；只有「一次都没拿到数据且最近一次查询失败」才置灰（`lib/usageLimits.ts` 的 `usageEntryDisabled`，不许再按 `currentModel` 的供应商过滤或置灰）。窗口**读数**口径唯一（`lib/providerUsage.ts` 的 `limitReading`，弹窗与浮层共用）：有比例才画条 + 百分比、余额型给「$X 剩余」、计数型给数量原文——percent 缺省 0 不是读数，拿它显示就是编造「0.0%」。浮层（2026-10-21 重做）按供应商分卡片；有比例的窗口两行（名称 + 重置倒计时 / 通栏进度条 + 百分比），余额窗口一行放完。**commandcode 的月度窗口由壳侧补充探针补**（omp 18.12 只报 5 小时 / 每周 / 余额；月度剩余在官方 `credits.monthlyCredits`，总额按 planId / cap 组合反查官方套餐表），omp 已有报告时只补缺的窗口、不覆盖 omp 的读数——缺了月度就会只剩一行 credits 余额。
-- **卡底统计条（会话读数，2026-10-16；2026-10-20 移到输入卡外部）**：**卡片下方**一行四项（与卡片同宽、`mt-1.5`；不再是卡片内部最后一行）、**整条靠右**（`justify-end`）——**会话统计**（`N 轮 M 步 · X tok/s`，点开：模型用时 / 工具调用用时 / 首发平均 TTFT / 输出速度 TPS）、**Token 用量**（`X tok · 缓存命中 P%`，点开：缓存命中 / 未缓存输入 / 缓存读取 / 输出 的分项与千分位总计）、**上下文占用**（容量环，点开分项）、**供应商用量**（只有图标 + 档位配色，点开全部窗口）——形态参照 DeepSeek Harness 的 composer dock（上游逆向口径：轮 = 有过步的轮、步 = 每次模型调用、模型用时 = Σ`duration`、工具用时 = 按调用逐个配对求和、TTFT = 按步算术平均、**TPS = 输出 token ÷ 解码墙钟（`duration` − `ttft`，不含首 token 等待）**、缓存命中 = `cacheRead ÷（未缓存输入 + 缓存读 + 缓存写）`、总计 = 三桶输入 + 输出）。**数据只由后端 `live_stats.rs` 扫该会话 jsonl 聚合**（派生指标后端算好、按 mtime+size 缓存），前端 `lib/sessionLiveStats.ts` 只做按会话快照 + 格式化（`fmtSpan` / `fmtTps` / `fmtHitRate`）。**收敛**：omp 不推这类投影——打开拉一次、**运行中每 3s** 回读、终态翻转再拉一次；2 秒节流 + 单飞 + 失败保留旧值；归档 / 删除走 `forgetSession` 一并清缓存。**门槛与 DH 同**：整条在四项都没内容时不渲染（不占版面），会话统计项要求步数 > 0、Token 项要求计费输入或输出非 0。**不许**把它做成第二个 `/status` 弹窗入口（`/status` 仍是独立模态，数据源是 omp 的 `get_session_stats`）。**四项浮层的包含块 = 整条统计条**（`relative` 挂在条根、按钮包装器不许带定位；浮层 `absolute right-0 bottom-full … max-w-full`，**水平位置由 `lib/usePopoverAnchor` 实测锚到被点的项**——居中于按钮再夹在条内，只写 style 不走 state，无布局环境退回 CSS 的 `right-0`）——相对按钮定位的宽浮层会在统计条换行时向左溢出输入卡、被中列的 `overflow-hidden` 裁掉，而贴条缘又会离靠左的项（会话统计 / Token 用量）很远（用户实测两条并存，口径见 MASTER §4.7）。
-- **状态收敛**：终态 `agent_end` → idle；**`agent_end{isTerminal:false, awaitingAsyncWork:true}`（等后台完成投递）也折算 idle**（活动态单列 `idle-awaiting`，闲置回收跳过）；`session_settled` 同样收敛（`get_state` 真值回读挂在「终态 agent_end ∪ session_settled」上——运行中注入的补标题 `/rename` 会把本轮 agent_end 变非终态，只认终态会漏掉首轮回读；**运行中另有一路**：每个 assistant 步收尾（`message_end`）按 ≥2s 节流补一发 `get_state`，`contextUsage` 才会随长任务推进增长，见 `runtime.rs` 的 `midrun_sync_due`）。前端状态不许在 `open_session` 回包时被压成 idle（会打断进行中的轮次）。**列表「运行中」标与状态收敛同源**：`SessionView.running` 由进程表活动态派生（`running_snapshot` → `activity_is_busy`：只有 running / awaiting-approval 才算），不许再存「进程在任」快照——打开过的空闲会话不该转圈、跑完的任务不许一直转，「跑完未读」的完成点就是它 running→非 running 的翻转（见「左栏会话状态点」）。**前端显示层同口径**：左栏对**打开过的会话**（有 `statusBySession` 记录）的 `running` 一律按实时状态派生（`ChatSidebar.mergedSessions`，running / awaiting-approval = 在跑，与 Composer 同口径）——`store.sessions` 行的 `running` 只是 open / refresh 时刻的快照，任务结束没有写入面把它归零，整行覆盖扫描行会把跑完的会话永远钉在转圈（用户实测）；没打开过的行（无状态记录）才用行自带值。
-- **任务清单（todo）口径**：**上游没有「清单更新」事件**——全量真值只有两处：todo 工具帧的 `result.details.phases`（`tool_execution_end` 与 `message_end{toolResult}` 两路同形，实测 18.10.4；`useSessionEvents` 的 handler 实时写 `store` 的 `applyPlans`——`plansBySession` 唯一写入面、值没变不写），与 `get_state.todoPhases` 回读（数组即覆盖、空数组 = 已清空并删浮卡状态；resume 历史会话靠它恢复）。`todo_reminder` 是「未完成项提醒」（`{todos,attempt,maxAttempts}`，不带 phases）——不解析、不进消息流；`todo_auto_clear` 收到即清空（探针 80s 未触发，兜底分支）。真值形状：phase / task **无 id**（key 用下标）、状态集含 `blocked`（带 `blocker` 文案）。展示**只有一处**（符号 / 色调 / 统计文案统一在 `lib/todoDisplay.ts`：`TODO_DISPLAY` / `countTodos` / `todoStatsText`）：消息列底部**浮卡**（`thread/PlanCard.tsx`——贴消息列底部、浮在输入卡上方的宽卡，挂 Thread 相对定位外壳、宽度 = `--measure-content` 与正文列同档，高度回报 Thread 给消息流垫等高留白、回底按钮随之让位；头部行 = 图标 + 「任务」+ 未完成档位统计「1 进行中 · 10 待处理」+ 折叠箭头，整行 = 开合开关；展开 = 清单区 `max-h` 内滚；开合在 `store.planCardBySession`——**首次出现默认收起**（2026-10-21 用户口径：无记录 = 收起，`applyPlans` 首次写入 `collapsed`；用户展开后不被清单更新覆盖），全部完成只在 `allDone` 翻转那一下自动折成头部行，**没有隐藏档**；清空即退场。**新回合发送成功**（`Composer.sendTextTo` / 手机 `MobileComposer` 的 `send_message`）时若清单**全部完成**，走 `dismissCompletedPlans` 连数据带浮卡一起收起，并记下这份清单的签名挡掉 `get_state` 在 omp 自动清理窗口内的同签名回读（omp 的 `tasks.todoClearDelay` 只是它自己 UI 的计时器，不挡会「复活」）；未完成的清单不动——那还是 omp 的真实任务状态）。
-- **流式渲染管线**：`frameToViewMsgs` → `mergeEvents`（rAF 合并缓冲：同 id 折叠、工具卡合并）→ `useSessionEvents`（历史 LRU：只留最近 3 个会话；running 豁免）→ `Thread`：
-  - `AssistantText` 两段式分块（`mdBlocks`：冻结前缀 memo + 活跃尾块每帧重走；围栏骨架只在「围栏开、无内容」时）；
-  - 平滑揭示（`streamReveal`：有界追赶、complete 立即全量）；
-  - 光标 = **测量覆盖**（`streamCaret` 只写 style，不许搬 React 管理的 DOM）；
-  - 贴底跟随 = sticky 语义（`useLayoutEffect` + `onScroll` / `followBottom` 共用 `userScrolledAway` + ResizeObserver 回调 ref；`events` 引用变化即跟）。释放只看「用户上翻」（scrollTop 净位移 > 8px 且离底 ≥ 80px）——按「距底距离」判会把视口变矮（输入框长高 / 查找条 / 窗口缩放）当成滚开，跟随会永久死亡。
-  - 无内容文本块（只有空白 / 孤立标点的 `{"type":"text"}`）不落正文行（`textHasContent`，历史与实时同口径）。
-  - 实时行 id = `${sid}:${msgSeq}:${contentIndex}`（contentIndex 每条消息从 0 重数，只用它会撞车）；重开实时流过的会话按「类别 + 全文」与历史配对，不许翻倍。
-  - `text_end` 是文本块完结信号（消费它，行才收敛）；工具占位卡从 `partial` 取真名 / 真 id / 半截参数。
-  - **注入消息分类**：`role=developer`（omp TTSR 规则提醒 `<system-reminder …>`）不落正文——历史回放与实时帧都渲染成一条 `divider:"reminder"` 紧凑行（规则名进文案，正文不入流）；其余未知 role 一律不按正文渲染（正文只认 assistant，注入内容落成正文就是泄漏）。
-- **消息列滚动**：`.thread-scroll` 必须保持 `overflow-y: auto`（`index.css`）——跟随 / 回看 / 加载更早全靠它（V32 曾漏恢复导致「输入框上方文字重叠」）。
-- **三栏布局（v2；右栏 V42 改造）**：左栏（`SidebarShell` + `ChatSidebar`）/ 中列（`ChatView`）/ 右栏**工作台**（`WorkbenchPanel`，装配在 `App` 主区内、`ChatView` 之侧）。右栏开关 = `store.workbenchOpen`（⌘⇧G；**每次启动都收起**、不恢复上次展开态——2026-10-19 用户口径，开合只在本次运行内有效）；打开即停靠为第三栏（布局变三栏，会话列让位、不遮盖）。**右栏宽度可拖**（`store.workbenchWidth`：260–640、默认 320、持久化；手柄在左缘，另受「给中列留 420px」的窗口约束，窗口变窄自动收回超限值）。**右栏 = 文件 / 脚本 / 终端三个页签**（`store.workbenchTab`，持久化），面板**常驻挂载、只切显隐**（收起 / 切页签 / 切设置视图都不卸载：终端进程与 xterm 回看缓冲、文件树的展开位置都不丢）。
-- **右栏工作台（V42 / V43）**：目标目录 = 当前会话 cwd（`lib/context.ts` 的 `resolveContext`），会话切换即跟着切。**文件页签** = 只读目录树（`workbench/FileTree.tsx`）：懒加载一层（`list_dir`，`withRepoRoot` 只在树根传）、目录优先 + 名称升序、每目录分片 200 条、单层超 2000 条截断；**类型图标 = Material Icon Theme**（`workbench/FileIcon.tsx` + `lib/fileIcons.ts`，资产由 `scripts/generate-material-icons.mjs` 从 devDependency `material-icon-theme` 裁剪生成到 `lib/materialIcons.generated.ts`；完整文件名 → 多段扩展名 → 扩展名 → 默认 `file`/`folder`，目录带展开态；只用于文件树与 ⌘⇧P 引用浮层的类型识别，是「单一 accent」的有意例外）；**顶部快速过滤** = 输入即搜（防抖 180ms → `search_paths`，后端 `workspace_fs.rs` **只读**递归搜名字 / 带 `/` 的相对路径，跳依赖与缓存目录、深度 24 / 扫描 20 万条 / 命中 800 三重预算），**文件与文件夹都出**，点结果 = 清空过滤 + 在树里逐级展开定位（1.6s 高亮）；未提交改动拿一次 `get_change_set`，按「仓库根 + 相对路径」换算成绝对路径打徽标（`M/A/D/R·C/?`）；点文件用系统默认程序打开，行尾 hover 出「引用到输入框」（与 `⌘⇧P` 引用浮层同一条投递口径：`mention_label` 取短标签 → `store.pendingReference` → Composer 插成引用芯片）与「在访达中显示」。「引用到输入框」写的是**短标签**（`@components/`、`@FileTree.tsx`——最短唯一后缀，见「输入框 `@` 提及口径」），完整相对路径在**输入框的悬停提示**里。**不许**变成编辑器：只读、不写文件、不预览内容。**脚本页签** = 项目脚本（`workbench/ScriptsPanel.tsx` + `project_scripts.rs` 的 `discover_scripts`）：后端**只读**扫清单文件给出候选命令——`package.json` 的 scripts（包管理器由锁文件 / `packageManager` 定）、`Cargo.toml`（固定五条 + `.cargo` 的 `[alias]`）、`go.mod`、`manage.py` / `pyproject.toml` 的 scripts 段、`Makefile` / `justfile` / `Taskfile`；解析全是**行扫描**（不为几个清单文件引 TOML / YAML 依赖，认不出的写法就是没有，不猜）。**自定义脚本** = 本应用偏好（`store.customScripts` 按 cwd 分组、localStorage `omp.scripts.v1`，**不写用户仓库**）。执行口径：点脚本 → `runInTerminal(cwd, command, title)` **新开一个终端**（标签名 = 脚本名）、展开右栏、切到终端页签、落 `store.pendingTerminalRun{terminalId}`，由**那个** `TerminalPane` 在 PTY 建好后写进 PTY——注入走 `terminal_write_ready`：后端 `pty.rs` 的 `shell_ready` 等行编辑器把终端切到 raw（提示符出来、能读输入）再落字，**不许**按首帧输出 / 固定延时写（cooked 期写会被 tty 回显一遍、行编辑器再重画一遍，命令在终端里出现两遍；2026-10-22 用户实测），8s 超时兜底，`consumedRunRef` 挡重复投递——脚本面板不自己起进程；连点几条脚本就是几个终端，各跑各的。**终端页签** = **多开**的 PTY 登录 shell（`pty.rs` + `workbench/TerminalPane.tsx`）：`terminal_spawn` 建 PTY、输出走 Tauri Channel、`terminal_write` / `terminal_resize` / `terminal_kill` 三路寻址。实例表 = `store.terminals`（`{id, cwd, title}` + `activeTerminalId`）：页签内一条**标签行**（切换 / 新建 / 关闭，横向滚动、标签名截断），上限 6、超出淘汰最旧的**非活跃**项（组件卸载即 kill）；终端在创建时定格 cwd，**不随会话切换改目录、也不被会话切换杀掉**（切会话只影响「新建终端用哪个目录」）；高频字节流只进 xterm，**不进 store**；应用退出走 `pty::kill_all`。**不许**再引入终端形态的会话模型（π 标题 / 目录行 / 标签栏 / 覆盖层注入）。
-- **消息列布局（v2）**：`lib/threadLayout.ts` 的 `buildThreadLayout(shown, running)` 是渲染前的唯一布局派生——相邻同类工具行聚合成摘要行（命令批 / 编辑卡 / 任务清单批——`todo` 工具行连成一段折成「更新了 N 次任务清单」，清单的当前状态看消息列底部浮卡），每轮末尾追加轮时长行（`user.at` → 该轮最后一条消息的 `at`；running 时跳过流尾轮）。`ViewMsg.at` 来源：历史 = jsonl 行的 `timestamp`（`lib/viewmsg.ts` 的 `lineAtOf`），实时 = 帧到达时刻（`useSessionEvents` 统一打戳）。聚合/时长只在布局层做，不改 `mergeViewMsgs` 的合并口径。
-- **轮次定位轨（2026-10-21，形态照 DeepSeek Harness 的 `TurnNavigator`）**：消息列右缘一条**每轮提问一道刻度**的竖轨（`components/thread/TurnRail.tsx` + 数据面 `lib/turnRail.ts`；`Thread` 外壳挂 `@container/thread`，容器宽 <900px 收起、<2 轮不渲染）。**一轮 = 一条用户消息**（用户行带 `data-turn` 锚点），刻度固定 10px 节距、20×2px 右对齐、满了在轨内滚动（两端遮罩淡出），**当前轮最长最亮**（`aria-current`）——**贴底 = 最新一轮**（与 Thread 跟随共用 `lib/threadScroll.ts` 的 `NEAR_BOTTOM_PX`），否则阅读线 = 视口顶 + `min(96px, 20% 视口高)` 落在哪一轮之上（`activeTurnAt`）；悬停 / 聚焦出预览（本轮提问 1 行 + 本轮最后一条**已完成**的助手正文 3 行，`role=tooltip`、不可悬停；流式半截不进预览）。点击**已加载**轮次 = 行顶落到视口顶 +24px（`turnJumpTop`，平滑滚动、`prefers-reduced-motion` 时瞬时）；**未加载**轮次（更早的历史页）先把渲染窗口放大到刚好含这一条，下一帧锚点进 DOM 后再**瞬时**落地（同步展开，没有加载态）。两条路都**先撤贴底跟随**（跳轮 = 读者接管）。滚轮停在轨上时**接力给消息列**（轨装得下时——否则右缘 28px 会变成滚不动的死区；轨自己溢出时只滚轨）。**不许**做成第二套滚动条 / 按内容比例铺刻度 / 用 `index` 当轮次号（历史分页只改 `loaded`，编号与预览始终是完整会话的口径）。
-- **左栏会话状态点（2026-10-19，档位与优先级照 DeepSeek Harness 的 `StateDot`）**：会话行的**状态只有一处** = 行首 16px 槽里的一个点（`components/sidebar/SessionStatusDot.tsx` + `index.css` 的 `.status-*`）。四档按**唯一优先级**取第一档（`lib/sessionRowStatus.ts` 的 `sessionRowStatus`——行首点 / 行尾标签 / 悬停文案共用这一份判断）：**待处理（橙点，`awaiting-approval`：等审批 / 等回答）> 运行中（中性灰转圈环）> 已完成未查看（绿点）> 空闲（不显示点，槽位仍占位、标题列不错行）**。视觉参数逐项对齐上游：环 14px SVG、轨道 `opacity .25`、弧 `stroke-width 2` + `dasharray 12 150`、1.5s 匀速旋转 + 弧长伸缩；实心点 = 10px 容器里 `inset 20%` 的圆（视觉 6px）；`prefers-reduced-motion` 走静态弧降级。**待处理档行尾把相对时间换成「待处理」标签**（上游 `status.compact.*` 口径；完整时间仍在悬停 `title` 里）。状态输入两路：`store.statusBySession`（打开过的会话，实时）× 行自带 `running` 快照（没打开过），与 `mergedSessions` 同口径。**不许**再把状态标放回行尾——原「行尾转圈 + 未读对勾」两种标已收敛进这一个点。
-- **左栏未读（v2，喂给上面「已完成」档）**：后台会话的**一轮起止**只有 `list_sessions` 快照看得到——`running` 字段 = **任务在跑**（进程表活动态派生，见「状态收敛」），`ChatSidebar.reload` 对比上一份快照，`running → 非 running` 且不在前台 → `store.markUnread`；打开会话（SessionRow 点击）`clearUnread`。运行期状态，不持久化。
-- **删除 / 归档的列表缓存同步**：左栏的 `mergedSessions` 把 `store.sessions` 当真相覆盖，并把「扫描结果里没有的行」补回列表（服务的是刚新建、还没落盘的会话）——所以删除 / 归档 / 恢复**必须在 `runSessionBatch` 里同步这些行**（删除 = 丢行 + 清激活；归档 / 恢复 = 只改归档位）。漏掉这一步的后果（用户实测）：后端删掉 jsonl、下一次刷新扫不到它，缓存里那一行又被补回来（还被顶到组首），看着像「点删除以后又冒出一个会话」；归档同理——缓存里过期的 `archived: false` 会把扫描回传的 `archived: true` 顶掉，归档过的会话继续留在「进行中」。归档 / 恢复 / 删除都只走这一条实现（原命令面 ⌘K 的那枚动作已随功能删除，2026-10-19），不许各写一份「归档完清什么」。
-- **左栏冷启动水合（2026-10-16 用户实测的坑）**：`projects` / `checkouts` / `workspaceGroups` 都是内存态，重启后为空的补齐**只有左栏挂载这一趟**（`ChatSidebar` 的 `coldLoaded`，目录行 + 工作区清单走 `loadCheckouts` 一次拉齐）——条件必须**各自独立**（谁的清单为空补谁），不许拿旁证当门：老实现把工作区清单挂在「已经有项目」下，冷启动时 `projects` 还是空的 → 那一趟整个跳过，项目拉回来了、工作区永远是空，左栏把建好的工作区渲染成平铺（`sections === null` 的平铺分支），看着像「重启后工作区丢了」（后端 `overlay.json` 数据完好，别去查后端）。同理 `loadCheckouts` 里两份数据**各落各的**（`allSettled`）：目录行要跑 `git worktree list`，它失败不许把工作区清单一起拖没（合并成败的后果就是上面那个平铺），目录行自己的失败照旧抛给调用方。
-- **左栏顶层分组的启动开合 + 上次会话恢复（2026-10-19 用户口径）**：app 打开时左栏**只展开第一个**顶层分组（有工作区 = 第一个工作区段；平铺 = 第一个项目块），其余收起；上次关闭时选中的会话所在的那一个优先。开合是**受控 details**（`ChatSidebar` 的 `openTop`：默认值从数据派生、不写 state 也不用 effect，用户第一次点击后由 `onToggle` 接管，不持久化——每次打开都重新摆）；工作区段内的项目块不占开合表（展开了工作区，里面的项目就该看得见）。上次会话本身记在 `lib/lastSession.ts`（键 `omp.lastSession.v1`：id + projectId + title + cwd，随选中 / 改名写入、内容没变不写，只是 hint 不是真相），`App` 的 `useLastSessionRestore` 冷启动读它 → `openSessionWithHistory(id, hint, { trustView: true })` 恢复打开：hint 让标题 / 项目 / 目录立刻到位，`trustView` 让 open 的真值**整行收敛** title/note（记录来自上一次运行、可能陈旧；本地乐观标题那条口径不变，只有恢复路径传它）；打不开（会话被删 / omp 不可用）时回到空态（`activeSessionId: null`），记录留着下次再试。
-- **标题**：omp 对 `--mode rpc-ui` 强制关闭自动标题——壳侧两层补：pump 在首条用户消息帧（`message_start` role=user 等）一到就注入一次 `/rename`（`/` 开头在 omp 侧先过命令门、早于 streaming 判定，`/rename` 无参数走后台执行：运行中注入不插话、不排队、不阻塞——标题在任务跑完前就有），spawn 时（resume 旧会话）与每次终态 `agent_end`（失败兜底重试）各再看一眼，每进程至多成功一次 → `session_info_update` 帧回灌；后端扫描 `first_user_text` 派生显示标题兜底。标题语言随壳界面语言（`TITLE_SYSTEM.md`，用户自写文件不覆盖）。**标题显示口径**：omp 18.8.7+ 的标题卡（上游 `utils/title-card.ts`，`title.icons` 默认 `nf+emoji`）会在生成 / `/rename` 时把标题写成 `${icon} ${code}: ${title}`（实测 `󰜘 COMMIT: 提交推送后仍有修改标识`；图标是私有区码位，壳里没有覆盖私有区的字体，WebKit 会回退成 Apple Symbols 的杂物字形，U+F084D 画成 6 根横条），**显示层一律去掉开头这整段前缀（图标 + 大写短码）**（`lib/sessionTitle.ts` 的 `sessionTitleForDisplay`，侧栏行 / 删除确认 / 顶栏 / 归档页 / 设置搜索 / **改名输入框回显**同一口径；没有图标的裸 `HGT: ` 不是卡、不剥），数据保持原样（jsonl 标题、导出仍带前缀）。**改名交互**（顶栏点标题就地改名）：Enter 或**点输入框外**提交、Esc 取消，改过才写 omp 真名（原样提交 = 不写）——「点输入框外」走 document `pointerdown`，不用 blur（WKWebView 里点非聚焦元素不搬焦点）；同一次点击里 pointerdown 提交后 blur 的补发由一次性结算挡住。**标题变更不落正文**：jsonl 的 `title_change`（壳侧自动补标题注入的 `/rename` 与顶部改名都会落一行，实测带 `source: "user"`）在历史回放里只更新标题、不产出消息行（`lib/viewmsg.ts` 的批量与单行两条归一口径都直接返回空）——标题在顶栏 / 左栏已可见，消息列不许再出一条「标题：…」分隔行（重开会话时它会让流尾凭空多出一行标题）。
-- **手机远程控制（0.3.0）**：桌面 Tauri 进程内嵌 axum HTTP/WS（`src-tauri/src/remote/`），手机浏览器 PWA（`mobile.html` + `src/mobile/`）扫码配对后继续会话。**复用**现有 `commands` 函数、`stores/app`、`useSessionEvents`、`openSessionWithHistory`、`Thread` 与审批/任务卡；传输在 `src/shared/remote.ts` 切换（`window.__OMP_REMOTE__`），桌面仍走 Tauri。安全口径：默认关闭、仅白名单 RPC（无文件/终端/设置/git）、会话 id 必须完整 uuid、审批仅 once/deny、`create_session` cwd 限已登记项目、设备 token 只存哈希且可撤销；局域网 HTTP 明文有 UI 警告，外网用 Tailscale Serve HTTPS。事件由 `remote::emit_event` 镜像；审批帧离线缓存 30 分钟，重连补拉。**不许**把远程做成通用 Tauri 桥或第二套聊天语义。
-- **内存治理**：每 60s 一轮闲置回收（idle 30 分钟且已落盘 → kill；重新打开 / 发消息自动 resume）；`eventsBySession` 只留最近 3 个会话（切会话时触发 LRU 裁剪）；工具全量输出封顶 100K 字符。
-- **模型目录**（`omp models --json`，2–10s）：单飞 + 5 分钟缓存 + 过期后台刷新（`omp-models://catalog` 广播）；`omp config list --json` 一次读全部配置键。
-- **使用统计（`usage.rs`）= omp 会话记录 ∪ 壳侧账本**：只扫 jsonl 的话**删掉会话，那部分用量就从统计里消失**，所以壳侧另记一份账本——每条 assistant `message_end`（`runtime.rs`，`totalTokens > 0` 才记）把那一轮 usage 追加进 `app_data_dir/omp-mini/usage-ledger.jsonl`（**只追加、不改写**，键已记过即跳过；`UsageLedger` 懒加载，首次记账才建目录 / 开文件 / 重建去重集合）。
-  - **去重键唯一口径 = `usage.rs` 的 `usage_key`**：`sid|responseId` 优先，`responseId` 缺失（失败 / 重试调用）退回 `sid|时间戳|四段用量`；jsonl 解析与账本记录共用这一处，口径不一致就会重复计数。实测同一轮在实时帧与 jsonl 里的 `responseId` / `message.timestamp` / `usage` **完全一致**（探针：`rid=e4445cd1… ts=1792128700867 total=4260` 两边同值），**两路都有时以 jsonl 为准**（jsonl 先扫、先占键；账本随后扫，去重剩下的就是「jsonl 里已经没有的」）。两路都不看对方的状态，只认这一个全局键——**不许**再加时间窗口 / 「会话文件在不在」之类的额外判据（试过：老会话后来追加过消息时按 mtime 判会误杀，按数据时间窗判要么重复要么漏）。
-  - 派生指标（命中率 / 活跃天数 / 连续天数 / 热力图）与 jsonl 同一条口径：账本事件同样进活跃日与热力图；返回的 `extras` = 只由账本补上、jsonl 里已经没有的条数（**仅数据面**——2026-10-19 用户口径：设置页不再拿它写来源说明行，界面只留读数）。账本读不完（超预算）与 jsonl 预算一样置 `truncated`，不假装统计完了。
-  - 记账失败（磁盘满 / 权限）只影响「已删除会话的补记」，**不许拖累会话线程**；本应用只读 omp，账本写在自己的应用数据目录里。
-- **会话图片（2026-10-22 修复历史回放坏图）**：实时帧（`message_start` / `message_end`）里的图片是 **base64**；omp 写 jsonl 时把它外置成 `blob:sha256:<hash>`（实体在 `~/.omp/agent/blobs/<sha256>`，另有同 inode 的 `<hash>.<ext>` 副本）。`lib/attachments.ts` 的 `blobRefOf` 只认 64 位小写 hex，`imagesFromContent` 命中即产出 `{mimeType, blob}`（不参与 base64 长度上限），**绝不许**把 blob 引用当 base64 拼 `data:` URL（这正是旧版历史图片坏图的根因）。`thread/MessageImage.tsx` 统一两种来源：base64 直显，blob 经 `api.readBlobImage` 按需读（`lib/blobImages.ts` 40 张 / 48M 字符 LRU + 单飞；远程白名单含 `read_blob_image`，手机也能看历史图）。点图开 `thread/ImageLightbox.tsx`：复制走后端 `copy_image`（`images.rs`：`image` 解码 → RGBA → `arboard` 主线程写系统剪贴板），另存为走系统保存对话框 + `save_image_file`（只接受 PNG / JPEG / WebP / GIF 扩展名）；手机端只保留预览（复制 / 保存不在远程白名单）。
-- **存储维护（2026-10-22）**：设置 › 数据 ›「存储维护」（`components/settings/StoragePanel.tsx` + `src-tauri/src/storage.rs`）。读数 `get_storage_stats` 只扫目录（快）：blobs **只数无扩展名主文件**（硬链接副本不重复计），日志目录是 `~/.omp/logs`（与 agent 同级，不是 `agent/logs`）。清理前 `preview_storage_cleanup` 跑 `omp gc --json`（dry-run）；执行 `clean_storage` 才加 `--apply`。安全项 = 未被引用的图片缓存（`--blobs`，引用口径由 omp 扫全部会话 jsonl，壳侧不猜）/ 日志（跳过最近 1 小时）/ 粘贴临时文件 / 设置备份 / WAL；深度项 = `--archive` / `--compress`（默认不勾，确认框追加风险说明）。**会话 jsonl 永远不由壳侧删除**。`reclaim_idle_sessions` 复用 `runtime::reclaim_idle_now`（只收 `ACT_IDLE` 且已落盘、闲置 ≥30 分钟；运行中 / 等审批 / 等后台投递不碰）。
+## 铁律
 
-- **设置写入口径**：omp 侧只经 `omp` CLI（`config set/reset`、`auth-broker`…）；**直接写文件的例外**：`models.yml`（hash 乐观锁 + 预校验 + 备份 + 原子写）与「omp 约束」的 `AGENTS.md` / `RULES.md` / `rules/*.md`（同款乐观锁 + 备份 + 原子写；上游没有写这些文件的 CLI）。本应用偏好不写 omp 配置。
-- **设置 ›「技能」的停用记录对账（2026-10-23）**：启停写 omp 全局 `disabledExtensions` 的 `skill:<名字>`（整组覆盖、`extensions_edit` 串行）；omp 在发现阶段就按名字过滤，所以「已停用」行只能从配置读。**技能被手动删掉后配置里的旧记录不会自动消失**——`list_skills` 因此多跑一次探测：把临时 overlay（`disabledExtensions: []`）经 **`PI_CONFIG_FILES`** 环境变量挂给 `omp skill list`（overlay 优先级高于全局层与项目层，实测生效；`--config` 对子命令无效），拿到「全部技能」的名字全集，配置里不在全集的名字即 `staleDisabled`。前端不把这些当「已停用」行展示，只在底部给一行「N 条停用记录指向已不存在的技能」+「清除记录」（逐条摘掉配置项）；设置搜索同样跳过它们。**探测失败一律降级成 stale 为空**（宁可多显示一行，不误藏真实存在的停用项）；临时 overlay 用完即删，`PI_CONFIG_FILES` 原有值追加而非覆盖。
-- **omp 约束（设置 ›「omp 约束」，2026-10-19）**：编辑 omp 的**全局**约束与规则文件——只碰 `<agentDir>` 下三处：`AGENTS.md`（native 用户级上下文文件，每次会话启动注入）、`RULES.md`（sticky 规则，始终 always-apply、每轮重挂）、`rules/*.{md,mdc}`（独立规则，文件名即规则名，`enabled: false` 停用）；三种文件都是整份 Markdown 直接编辑（**选中默认展示预览**，点「编辑」才进编辑态）。项目级 `.omp/` 由 omp 自己发现，本页不碰。
-  - **数据面**（`constraints.rs`）：`get_omp_constraints`（固定两份文件 + rules/ 列表，一次读全）/ `write_omp_constraint`（`expectHash` 乐观锁 → 备份到 `<appData>/omp-mini/backups/constraints/` → 原子写 → 回读）/ `create_omp_rule` / `delete_omp_rule`（先备份再删）。文件名白名单：`rules/` 下单层 `.md` / `.mdc`、不以 `.` 开头、无路径分隔符 / 控制字符 / Windows 非法字符；内容上限 2 MiB；规则 frontmatter 必须有结束行。`expectHash = ""` 表示「打开时文件不存在」——外部创建了也算冲突；`null` = 冲突对话框里的显式强制覆盖。
-  - **编辑面（2026-10-19 用户口径：去掉表单）**：三种文件（含 `rules/*.md`）一律**直接编辑整份 Markdown**——`AGENTS.md` / `RULES.md` / 规则文件共用一个编辑框，不再有「表单 / 源码」两档，frontmatter 由用户自己写、文本原样保存。**默认视图 = 预览**（2026-10-19 用户口径）：选中任何文件先渲染 Markdown（frontmatter 不进正文），点「编辑」才换成编辑框；切换文件回到预览，唯一例外是新建规则（空文件、下一步就是写内容，直接进编辑态）。`lib/constraints.ts` 的解析只在读侧：列表摘要与标题行的类型标签（`kindLabel(ruleKindOf(...))`）、未识别顶层字段提示、保存前校验（大小 / NUL / YAML 可解析）。保存前本地校验，失败不发请求。草稿在模块级缓存里跨设置页签 / 设置视图保留，「重新加载」才丢弃。
-  - **生效**：omp 在会话启动 / `/clear` / `/new` 时重新发现规则与上下文文件，界面只说「新建的会话一定读到」；已打开会话是否热读未实测。
-  - **设置搜索**：`constraints` 是独立数据源（条目名 / 文件名 / 路径 / 规则描述），命中跳转用 `focusKey = kind:name` 选中对应文件。
-- **自定义供应商：供应商配置 与 模型清单 拆开（2026-10-17 用户口径）**：`CustomProviderEditForm` 只配 名称 / 接口地址 / 接口类型 / API Key（**不再内嵌模型编辑区**）；模型清单一律在**已配置的供应商行**上点「挑选模型」管——自定义端点走 `CustomProviderModelsDialog`（**清单为空 = 打开即拉** → 候选勾选 → 逐项调参 → 保存），登录型仍是 omp 目录里的星标挑选（`ProviderModelsDialog`）。数据层两个写入面**各写各的、互不覆盖**：`customModels.ts` 的 `upsertProvider`（供应商级字段，**不碰 `models` 节点**）与 `setProviderModels`（模型清单，逐条复用原节点保真改，**空清单删掉 `models` 键**）。
-  - **打开即拉（2026-10-19 用户口径）**：清单为空的供应商点「挑选模型」打开弹窗时**自动探测一次端点**——成功直接落候选视图，失败留在清单视图（错误行 + 手工添加入口，右上角按钮可重试），不必先手点「获取可用模型」。**三种情况不自动拉**：清单非空（用户是来看 / 调现有清单的，自动跳候选会把清单挡掉）、清单只读（形状界面表达不了，拉回来也存不进去）、供应商缺 `baseUrl`（拉了必然立刻报错，留着按钮的禁用提示）。实现细节：loading 初值跟着判定走（不闪一帧「还没有模型」）；「请求在飞」的守卫用 **ref**（自动拉与用户点按钮可能落在同一帧，state 还没提交时会问端点两遍）；effect 体里**不许同步写 state**（`react-hooks/set-state-in-effect`，构建期就报错）——setState 全留在 promise 回调里。
-  - **行尾星标 = 加入 / 移出「我的模型」**（2026-10-21 用户口径）：自定义端点每行行尾与登录型供应商的挑选面板同口径（`StarToggle`），selector = `provider/id`（与该模型进 omp 目录后的 `ModelInfo.selector` 同形）；**id 为空或重复时不摆星标**（selector 不唯一）。新加的行在「保存」后才进目录，提前收藏会先在「我的模型」标「已不可用」，保存后自动恢复。星标只写 localStorage 的 `omp.favoriteModels.v1`，不写 `models.yml`。
-  - **探测走壳侧**（`provider_models.rs` 的 `fetch_provider_models`，只读、不落盘）：口径对齐 DeepSeek Harness 的 `discoverModels`——只认三档 wire API（`openai-completions` / `openai-responses` / `anthropic-messages`，其余不猜，猜错会把鉴权失败报成「供应商没有模型」）；OpenAI 系 `GET {接口地址 去尾斜杠}/models`（**按前缀拼、不自动补 `/v1`**，保住 `/openai/v1` 这类部署路径）、Anthropic `GET {去掉末尾一个 /v1 的根}/v1/models?limit=1000`（只读一页，不跟 `has_more`）；认证 Anthropic 用 `x-api-key` + `anthropic-version: 2023-06-01`、其余 `Bearer`、**没填 key 就不带认证头**；解析 `data[]` 优先、其次 `models`（对象按 map，键名优先于条目 `id`），容量字段多别名兜底（`contextWindow` / `context_length` / `max_input_tokens` / `max_model_len`、`maxOutputTokens` / `max_completion_tokens`…），坏行跳过、缺名回退 id。**DSH 链路里没有超时**（UI 不传 signal、host 不加 AbortSignal），壳侧自加 20s 超时；响应体上限 4 MiB，**超限报错不截断**（截断的清单不可解析）。
-  - **apiKey 三种写法**（omp 18.11 实测，探测与 omp 同口径）：`!命令` 执行取 stdout、裸名字**先当环境变量名查**（命中用其值）、其余按字面量；`${VAR}` 不展开。密钥只在本进程内用，不落盘、不进日志、不回传前端。
-  - **omp 侧实测事实**（写入形状的依据）：没有 `models` 的自定义块**被 omp 接受**（`omp models --json` 退出码 0、stderr 空，只是该供应商不出现在目录里）——所以「先存供应商、后挑模型」成立；模型条目只给 `id`（或 `id`+`name`）时 omp 用默认值（上下文 128000 / 最大输出 16384 / 非推理 / 纯文本）；`models: []` 同样合法（界面仍选删键，文件更干净）；`models` 静态列表与 provider 级 `discovery` 共存时目录取并集（壳侧本轮未用 `discovery`——勾选即启用是用户口径，全靠静态 `models` 表达）。
-- **设置视图（v3 设置重构）**：`SettingsPage` 覆盖主区（`store.settingsTabOpen/settingsTabActive`；打开 = 左栏「设置」/ `⌘,`，关闭 = 顶部返回 / `⌘W` / 再点一次）——顶部条（返回 + 当前条目名；**搜索钮 2026-10-19 去除，搜索入口只剩 `⌘F`**）+ 左导航**四组十条目**（通用 / 模型 / 扩展 / 数据；通用组 = 常用设置 + omp 约束 + 系统授权 + 远程控制；窄窗 44px 图标档，容器查询）+ 内容区唯一滚动。搜索 = `store.settingsSearchOpen`（`⌘F`），数据源走 `lib/settingsSearch.ts`（模块级缓存 + 懒加载，设置视图卸载即清；参数 = 常用设置目录 / omp 约束 / 模型目录 / 插件 / 技能 / 记忆 / 归档），四档打分复用 `filterCatalog`；结果点击经 `navigateTo` 跳条目，常用设置项与约束文件带 `SettingsFocusRequest{key,seq}` 定位（通用页展开分组 → 滚动到行 → 一次闪烁；约束页选中文件；seq 防重放、消费后回调清空）。**常用设置展示清单 87 项**（四稿 80 → 五稿并入浏览器自动化 7 项，2026-10-22 用户口径）：`browser.enabled` / `cdpUrl` / `relay` / `relayUrl` / `headless` / `freezeOnTurnEnd` / `idleCloseSec` / `screenshotDir` 全在「工具」组（`browser.cmux` / `browser.tern` 不进：cmux / Tern 宿主专属，桌面壳里无差异）。**让浏览器操作可见 = 关掉 `browser.headless`**（行内标注「窗口可见」，值为 false 时才显示上游的 "disable to show browser UI" 没那么好读），omp 会另起一个**有头** Chrome for Testing 窗口；壳侧不做内置浏览器（`browser.headless` 从三稿的删除名单解禁，理由见 `lib/settingsList.ts` 头部）。
-- **设置 ›「系统授权」（2026-10-22）**：macOS TCC 四项授权的**实际生效状态** + 一键跳到系统设置（`components/settings/SystemPermissionsPanel.tsx`；后端 `system_permissions.rs` 的 `get_system_permissions` / `open_system_permission`）。读数口径：完全磁盘访问 = 能否读 `~/Library/Application Support/com.apple.TCC/TCC.db`（无公开 API，兜底 `~/Library/Safari/History.db`）；辅助功能 = `AXIsProcessTrusted()`；屏幕录制 = `CGPreflightScreenCaptureAccess()`；自动化 = `AEDeterminePermissionToAutomateTarget`（目标 System Events、`askUserIfNeeded = false`，**只查不弹**）——但该 API 按 bundle id 寻址**要求目标进程正在运行**（否则 -600 `procNotFound`），而 System Events 由 launchd 按需拉起、平时不常驻（2026-10-22 用户实测：系统设置里开关全开、面板仍显示未授权）；所以 -600 时后端先 `open -g -b com.apple.systemevents` 拉起它、短暂等待后重查（拉起有效就不留门槛，用户手动退出后下一轮轮询即可恢复；只有拉起本身失败才 30s 内不再重试；启动 app 不发 Apple Event、不弹授权框），仍拿不到才按未授权显示。**读数不是系统设置里那个开关**——ad-hoc 签名 / 证书轮换会让 TCC 记录与当前签名身份对不上（tccd 日志 `Failed to match existing code requirement` + 屏幕录制 `does not allow prompting`），开关看着开着、API 全是 false；用户报「computer use 没有权限」先看这一页。面板挂载期间每 2 秒回读（本地查询、单飞；唯一的子进程动作是自动化那一档的「拉起 System Events」）+ 窗口重新获得焦点立刻读；屏幕录制未授权时恒挂「退出并重新打开本应用」提示（macOS 对新进程才生效）。「去授权」= `open` + `x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles / Privacy_Accessibility / Privacy_ScreenCapture / Privacy_Automation`；非 macOS 只显示一句「仅 macOS 可用」，不摆假读数。
-- **提交 / 推送**：两轨（快速 = 一次 `omp -p` 生成信息 + `git commit/push`；完整 = `omp commit`）；按 cwd 建任务表（并行 + BUSY + 取消 + 超时）；入口 = **卡内顶行提交键**（2026-10-22 用户口径：顶行搬回输入卡内部，与项目 / 分支同一行；V42 起右栏「变更」区块随上下文面板退场，这里是唯一入口；同一浮层链路、同一状态口径：运行中转圈 / 失败红点）+ 左栏任务徽章。**提交键的可用性 = 有没有东西可提交或推送**（2026-10-17）：判定取 `store.workspaceGitStates[cwd]`——**与提交面板同源**（完整 `git status --porcelain -b`，含未跟踪新文件；提交走 `add -A`，口径一致），工作区干净且 `ahead === 0` 才置灰禁用（提示「没有可提交或推送的改动」），有改动则键尾一个 warn 圆点；**快照未知（还没回来）不置灰**（不把真实改动挡在门外，真裁决在后端预检）；任务在跑 / 失败一律可点（要能看进度与错误）。改动状态要**跟得上**：会话 `running → idle` 翻转那一下（= agent 刚写完文件）就重读本会话目录的快照（`scheduleWorkspaceGitRefresh`，2s 防抖 + 合并，只刷该目录；重复 idle 帧不触发），别等下一轮 30s 兜底轮询。
-- **拉取远程（2026-10-19）**：左栏项目分组头的落后徽章 = `Download` 图标 + 数字，**点击即拉取**（`git_ops::pull_workspace`：`git pull --no-rebase --ff --no-edit`——能快进就快进、分叉就合并，不 rebase、不拉起终端编辑器）；无冲突直接更新合并、徽章随快照归零消失。**有冲突不是命令失败**：后端保留合并态并返回冲突文件绝对路径（`git diff --name-only --diff-filter=U -z` 按仓库根拼绝对），前端 `lib/pull.ts` 立刻用系统默认程序打开第一个冲突文件并弹 `PullConflictDialog`——清单里逐个打开、**继续合并**（`continue_merge`：仍未标记解决的冲突文件先 `git add`，再 `git commit --no-edit --no-verify`）、**放弃合并**（`abort_merge` = `git merge --abort`）。运行态在 `store.pullStates`（running 转圈 / conflict / error 危险色 + git 原文悬停），刷新入口 `refreshWorkspaceGitState` 顺带对账：冲突态遇到 `behind === 0`（已在别处收尾）即清。壳**不做内置编辑器**：冲突一律交给系统默认程序，壳只负责送到编辑器与收尾。
-- **卡内顶行 git 区（分支切换）**：`BranchPicker` 展开清单**点分支即切**（后端 `switch_branch` = `git switch <branch>`，只认分支、不会被同名路径抢语义）——脏工作区交给 git 裁决（带得走就带着走，冲突整条拒绝、错误原文就地显示，壳侧不 stash / 不 force）；切换成功走 `refreshWorkspaceGitState([cwd])`——它是 **git 状态的统一刷新入口**（刷新时机 = 启动 / 焦点 / 30s 轮询 / **会话一轮收敛到 idle** / 提交任务结束 / 分支切换），每次刷新自增 store 的 `gitInfoSeq`，`useGitInfo` 的全部挂载实例（输入卡的卡内顶行）一起重读、ahead/behind 快照同步刷新。只读查询仍是 `get_git_info`（4s 超时、降级不报错），写命令用 30s 超时。
-- **更新链路两条独立**：本应用（Tauri updater，`latest.json`）与 omp 运行时（`omp update`）互不相干；入口 = 左栏顶栏两枚 chip。**omp 缺失时**同一位置换成「安装 omp」chip（`OmpUpdateChip` 的缺失分支 + `OmpInstallDialog`）：点击由后端 `install_omp` 跑 **omp 官方安装脚本**（`curl -fsSL https://omp.sh/install | sh`，Windows 为 `install.ps1`），输出流式进 `store.ompInstallRun`、可取消；安装与更新**共用后端单槽**（`UpdateSlot`），不会并发。装完前端重新 `getHealth` 识别——官方脚本的落点 `~/.local/bin/omp` 与 `~/.bun/bin/omp` 都在 `discover_omp_path` 的兜底里，chip 自动变回版本号；脚本跑完仍识别不到时就地给「重新检测 / 手动指定路径」，不把「脚本成功」说成 omp 可用。
+跨模块、违背就会出用户可见故障的结论。机制与理由见对应 docs。
+
+### 会话与运行时
+
+- 每会话一个长驻 `omp --mode rpc-ui` 进程；事件通道 `omp-event/status/state://<sid>` 用会话 id 命名；单会话 `kill_runtime`、退出 `kill_all`。
+- **会话身份 = 完整 uuid**。定位 / `--resume` / 删除一律不许退回 8 字符前缀（uuid v7 同分钟内前缀相同）。
+- **open-elsewhere** 会 fork 出新身份：壳侧以 spawn 返回的真实 sid 为准，前端全程用 `opened.id`，不许用请求 id 继续。
+- `create_session` 的 `last_model` / `last_thinking` 只是偏好：omp 对非法参数直接退出 → 去掉参数降级重试一次 + 清失效偏好 + 回包带 `FallbackNotice`；前端落本地说明行，不许静默换模型。
+- 计划模式（`plan` → `--plan-yolo`）只给新建会话；计划阶段模型用 `modelRoles.plan`（未配置才回退项目偏好）。
+- 发送：idle = Enter；running = Enter 插话 / Tab 排队 / Esc 中断并交还队列。队列以 omp 的 `queue_update` 为真值，`applyQueue` 唯一写入面。
+- **`/` 开头的命令不被 running 改道**：`steer` / `follow_up` 不注入技能，一律走 `run_slash`。
+- 状态收敛：终态 `agent_end` 与 `session_settled`（含 `awaitingAsyncWork`）→ idle；`open_session` 回包不许把前端状态压成 idle。
+- `SessionView.running` 由进程表活动态派生（running / awaiting-approval），不存「进程在任」快照。
+
+### 数据与持久化
+
+- 图片：jsonl / 历史里的 `blob:sha256:<hash>` **绝不许**当 base64 拼 `data:` URL；`blobRefOf` 只认 64 位小写 hex。
+- 使用统计去重只认 `usage.rs` 的 `usage_key`（`sid|responseId`，缺失时 `sid|时间戳|用量`）；两路都有时以 jsonl 为准，不许加时间窗口 / 文件存在性判据。
+- 设置写入口径：omp 侧只经 CLI；**直接写文件的只有两处**——`models.yml` 与 omp 约束文件（`AGENTS.md` / `RULES.md` / `rules/*.md`），都必须 hash 乐观锁 + 备份 + 原子写。
+- **会话 jsonl 永远不由壳侧删除**；本应用偏好只落 localStorage。
+- 内存：`eventsBySession` 只留最近 3 个会话（running 豁免）；工具输出封顶 100K 字符；终端字节流 / 流式帧不进 store。
+
+### 前端
+
+- 标题：显示层一律剥掉 omp 标题卡的「图标 + 大写短码」前缀（`sessionTitleForDisplay`）；`title_change` 只更新标题、不产出正文行。
+- 草稿 = Lexical 编辑器（恒定一个段落）；store 里的草稿是**投影**，`sync` 来源不回写。外部插引用只走 `store.pendingReference`。
+- 输入卡的 `+`/`/` 面板、目标、计划各只有一个入口；`/goal` 已移除，目标只在「目标条 + 主输入框目标模式」。
+- `@` 写短标签、进上下文是**真路径**：发送前 `rewriteMentions` 还原（芯片已是真路径不改写）；歧义不猜，按「不存在 + 警告」。
+- 执行模式 = 本会话生效档（覆盖层优先，其次 omp 全局）；读不到显示「读取中…」，不许兜底成某一档。
+- 思考档只在缺失 / 对新模型非法时落默认档；Fast 只对支持模型显示闪电，`ultra` 不展示。
+- 贴底跟随按「用户上翻」释放，不按距底距离；实时行 id = `${sid}:${msgSeq}:${contentIndex}`；`role=developer` 注入不落正文。
+- `.thread-scroll` 必须保持 `overflow-y: auto`。
+- 任务清单只有一个数据面（`applyPlans` / `plansBySession`）与一处展示（底部浮卡）；发送新回合时 `dismissCompletedPlans` 挡掉 `get_state` 复活回读。
+- 左栏状态只有一个点、一套优先级（待处理 > 运行中 > 已完成未查看 > 空闲）；删除 / 归档 / 恢复必须在 `runSessionBatch` 同步列表缓存；冷启动补齐条件各自独立。
+- 右栏工作台常驻挂载、只切显隐；文件树**只读**；脚本注入 PTY 必须走 `terminal_write_ready`（等 raw 模式），终端不随会话切换改目录或被杀。
+- 供应商用量：看全部供应商、与当前模型无关；读数只认 `limitReading`（percent 缺省 0 不是读数）。
+- 手机远程只做白名单 RPC（无文件 / 终端 / 设置 / git）、完整 uuid、审批仅 once/deny；不许做成通用 Tauri 桥。
+
+### 设置与集成
+
+- omp 约束页只编辑全局三处文件；技能停用记录对账用 `PI_CONFIG_FILES` 临时 overlay，探测失败降级为 stale 为空。
+- 模型角色：多套只存 localStorage，同一时间恰好一套激活；omp 是外部改动真值。
+- 自定义供应商的「供应商字段」与「模型清单」两个写入面互不覆盖；空清单才打开即拉；`apiKey` 不落盘、不日志、不回传。
+- 系统授权读的是 TCC **实际生效状态**，不是系统设置开关；自动化读数用「拉起 System Events 再查」。
+- git 状态统一走 `refreshWorkspaceGitState`；冲突交给系统默认程序，壳不做内置编辑器，也不 stash / force。
+- 应用更新与 omp 更新两条独立链路；安装 / 更新共用后端单槽，不许并发。
 
 ## 工程约定
 
 - **语言**：界面文案 / 注释 / 文档 / 提交信息用简体中文；标识符英文。界面文案一律走 `lib/locale.ts` 字典。
-- **版本文案口径**：README / CHANGELOG / 文档里不写「仓库重置 / 版本归零 / 清除历史版本与发版记录」这类字样；版本历史只按实际版本节记录现状与变更。
-- **文档更新**：架构级变更（文件增删 / 数据流变化）同步 `AGENTS.md`；界面与交互变更把口径补进本文件对应章节；用户可见的变更写 `CHANGELOG.md`。
+- **版本文案**：文档里不写「仓库重置 / 版本归零 / 清除历史版本」这类字样；版本历史按实际版本节记录。
+- **文档更新**：架构或数据流变化 → `docs/architecture.md`；组件交互口径 → `docs/ui-contracts.md`；设置 / 供应商 / git / 更新 → `docs/integrations.md`；新增「不许」→ 本文件铁律；用户可见变更 → `CHANGELOG.md`。
 - **提交信息**：`omp commit` 生成（type 英文 + summary 首词英文过去式 + 其余中文，30 字符内）。
-- **输入框**：全 app 禁系统输入提示（`lib/inputAssist.ts` 全局挂 `spellcheck=false` 等），组件不许各自写。
+- **输入框**：全 app 禁系统输入提示（`lib/inputAssist.ts` 全局挂 `spellcheck=false`），组件不许各自写。
 - **滚动条**：全 app 不显示滚动条（`index.css` 全局规则），滚动照常。
-- **弹层**：`lib/useDropdown.ts` 统一（最上层 Esc / Tab 圈定 / 焦点恢复 / 挂载层 = 最上层模态）；`EnumSelect` 面板 `width: max-content` 不许截断。
-- **状态**：高频字节流 / 流式帧不进 Zustand 原始形态（rAF 合并后进）；解析放在 store 边界（值没变不写）。
+- **弹层**：`lib/useDropdown.ts` 统一（最上层 Esc / Tab 圈定 / 焦点恢复 / 挂载层 = 最上层模态）；`EnumSelect` 面板 `width: max-content`，不许截断。
+- **状态**：高频字节流 / 流式帧不进 Zustand 原始形态（rAF 合并后进）；解析放在 store 边界，值没变不写。
 
 ## 常用命令
 
@@ -158,7 +120,7 @@ cargo test --manifest-path src-tauri/Cargo.toml            # Rust 单测
 cargo test --manifest-path src-tauri/Cargo.toml -- --ignored   # 慢测试（真实 omp）
 pnpm tauri:build            # 本机发布构建
 pnpm icon                   # 从 design-system/icon/omp-mini-icon.svg 重生成应用图标
-pnpm file-icons             # 从 material-icon-theme 重新生成右栏文件树的图标子集
+pnpm file-icons             # 从 material-icon-theme 重新生成文件树图标子集
 ```
 
 ## 发版与更新
@@ -167,9 +129,11 @@ pnpm file-icons             # 从 material-icon-theme 重新生成右栏文件�
 - 更新说明取 `CHANGELOG.md` 版本节（`scripts/changelog-notes.mjs`），版本节缺失会挡发版——**发版前先写 CHANGELOG**。
 - macOS 签名用自签证书（`scripts/make-signing-cert.sh`；TCC 授权持久化）；CI 用 secrets `APPLE_CERTIFICATE` / `APPLE_CERTIFICATE_PASSWORD`。
 - 升版本号：`package.json` / `src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml`（+ `Cargo.lock`）四处同步。
+- 应用内更新链路与 omp 安装细节见 `docs/integrations.md` 的「更新链路」。
 
 ## 范围边界
 
-- **做**：聊天唯一形态、Codex / ZCode 对标、设置重构、**右栏工作台**——文件目录 + 项目脚本 + 多开终端（V42 / V43 / V44）、**会话读数**——输入卡底部统计条、**omp 约束**——全局 `AGENTS.md` / `RULES.md` / `rules/*.md` 的编辑（整份 Markdown 直接编辑）、**手机远程控制**——手机浏览器 PWA + 内嵌 HTTP/WS + 扫码配对。
-- **不做**：编辑器（文件只读浏览，打开交给系统默认程序；**omp 约束页只编辑 omp 的全局约束 / 规则 Markdown，不是通用文件编辑器**）/ 内置浏览器 / SSH / 原生移动端 App / 远程桌面 / PR 集成；分屏 / 多窗口；worktree 生命周期管理；云同步 / 定时任务。**手机端只作为远程控制 PWA 存在**（不是独立移动端产品形态）。
-- 终端**只作为右栏工作台的页签**存在：同一页签内允许多开（标签行切换，V44 用户口径），但不许长出终端形态的会话模型（π 标题解析 / 目录行 / 覆盖层注入 / 独立窗口 / 任意分屏）；也不许把文件树升级成编辑器或全屏工作区。
+- **做**：聊天唯一形态、右栏工作台（文件 / 脚本 / 多开终端）、会话读数（卡底统计条）、omp 约束编辑、手机远程控制 PWA。
+- **不做**：编辑器（文件只读，打开交给系统默认程序；omp 约束页不是通用编辑器）/ 内置浏览器 / SSH / 原生移动端 App / 远程桌面 / PR 集成；分屏 / 多窗口；worktree 生命周期管理；云同步 / 定时任务。
+- 终端只作为右栏工作台页签（页签内可多开），不许长出终端形态的会话模型（π 标题 / 目录行 / 覆盖层注入 / 独立窗口 / 任意分屏）；文件树不许升级成编辑器或全屏工作区。
+- 手机端只作为远程控制 PWA 存在，不是独立移动端产品形态。

@@ -13,7 +13,7 @@
 - **周边**：应用与 omp 运行时更新、供应商用量、跨项目文件引用、提交与推送；
 - **手机**：扫码配对后在手机浏览器继续会话（PWA；局域网 / Tailscale HTTPS；审批只支持允许一次 / 拒绝）。
 
-界面视觉与布局按 [`AGENTS.md`](AGENTS.md) 的设计约定对齐 Codex / ZCode 范式。
+界面视觉与布局按 [`docs/ui-contracts.md`](docs/ui-contracts.md) 的设计约定对齐 Codex / ZCode 范式。
 
 ## 技术栈
 
@@ -56,7 +56,10 @@ macOS 签名证书见 `scripts/make-signing-cert.sh`；版本号同步位置与�
 |---|---|
 | [`CHANGELOG.md`](CHANGELOG.md) | 变更记录（版本节即 Release 说明）|
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 开发环境 / 检查 / 贡献与提交约定 |
-| [`AGENTS.md`](AGENTS.md) | 工程导航与架构约定（改代码前读）|
+| [`AGENTS.md`](AGENTS.md) | 工程导航、铁律与命令（改代码前读）|
+| [`docs/architecture.md`](docs/architecture.md) | 架构与运行时（会话进程 / 数据面 / 源码地图）|
+| [`docs/ui-contracts.md`](docs/ui-contracts.md) | 界面与交互口径（三栏 / 输入卡 / 消息列 / 工作台）|
+| [`docs/integrations.md`](docs/integrations.md) | 设置 / 供应商 / 系统授权 / git / 更新链路 |
 | [`SECURITY.md`](SECURITY.md) | 安全问题报告 |
 
 ## 许可
