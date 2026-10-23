@@ -49,6 +49,7 @@ const skills: SkillsView = {
  cwd: "",
  skills: [{ name: "commit-helper", description: "生成提交信息", filePath: "/x/SKILL.md", baseDir: "/x", source: "native:user", hide: false }],
  disabled: ["legacy-writer"],
+ staleDisabled: [],
  warnings: [],
 };
 
@@ -89,6 +90,15 @@ describe("设置搜索（跨条目）", () => {
   for (const group of searchSettings(SOURCES, "deepseek", t, "zh-CN")) {
    if (group.tab !== "general") expect(group.hits.every((h) => h.focusKey === null)).toBe(true);
   }
+ });
+
+ it("悬空停用记录（技能已不存在）不进搜索结果", () => {
+  const staleSources: SettingsSearchSources = {
+   ...SOURCES,
+   skills: { ...skills, staleDisabled: ["legacy-writer"] },
+  };
+  // 指向已删除技能的旧记录没有对应页面对象，搜出来只会跳到一个不存在的行
+  expect(searchSettings(staleSources, "legacy", t, "zh-CN").some((g) => g.tab === "skills")).toBe(false);
  });
 
  it("大小写不敏感；无命中返回空数组；缺源不产组", () => {

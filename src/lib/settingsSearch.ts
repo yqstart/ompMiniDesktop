@@ -191,8 +191,9 @@ export function searchSettings(
     title: s.name,
     sub: cut(s.description),
    }));
+  const staleSet = new Set(sources.skills.staleDisabled);
   const disabled = sources.skills.disabled
-   .filter((name) => has(name, q))
+   .filter((name) => !staleSet.has(name) && has(name, q))
    .slice(0, 8)
    .map<SettingsSearchHit>((name) => ({
     id: `skills:off:${name}`,

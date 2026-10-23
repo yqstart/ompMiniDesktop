@@ -85,7 +85,7 @@ beforeEach(() => {
  });
  vi.mocked(api.getModels).mockResolvedValue({ models: [], fetchedAt: 0 });
  vi.mocked(api.listPlugins).mockResolvedValue({ cwd: "", npm: [], marketplace: [] });
- vi.mocked(api.listSkills).mockResolvedValue({ cwd: "", skills: [], disabled: [], warnings: [] });
+ vi.mocked(api.listSkills).mockResolvedValue({ cwd: "", skills: [], disabled: [], staleDisabled: [], warnings: [] });
  vi.mocked(api.listMemories).mockResolvedValue([]);
  vi.mocked(api.listArchivedSessions).mockResolvedValue([]);
  vi.mocked(api.getOmpConstraints).mockResolvedValue({

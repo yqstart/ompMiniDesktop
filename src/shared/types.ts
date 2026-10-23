@@ -852,11 +852,14 @@ export type SkillWarning = {
  * 技能清单：`cwd` = 本次发现钉的范围（家目录 = 只看用户级）。
  * `disabled` 是 `disabledExtensions` 里的技能名——**被停用的技能上游不再列出来**，
  * 「已停用」行只能从这份配置读（拿不到描述与路径，上游行为）。
+ * `staleDisabled` = 其中已经发现不到同名技能的旧记录（技能目录被删 / 改名留下的），
+ * 由后端用一次「清空停用」的发现对账得出；探测失败时为空（按仍然存在处理）。
  */
 export type SkillsView = {
  cwd: string;
  skills: SkillItem[];
  disabled: string[];
+ staleDisabled: string[];
  warnings: SkillWarning[];
 };
 

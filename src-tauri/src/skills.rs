@@ -25,7 +25,7 @@ use std::time::Duration;
 use tauri::State;
 
 use crate::commands::{cmd_err, AppState, CmdError};
-use crate::providers::{config_values_global, omp_bin, run_omp_in_timeout};
+use crate::providers::{config_values_global, omp_bin, run_omp_capture_env, run_omp_in_timeout};
 
 /// 技能发现是纯本地扫描，实测 0.2–0.5s；给足余量。
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
@@ -35,6 +35,8 @@ pub const NAME_MAX_LEN: usize = 128;
 const READ_MAX_BYTES: usize = 1024 * 1024;
 /// `disabledExtensions` 里技能条目的前缀。
 const SKILL_PREFIX: &str = "skill:";
+/// 全量发现的 overlay：只看这一个键——把停用名单覆盖成空数组，过滤就只剩「技能是否存在」。
+const FULL_LIST_OVERLAY: &str = "disabledExtensions: []\n";
 
 // ---------- 视图类型 ----------
 
@@ -69,7 +71,14 @@ pub struct SkillsView {
     pub cwd: String,
     pub skills: Vec<SkillItem>,
     /// 被 `disabledExtensions` 停用的技能名（上游列表里已看不到它们，只能从配置读）。
+    /// 这是配置真值：其中可能混着「技能已被删掉」的旧记录（见 `stale_disabled`）。
     pub disabled: Vec<String>,
+    /// `disabled` 里**已经发现不到同名技能**的那些（技能目录被删 / 改名后留下的旧记录）。
+    ///
+    /// 判定方式：用一份把 `disabledExtensions` 覆盖成空数组的 `PI_CONFIG_FILES` overlay
+    /// 再跑一次 `omp skill list`——过滤只来自这个键，于是能拿到「全部技能」的名字全集，
+    /// 停用名单里不在全集里的就是旧记录。探测失败时为空（按「仍然存在」显示，绝不误藏）。
+    pub stale_disabled: Vec<String>,
     pub warnings: Vec<SkillWarning>,
 }
 
@@ -108,6 +117,34 @@ pub fn disabled_skill_names(v: Option<&serde_json::Value>) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// 停用名单里**已经发现不到同名技能**的那些（技能被删 / 改名后留下的旧记录），保序。
+///
+/// 判定依据是「把停用过滤摘掉之后的全量发现」：全量里没有这个名字 = 它不指向任何技能。
+/// 只做集合差，不猜目录、不猜优先级——发现的边界仍由 omp 自己划。
+pub fn stale_disabled_names(disabled: &[String], discovered_all: &[String]) -> Vec<String> {
+    let all: std::collections::HashSet<&str> = discovered_all.iter().map(String::as_str).collect();
+    disabled
+        .iter()
+        .filter(|n| !all.contains(n.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// 把探测 overlay 接到 `PI_CONFIG_FILES` 现有值的**末尾**（追加，不覆盖用户自己设的 overlay）。
+///
+/// omp 按平台路径分隔符切这个变量（`path.delimiter`：POSIX `:` / Windows `;`），
+/// 用 `split_paths` + `join_paths` 跟着它的口径走，不手写分隔符。
+pub fn overlay_chain(existing: Option<&str>, probe: &Path) -> String {
+    let mut all: Vec<PathBuf> = existing
+        .map(std::env::split_paths)
+        .map(|p| p.filter(|x| !x.as_os_str().is_empty()).collect())
+        .unwrap_or_default();
+    all.push(probe.to_path_buf());
+    std::env::join_paths(all)
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| probe.to_string_lossy().into_owned())
 }
 
 /// 启停一项技能：在 `disabledExtensions` 里加 / 删 `skill:<name>`，**其余条目原样保留**。
@@ -225,7 +262,40 @@ async fn read_disabled(
     Ok(disabled_skill_names(vals.get("disabledExtensions")))
 }
 
-/// 技能清单：按 `cwd`（项目目录 / 家目录）做一次发现 + 当前停用名。
+/// 同进程里两次探测的临时 overlay 不能撞名（并发切范围会同时跑）。
+static PROBE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// 在「停用名单清空」的 overlay 下再发现一次，返回技能名全集。
+///
+/// 失败（写不了临时文件 / omp 跑不起来 / 输出不是 JSON）返回 `None`：调用方一律按
+/// 「停用记录仍然有效」处理——宁可多留一行旧记录，不可把真实存在的停用项误藏掉。
+async fn discover_all_names(agent: &Path, bin: &str, dir: &Path) -> Option<Vec<String>> {
+    let probe = std::env::temp_dir().join(format!(
+        "omp-mini-skill-probe-{}-{}.yml",
+        std::process::id(),
+        PROBE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    std::fs::write(&probe, FULL_LIST_OVERLAY).ok()?;
+    let chain = overlay_chain(std::env::var("PI_CONFIG_FILES").ok().as_deref(), &probe);
+    let out = run_omp_capture_env(
+        Some(agent),
+        bin,
+        &["skill", "list", &dir.to_string_lossy(), "--json"],
+        READ_TIMEOUT,
+        &[("PI_CONFIG_FILES", chain.as_str())],
+    )
+    .await;
+    // 垫片只服务这一次探测，别留在临时目录里。
+    let _ = std::fs::remove_file(&probe);
+    let (stdout, _err, code) = out.ok()?;
+    if code != Some(0) {
+        return None;
+    }
+    let (skills, _) = parse_skill_list(&stdout).ok()?;
+    Some(skills.into_iter().map(|s| s.name).collect())
+}
+
+/// 技能清单：按 `cwd`（项目目录 / 家目录）做一次发现 + 当前停用名 + 悬空停用记录。
 #[tauri::command]
 pub async fn list_skills(
     state: State<'_, AppState>,
@@ -247,7 +317,23 @@ pub async fn list_skills(
     let (skills, warnings) =
         parse_skill_list(&out).map_err(|e| cmd_err("SKILL_LIST_FAILED", e, None))?;
     let disabled = read_disabled(&state, &bin).await?;
-    Ok(SkillsView { cwd: dir.to_string_lossy().to_string(), skills, disabled, warnings })
+    // 停用记录可能指向已经删掉的技能（用户手动删目录 / 改过名）：再用一次「清空停用」的
+    // 发现拿全量名字对账。没有停用记录时省掉这一次子进程。
+    let stale_disabled = if disabled.is_empty() {
+        Vec::new()
+    } else {
+        match discover_all_names(&agent, &bin, &dir).await {
+            Some(all) => stale_disabled_names(&disabled, &all),
+            None => Vec::new(),
+        }
+    };
+    Ok(SkillsView {
+        cwd: dir.to_string_lossy().to_string(),
+        skills,
+        disabled,
+        stale_disabled,
+        warnings,
+    })
 }
 
 /// 启用 / 停用一项技能：写 `disabledExtensions`（读 → 改 → 整组写回 → 回读）。
@@ -368,6 +454,35 @@ mod tests {
         assert_eq!(disabled_skill_names(None), Vec::<String>::new());
         assert_eq!(disabled_skill_names(Some(&json!({"skill:a": true}))), Vec::<String>::new());
         assert_eq!(disabled_skill_names(Some(&json!([]))), Vec::<String>::new());
+    }
+
+    #[test]
+    fn stale_disabled_only_keeps_names_without_a_skill() {
+        let all = vec!["web".to_string(), "docs".to_string()];
+        assert_eq!(
+            stale_disabled_names(&["web".into(), "gone".into(), "docs".into()], &all),
+            vec!["gone".to_string()]
+        );
+        // 全量里一个都没有（比如探测拿到了空列表）→ 全部算悬空
+        assert_eq!(
+            stale_disabled_names(&["web".into()], &[]),
+            vec!["web".to_string()]
+        );
+        // 停用名单为空 → 没有悬空项
+        assert!(stale_disabled_names(&[], &all).is_empty());
+    }
+
+    #[test]
+    fn overlay_chain_appends_to_existing_files() {
+        let probe = Path::new("/tmp/omp-mini-probe.yml");
+        let joined = overlay_chain(Some("/a/one.yml"), probe);
+        let parts: Vec<_> = std::env::split_paths(&joined).collect();
+        assert_eq!(parts, vec![Path::new("/a/one.yml"), probe]);
+        // 没设过 / 空值 → 只有探测 overlay
+        for existing in [None, Some("")] {
+            let parts: Vec<_> = std::env::split_paths(&overlay_chain(existing, probe)).collect();
+            assert_eq!(parts, vec![probe]);
+        }
     }
 
     #[test]

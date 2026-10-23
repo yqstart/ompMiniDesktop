@@ -618,10 +618,29 @@ pub(crate) async fn run_omp_capture(
     args: &[&str],
     timeout: Duration,
 ) -> Result<(String, String, Option<i32>), String> {
+    run_omp_capture_env(dir, bin, args, timeout, &[]).await
+}
+
+/// 同上，但给这次进程附加环境变量。
+///
+/// 目前只有技能页的「悬空停用记录」探测用它：`PI_CONFIG_FILES` 是 omp 的进程级配置
+/// overlay（优先级高于全局层与项目层，见 omp 的用 provenance 说明），探测时把
+/// `disabledExtensions` 覆盖成空数组就能让 omp 用**它自己的发现逻辑**列出全部技能——
+/// 壳侧不复制发现规则。
+pub(crate) async fn run_omp_capture_env(
+    dir: Option<&std::path::Path>,
+    bin: &str,
+    args: &[&str],
+    timeout: Duration,
+    envs: &[(&str, &str)],
+) -> Result<(String, String, Option<i32>), String> {
     let mut cmd = tokio::process::Command::new(bin);
     cmd.args(args).stdin(Stdio::null()).kill_on_drop(true);
     if let Some(d) = dir {
         cmd.current_dir(d);
+    }
+    for (k, v) in envs {
+        cmd.env(k, v);
     }
     match tokio::time::timeout(timeout, cmd.output()).await {
         Ok(Ok(o)) => Ok((

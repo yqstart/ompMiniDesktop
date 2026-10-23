@@ -59,7 +59,13 @@ export function SkillsPanel() {
  const options = useMemo(() => scopeChoices(t.skillsScopeGlobal, projects), [t.skillsScopeGlobal, projects]);
  /** 有效范围：项目被移除 / 改名后按全局处理（与选项显示保持一致）。 */
  const activeScope = options.some((o) => o.path === scopePath) ? scopePath : null;
- const disabled = useMemo(() => sortDisabled(data?.disabled ?? []), [data]);
+ const disabled = useMemo(() => {
+  // 悬空记录（技能已删）不当作「已停用」行展示——它会让人以为还有技能被停着，
+  // 又拿不到任何可操作对象；只在下面单独提示 + 可清除。
+  const staleSet = new Set(data?.staleDisabled ?? []);
+  return sortDisabled((data?.disabled ?? []).filter((n) => !staleSet.has(n)));
+ }, [data]);
+ const stale = useMemo(() => sortDisabled(data?.staleDisabled ?? []), [data]);
  const groups = useMemo(() => groupSkills(data?.skills ?? []), [data]);
 
  useEffect(() => {
@@ -118,6 +124,25 @@ export function SkillsPanel() {
    }
   } catch (e) {
    setError(e instanceof Error ? e.message : t.opFailed);
+  } finally {
+   busyRef.current = false;
+   setBusy(false);
+  }
+ };
+
+ /** 清除悬空停用记录：逐条从 `disabledExtensions` 摘掉（等于启用一个已经不存在的技能），
+   *  然后重拉——清单由后端对账，前端不自己改 `staleDisabled`。 */
+ const clearStale = async () => {
+  if (busyRef.current || stale.length === 0) return;
+  busyRef.current = true;
+  setBusy(true);
+  setError(null);
+  try {
+   for (const name of stale) await api.setSkillEnabled(name, true);
+   setRefreshing(true);
+   setReloadKey((k) => k + 1);
+  } catch (e) {
+   setError(fmt(t.skillsStaleClearFailed, e instanceof Error && e.message ? e.message : t.opFailed));
   } finally {
    busyRef.current = false;
    setBusy(false);
@@ -291,7 +316,7 @@ export function SkillsPanel() {
       {t.skillsLoading}
      </p>
     )
-   ) : total === 0 && disabled.length === 0 ? (
+   ) : total === 0 && disabled.length === 0 && stale.length === 0 ? (
     <p className="mt-4 rounded-md bg-surface px-4 py-8 text-center text-[13px] leading-relaxed text-muted">
      {t.skillsEmpty}
     </p>
@@ -325,6 +350,28 @@ export function SkillsPanel() {
           />
          </div>
         ))}
+       </div>
+      </section>
+     )}
+
+     {stale.length > 0 && (
+      <section aria-label={fmt(t.skillsStaleDisabled, stale.length)} className="mt-6 shrink-0">
+       {/* 不逐条列名字：这些记录指向的技能已经没了，列出来只会让人以为它们还在被停用。
+            名字挂在悬停提示里，方便想核对配置的人。 */}
+       <div
+        title={stale.join(" · ")}
+        className="flex flex-wrap items-center gap-2 rounded-md border border-border-soft bg-surface px-3 py-2"
+       >
+        <span className="min-w-0 flex-1 text-[12px] leading-relaxed text-muted">
+         {fmt(t.skillsStaleDisabled, stale.length)}
+        </span>
+        <button
+         onClick={() => void clearStale()}
+         disabled={lock}
+         className="shrink-0 cursor-pointer rounded-md border border-border px-2.5 py-1 text-[12px] transition-colors duration-100 hover:bg-hover disabled:opacity-50"
+        >
+         {t.skillsStaleClear}
+        </button>
        </div>
       </section>
      )}

@@ -20,6 +20,8 @@
 
 ### Fixed
 
+- **技能删掉后不再在「已停用」里阴魂不散**（2026-10-23 用户实测）：设置 ›「技能」的停用名单来自 omp 全局 `disabledExtensions`，手动删掉技能目录后配置里的旧记录还在，「已停用」照样列着一个已经不存在的技能，看着像页面没刷新。现在 `list_skills` 用一次「清空停用」的探测（临时 overlay 走 `PI_CONFIG_FILES`，由 omp 自己重新发现）拿到全部技能名，配置里对不上任何技能的名字归为悬空记录——它们不再作为停用行展示，只在列表底部给一行「N 条停用记录指向已不存在的技能」+「清除记录」一键摘除；设置搜索也不再命中这些悬空项。探测失败时按原样显示（不误藏真实存在的停用项）。
+
 - **历史会话里的图片不再显示成坏图**（2026-10-22）：omp 写 jsonl 时把图片外置成 `blob:sha256:<hash>`（实体在 `~/.omp/agent/blobs/`），旧版壳侧把它当 base64 拼成 `data:image/...;base64,blob:sha256:…`，重开会话后图片全部显示不出来（实时帧是 base64，所以刚发完时正常）。现在 `imagesFromContent` 识别 blob 引用、`MessageImage` 经 `read_blob_image` 按需读实体（hash 形状校验 + 只读 blobs 目录 + 10MB 上限），远程白名单同步放行该只读命令。
 
 - **「系统授权 › 自动化」不再把「System Events 没在跑」读成未授权**（2026-10-22 用户实测）：`AEDeterminePermissionToAutomateTarget` 按 bundle id 寻址时**要求目标进程正在运行**，而 System Events 由 launchd 按需拉起、平时不常驻——归零状态下这个 API 一律返回 `-600`（procNotFound），于是系统设置里 System Events / Chrome 的开关全开着、面板仍显示「去授权」。现在 -600 时后端先 `open -g -b com.apple.systemevents` 把它拉起来（启动 app 不发 Apple Event、不会弹授权框；拉起有效就不留门槛——用户手动退出 System Events 后下一轮轮询即可恢复，只有拉起本身失败才 30s 内不再重试），短暂等待后重查，再按 0 / -1743 / -1744 给出真实读数。回归测试从冷状态（先杀掉 System Events）验证查询不再停在 -600。
